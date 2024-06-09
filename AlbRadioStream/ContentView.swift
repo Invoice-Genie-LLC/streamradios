@@ -44,7 +44,8 @@ struct ContentView: View {
                             //.padding(.horizontal)
                             //.frame(maxHeight: 400) // Increase height of the radio stations list
                     }
-                    .padding(.top,  150)
+                    .padding(.top,  25)
+                    .padding(.bottom,  25)
                     //.background(RoundedRectangle(cornerRadius: 20)
                                    // .fill(Color(UIColor.secondarySystemBackground))
                                     //.shadow(radius: 10))

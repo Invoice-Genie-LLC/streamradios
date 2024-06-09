@@ -23,8 +23,8 @@ struct RadioStationListView: View {
                             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                                 Image(uiImage: image)
                                     .resizable()
-                                    .frame(width: 20, height: 20)
-                                    .cornerRadius(4)
+                                    .frame(width: 40, height: 40)  // Increase the size of the icons
+                                    .cornerRadius(8)  // Increase the corner radius to match the larger icon size
                             }
                             Text(station.name)
                                 .font(.headline)
