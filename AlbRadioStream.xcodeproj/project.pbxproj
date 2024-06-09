@@ -1,0 +1,441 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA3A2C152EF2006D5EBB /* ContentView.swift */; };
+		7707DA3D2C152EF5006D5EBB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3C2C152EF5006D5EBB /* Assets.xcassets */; };
+		7707DA402C152EF5006D5EBB /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3F2C152EF5006D5EBB /* Preview Assets.xcassets */; };
+		7707DA532C153A72006D5EBB /* CarPlayTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA522C153A72006D5EBB /* CarPlayTemplate.swift */; };
+		7707DA552C153A93006D5EBB /* CarPlayTemplateScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA542C153A93006D5EBB /* CarPlayTemplateScene.swift */; };
+		7707DA572C153B64006D5EBB /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA562C153B64006D5EBB /* CarPlaySceneDelegate.swift */; };
+		7707DA592C153C7C006D5EBB /* CarPlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA582C153C7C006D5EBB /* CarPlayView.swift */; };
+		7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA5A2C15524F006D5EBB /* RadioPlayer.swift */; };
+		7707DA5D2C155417006D5EBB /* CarPlayTemplateModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA5C2C155417006D5EBB /* CarPlayTemplateModifier.swift */; };
+		7707DA5F2C155873006D5EBB /* MusicVisualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA5E2C155873006D5EBB /* MusicVisualizer.swift */; };
+		7707DA612C155B82006D5EBB /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA602C155B82006D5EBB /* SceneDelegate.swift */; };
+		7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA622C156D92006D5EBB /* AddStationView.swift */; };
+		7707DA662C156F8D006D5EBB /* RadioStation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA652C156F8D006D5EBB /* RadioStation.swift */; };
+		7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */; };
+		7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA692C156FDA006D5EBB /* RadioStationListView.swift */; };
+		7707DA6C2C15789E006D5EBB /* KeyboardObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA6B2C15789E006D5EBB /* KeyboardObserver.swift */; };
+		7707DA6E2C158929006D5EBB /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA6D2C158929006D5EBB /* ViewController.swift */; };
+		7707DA702C15894F006D5EBB /* ShazamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA6F2C15894F006D5EBB /* ShazamView.swift */; };
+		7707DA742C159347006D5EBB /* MediaItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA732C159347006D5EBB /* MediaItemView.swift */; };
+		77AE62EA2C159BF900F02B33 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62E92C159BF900F02B33 /* EditStationView.swift */; };
+		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		7707DA352C152EF2006D5EBB /* AlbRadioStream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AlbRadioStream.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7707DA3A2C152EF2006D5EBB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		7707DA3C2C152EF5006D5EBB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		7707DA3F2C152EF5006D5EBB /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		7707DA462C152F36006D5EBB /* AlbRadioStream.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AlbRadioStream.entitlements; sourceTree = "<group>"; };
+		7707DA4B2C153935006D5EBB /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		7707DA522C153A72006D5EBB /* CarPlayTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayTemplate.swift; sourceTree = "<group>"; };
+		7707DA542C153A93006D5EBB /* CarPlayTemplateScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayTemplateScene.swift; sourceTree = "<group>"; };
+		7707DA562C153B64006D5EBB /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
+		7707DA582C153C7C006D5EBB /* CarPlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayView.swift; sourceTree = "<group>"; };
+		7707DA5A2C15524F006D5EBB /* RadioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioPlayer.swift; sourceTree = "<group>"; };
+		7707DA5C2C155417006D5EBB /* CarPlayTemplateModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayTemplateModifier.swift; sourceTree = "<group>"; };
+		7707DA5E2C155873006D5EBB /* MusicVisualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicVisualizer.swift; sourceTree = "<group>"; };
+		7707DA602C155B82006D5EBB /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		7707DA622C156D92006D5EBB /* AddStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddStationView.swift; sourceTree = "<group>"; };
+		7707DA652C156F8D006D5EBB /* RadioStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStation.swift; sourceTree = "<group>"; };
+		7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationViewModel.swift; sourceTree = "<group>"; };
+		7707DA692C156FDA006D5EBB /* RadioStationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationListView.swift; sourceTree = "<group>"; };
+		7707DA6B2C15789E006D5EBB /* KeyboardObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardObserver.swift; sourceTree = "<group>"; };
+		7707DA6D2C158929006D5EBB /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		7707DA6F2C15894F006D5EBB /* ShazamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamView.swift; sourceTree = "<group>"; };
+		7707DA732C159347006D5EBB /* MediaItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaItemView.swift; sourceTree = "<group>"; };
+		77AE62E92C159BF900F02B33 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
+		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7707DA322C152EF2006D5EBB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		7707DA2C2C152EF2006D5EBB = {
+			isa = PBXGroup;
+			children = (
+				7707DA4B2C153935006D5EBB /* Info.plist */,
+				7707DA372C152EF2006D5EBB /* AlbRadioStream */,
+				7707DA362C152EF2006D5EBB /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7707DA362C152EF2006D5EBB /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7707DA352C152EF2006D5EBB /* AlbRadioStream.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7707DA372C152EF2006D5EBB /* AlbRadioStream */ = {
+			isa = PBXGroup;
+			children = (
+				7707DA462C152F36006D5EBB /* AlbRadioStream.entitlements */,
+				7707DA4D2C1539F3006D5EBB /* ViewModels */,
+				7707DA3A2C152EF2006D5EBB /* ContentView.swift */,
+				7707DA582C153C7C006D5EBB /* CarPlayView.swift */,
+				77AE62E92C159BF900F02B33 /* EditStationView.swift */,
+				7707DA6F2C15894F006D5EBB /* ShazamView.swift */,
+				7707DA732C159347006D5EBB /* MediaItemView.swift */,
+				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
+				77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */,
+				7707DA622C156D92006D5EBB /* AddStationView.swift */,
+				7707DA3C2C152EF5006D5EBB /* Assets.xcassets */,
+				7707DA3E2C152EF5006D5EBB /* Preview Content */,
+			);
+			path = AlbRadioStream;
+			sourceTree = "<group>";
+		};
+		7707DA3E2C152EF5006D5EBB /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				7707DA3F2C152EF5006D5EBB /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		7707DA4D2C1539F3006D5EBB /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				7707DA642C156F7A006D5EBB /* Models */,
+				7707DA522C153A72006D5EBB /* CarPlayTemplate.swift */,
+				7707DA5A2C15524F006D5EBB /* RadioPlayer.swift */,
+				7707DA5C2C155417006D5EBB /* CarPlayTemplateModifier.swift */,
+				7707DA602C155B82006D5EBB /* SceneDelegate.swift */,
+				7707DA6B2C15789E006D5EBB /* KeyboardObserver.swift */,
+				7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */,
+				7707DA5E2C155873006D5EBB /* MusicVisualizer.swift */,
+				7707DA562C153B64006D5EBB /* CarPlaySceneDelegate.swift */,
+				7707DA542C153A93006D5EBB /* CarPlayTemplateScene.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		7707DA642C156F7A006D5EBB /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				7707DA652C156F8D006D5EBB /* RadioStation.swift */,
+				7707DA6D2C158929006D5EBB /* ViewController.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7707DA342C152EF2006D5EBB /* AlbRadioStream */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7707DA432C152EF5006D5EBB /* Build configuration list for PBXNativeTarget "AlbRadioStream" */;
+			buildPhases = (
+				7707DA312C152EF2006D5EBB /* Sources */,
+				7707DA322C152EF2006D5EBB /* Frameworks */,
+				7707DA332C152EF2006D5EBB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AlbRadioStream;
+			productName = AlbRadioStream;
+			productReference = 7707DA352C152EF2006D5EBB /* AlbRadioStream.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7707DA2D2C152EF2006D5EBB /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1510;
+				LastUpgradeCheck = 1510;
+				TargetAttributes = {
+					7707DA342C152EF2006D5EBB = {
+						CreatedOnToolsVersion = 15.1;
+					};
+				};
+			};
+			buildConfigurationList = 7707DA302C152EF2006D5EBB /* Build configuration list for PBXProject "AlbRadioStream" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 7707DA2C2C152EF2006D5EBB;
+			productRefGroup = 7707DA362C152EF2006D5EBB /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7707DA342C152EF2006D5EBB /* AlbRadioStream */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7707DA332C152EF2006D5EBB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7707DA402C152EF5006D5EBB /* Preview Assets.xcassets in Resources */,
+				7707DA3D2C152EF5006D5EBB /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7707DA312C152EF2006D5EBB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				77AE62EA2C159BF900F02B33 /* EditStationView.swift in Sources */,
+				7707DA6E2C158929006D5EBB /* ViewController.swift in Sources */,
+				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
+				7707DA552C153A93006D5EBB /* CarPlayTemplateScene.swift in Sources */,
+				7707DA6C2C15789E006D5EBB /* KeyboardObserver.swift in Sources */,
+				7707DA662C156F8D006D5EBB /* RadioStation.swift in Sources */,
+				7707DA612C155B82006D5EBB /* SceneDelegate.swift in Sources */,
+				7707DA532C153A72006D5EBB /* CarPlayTemplate.swift in Sources */,
+				7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */,
+				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
+				7707DA572C153B64006D5EBB /* CarPlaySceneDelegate.swift in Sources */,
+				7707DA702C15894F006D5EBB /* ShazamView.swift in Sources */,
+				7707DA592C153C7C006D5EBB /* CarPlayView.swift in Sources */,
+				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
+				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
+				7707DA742C159347006D5EBB /* MediaItemView.swift in Sources */,
+				7707DA5D2C155417006D5EBB /* CarPlayTemplateModifier.swift in Sources */,
+				7707DA5F2C155873006D5EBB /* MusicVisualizer.swift in Sources */,
+				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		7707DA412C152EF5006D5EBB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		7707DA422C152EF5006D5EBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		7707DA442C152EF5006D5EBB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AlbRadioStream/AlbRadioStream.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"AlbRadioStream/Preview Content\"";
+				DEVELOPMENT_TEAM = LH5V67498N;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires access to the microphone to monitor audio levels for the music visualizer.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = radio.AlbRadioStream;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7707DA452C152EF5006D5EBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AlbRadioStream/AlbRadioStream.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"AlbRadioStream/Preview Content\"";
+				DEVELOPMENT_TEAM = LH5V67498N;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires access to the microphone to monitor audio levels for the music visualizer.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = radio.AlbRadioStream;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7707DA302C152EF2006D5EBB /* Build configuration list for PBXProject "AlbRadioStream" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7707DA412C152EF5006D5EBB /* Debug */,
+				7707DA422C152EF5006D5EBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7707DA432C152EF5006D5EBB /* Build configuration list for PBXNativeTarget "AlbRadioStream" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7707DA442C152EF5006D5EBB /* Debug */,
+				7707DA452C152EF5006D5EBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 7707DA2D2C152EF2006D5EBB /* Project object */;
+}
