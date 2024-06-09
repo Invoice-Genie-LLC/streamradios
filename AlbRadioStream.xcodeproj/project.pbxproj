@@ -28,6 +28,7 @@
 		7707DA742C159347006D5EBB /* MediaItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA732C159347006D5EBB /* MediaItemView.swift */; };
 		77AE62EA2C159BF900F02B33 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62E92C159BF900F02B33 /* EditStationView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
+		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +56,7 @@
 		7707DA732C159347006D5EBB /* MediaItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaItemView.swift; sourceTree = "<group>"; };
 		77AE62E92C159BF900F02B33 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
+		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +97,7 @@
 				77AE62E92C159BF900F02B33 /* EditStationView.swift */,
 				7707DA6F2C15894F006D5EBB /* ShazamView.swift */,
 				7707DA732C159347006D5EBB /* MediaItemView.swift */,
+				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */,
 				7707DA622C156D92006D5EBB /* AddStationView.swift */,
@@ -210,6 +213,7 @@
 			files = (
 				77AE62EA2C159BF900F02B33 /* EditStationView.swift in Sources */,
 				7707DA6E2C158929006D5EBB /* ViewController.swift in Sources */,
+				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
 				7707DA552C153A93006D5EBB /* CarPlayTemplateScene.swift in Sources */,
 				7707DA6C2C15789E006D5EBB /* KeyboardObserver.swift in Sources */,

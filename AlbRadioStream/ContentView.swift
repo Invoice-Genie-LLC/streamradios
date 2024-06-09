@@ -1,8 +1,7 @@
+// ContentView.swift
+// AlbRadioStream
 //
-//  ContentView.swift
-//  AlbRadioStream
-//
-//  Created by Kley Sulo on 6/8/24.
+// Created by Kley Sulo on 6/8/24.
 //
 
 import SwiftUI
@@ -23,6 +22,7 @@ struct ContentView: View {
     @StateObject private var viewModel = RadioStationViewModel()
     @State private var isAddStationViewPresented = false
     @State private var isPlayerSheetPresented = false
+    @State private var showSideMenu = false
 
     var body: some View {
         NavigationView {
@@ -31,7 +31,9 @@ struct ContentView: View {
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
 
+                // Main content
                 VStack {
+                    Spacer()
                     // Radio Stations List
                     VStack {
                         RadioStationListView()
@@ -50,6 +52,7 @@ struct ContentView: View {
                     Spacer()
 
                     // Now Playing Section
+                    Spacer()
                     VStack {
                         HStack {
                             if let currentStationIndex = radioPlayer.currentStationIndex,
@@ -103,16 +106,53 @@ struct ContentView: View {
                     .frame(height: 100) // Adjust the height to fit text and buttons
                     .padding(.bottom, UIApplication.shared.windows.first?.safeAreaInsets.bottom)
                 }
-            }
-            .navigationBarItems(trailing:
-                Button(action: {
-                    isAddStationViewPresented.toggle()
-                }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title)
-                        .foregroundColor(.blue)
+
+                // Side Menu
+                GeometryReader { geometry in
+                    HStack {
+                        SideMenuView()
+                            .frame(width: geometry.size.width / 2)
+                            .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
+                            .animation(.easeInOut(duration: 0.3))
+
+                        Spacer()
+                    }
                 }
-            )
+                .background(Color.black.opacity(showSideMenu ? 0.5 : 0).edgesIgnoringSafeArea(.all))
+                .onTapGesture {
+                    withAnimation {
+                        showSideMenu.toggle()
+                    }
+                }
+
+                // Menu and Plus button
+                VStack {
+                    HStack {
+                        Button(action: {
+                            withAnimation {
+                                showSideMenu.toggle()
+                            }
+                        }) {
+                            Image(systemName: "line.horizontal.3")
+                                .font(.title)
+                                .foregroundColor(.blue)
+                                .padding()
+                        }
+
+                        Spacer()
+
+                        Button(action: {
+                            isAddStationViewPresented.toggle()
+                        }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.blue)
+                                .padding()
+                        }
+                    }
+                    Spacer()
+                }
+            }
             .sheet(isPresented: $isAddStationViewPresented) {
                 AddStationView(isPresented: $isAddStationViewPresented)
                     .environmentObject(viewModel)
