@@ -39,14 +39,15 @@ struct ContentView: View {
                         RadioStationListView()
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
-                            .background(Color(UIColor.systemBackground).opacity(0.8))
-                            .cornerRadius(20)
-                            .padding(.horizontal)
-                            .frame(maxHeight: 400) // Increase height of the radio stations list
+                            //.background(Color(UIColor.systemBackground).opacity(0.8))
+                            //.cornerRadius(20)
+                            //.padding(.horizontal)
+                            //.frame(maxHeight: 400) // Increase height of the radio stations list
                     }
-                    .background(RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color(UIColor.secondarySystemBackground))
-                                    .shadow(radius: 10))
+                    .padding(.top,  150)
+                    //.background(RoundedRectangle(cornerRadius: 20)
+                                   // .fill(Color(UIColor.secondarySystemBackground))
+                                    //.shadow(radius: 10))
                     .padding()
 
                     Spacer()
@@ -163,5 +164,6 @@ struct ContentView: View {
                     .environmentObject(viewModel)
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }

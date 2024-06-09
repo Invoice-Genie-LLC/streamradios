@@ -1,8 +1,7 @@
+// RadioStationListView.swift
+// AlbRadioStream
 //
-//  RadioStationListView.swift
-//  AlbRadioStream
-//
-//  Created by Kley Sulo on 6/9/24.
+// Created by Kley Sulo on 6/9/24.
 //
 
 import SwiftUI
@@ -20,9 +19,22 @@ struct RadioStationListView: View {
                     Button(action: {
                         selectStation(station)
                     }) {
-                        Text(station.name)
-                            .font(.headline)
-                            .foregroundColor(.primary)
+                        HStack {
+                            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .frame(width: 20, height: 20)
+                                    .cornerRadius(4)
+                            }
+                            Text(station.name)
+                                .font(.headline)
+                                .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .blue : .primary)
+                            
+                            if radioPlayer.currentStationIndex != nil && viewModel.stations[radioPlayer.currentStationIndex!] == station {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .foregroundColor(.blue)
+                            }
+                        }
                     }
                     .buttonStyle(PlainButtonStyle())
                     

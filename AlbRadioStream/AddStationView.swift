@@ -1,8 +1,7 @@
+// AddStationView.swift
+// AlbRadioStream
 //
-//  AddStationView.swift
-//  AlbRadioStream
-//
-//  Created by Kley Sulo on 6/9/24.
+// Created by Kley Sulo on 6/9/24.
 //
 
 import SwiftUI
@@ -11,6 +10,8 @@ struct AddStationView: View {
     @State private var name: String
     @State private var urlString: String
     @State private var showAlert = false
+    @State private var iconImage: UIImage? = nil
+    @State private var showImagePicker = false
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Binding var isPresented: Bool
     var station: RadioStation?
@@ -28,7 +29,7 @@ struct AddStationView: View {
                 Spacer()
 
                 Text(station == nil ? "Add Radio Station" : "Edit Radio Station")
-                    .font(.largeTitle)
+                    .font(.title)
                     .padding()
 
                 TextField("Enter station name", text: $name)
@@ -44,29 +45,68 @@ struct AddStationView: View {
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(10)
                     .padding(.horizontal)
-
-                Button(action: {
-                    if let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
-                        if let station = station {
-                            if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                                viewModel.stations[index].name = name
-                                viewModel.stations[index].url = urlString
-                            }
-                        } else {
-                            viewModel.addStation(name: name, url: urlString)
-                        }
-                        isPresented = false // Close the sheet
-                    } else {
-                        showAlert = true
-                    }
-                }) {
-                    Text(station == nil ? "Add Station" : "Save Changes")
-                        .font(.title)
+                
+                if let iconImage = iconImage {
+                    Image(uiImage: iconImage)
+                        .resizable()
+                        .frame(width: 50, height: 50)
+                        .cornerRadius(10)
                         .padding()
+                }
+
+                HStack {
+                    Button(action: {
+                        showImagePicker = true
+                    }) {
+                        HStack {
+                            Image(systemName: "photo")
+                                .font(.headline)
+                            Text("Upload Icon")
+                                .font(.headline)
+                        }
+                        .padding(8)
                         .background(Color.blue)
                         .foregroundColor(.white)
                         .cornerRadius(10)
+                    }
+                    .sheet(isPresented: $showImagePicker) {
+                        ImagePicker(image: $iconImage)
+                    }
+                    .padding(.trailing, 8)
+
+                    Button(action: {
+                        if let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
+                            if let station = station {
+                                if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                                    viewModel.stations[index].name = name
+                                    viewModel.stations[index].url = urlString
+                                    viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+                                }
+                            } else {
+                                let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+                                let newStation = RadioStation(name: name, url: urlString, iconData: iconData)
+                                viewModel.stations.append(newStation)
+                            }
+                            viewModel.saveStations()
+                            isPresented = false // Close the sheet
+                        } else {
+                            showAlert = true
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.headline)
+                            Text(station == nil ? "Add Station" : "Save Changes")
+                                .font(.headline)
+                        }
+                        .padding(8)
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                    }
                 }
+                .padding()
+
                 .alert(isPresented: $showAlert) {
                     Alert(title: Text("Invalid URL"), message: Text("Please enter a valid URL"), dismissButton: .default(Text("OK")))
                 }
@@ -81,5 +121,6 @@ struct AddStationView: View {
                 Text("Done").bold()
             })
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 }
