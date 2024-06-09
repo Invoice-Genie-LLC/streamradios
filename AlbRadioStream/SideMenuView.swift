@@ -25,9 +25,19 @@ struct SideMenuView: View {
                     .font(.headline)
                     .padding(.top, 20)
                     .padding(.horizontal, 20)
+                NavigationLink(destination: SettingsView()) {
+                    HStack {
+                        Image(systemName: "gear")
+                            .font(.headline)
+                        Text("Settings")
+                            .font(.headline)
+                    }
+                    .padding(.top, 20)
+                    .padding(.horizontal, 20)
+                }
             }.padding(.top, 100)
             Spacer()
-            
+
             // Footer
             VStack(alignment: .leading) {
                 Text("Copyright AlbRadio Streaming")
@@ -44,3 +54,4 @@ struct SideMenuView: View {
         .edgesIgnoringSafeArea(.all)
     }
 }
+    

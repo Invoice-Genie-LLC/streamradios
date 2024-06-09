@@ -1,8 +1,7 @@
+// RadioPlayer.swift
+// AlbRadioStream
 //
-//  RadioPlayer.swift
-//  AlbRadioStream
-//
-//  Created by Kley Sulo on 6/8/24.
+// Created by Kley Sulo on 6/8/24.
 //
 
 import AVFoundation
@@ -23,7 +22,8 @@ class RadioPlayer: NSObject, ObservableObject {
     private override init() {
         super.init()
         configureAudioSession()
-        if let lastStationURL = UserDefaults.standard.url(forKey: "lastStationURL") {
+        if UserDefaults.standard.bool(forKey: "autoPlayLastStation"),
+           let lastStationURL = UserDefaults.standard.url(forKey: "lastStationURL") {
             setStationURL(lastStationURL)
             currentStationIndex = UserDefaults.standard.integer(forKey: "lastStationIndex")
             play()
