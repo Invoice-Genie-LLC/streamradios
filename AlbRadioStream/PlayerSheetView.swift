@@ -8,7 +8,8 @@
 import SwiftUI
 
 struct PlayerSheetView: View {
-    @StateObject private var radioPlayer = RadioPlayer.shared
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @EnvironmentObject var viewModel: RadioStationViewModel
 
     var body: some View {
         VStack {
@@ -33,7 +34,7 @@ struct PlayerSheetView: View {
 
             HStack {
                 Button(action: {
-                    radioPlayer.previousStation()
+                    radioPlayer.previousStation(from: viewModel.stations)
                 }) {
                     Image(systemName: "backward.fill")
                         .font(.title)
@@ -53,7 +54,7 @@ struct PlayerSheetView: View {
                 Spacer()
 
                 Button(action: {
-                    radioPlayer.nextStation()
+                    radioPlayer.nextStation(from: viewModel.stations)
                 }) {
                     Image(systemName: "forward.fill")
                         .font(.title)

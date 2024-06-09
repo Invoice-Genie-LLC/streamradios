@@ -13,30 +13,19 @@ class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
     private var player: AVPlayer?
     private var cancellable: AnyCancellable?
-
+    
     @Published var isPlaying = false
+    @Published var currentStationIndex: Int?
     @Published var songTitle: String = ""
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
-    @Published var currentURL: String?
-    @Published var currentStationIndex: Int = 0
-    var stations: [RadioStation] = []
 
     private override init() {
         super.init()
-        configureAudioSession()
     }
 
-    func setStationURL(_ url: URL, index: Int? = nil) {
+    func setStationURL(_ url: URL) {
         player = AVPlayer(url: url)
-        currentURL = url.absoluteString
-        if let index = index {
-            currentStationIndex = index
-        }
-        observePlayerState()
-    }
-
-    private func observePlayerState() {
         cancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
                 self?.isPlaying = (status == .playing)
@@ -44,40 +33,33 @@ class RadioPlayer: NSObject, ObservableObject {
     }
 
     func playPause() {
-        if isPlaying {
-            player?.pause()
+        guard let player = player else { return }
+        if player.timeControlStatus == .playing {
+            player.pause()
         } else {
-            player?.play()
+            player.play()
         }
     }
 
-    func stop() {
-        player?.pause()
-        isPlaying = false
-        currentURL = nil
-    }
-
-    func nextStation() {
-        guard !stations.isEmpty else { return }
-        currentStationIndex = (currentStationIndex + 1) % stations.count
-        setStationURL(URL(string: stations[currentStationIndex].url)!, index: currentStationIndex)
-        playPause()
-    }
-
-    func previousStation() {
-        guard !stations.isEmpty else { return }
-        currentStationIndex = (currentStationIndex - 1 + stations.count) % stations.count
-        setStationURL(URL(string: stations[currentStationIndex].url)!, index: currentStationIndex)
-        playPause()
-    }
-
-    private func configureAudioSession() {
-        let audioSession = AVAudioSession.sharedInstance()
-        do {
-            try audioSession.setCategory(.playback, options: [.allowBluetooth, .allowAirPlay])
-            try audioSession.setActive(true)
-        } catch {
-            print("Failed to set up audio session: \(error)")
+    func playStation(at index: Int, from stations: [RadioStation]) {
+        guard index >= 0 && index < stations.count else { return }
+        currentStationIndex = index
+        let station = stations[index]
+        if let url = URL(string: station.url) {
+            setStationURL(url)
+            playPause()
         }
+    }
+
+    func nextStation(from stations: [RadioStation]) {
+        guard let currentIndex = currentStationIndex else { return }
+        let nextIndex = (currentIndex + 1) % stations.count
+        playStation(at: nextIndex, from: stations)
+    }
+
+    func previousStation(from stations: [RadioStation]) {
+        guard let currentIndex = currentStationIndex else { return }
+        let previousIndex = (currentIndex - 1 + stations.count) % stations.count
+        playStation(at: previousIndex, from: stations)
     }
 }

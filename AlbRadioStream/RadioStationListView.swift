@@ -9,6 +9,7 @@ import SwiftUI
 
 struct RadioStationListView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @EnvironmentObject var radioPlayer: RadioPlayer
     @State private var selectedStation: RadioStation?
     @State private var isEditing = false
 
@@ -17,47 +18,53 @@ struct RadioStationListView: View {
             ForEach(viewModel.stations) { station in
                 HStack {
                     Button(action: {
-                        selectedStation = station
-                        isEditing = true
+                        selectStation(station)
                     }) {
-                        HStack {
-                            Text(station.name)
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            Spacer()
-                        }
+                        Text(station.name)
+                            .font(.headline)
+                            .foregroundColor(.primary)
                     }
                     .buttonStyle(PlainButtonStyle())
                     
+                    Spacer()
+                    
                     Button(action: {
-                        if let url = URL(string: station.url) {
-                            RadioPlayer.shared.setStationURL(url)
-                            RadioPlayer.shared.playPause()
+                        if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                            radioPlayer.playStation(at: index, from: viewModel.stations)
                         }
                     }) {
                         Image(systemName: "play.circle.fill")
                             .font(.title)
                             .foregroundColor(.blue)
                     }
+                    
+                    Image(systemName: "line.horizontal.3")
+                        .font(.title)
+                        .foregroundColor(.gray)
+                        .padding(.leading, 10)
+                        .onDrag {
+                            NSItemProvider(object: station.name as NSString)
+                        }
                 }
                 .padding(.vertical, 8)
                 .listRowBackground(Color(UIColor.secondarySystemBackground))
             }
-            .onDelete(perform: deleteStation)
+            .onDelete(perform: viewModel.deleteStation)
+            .onMove(perform: viewModel.moveStation)
         }
         .listStyle(InsetGroupedListStyle())
-        .sheet(item: $selectedStation) { station in
-            AddStationView(station: station, isPresented: Binding(
-                get: { self.selectedStation != nil },
-                set: { newValue in
-                    if !newValue { self.selectedStation = nil }
-                }
-            ))
-            .environmentObject(viewModel)
+        .sheet(isPresented: $isEditing) {
+            if let selectedStation = selectedStation {
+                AddStationView(station: selectedStation, isPresented: $isEditing)
+                    .environmentObject(viewModel)
+            }
         }
     }
     
-    private func deleteStation(at offsets: IndexSet) {
-        viewModel.stations.remove(atOffsets: offsets)
+    private func selectStation(_ station: RadioStation) {
+        selectedStation = station
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.isEditing = true
+        }
     }
 }
