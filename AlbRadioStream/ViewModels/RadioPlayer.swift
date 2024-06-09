@@ -22,10 +22,27 @@ class RadioPlayer: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        configureAudioSession()
+        if let lastStationURL = UserDefaults.standard.url(forKey: "lastStationURL") {
+            setStationURL(lastStationURL)
+            currentStationIndex = UserDefaults.standard.integer(forKey: "lastStationIndex")
+            play()
+        }
+    }
+
+    private func configureAudioSession() {
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playback, mode: .default, options: [])
+            try audioSession.setActive(true)
+        } catch {
+            print("Failed to set up audio session: \(error)")
+        }
     }
 
     func setStationURL(_ url: URL) {
         player = AVPlayer(url: url)
+        UserDefaults.standard.set(url, forKey: "lastStationURL") // Save the URL
         cancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
                 self?.isPlaying = (status == .playing)
@@ -41,9 +58,16 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
 
+    func play() {
+        guard let player = player else { return }
+        player.play()
+        isPlaying = true
+    }
+
     func playStation(at index: Int, from stations: [RadioStation]) {
         guard index >= 0 && index < stations.count else { return }
         currentStationIndex = index
+        UserDefaults.standard.set(index, forKey: "lastStationIndex") // Save the index
         let station = stations[index]
         if let url = URL(string: station.url) {
             setStationURL(url)
