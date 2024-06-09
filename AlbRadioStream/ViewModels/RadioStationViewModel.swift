@@ -23,7 +23,7 @@ class RadioStationViewModel: ObservableObject {
         saveStations()
     }
 
-    private func saveStations() {
+     func saveStations() {
         if let encodedStations = try? JSONEncoder().encode(stations) {
             UserDefaults.standard.set(encodedStations, forKey: userDefaultsKey)
         }

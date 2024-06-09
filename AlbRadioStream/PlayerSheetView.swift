@@ -1,8 +1,7 @@
+// PlayerSheetView.swift
+// AlbRadioStream
 //
-//  PlayerSheetView.swift
-//  AlbRadioStream
-//
-//  Created by Kley Sulo on 6/9/24.
+// Created by Kley Sulo on 6/9/24.
 //
 
 import SwiftUI
@@ -13,6 +12,18 @@ struct PlayerSheetView: View {
 
     var body: some View {
         VStack {
+            if let currentStationIndex = radioPlayer.currentStationIndex,
+               currentStationIndex < viewModel.stations.count {
+                let currentStation = viewModel.stations[currentStationIndex]
+                if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .frame(width: 20, height: 20)
+                        .cornerRadius(4)
+                        .padding(.bottom, 8)
+                }
+            }
+
             if let albumArt = radioPlayer.albumArt {
                 Image(uiImage: albumArt)
                     .resizable()
