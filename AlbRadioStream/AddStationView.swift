@@ -21,6 +21,10 @@ struct AddStationView: View {
         _urlString = State(initialValue: station?.url ?? "")
         self.station = station
         _isPresented = isPresented
+
+        if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+            _iconImage = State(initialValue: image)
+        }
     }
 
     var body: some View {
