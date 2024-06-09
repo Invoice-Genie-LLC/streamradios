@@ -40,4 +40,9 @@ class RadioStationViewModel: ObservableObject {
         stations.remove(atOffsets: offsets)
         saveStations()
     }
+
+    func moveStation(from source: IndexSet, to destination: Int) {
+        stations.move(fromOffsets: source, toOffset: destination)
+        saveStations()
+    }
 }

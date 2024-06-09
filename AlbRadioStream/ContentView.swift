@@ -12,6 +12,8 @@ struct RadioStreamApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(RadioPlayer.shared)
+                .environmentObject(RadioStationViewModel())
         }
     }
 }
@@ -34,6 +36,7 @@ struct ContentView: View {
                     VStack {
                         RadioStationListView()
                             .environmentObject(viewModel)
+                            .environmentObject(radioPlayer)
                             .background(Color(UIColor.systemBackground).opacity(0.8))
                             .cornerRadius(20)
                             .padding(.horizontal)
@@ -47,41 +50,57 @@ struct ContentView: View {
                     Spacer()
 
                     // Now Playing Section
-                    HStack {
-                        Button(action: {
-                            radioPlayer.previousStation()
-                        }) {
-                            Image(systemName: "backward.fill")
-                                .font(.title)
-                                .foregroundColor(.blue)
+                    VStack {
+                        HStack {
+                            if let currentStationIndex = radioPlayer.currentStationIndex,
+                               currentStationIndex < viewModel.stations.count {
+                                Text(viewModel.stations[currentStationIndex].name)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                            } else {
+                                Text("Not Playing")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
                         }
 
-                        Spacer()
+                        HStack {
+                            Button(action: {
+                                radioPlayer.previousStation(from: viewModel.stations)
+                            }) {
+                                Image(systemName: "backward.fill")
+                                    .font(.title)
+                                    .foregroundColor(.blue)
+                            }
 
-                        Button(action: {
-                            radioPlayer.playPause()
-                        }) {
-                            Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 50))
-                                .foregroundColor(.blue)
+                            Spacer()
+
+                            Button(action: {
+                                radioPlayer.playPause()
+                            }) {
+                                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.blue)
+                            }
+
+                            Spacer()
+
+                            Button(action: {
+                                radioPlayer.nextStation(from: viewModel.stations)
+                            }) {
+                                Image(systemName: "forward.fill")
+                                    .font(.title)
+                                    .foregroundColor(.blue)
+                            }
                         }
-
-                        Spacer()
-
-                        Button(action: {
-                            radioPlayer.nextStation()
-                        }) {
-                            Image(systemName: "forward.fill")
-                                .font(.title)
-                                .foregroundColor(.blue)
-                        }
+                        .padding(.top, 8) // Add some space between text and buttons
                     }
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
                     }
-                    .frame(height: 60)
+                    .frame(height: 100) // Adjust the height to fit text and buttons
                     .padding(.bottom, UIApplication.shared.windows.first?.safeAreaInsets.bottom)
                 }
             }
@@ -100,6 +119,8 @@ struct ContentView: View {
             }
             .sheet(isPresented: $isPlayerSheetPresented) {
                 PlayerSheetView()
+                    .environmentObject(radioPlayer)
+                    .environmentObject(viewModel)
             }
         }
     }
