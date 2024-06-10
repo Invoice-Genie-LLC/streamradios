@@ -19,28 +19,35 @@ struct RadioStationListView: View {
                     Button(action: {
                         selectStation(station)
                     }) {
-                        VStack(alignment: .leading) {
-                            HStack {
-                                if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .frame(width: 40, height: 40)  // Increase the size of the icons
-                                        .cornerRadius(8)  // Increase the corner radius to match the larger icon size
-                                }
-                                Text(station.name)
-                                    .font(.headline)
-                                    .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .blue : .primary)
+                        HStack {
+                            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .frame(width: 40, height: 40)
+                                    .cornerRadius(8)
+                                    .padding(.trailing, 8)
+                            }
 
-                                if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
-                                    Image(systemName: "speaker.wave.2.fill")
-                                        .foregroundColor(.blue)
+                            VStack(alignment: .leading) {
+                                HStack {
+                                    Text(station.name)
+                                        .font(.headline)
+                                        .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .blue : .primary)
+
+                                    if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
+                                        Image(systemName: "speaker.wave.2.fill")
+                                            .foregroundColor(.blue)
+                                            .padding(.leading, 4)
+                                    }
+                                }
+
+                                if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station && !radioPlayer.metadata.isEmpty {
+                                    Text(radioPlayer.metadata)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
                                 }
                             }
-                            if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
-                                Text(radioPlayer.metadata)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -72,6 +79,8 @@ struct RadioStationListView: View {
             .onMove(perform: viewModel.moveStation)
         }
         .listStyle(InsetGroupedListStyle())
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 5) // Reduce padding to make the list wider
         .sheet(isPresented: $isEditing) {
             if let selectedStation = selectedStation {
                 AddStationView(station: selectedStation, isPresented: $isEditing)
