@@ -26,6 +26,16 @@
 		7707DA6E2C158929006D5EBB /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA6D2C158929006D5EBB /* ViewController.swift */; };
 		7707DA702C15894F006D5EBB /* ShazamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA6F2C15894F006D5EBB /* ShazamView.swift */; };
 		7707DA742C159347006D5EBB /* MediaItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA732C159347006D5EBB /* MediaItemView.swift */; };
+		7746177A2C1726E700F442B3 /* RadioWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774617792C1726E700F442B3 /* RadioWidget.swift */; };
+		7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746177B2C17290200F442B3 /* RadioStreamApp.swift */; };
+		774617842C17411C00F442B3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617832C17411C00F442B3 /* WidgetKit.framework */; };
+		774617862C17411C00F442B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617852C17411C00F442B3 /* SwiftUI.framework */; };
+		774617892C17411C00F442B3 /* albRadioWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774617882C17411C00F442B3 /* albRadioWidgetBundle.swift */; };
+		7746178B2C17411C00F442B3 /* albRadioWidgetLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746178A2C17411C00F442B3 /* albRadioWidgetLiveActivity.swift */; };
+		7746178D2C17411C00F442B3 /* albRadioWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746178C2C17411C00F442B3 /* albRadioWidget.swift */; };
+		7746178F2C17411E00F442B3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7746178E2C17411E00F442B3 /* Assets.xcassets */; };
+		774617932C17411E00F442B3 /* albRadioWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 774617812C17411C00F442B3 /* albRadioWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179B2C17834200F442B3 /* CircularProgressView.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
@@ -35,6 +45,30 @@
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
 		77CCE9662C1632850098EE74 /* saveToDocuments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9652C1632850098EE74 /* saveToDocuments.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		774617912C17411E00F442B3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7707DA2D2C152EF2006D5EBB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 774617802C17411C00F442B3;
+			remoteInfo = albRadioWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		774617972C17411E00F442B3 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				774617932C17411E00F442B3 /* albRadioWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		7707DA352C152EF2006D5EBB /* AlbRadioStream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AlbRadioStream.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -59,6 +93,18 @@
 		7707DA6D2C158929006D5EBB /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
 		7707DA6F2C15894F006D5EBB /* ShazamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamView.swift; sourceTree = "<group>"; };
 		7707DA732C159347006D5EBB /* MediaItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaItemView.swift; sourceTree = "<group>"; };
+		774617792C1726E700F442B3 /* RadioWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioWidget.swift; sourceTree = "<group>"; };
+		7746177B2C17290200F442B3 /* RadioStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStreamApp.swift; sourceTree = "<group>"; };
+		774617812C17411C00F442B3 /* albRadioWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = albRadioWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		774617832C17411C00F442B3 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		774617852C17411C00F442B3 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		774617882C17411C00F442B3 /* albRadioWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = albRadioWidgetBundle.swift; sourceTree = "<group>"; };
+		7746178A2C17411C00F442B3 /* albRadioWidgetLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = albRadioWidgetLiveActivity.swift; sourceTree = "<group>"; };
+		7746178C2C17411C00F442B3 /* albRadioWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = albRadioWidget.swift; sourceTree = "<group>"; };
+		7746178E2C17411E00F442B3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		774617902C17411E00F442B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		774617982C17425000F442B3 /* albRadioWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = albRadioWidgetExtension.entitlements; sourceTree = "<group>"; };
+		7746179B2C17834200F442B3 /* CircularProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularProgressView.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
@@ -77,14 +123,26 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7746177E2C17411C00F442B3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				774617862C17411C00F442B3 /* SwiftUI.framework in Frameworks */,
+				774617842C17411C00F442B3 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		7707DA2C2C152EF2006D5EBB = {
 			isa = PBXGroup;
 			children = (
+				774617982C17425000F442B3 /* albRadioWidgetExtension.entitlements */,
 				7707DA4B2C153935006D5EBB /* Info.plist */,
 				7707DA372C152EF2006D5EBB /* AlbRadioStream */,
+				774617872C17411C00F442B3 /* albRadioWidget */,
+				774617822C17411C00F442B3 /* Frameworks */,
 				7707DA362C152EF2006D5EBB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -93,6 +151,7 @@
 			isa = PBXGroup;
 			children = (
 				7707DA352C152EF2006D5EBB /* AlbRadioStream.app */,
+				774617812C17411C00F442B3 /* albRadioWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,11 +159,13 @@
 		7707DA372C152EF2006D5EBB /* AlbRadioStream */ = {
 			isa = PBXGroup;
 			children = (
+				774617772C1726BA00F442B3 /* Widgets */,
 				7707DA462C152F36006D5EBB /* AlbRadioStream.entitlements */,
 				7707DA4D2C1539F3006D5EBB /* ViewModels */,
 				7707DA3A2C152EF2006D5EBB /* ContentView.swift */,
 				7707DA582C153C7C006D5EBB /* CarPlayView.swift */,
 				7707DA6F2C15894F006D5EBB /* ShazamView.swift */,
+				7746179B2C17834200F442B3 /* CircularProgressView.swift */,
 				7707DA732C159347006D5EBB /* MediaItemView.swift */,
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
@@ -116,6 +177,7 @@
 				77CCE95C2C1630D20098EE74 /* radio-shqip.png */,
 				77CCE95D2C1630D20098EE74 /* topAlbaniaRadio.png */,
 				7707DA3E2C152EF5006D5EBB /* Preview Content */,
+				7746177B2C17290200F442B3 /* RadioStreamApp.swift */,
 			);
 			path = AlbRadioStream;
 			sourceTree = "<group>";
@@ -156,6 +218,43 @@
 			path = Models;
 			sourceTree = "<group>";
 		};
+		774617772C1726BA00F442B3 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				774617782C1726D200F442B3 /* Models */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		774617782C1726D200F442B3 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				774617792C1726E700F442B3 /* RadioWidget.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		774617822C17411C00F442B3 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				774617832C17411C00F442B3 /* WidgetKit.framework */,
+				774617852C17411C00F442B3 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		774617872C17411C00F442B3 /* albRadioWidget */ = {
+			isa = PBXGroup;
+			children = (
+				774617882C17411C00F442B3 /* albRadioWidgetBundle.swift */,
+				7746178A2C17411C00F442B3 /* albRadioWidgetLiveActivity.swift */,
+				7746178C2C17411C00F442B3 /* albRadioWidget.swift */,
+				7746178E2C17411E00F442B3 /* Assets.xcassets */,
+				774617902C17411E00F442B3 /* Info.plist */,
+			);
+			path = albRadioWidget;
+			sourceTree = "<group>";
+		};
 		77CCE9642C16326A0098EE74 /* Extensions */ = {
 			isa = PBXGroup;
 			children = (
@@ -174,15 +273,34 @@
 				7707DA312C152EF2006D5EBB /* Sources */,
 				7707DA322C152EF2006D5EBB /* Frameworks */,
 				7707DA332C152EF2006D5EBB /* Resources */,
+				774617972C17411E00F442B3 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				774617922C17411E00F442B3 /* PBXTargetDependency */,
 			);
 			name = AlbRadioStream;
 			productName = AlbRadioStream;
 			productReference = 7707DA352C152EF2006D5EBB /* AlbRadioStream.app */;
 			productType = "com.apple.product-type.application";
+		};
+		774617802C17411C00F442B3 /* albRadioWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 774617942C17411E00F442B3 /* Build configuration list for PBXNativeTarget "albRadioWidgetExtension" */;
+			buildPhases = (
+				7746177D2C17411C00F442B3 /* Sources */,
+				7746177E2C17411C00F442B3 /* Frameworks */,
+				7746177F2C17411C00F442B3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = albRadioWidgetExtension;
+			productName = albRadioWidgetExtension;
+			productReference = 774617812C17411C00F442B3 /* albRadioWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -195,6 +313,9 @@
 				LastUpgradeCheck = 1510;
 				TargetAttributes = {
 					7707DA342C152EF2006D5EBB = {
+						CreatedOnToolsVersion = 15.1;
+					};
+					774617802C17411C00F442B3 = {
 						CreatedOnToolsVersion = 15.1;
 					};
 				};
@@ -213,6 +334,7 @@
 			projectRoot = "";
 			targets = (
 				7707DA342C152EF2006D5EBB /* AlbRadioStream */,
+				774617802C17411C00F442B3 /* albRadioWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -230,6 +352,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7746177F2C17411C00F442B3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7746178F2C17411E00F442B3 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -240,6 +370,7 @@
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				7707DA6E2C158929006D5EBB /* ViewController.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
+				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
 				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
 				7707DA552C153A93006D5EBB /* CarPlayTemplateScene.swift in Sources */,
@@ -258,11 +389,31 @@
 				7707DA742C159347006D5EBB /* MediaItemView.swift in Sources */,
 				7707DA5D2C155417006D5EBB /* CarPlayTemplateModifier.swift in Sources */,
 				7707DA5F2C155873006D5EBB /* MusicVisualizer.swift in Sources */,
+				7746177A2C1726E700F442B3 /* RadioWidget.swift in Sources */,
+				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7746177D2C17411C00F442B3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7746178D2C17411C00F442B3 /* albRadioWidget.swift in Sources */,
+				7746178B2C17411C00F442B3 /* albRadioWidgetLiveActivity.swift in Sources */,
+				774617892C17411C00F442B3 /* albRadioWidgetBundle.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		774617922C17411E00F442B3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 774617802C17411C00F442B3 /* albRadioWidgetExtension */;
+			targetProxy = 774617912C17411E00F442B3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		7707DA412C152EF5006D5EBB /* Debug */ = {
@@ -387,6 +538,7 @@
 		7707DA442C152EF5006D5EBB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AlbRadioStream/AlbRadioStream.entitlements;
@@ -407,6 +559,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = radio.AlbRadioStream;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -418,6 +571,7 @@
 		7707DA452C152EF5006D5EBB /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AlbRadioStream/AlbRadioStream.entitlements;
@@ -438,8 +592,67 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = radio.AlbRadioStream;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		774617952C17411E00F442B3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = albRadioWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LH5V67498N;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = albRadioWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = albRadioWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
+				PRODUCT_BUNDLE_IDENTIFIER = radio.AlbRadioStream.albRadioWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		774617962C17411E00F442B3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = albRadioWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LH5V67498N;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = albRadioWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = albRadioWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
+				PRODUCT_BUNDLE_IDENTIFIER = radio.AlbRadioStream.albRadioWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -463,6 +676,15 @@
 			buildConfigurations = (
 				7707DA442C152EF5006D5EBB /* Debug */,
 				7707DA452C152EF5006D5EBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		774617942C17411E00F442B3 /* Build configuration list for PBXNativeTarget "albRadioWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				774617952C17411E00F442B3 /* Debug */,
+				774617962C17411E00F442B3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
