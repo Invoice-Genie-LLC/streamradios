@@ -11,6 +11,7 @@ struct RadioStationListView: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @State private var selectedStation: RadioStation?
     @State private var isEditing = false
+    @State private var pulsate = false
 
     var body: some View {
         List {
@@ -37,7 +38,21 @@ struct RadioStationListView: View {
                                     if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
                                         Image(systemName: "speaker.wave.2.fill")
                                             .foregroundColor(.blue)
-                                            .padding(.leading, 4)
+                                            .scaleEffect(pulsate ? 1.1 : 1.0)
+                                            .animation(
+                                                Animation.easeInOut(duration: 0.8)
+                                                    .repeatForever(autoreverses: true),
+                                                value: pulsate
+                                            )
+                                            .onAppear {
+                                                pulsate = true
+                                            }
+                                            .onDisappear {
+                                                pulsate = false
+                                            }
+                                    } else {
+                                        Image(systemName: "speaker.wave.2.fill")
+                                            .foregroundColor(.gray)
                                     }
                                 }
 
@@ -73,7 +88,8 @@ struct RadioStationListView: View {
                         }
                 }
                 .padding(.vertical, 8)
-                .listRowBackground(Color(UIColor.secondarySystemBackground))
+                .padding(.horizontal, 5) // Reduce padding to make the list wider
+                .listRowInsets(EdgeInsets())
             }
             .onDelete(perform: viewModel.deleteStation)
             .onMove(perform: viewModel.moveStation)

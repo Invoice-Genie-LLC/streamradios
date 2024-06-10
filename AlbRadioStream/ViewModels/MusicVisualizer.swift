@@ -17,7 +17,7 @@ struct MusicVisualizer: View {
                     .fill(LinearGradient(gradient: Gradient(colors: [.blue, .green]), startPoint: .top, endPoint: .bottom))
                     .frame(width: 10, height: CGFloat(max(10, Double(audioLevel + 50) * 2)))
                     .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
-                    .animation(.linear(duration: 0.1))
+                    .animation(.linear(duration: 0.1), value: audioLevel)
             }
         }
     }

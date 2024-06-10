@@ -1,10 +1,3 @@
-//
-//  ViewController.swift
-//  AlbRadioStream
-//
-//  Created by Kley Sulo on 6/9/24.
-//
-
 import UIKit
 import ShazamKit
 import AVFoundation
@@ -30,16 +23,14 @@ class ViewController: UIViewController, SHSessionDelegate {
     }
     
     @IBAction func shazam() {
-        let audioSession = AVAudioSession.sharedInstance()
-        
-        audioSession.requestRecordPermission { granted in
+        AVAudioApplication.requestRecordPermission { granted in
             if granted {
                 DispatchQueue.main.async {
                     self.titleLabel.text = "Preparing"
                 }
                 
                 do {
-                    try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                    try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
                     self.startListening()
                 } catch {
                     DispatchQueue.main.async {

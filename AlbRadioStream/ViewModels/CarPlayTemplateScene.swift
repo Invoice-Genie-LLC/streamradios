@@ -8,8 +8,6 @@
 import CarPlay
 import SwiftUI
 
-
-
 struct CarPlayTemplateScene: UIViewControllerRepresentable {
     var interfaceController: CPInterfaceController?
 
@@ -19,11 +17,12 @@ struct CarPlayTemplateScene: UIViewControllerRepresentable {
         let carPlayTemplate = CPGridTemplate(title: "Radio Stream", gridButtons: [
             CPGridButton(titleVariants: ["Play"], image: UIImage(systemName: "play.circle")!) { _ in
                 // Handle Play button action
+                RadioPlayer.shared.playPause()
                 print("Play button tapped")
             }
         ])
         
-        interfaceController?.setRootTemplate(carPlayTemplate, animated: true)
+        interfaceController?.setRootTemplate(carPlayTemplate, animated: true, completion: nil)
         
         return viewController
     }

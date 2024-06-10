@@ -27,7 +27,6 @@
 		7707DA702C15894F006D5EBB /* ShazamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA6F2C15894F006D5EBB /* ShazamView.swift */; };
 		7707DA742C159347006D5EBB /* MediaItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA732C159347006D5EBB /* MediaItemView.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
-		77AE62EA2C159BF900F02B33 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62E92C159BF900F02B33 /* EditStationView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE95F2C1630D20098EE74 /* radio-shqip.png in Resources */ = {isa = PBXBuildFile; fileRef = 77CCE95C2C1630D20098EE74 /* radio-shqip.png */; };
@@ -61,7 +60,6 @@
 		7707DA6F2C15894F006D5EBB /* ShazamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamView.swift; sourceTree = "<group>"; };
 		7707DA732C159347006D5EBB /* MediaItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaItemView.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		77AE62E92C159BF900F02B33 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE95C2C1630D20098EE74 /* radio-shqip.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "radio-shqip.png"; sourceTree = "<group>"; };
@@ -106,7 +104,6 @@
 				7707DA4D2C1539F3006D5EBB /* ViewModels */,
 				7707DA3A2C152EF2006D5EBB /* ContentView.swift */,
 				7707DA582C153C7C006D5EBB /* CarPlayView.swift */,
-				77AE62E92C159BF900F02B33 /* EditStationView.swift */,
 				7707DA6F2C15894F006D5EBB /* ShazamView.swift */,
 				7707DA732C159347006D5EBB /* MediaItemView.swift */,
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
@@ -240,7 +237,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				77AE62EA2C159BF900F02B33 /* EditStationView.swift in Sources */,
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				7707DA6E2C158929006D5EBB /* ViewController.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
