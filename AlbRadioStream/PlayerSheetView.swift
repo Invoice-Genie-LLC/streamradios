@@ -94,12 +94,17 @@ struct PlayerSheetView: View {
 
                 Spacer()
 
-                Button(action: {
-                    radioPlayer.playPause()
-                }) {
-                    Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 50))
-                        .foregroundColor(.blue)
+                ZStack {
+                    if radioPlayer.isBuffering {
+                        CircularProgressView()
+                    }
+                    Button(action: {
+                        radioPlayer.playPause()
+                    }) {
+                        Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 50))
+                            .foregroundColor(.blue)
+                    }
                 }
 
                 Spacer()

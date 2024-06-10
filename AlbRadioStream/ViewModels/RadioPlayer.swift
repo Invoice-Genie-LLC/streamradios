@@ -7,12 +7,23 @@
 import AVFoundation
 import Combine
 import UIKit
+import WidgetKit
+import Network
+import MediaPlayer
 
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
-    var player: AVPlayer?
+    @objc var player: AVPlayer?
     private var statusCancellable: AnyCancellable?
-    
+    private var retryTimer: Timer?
+    private var networkRetryTimer: Timer?
+    private var retryCount = 0
+    private let maxRetryCount = 5
+    private let monitor = NWPathMonitor()
+    private var isNetworkAvailable = true
+    private var wasPlayingBeforeNetworkLoss = false
+    @Published var isBuffering = false
+
     @Published var isPlaying = false
     @Published var currentStationIndex: Int?
     @Published var songTitle: String = ""
@@ -20,13 +31,21 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var albumArt: UIImage?
     @Published var metadata: String = ""
 
+    private let userDefaultsSuiteName = "group.radio.AlbRadioStream"
+    private var userDefaults: UserDefaults? {
+        return UserDefaults(suiteName: userDefaultsSuiteName)
+    }
+
     private override init() {
         super.init()
         configureAudioSession()
-        if UserDefaults.standard.bool(forKey: "autoPlayLastStation"),
-           let lastStationURL = UserDefaults.standard.url(forKey: "lastStationURL") {
+        startNetworkMonitoring()
+        addObservers()
+        if let userDefaults = userDefaults,
+           userDefaults.bool(forKey: "autoPlayLastStation"),
+           let lastStationURL = userDefaults.url(forKey: "lastStationURL") {
             setStationURL(lastStationURL)
-            currentStationIndex = UserDefaults.standard.integer(forKey: "lastStationIndex")
+            currentStationIndex = userDefaults.integer(forKey: "lastStationIndex")
             play()
         }
     }
@@ -41,9 +60,105 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
 
+    private func startNetworkMonitoring() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self = self else { return }
+            if path.status == .satisfied {
+                print("Network connected")
+                self.isNetworkAvailable = true
+                self.retryStreamIfNeeded()
+                if self.wasPlayingBeforeNetworkLoss {
+                    // Ensure a fresh connection
+                    if let userDefaults = self.userDefaults,
+                       let lastStationURL = userDefaults.url(forKey: "lastStationURL") {
+                        self.setStationURL(lastStationURL)
+                        self.play()
+                    }
+                }
+            } else {
+                print("Network disconnected")
+                self.isNetworkAvailable = false
+                self.wasPlayingBeforeNetworkLoss = self.isPlaying
+                if self.isPlaying {
+                    self.pause()
+                }
+            }
+        }
+        let queue = DispatchQueue(label: "NetworkMonitor")
+        monitor.start(queue: queue)
+
+        // Start periodic network check
+        networkRetryTimer = Timer.scheduledTimer(timeInterval: 10.0, target: self, selector: #selector(checkNetworkAndRetry), userInfo: nil, repeats: true)
+    }
+
+    private func addObservers() {
+        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidStall), name: .AVPlayerItemPlaybackStalled, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFailToPlayToEnd), name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
+
+        // Add KVO observers for buffering and playing state
+        addObserver(self, forKeyPath: #keyPath(player.currentItem.isPlaybackBufferEmpty), options: [.new, .old], context: nil)
+        addObserver(self, forKeyPath: #keyPath(player.currentItem.isPlaybackLikelyToKeepUp), options: [.new, .old], context: nil)
+    }
+
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == #keyPath(player.currentItem.isPlaybackBufferEmpty) {
+            if let isEmpty = change?[.newKey] as? Bool {
+                isBuffering = isEmpty
+                updateNowPlayingInfo()
+            }
+        } else if keyPath == #keyPath(player.currentItem.isPlaybackLikelyToKeepUp) {
+            if let isLikelyToKeepUp = change?[.newKey] as? Bool {
+                isBuffering = !isLikelyToKeepUp
+                updateNowPlayingInfo()
+            }
+        } else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+        }
+    }
+
+    @objc private func playerItemDidStall(notification: Notification) {
+        retryStream()
+    }
+
+    @objc private func playerItemDidFailToPlayToEnd(notification: Notification) {
+        retryStream()
+    }
+
+    @objc private func checkNetworkAndRetry() {
+        if isNetworkAvailable && wasPlayingBeforeNetworkLoss && !isPlaying {
+            retryStreamIfNeeded()
+        }
+    }
+
+    private func retryStream() {
+        retryCount += 1
+        retryTimer?.invalidate()
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
+            self?.refreshStream()
+        }
+        print("Retrying stream, attempt \(retryCount)")
+    }
+
+    private func refreshStream() {
+        guard let lastStationURL = userDefaults?.url(forKey: "lastStationURL") else { return }
+        setStationURL(lastStationURL)
+        play()
+    }
+
+    private func resetRetryCount() {
+        retryCount = 0
+        retryTimer?.invalidate()
+    }
+
+    private func retryStreamIfNeeded() {
+        if !isPlaying && wasPlayingBeforeNetworkLoss {
+            retryStream()
+        }
+    }
+
     func setStationURL(_ url: URL) {
         player = AVPlayer(url: url)
-        UserDefaults.standard.set(url, forKey: "lastStationURL")
+        userDefaults?.set(url, forKey: "lastStationURL")
 
         // Cancel previous observer if it exists
         statusCancellable?.cancel()
@@ -51,7 +166,11 @@ class RadioPlayer: NSObject, ObservableObject {
         // Set up observers
         statusCancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
-                self?.isPlaying = (status == .playing)
+                guard let self = self else { return }
+                self.isPlaying = (status == .playing)
+                self.isBuffering = (status == .waitingToPlayAtSpecifiedRate)
+                print("Set station URL: isPlaying = \(self.isPlaying), isBuffering = \(self.isBuffering)")
+                self.updateNowPlayingInfo()
             }
         addMetadataOutput()
     }
@@ -68,25 +187,45 @@ class RadioPlayer: NSObject, ObservableObject {
             player.pause()
         } else {
             player.play()
+            resetRetryCount()
         }
+        updateNowPlayingInfo()
+        updateWidget()
     }
 
     func play() {
         guard let player = player else { return }
+        // Ensure the player is properly set up with the current station URL
+        if player.currentItem?.asset as? AVURLAsset == nil,
+           let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+            setStationURL(lastStationURL)
+        }
         player.play()
         isPlaying = true
+        resetRetryCount()
+        updateNowPlayingInfo()
+        updateWidget()
+    }
+
+    func pause() {
+        guard let player = player else { return }
+        player.pause()
+        isPlaying = false
+        updateNowPlayingInfo()
     }
 
     func playStation(at index: Int, from stations: [RadioStation]) {
         guard index >= 0 && index < stations.count else { return }
         currentStationIndex = index
         metadata = "" // Clear metadata when switching stations
-        UserDefaults.standard.set(index, forKey: "lastStationIndex")
+        userDefaults?.set(index, forKey: "lastStationIndex")
         let station = stations[index]
         if let url = URL(string: station.url) {
             setStationURL(url)
             play()
         }
+        updateNowPlayingInfo()
+        updateWidget()
     }
 
     func nextStation(from stations: [RadioStation]) {
@@ -99,6 +238,52 @@ class RadioPlayer: NSObject, ObservableObject {
         guard let currentIndex = currentStationIndex else { return }
         let previousIndex = (currentIndex - 1 + stations.count) % stations.count
         playStation(at: previousIndex, from: stations)
+    }
+
+    private func updateNowPlayingInfo() {
+        var nowPlayingInfo = [String: Any]()
+        nowPlayingInfo[MPMediaItemPropertyTitle] = songTitle.isEmpty ? "Unknown Title" : songTitle
+        nowPlayingInfo[MPMediaItemPropertyArtist] = artistName.isEmpty ? "Unknown Artist" : artistName
+        nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+
+        if let albumArt = albumArt {
+            let artwork = MPMediaItemArtwork(boundsSize: albumArt.size) { size in
+                return albumArt
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        } else if let currentStationIndex = currentStationIndex,
+                  currentStationIndex < RadioStationViewModel().stations.count {
+            let currentStation = RadioStationViewModel().stations[currentStationIndex]
+            if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+                    return image
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+            }
+        }
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        print("Updated now playing info: \(nowPlayingInfo)")
+    }
+
+    private func updateWidget() {
+        guard let currentStationIndex = currentStationIndex else { return }
+        let viewModel = RadioStationViewModel()
+
+        guard currentStationIndex < viewModel.stations.count else {
+            return
+        }
+
+        let currentStation = viewModel.stations[currentStationIndex]
+        let metadata = self.metadata
+
+        userDefaults?.set(currentStation.name, forKey: "stationName")
+        userDefaults?.set(currentStation.iconData, forKey: "stationIcon")
+        userDefaults?.set(metadata, forKey: "stationMetadata")
+
+        WidgetCenter.shared.reloadAllTimelines()
+        print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
     }
 }
 
@@ -114,9 +299,13 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                                 // Only update metadata if the station has not changed
                                 if self.currentStationIndex == self.currentStationIndex {
                                     self.metadata = stringValue
+                                    self.updateNowPlayingInfo()
+                                    self.updateWidget()
                                 }
                             } else {
                                 self.metadata = ""
+                                self.updateNowPlayingInfo()
+                                self.updateWidget()
                             }
                         }
                     }

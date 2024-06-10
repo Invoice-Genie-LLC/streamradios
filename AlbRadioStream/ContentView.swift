@@ -6,20 +6,6 @@
 
 import SwiftUI
 
-@main
-struct RadioStreamApp: App {
-    @AppStorage("isDarkMode") private var isDarkMode = false
-    
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .environmentObject(RadioPlayer.shared)
-                .environmentObject(RadioStationViewModel())
-                .preferredColorScheme(isDarkMode ? .dark : .light)
-        }
-    }
-}
-
 struct ContentView: View {
     @StateObject private var radioPlayer = RadioPlayer.shared
     @StateObject private var viewModel = RadioStationViewModel()
@@ -83,12 +69,17 @@ struct ContentView: View {
 
                             Spacer()
 
-                            Button(action: {
-                                radioPlayer.playPause()
-                            }) {
-                                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                    .font(.system(size: 50))
-                                    .foregroundColor(.blue)
+                            ZStack {
+                                if radioPlayer.isBuffering {
+                                    CircularProgressView()
+                                }
+                                Button(action: {
+                                    radioPlayer.playPause()
+                                }) {
+                                    Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                        .font(.system(size: 50))
+                                        .foregroundColor(.blue)
+                                }
                             }
 
                             Spacer()
