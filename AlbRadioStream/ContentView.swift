@@ -42,16 +42,9 @@ struct ContentView: View {
                         RadioStationListView()
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
-                            //.background(Color(UIColor.systemBackground).opacity(0.8))
-                            //.cornerRadius(20)
-                            //.padding(.horizontal)
-                            //.frame(maxHeight: 400) // Increase height of the radio stations list
                     }
                     .padding(.top,  25)
                     .padding(.bottom,  25)
-                    //.background(RoundedRectangle(cornerRadius: 20)
-                                   // .fill(Color(UIColor.secondarySystemBackground))
-                                    //.shadow(radius: 10))
                     .padding()
 
                     Spacer()
@@ -125,8 +118,10 @@ struct ContentView: View {
                 }
                 .background(Color.black.opacity(showSideMenu ? 0.5 : 0).edgesIgnoringSafeArea(.all))
                 .onTapGesture {
-                    withAnimation {
-                        showSideMenu.toggle()
+                    if showSideMenu {
+                        withAnimation {
+                            showSideMenu.toggle()
+                        }
                     }
                 }
 
@@ -171,4 +166,3 @@ struct ContentView: View {
         .navigationViewStyle(StackNavigationViewStyle())
     }
 }
-
