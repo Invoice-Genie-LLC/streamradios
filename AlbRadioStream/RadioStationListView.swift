@@ -19,27 +19,34 @@ struct RadioStationListView: View {
                     Button(action: {
                         selectStation(station)
                     }) {
-                        HStack {
-                            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .frame(width: 40, height: 40)  // Increase the size of the icons
-                                    .cornerRadius(8)  // Increase the corner radius to match the larger icon size
+                        VStack(alignment: .leading) {
+                            HStack {
+                                if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .frame(width: 40, height: 40)  // Increase the size of the icons
+                                        .cornerRadius(8)  // Increase the corner radius to match the larger icon size
+                                }
+                                Text(station.name)
+                                    .font(.headline)
+                                    .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .blue : .primary)
+
+                                if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
+                                    Image(systemName: "speaker.wave.2.fill")
+                                        .foregroundColor(.blue)
+                                }
                             }
-                            Text(station.name)
-                                .font(.headline)
-                                .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .blue : .primary)
-                            
-                            if radioPlayer.currentStationIndex != nil && viewModel.stations[radioPlayer.currentStationIndex!] == station {
-                                Image(systemName: "speaker.wave.2.fill")
-                                    .foregroundColor(.blue)
+                            if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
+                                Text(radioPlayer.metadata)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
                             }
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
-                    
+
                     Spacer()
-                    
+
                     Button(action: {
                         if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
                             radioPlayer.playStation(at: index, from: viewModel.stations)
@@ -49,7 +56,7 @@ struct RadioStationListView: View {
                             .font(.title)
                             .foregroundColor(.blue)
                     }
-                    
+
                     Image(systemName: "line.horizontal.3")
                         .font(.title)
                         .foregroundColor(.gray)
@@ -72,7 +79,7 @@ struct RadioStationListView: View {
             }
         }
     }
-    
+
     private func selectStation(_ station: RadioStation) {
         selectedStation = station
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

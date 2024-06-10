@@ -10,14 +10,16 @@ import UIKit
 
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
-    private var player: AVPlayer?
-    private var cancellable: AnyCancellable?
+    var player: AVPlayer?
+    private var metadataCancellable: AnyCancellable?
+    private var statusCancellable: AnyCancellable?
     
     @Published var isPlaying = false
     @Published var currentStationIndex: Int?
     @Published var songTitle: String = ""
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
+    @Published var metadata: String = "" // Ensure metadata is a @Published property
 
     private override init() {
         super.init()
@@ -43,9 +45,28 @@ class RadioPlayer: NSObject, ObservableObject {
     func setStationURL(_ url: URL) {
         player = AVPlayer(url: url)
         UserDefaults.standard.set(url, forKey: "lastStationURL") // Save the URL
-        cancellable = player?.publisher(for: \.timeControlStatus)
+
+        // Cancel previous observers if they exist
+        metadataCancellable?.cancel()
+        statusCancellable?.cancel()
+
+        // Set up observers
+        statusCancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
                 self?.isPlaying = (status == .playing)
+            }
+        addMetadataObserver()
+    }
+
+    private func addMetadataObserver() {
+        metadataCancellable = player?.currentItem?.publisher(for: \.timedMetadata)
+            .sink { [weak self] metadata in
+                guard let self = self else { return }
+                if let metadataItem = metadata?.first(where: { $0.commonKey?.rawValue == "title" }) {
+                    self.metadata = metadataItem.stringValue ?? ""
+                } else {
+                    self.metadata = ""
+                }
             }
     }
 
@@ -71,7 +92,7 @@ class RadioPlayer: NSObject, ObservableObject {
         let station = stations[index]
         if let url = URL(string: station.url) {
             setStationURL(url)
-            playPause()
+            play() // Ensure the player starts playing
         }
     }
 
