@@ -42,10 +42,12 @@ struct ContentView: View {
                         RadioStationListView()
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 5)
                     }
-                    .padding(.top,  25)
-                    .padding(.bottom,  25)
-                    .padding()
+                    .padding(.top, 25)
+                    .padding(.bottom, 25)
+                    .padding(.horizontal, 5)
 
                     Spacer()
 
