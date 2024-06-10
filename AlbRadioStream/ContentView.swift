@@ -8,11 +8,14 @@ import SwiftUI
 
 @main
 struct RadioStreamApp: App {
+    @AppStorage("isDarkMode") private var isDarkMode = false
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(RadioPlayer.shared)
                 .environmentObject(RadioStationViewModel())
+                .preferredColorScheme(isDarkMode ? .dark : .light)
         }
     }
 }
@@ -168,3 +171,4 @@ struct ContentView: View {
         .navigationViewStyle(StackNavigationViewStyle())
     }
 }
+
