@@ -55,6 +55,11 @@ struct PlayerSheetView: View {
                     .font(.title)
                     .bold()
                     .padding(.top, 4)
+
+                Text(radioPlayer.metadata)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
             }
 
             if let albumArt = radioPlayer.albumArt {

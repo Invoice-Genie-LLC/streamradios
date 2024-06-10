@@ -55,9 +55,14 @@ struct ContentView: View {
                         HStack {
                             if let currentStationIndex = radioPlayer.currentStationIndex,
                                currentStationIndex < viewModel.stations.count {
-                                Text(viewModel.stations[currentStationIndex].name)
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
+                                VStack(alignment: .leading) {
+                                    Text(viewModel.stations[currentStationIndex].name)
+                                        .font(.subheadline)
+                                        .foregroundColor(.primary)
+                                    Text(radioPlayer.metadata)
+                                        .font(.footnote)
+                                        .foregroundColor(.secondary)
+                                }
                             } else {
                                 Text("Not Playing")
                                     .font(.subheadline)
