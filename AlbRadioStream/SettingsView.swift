@@ -18,13 +18,13 @@ struct SettingsView: View {
             
             Section(header: Text("Display Settings")) {
                 Toggle("Dark Mode", isOn: $isDarkMode)
-                    .onChange(of: isDarkMode) { value in
-                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                            windowScene.windows.first?.overrideUserInterfaceStyle = value ? .dark : .light
-                        }
-                    }
             }
         }
         .navigationTitle("Settings")
+        .onChange(of: isDarkMode) { oldValue, newValue in
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .light
+            }
+        }
     }
 }

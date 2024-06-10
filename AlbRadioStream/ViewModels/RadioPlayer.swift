@@ -11,7 +11,6 @@ import UIKit
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
     var player: AVPlayer?
-    private var metadataCancellable: AnyCancellable?
     private var statusCancellable: AnyCancellable?
     
     @Published var isPlaying = false
@@ -19,7 +18,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var songTitle: String = ""
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
-    @Published var metadata: String = "" // Ensure metadata is a @Published property
+    @Published var metadata: String = ""
 
     private override init() {
         super.init()
@@ -44,10 +43,9 @@ class RadioPlayer: NSObject, ObservableObject {
 
     func setStationURL(_ url: URL) {
         player = AVPlayer(url: url)
-        UserDefaults.standard.set(url, forKey: "lastStationURL") // Save the URL
+        UserDefaults.standard.set(url, forKey: "lastStationURL")
 
-        // Cancel previous observers if they exist
-        metadataCancellable?.cancel()
+        // Cancel previous observer if it exists
         statusCancellable?.cancel()
 
         // Set up observers
@@ -55,19 +53,13 @@ class RadioPlayer: NSObject, ObservableObject {
             .sink { [weak self] status in
                 self?.isPlaying = (status == .playing)
             }
-        addMetadataObserver()
+        addMetadataOutput()
     }
 
-    private func addMetadataObserver() {
-        metadataCancellable = player?.currentItem?.publisher(for: \.timedMetadata)
-            .sink { [weak self] metadata in
-                guard let self = self else { return }
-                if let metadataItem = metadata?.first(where: { $0.commonKey?.rawValue == "title" }) {
-                    self.metadata = metadataItem.stringValue ?? ""
-                } else {
-                    self.metadata = ""
-                }
-            }
+    private func addMetadataOutput() {
+        let metadataOutput = AVPlayerItemMetadataOutput()
+        metadataOutput.setDelegate(self, queue: DispatchQueue.main)
+        player?.currentItem?.add(metadataOutput)
     }
 
     func playPause() {
@@ -88,11 +80,12 @@ class RadioPlayer: NSObject, ObservableObject {
     func playStation(at index: Int, from stations: [RadioStation]) {
         guard index >= 0 && index < stations.count else { return }
         currentStationIndex = index
-        UserDefaults.standard.set(index, forKey: "lastStationIndex") // Save the index
+        metadata = "" // Clear metadata when switching stations
+        UserDefaults.standard.set(index, forKey: "lastStationIndex")
         let station = stations[index]
         if let url = URL(string: station.url) {
             setStationURL(url)
-            play() // Ensure the player starts playing
+            play()
         }
     }
 
@@ -106,5 +99,29 @@ class RadioPlayer: NSObject, ObservableObject {
         guard let currentIndex = currentStationIndex else { return }
         let previousIndex = (currentIndex - 1 + stations.count) % stations.count
         playStation(at: previousIndex, from: stations)
+    }
+}
+
+extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
+    func metadataOutput(_ output: AVPlayerItemMetadataOutput, didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup], from playerItemTrack: AVPlayerItemTrack?) {
+        for group in groups {
+            for item in group.items {
+                if item.commonKey?.rawValue == "title" {
+                    item.loadValuesAsynchronously(forKeys: ["stringValue"]) { [weak self] in
+                        guard let self = self else { return }
+                        DispatchQueue.main.async {
+                            if let stringValue = item.stringValue {
+                                // Only update metadata if the station has not changed
+                                if self.currentStationIndex == self.currentStationIndex {
+                                    self.metadata = stringValue
+                                }
+                            } else {
+                                self.metadata = ""
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

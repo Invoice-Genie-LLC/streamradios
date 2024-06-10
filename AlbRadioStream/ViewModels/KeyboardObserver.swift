@@ -23,11 +23,19 @@ final class KeyboardObserver: ObservableObject {
                 (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect)?.height
             }
             .map { height -> CGFloat in
-                let bottomSafeAreaInset = UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0
+                let bottomSafeAreaInset = self.getBottomSafeAreaInset()
                 return height == 0 ? 0 : height - bottomSafeAreaInset
             }
             .assign(to: \.keyboardHeight, on: self)
             .store(in: &cancellableSet)
+    }
+
+    private func getBottomSafeAreaInset() -> CGFloat {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return 0
+        }
+        return window.safeAreaInsets.bottom
     }
 
     deinit {

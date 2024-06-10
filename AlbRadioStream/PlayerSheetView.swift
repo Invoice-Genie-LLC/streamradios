@@ -34,12 +34,14 @@ struct PlayerSheetView: View {
                 }
                 .foregroundColor(.blue)
             })
+            .background(Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all))
         }
     }
 
     @ViewBuilder
     private var content: some View {
         VStack {
+            Spacer()
             if let currentStationIndex = radioPlayer.currentStationIndex,
                currentStationIndex < viewModel.stations.count {
                 let currentStation = viewModel.stations[currentStationIndex]
@@ -114,7 +116,9 @@ struct PlayerSheetView: View {
             .background(Color(UIColor.secondarySystemBackground))
             .cornerRadius(12)
             .shadow(radius: 8)
-
+            
+            Spacer()
+    
             // AirPlay Button
             AirPlayButton()
                 .frame(width: 50, height: 50)

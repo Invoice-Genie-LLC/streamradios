@@ -45,7 +45,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.horizontal, 5)
                     }
-                    .padding(.top, 25)
+                    .padding(.top, 50)
                     .padding(.bottom, 25)
                     .padding(.horizontal, 5)
 
@@ -105,11 +105,17 @@ struct ContentView: View {
                     }
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(12) // Add rounded corners
+                    .shadow(radius: 8) // Add shadow
+                    .frame(maxWidth: 350)
+                    .padding(.horizontal, 5)
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
                     }
                     .frame(height: 100) // Adjust the height to fit text and buttons
-                    .padding(.bottom, UIApplication.shared.windows.first?.safeAreaInsets.bottom)
+                    .padding(.bottom, UIApplication.shared.connectedScenes
+                                        .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
+                                        .first ?? 0)
                 }
 
                 // Side Menu
@@ -118,7 +124,7 @@ struct ContentView: View {
                         SideMenuView()
                             .frame(width: geometry.size.width / 2)
                             .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-                            .animation(.easeInOut(duration: 0.3))
+                            .animation(.easeInOut(duration: 0.3), value: showSideMenu)
 
                         Spacer()
                     }
@@ -153,7 +159,7 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title)
-                                .foregroundColor(.blue)
+                                .foregroundColor(showSideMenu ? Color(.sRGB, red: 0, green: 0, blue: 0.5, opacity: 1) : .blue)
                                 .padding()
                         }
                     }

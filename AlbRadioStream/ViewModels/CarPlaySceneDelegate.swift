@@ -1,4 +1,3 @@
-//
 //  CarPlaySceneDelegate.swift
 //  AlbRadioStream
 //
@@ -15,6 +14,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 RadioPlayer.shared.playPause()
             }
         ])
-        interfaceController.setRootTemplate(gridTemplate, animated: true)
+        
+        interfaceController.setRootTemplate(gridTemplate, animated: true, completion: nil)
     }
 }
