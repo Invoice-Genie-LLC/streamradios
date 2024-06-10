@@ -1,4 +1,3 @@
-
 // SettingsView.swift
 // AlbRadioStream
 //
@@ -9,10 +8,22 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
+    @AppStorage("isDarkMode") private var isDarkMode = false
 
     var body: some View {
         Form {
-            Toggle("Auto-Play Last Station", isOn: $autoPlayLastStation)
+            Section(header: Text("Playback Settings")) {
+                Toggle("Auto-Play Last Station", isOn: $autoPlayLastStation)
+            }
+            
+            Section(header: Text("Display Settings")) {
+                Toggle("Dark Mode", isOn: $isDarkMode)
+                    .onChange(of: isDarkMode) { value in
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            windowScene.windows.first?.overrideUserInterfaceStyle = value ? .dark : .light
+                        }
+                    }
+            }
         }
         .navigationTitle("Settings")
     }
