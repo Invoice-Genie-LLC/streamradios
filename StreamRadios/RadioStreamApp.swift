@@ -1,4 +1,3 @@
-//
 // RadioStreamApp.swift
 // RadioStreamApp
 //
@@ -12,15 +11,23 @@ import WidgetKit
 struct RadioStreamApp: App {
     @AppStorage("isDarkMode") private var isDarkMode = false
 
+    // Perform initial setup in an initializer
+    init() {
+        let radioPlayer = RadioPlayer.shared
+        let viewModel = RadioStationViewModel()
+        radioPlayer.setViewModel(viewModel)
+
+        // Set up remote control and start receiving remote control events
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+        radioPlayer.setupRemoteCommandCenter()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(RadioPlayer.shared)
                 .environmentObject(RadioStationViewModel())
                 .preferredColorScheme(isDarkMode ? .dark : .light)
-                .onAppear {
-                    updateWidget()
-                }
         }
     }
 }

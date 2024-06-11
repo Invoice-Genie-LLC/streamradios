@@ -10,6 +10,7 @@ import UIKit
 import WidgetKit
 import Network
 import MediaPlayer
+import BackgroundTasks
 
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
@@ -36,6 +37,8 @@ class RadioPlayer: NSObject, ObservableObject {
         return UserDefaults(suiteName: userDefaultsSuiteName)
     }
 
+    private var viewModel: RadioStationViewModel?
+
     private override init() {
         super.init()
         configureAudioSession()
@@ -48,6 +51,15 @@ class RadioPlayer: NSObject, ObservableObject {
             currentStationIndex = userDefaults.integer(forKey: "lastStationIndex")
             play()
         }
+
+        // Register background task
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.radio.refresh", using: nil) { task in
+            self.handleAppRefresh(task: task as! BGAppRefreshTask)
+        }
+    }
+
+    func setViewModel(_ viewModel: RadioStationViewModel) {
+        self.viewModel = viewModel
     }
 
     private func configureAudioSession() {
@@ -66,14 +78,8 @@ class RadioPlayer: NSObject, ObservableObject {
             if path.status == .satisfied {
                 print("Network connected")
                 self.isNetworkAvailable = true
-                self.retryStreamIfNeeded()
                 if self.wasPlayingBeforeNetworkLoss {
-                    // Ensure a fresh connection
-                    if let userDefaults = self.userDefaults,
-                       let lastStationURL = userDefaults.url(forKey: "lastStationURL") {
-                        self.setStationURL(lastStationURL)
-                        self.play()
-                    }
+                    self.retryStream()
                 }
             } else {
                 print("Network disconnected")
@@ -142,7 +148,9 @@ class RadioPlayer: NSObject, ObservableObject {
     private func refreshStream() {
         guard let lastStationURL = userDefaults?.url(forKey: "lastStationURL") else { return }
         setStationURL(lastStationURL)
-        play()
+        player?.seek(to: .zero)
+        player?.play()
+        print("Stream refreshed")
     }
 
     private func resetRetryCount() {
@@ -205,6 +213,7 @@ class RadioPlayer: NSObject, ObservableObject {
         resetRetryCount()
         updateNowPlayingInfo()
         updateWidget()
+        scheduleAppRefresh()
     }
 
     func pause() {
@@ -241,9 +250,16 @@ class RadioPlayer: NSObject, ObservableObject {
     }
 
     private func updateNowPlayingInfo() {
+        guard let viewModel = viewModel else { return }
+
         var nowPlayingInfo = [String: Any]()
-        nowPlayingInfo[MPMediaItemPropertyTitle] = songTitle.isEmpty ? "Unknown Title" : songTitle
-        nowPlayingInfo[MPMediaItemPropertyArtist] = artistName.isEmpty ? "Unknown Artist" : artistName
+        if let currentStationIndex = currentStationIndex,
+           currentStationIndex < viewModel.stations.count {
+            let currentStation = viewModel.stations[currentStationIndex]
+            nowPlayingInfo[MPMediaItemPropertyTitle] = songTitle.isEmpty ? currentStation.name : songTitle
+            nowPlayingInfo[MPMediaItemPropertyArtist] = artistName.isEmpty ? (metadata ?? currentStation.name) : artistName
+        }
+
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
 
@@ -253,8 +269,8 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
         } else if let currentStationIndex = currentStationIndex,
-                  currentStationIndex < RadioStationViewModel().stations.count {
-            let currentStation = RadioStationViewModel().stations[currentStationIndex]
+                  currentStationIndex < viewModel.stations.count {
+            let currentStation = viewModel.stations[currentStationIndex]
             if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                 let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
                     return image
@@ -268,8 +284,7 @@ class RadioPlayer: NSObject, ObservableObject {
     }
 
     private func updateWidget() {
-        guard let currentStationIndex = currentStationIndex else { return }
-        let viewModel = RadioStationViewModel()
+        guard let currentStationIndex = currentStationIndex, let viewModel = viewModel else { return }
 
         guard currentStationIndex < viewModel.stations.count else {
             return
@@ -284,6 +299,63 @@ class RadioPlayer: NSObject, ObservableObject {
 
         WidgetCenter.shared.reloadAllTimelines()
         print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
+    }
+
+    func setupRemoteCommandCenter() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.playCommand.addTarget { [weak self] event in
+            self?.play()
+            return .success
+        }
+
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.pauseCommand.addTarget { [weak self] event in
+            self?.pause()
+            return .success
+        }
+
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.nextTrackCommand.addTarget { [weak self] event in
+            if let self = self, let viewModel = self.viewModel {
+                self.nextStation(from: viewModel.stations)
+                return .success
+            }
+            return .commandFailed
+        }
+
+        commandCenter.previousTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.addTarget { [weak self] event in
+            if let self = self, let viewModel = self.viewModel {
+                self.previousStation(from: viewModel.stations)
+                return .success
+            }
+            return .commandFailed
+        }
+    }
+
+    private func scheduleAppRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: "com.radio.refresh")
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // Refresh every 15 minutes.
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            print("Could not schedule app refresh: \(error)")
+        }
+    }
+
+    private func handleAppRefresh(task: BGAppRefreshTask) {
+        scheduleAppRefresh()
+
+        task.expirationHandler = {
+            // Clean up any resources before the task expires.
+        }
+
+        checkNetworkAndRetry()
+
+        task.setTaskCompleted(success: true)
     }
 }
 
