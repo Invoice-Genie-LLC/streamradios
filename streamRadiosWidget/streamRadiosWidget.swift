@@ -1,6 +1,6 @@
 //
-//  albRadioWidget.swift
-//  albRadioWidget
+//  streamRadiosWidget.swift
+//  streamRadiosWidget
 //
 //  Created by Kley Sulo on 6/10/24.
 //
@@ -21,7 +21,7 @@ struct Provider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<SimpleEntry>) -> Void) {
         var entries: [SimpleEntry] = []
 
-        let sharedDefaults = UserDefaults(suiteName: "group.radio.AlbRadioStream")
+        let sharedDefaults = UserDefaults(suiteName: "group.streamradios")
         let stationName = sharedDefaults?.string(forKey: "stationName") ?? "No Station"
         let stationIcon = sharedDefaults?.string(forKey: "stationIcon")
         let stationMetadata = sharedDefaults?.string(forKey: "stationMetadata") ?? "No Metadata"
@@ -42,7 +42,7 @@ struct SimpleEntry: TimelineEntry {
     let stationMetadata: String
 }
 
-struct albRadioWidgetEntryView: View {
+struct StreamRadiosWidgetEntryView: View {
     var entry: SimpleEntry
 
     var body: some View {
@@ -69,12 +69,12 @@ struct albRadioWidgetEntryView: View {
     }
 }
 
-struct albRadioWidget: Widget {
-    let kind: String = "albRadioWidget"
+struct streamRadiosWidget: Widget {
+    let kind: String = "com.radio.streamradios.widget"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
-            albRadioWidgetEntryView(entry: entry)
+            StreamRadiosWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("Radio Station")
         .description("Displays the current radio station and metadata.")
@@ -82,9 +82,9 @@ struct albRadioWidget: Widget {
     }
 }
 
-struct albRadioWidget_Previews: PreviewProvider {
+struct streamRadiosWidget_Previews: PreviewProvider {
     static var previews: some View {
-        albRadioWidgetEntryView(entry: SimpleEntry(date: Date(), stationName: "Preview Station", stationIcon: nil, stationMetadata: "Preview Metadata"))
+        StreamRadiosWidgetEntryView(entry: SimpleEntry(date: Date(), stationName: "Preview Station", stationIcon: nil, stationMetadata: "Preview Metadata"))
             .previewContext(WidgetPreviewContext(family: .systemSmall))
     }
 }

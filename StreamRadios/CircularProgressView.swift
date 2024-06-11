@@ -1,6 +1,6 @@
 //
 //  CircularProgressView.swift
-//  AlbRadioStream
+//  StreamRadios
 //
 //  Created by Kley Sulo on 6/10/24.
 //

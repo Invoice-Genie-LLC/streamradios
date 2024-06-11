@@ -31,7 +31,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var albumArt: UIImage?
     @Published var metadata: String?
 
-    private let userDefaultsSuiteName = "group.radio.AlbRadioStream"
+    private let userDefaultsSuiteName = "group.streamradios"
     private var userDefaults: UserDefaults? {
         return UserDefaults(suiteName: userDefaultsSuiteName)
     }

@@ -1,5 +1,5 @@
 // ContentView.swift
-// AlbRadioStream
+// StreamRadios
 //
 // Created by Kley Sulo on 6/8/24.
 //
