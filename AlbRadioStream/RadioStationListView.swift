@@ -11,7 +11,6 @@ struct RadioStationListView: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @State private var selectedStation: RadioStation?
     @State private var isEditing = false
-    @State private var pulsate = false
 
     var body: some View {
         List {
@@ -38,29 +37,18 @@ struct RadioStationListView: View {
                                     if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
                                         Image(systemName: "speaker.wave.2.fill")
                                             .foregroundColor(.blue)
-                                            .scaleEffect(pulsate ? 1.1 : 1.0)
-                                            .animation(
-                                                Animation.easeInOut(duration: 0.8)
-                                                    .repeatForever(autoreverses: true),
-                                                value: pulsate
-                                            )
-                                            .onAppear {
-                                                pulsate = true
-                                            }
-                                            .onDisappear {
-                                                pulsate = false
-                                            }
                                     } else {
                                         Image(systemName: "speaker.wave.2.fill")
                                             .foregroundColor(.gray)
                                     }
                                 }
 
-                                if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station && !radioPlayer.metadata.isEmpty {
-                                    Text(radioPlayer.metadata)
+                                if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station && !(radioPlayer.metadata?.isEmpty ?? true) {
+                                    Text(radioPlayer.metadata ?? "")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
                                 }
+
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }

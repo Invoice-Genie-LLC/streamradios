@@ -1,5 +1,9 @@
+//
 // RadioStreamApp.swift
-// AlbRadioStream
+// RadioStreamApp
+//
+// Created by Kley Sulo on 6/9/24.
+//
 
 import SwiftUI
 import WidgetKit
@@ -34,7 +38,7 @@ func updateWidget() {
     let currentStation = viewModel.stations[currentStationIndex]
     let metadata = radioPlayer.metadata
 
-    let sharedDefaults = UserDefaults(suiteName: "group.your.actual.app.group.identifier")
+    let sharedDefaults = UserDefaults(suiteName: "group.radio.AlbRadioStream")
     sharedDefaults?.set(currentStation.name, forKey: "stationName")
     sharedDefaults?.set(currentStation.iconData, forKey: "stationIcon")
     sharedDefaults?.set(metadata, forKey: "stationMetadata")
