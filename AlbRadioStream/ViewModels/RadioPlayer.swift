@@ -29,7 +29,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var songTitle: String = ""
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
-    @Published var metadata: String = ""
+    @Published var metadata: String?
 
     private let userDefaultsSuiteName = "group.radio.AlbRadioStream"
     private var userDefaults: UserDefaults? {
@@ -217,7 +217,7 @@ class RadioPlayer: NSObject, ObservableObject {
     func playStation(at index: Int, from stations: [RadioStation]) {
         guard index >= 0 && index < stations.count else { return }
         currentStationIndex = index
-        metadata = "" // Clear metadata when switching stations
+        metadata = nil // Clear metadata when switching stations
         userDefaults?.set(index, forKey: "lastStationIndex")
         let station = stations[index]
         if let url = URL(string: station.url) {
@@ -276,7 +276,7 @@ class RadioPlayer: NSObject, ObservableObject {
         }
 
         let currentStation = viewModel.stations[currentStationIndex]
-        let metadata = self.metadata
+        let metadata = self.metadata ?? "No song or album title available"
 
         userDefaults?.set(currentStation.name, forKey: "stationName")
         userDefaults?.set(currentStation.iconData, forKey: "stationIcon")
@@ -295,17 +295,22 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                     item.loadValuesAsynchronously(forKeys: ["stringValue"]) { [weak self] in
                         guard let self = self else { return }
                         DispatchQueue.main.async {
-                            if let stringValue = item.stringValue {
+                            if let stringValue = item.stringValue, !stringValue.isEmpty {
                                 // Only update metadata if the station has not changed
                                 if self.currentStationIndex == self.currentStationIndex {
                                     self.metadata = stringValue
                                     self.updateNowPlayingInfo()
                                     self.updateWidget()
                                 }
-                            } else {
-                                self.metadata = ""
-                                self.updateNowPlayingInfo()
-                                self.updateWidget()
+                            } else if self.metadata == nil {
+                                // Schedule default message after a delay if no metadata is received
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                    if self.metadata == nil || self.metadata?.isEmpty == true {
+                                        self.metadata = "No song or album title available"
+                                        self.updateNowPlayingInfo()
+                                        self.updateWidget()
+                                    }
+                                }
                             }
                         }
                     }

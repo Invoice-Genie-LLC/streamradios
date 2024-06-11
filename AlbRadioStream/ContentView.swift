@@ -40,22 +40,35 @@ struct ContentView: View {
                     // Now Playing Section
                     Spacer()
                     VStack {
-                        HStack {
-                            if let currentStationIndex = radioPlayer.currentStationIndex,
-                               currentStationIndex < viewModel.stations.count {
+                        if radioPlayer.isPlaying, let currentStationIndex = radioPlayer.currentStationIndex,
+                           currentStationIndex < viewModel.stations.count {
+                            let currentStation = viewModel.stations[currentStationIndex]
+                            HStack(alignment: .center) {
+                                if let iconData = currentStation.iconData,
+                                   let imageData = Data(base64Encoded: iconData),
+                                   let image = UIImage(data: imageData) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .frame(width: 60, height: 60)
+                                        .cornerRadius(8)
+                                        .padding(.trailing, 10)
+                                }
+                                
                                 VStack(alignment: .leading) {
                                     Text(viewModel.stations[currentStationIndex].name)
-                                        .font(.subheadline)
+                                        .font(.headline)
                                         .foregroundColor(.primary)
-                                    Text(radioPlayer.metadata)
-                                        .font(.footnote)
-                                        .foregroundColor(.secondary)
-                                }
-                            } else {
-                                Text("Not Playing")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
+                                    if let metadata = radioPlayer.metadata {
+                                        Text(metadata)
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    } else {
+                                        Text("No song or album title available")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }}
+                            .padding(.leading, 10) // Add padding to push everything to the far left
                         }
 
                         HStack {
@@ -103,7 +116,7 @@ struct ContentView: View {
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
                     }
-                    .frame(height: 100) // Adjust the height to fit text and buttons
+                    .frame(height: 120) // Adjust the height to fit text and buttons
                     .padding(.bottom, UIApplication.shared.connectedScenes
                                         .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
                                         .first ?? 0)
@@ -115,7 +128,6 @@ struct ContentView: View {
                         SideMenuView()
                             .frame(width: geometry.size.width / 2)
                             .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-                            .animation(.easeInOut(duration: 0.3), value: showSideMenu)
 
                         Spacer()
                     }
@@ -123,9 +135,7 @@ struct ContentView: View {
                 .background(Color.black.opacity(showSideMenu ? 0.5 : 0).edgesIgnoringSafeArea(.all))
                 .onTapGesture {
                     if showSideMenu {
-                        withAnimation {
-                            showSideMenu.toggle()
-                        }
+                        showSideMenu.toggle()
                     }
                 }
 
@@ -133,9 +143,7 @@ struct ContentView: View {
                 VStack {
                     HStack {
                         Button(action: {
-                            withAnimation {
-                                showSideMenu.toggle()
-                            }
+                            showSideMenu.toggle()
                         }) {
                             Image(systemName: "line.horizontal.3")
                                 .font(.title)

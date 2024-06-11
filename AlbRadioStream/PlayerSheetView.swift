@@ -58,10 +58,17 @@ struct PlayerSheetView: View {
                     .bold()
                     .padding(.top, 4)
 
-                Text(radioPlayer.metadata)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 2)
+                if let metadata = radioPlayer.metadata {
+                    Text(metadata)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                } else {
+                    Text("No song or album title available")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                }
             }
 
             if let albumArt = radioPlayer.albumArt {
