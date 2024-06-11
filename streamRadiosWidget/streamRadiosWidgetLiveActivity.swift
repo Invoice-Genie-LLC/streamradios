@@ -1,6 +1,6 @@
 //
-//  albRadioWidgetLiveActivity.swift
-//  albRadioWidget
+//  streamRadiosWidgetAttributes.swift
+//  streamRadiosWidget
 //
 //  Created by Kley Sulo on 6/10/24.
 //
@@ -9,7 +9,7 @@ import ActivityKit
 import WidgetKit
 import SwiftUI
 
-struct albRadioWidgetAttributes: ActivityAttributes {
+struct streamRadiosWidgetAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         // Dynamic stateful properties about your activity go here!
         var emoji: String
@@ -19,9 +19,9 @@ struct albRadioWidgetAttributes: ActivityAttributes {
     var name: String
 }
 
-struct albRadioWidgetLiveActivity: Widget {
+struct streamRadiosWidgetLiveActivity: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: albRadioWidgetAttributes.self) { context in
+        ActivityConfiguration(for: streamRadiosWidgetAttributes.self) { context in
             // Lock screen/banner UI goes here
             VStack {
                 Text("Hello \(context.state.emoji)")
@@ -56,25 +56,25 @@ struct albRadioWidgetLiveActivity: Widget {
     }
 }
 
-extension albRadioWidgetAttributes {
-    fileprivate static var preview: albRadioWidgetAttributes {
-        albRadioWidgetAttributes(name: "World")
+extension streamRadiosWidgetAttributes {
+    fileprivate static var preview: streamRadiosWidgetAttributes {
+        streamRadiosWidgetAttributes(name: "World")
     }
 }
 
-extension albRadioWidgetAttributes.ContentState {
-    fileprivate static var smiley: albRadioWidgetAttributes.ContentState {
-        albRadioWidgetAttributes.ContentState(emoji: "😀")
+extension streamRadiosWidgetAttributes.ContentState {
+    fileprivate static var smiley: streamRadiosWidgetAttributes.ContentState {
+        streamRadiosWidgetAttributes.ContentState(emoji: "😀")
      }
 
-     fileprivate static var starEyes: albRadioWidgetAttributes.ContentState {
-         albRadioWidgetAttributes.ContentState(emoji: "🤩")
+     fileprivate static var starEyes: streamRadiosWidgetAttributes.ContentState {
+         streamRadiosWidgetAttributes.ContentState(emoji: "🤩")
      }
 }
 
-#Preview("Notification", as: .content, using: albRadioWidgetAttributes.preview) {
-   albRadioWidgetLiveActivity()
+#Preview("Notification", as: .content, using: streamRadiosWidgetAttributes.preview) {
+   streamRadiosWidgetLiveActivity()
 } contentStates: {
-    albRadioWidgetAttributes.ContentState.smiley
-    albRadioWidgetAttributes.ContentState.starEyes
+    streamRadiosWidgetAttributes.ContentState.smiley
+    streamRadiosWidgetAttributes.ContentState.starEyes
 }
