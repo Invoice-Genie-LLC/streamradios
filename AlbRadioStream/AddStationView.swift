@@ -49,9 +49,15 @@ struct AddStationView: View {
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(10)
                     .padding(.horizontal)
-                
+
                 if let iconImage = iconImage {
                     Image(uiImage: iconImage)
+                        .resizable()
+                        .frame(width: 50, height: 50)
+                        .cornerRadius(10)
+                        .padding()
+                } else {
+                    Image(systemName: "photo")
                         .resizable()
                         .frame(width: 50, height: 50)
                         .cornerRadius(10)

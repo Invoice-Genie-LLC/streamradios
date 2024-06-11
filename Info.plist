@@ -10,30 +10,20 @@
     <string>We need access to your microphone to identify music with Shazam.</string>
     <key>CFBundleDisplayName</key>
     <string>AlbRadioStream</string>
-    <key>NSSupportsCarPlay</key>
-    <true/>
     <key>LSRequiresIPhoneOS</key>
-        <true/>
-        <key>UIBackgroundModes</key>
-        <array>
-            <string>audio</string>
-            <string>fetch</string>
-        </array>
+    <true/>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+        <string>fetch</string>
+        <string>processing</string>
+    </array>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
         <true/>
         <key>UISceneConfigurations</key>
         <dict>
-            <key>CPTemplateApplicationSceneSessionRoleApplication</key>
-            <array>
-                <dict>
-                    <key>UISceneConfigurationName</key>
-                    <string>CarPlay Configuration</string>
-                    <key>UISceneDelegateClassName</key>
-                    <string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
-                </dict>
-            </array>
             <key>UIWindowSceneSessionRoleApplication</key>
             <array>
                 <dict>
@@ -45,11 +35,5 @@
             </array>
         </dict>
     </dict>
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>audio</string>
-        <string>fetch</string>
-        <string>processing</string>
-    </array>
 </dict>
 </plist>
