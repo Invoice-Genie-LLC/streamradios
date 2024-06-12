@@ -1,9 +1,3 @@
-// RadioStationListView.swift
-// StreamRadios
-//
-// Created by Kley Sulo on 6/9/24.
-//
-
 import SwiftUI
 
 struct RadioStationListView: View {
@@ -65,6 +59,7 @@ struct RadioStationListView: View {
                         Image(systemName: "play.circle.fill")
                             .font(.title)
                             .foregroundColor(.blue)
+                            .accessibilityIdentifier("playButton-\(station.id)")
                     }
 
                     Image(systemName: "line.horizontal.3")
@@ -76,20 +71,33 @@ struct RadioStationListView: View {
                         }
                 }
                 .padding(.vertical, 8)
-                .padding(.horizontal, 5) // Reduce padding to make the list wider
+                .padding(.horizontal, 5)
                 .listRowInsets(EdgeInsets())
             }
             .onDelete(perform: viewModel.deleteStation)
-            .onMove(perform: viewModel.moveStation)
+            .onMove(perform: { indices, newOffset in
+                viewModel.stations.move(fromOffsets: indices, toOffset: newOffset)
+                updateCurrentStationIndexAfterMove(indices: indices, newOffset: newOffset)
+            })
         }
         .listStyle(InsetGroupedListStyle())
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 5) // Reduce padding to make the list wider
+        .padding(.horizontal, 5)
         .sheet(isPresented: $isEditing) {
             if let selectedStation = selectedStation {
                 AddStationView(station: selectedStation, isPresented: $isEditing)
                     .environmentObject(viewModel)
             }
+        }
+        .onAppear {
+            NotificationCenter.default.addObserver(forName: .NetworkReconnectNotification, object: nil, queue: .main) { _ in
+                if let index = radioPlayer.currentStationIndex {
+                    radioPlayer.playStation(at: index, from: viewModel.stations)
+                }
+            }
+        }
+        .onDisappear {
+            NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
         }
     }
 
@@ -97,6 +105,17 @@ struct RadioStationListView: View {
         selectedStation = station
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.isEditing = true
+        }
+    }
+
+    private func updateCurrentStationIndexAfterMove(indices: IndexSet, newOffset: Int) {
+        guard let oldIndex = indices.first else { return }
+        if let currentStationIndex = radioPlayer.currentStationIndex, currentStationIndex == oldIndex {
+            radioPlayer.currentStationIndex = newOffset > oldIndex ? newOffset - 1 : newOffset
+        } else if let currentStationIndex = radioPlayer.currentStationIndex, currentStationIndex > oldIndex, currentStationIndex < newOffset {
+            radioPlayer.currentStationIndex = currentStationIndex - 1
+        } else if let currentStationIndex = radioPlayer.currentStationIndex, currentStationIndex < oldIndex, currentStationIndex >= newOffset {
+            radioPlayer.currentStationIndex = currentStationIndex + 1
         }
     }
 }

@@ -12,6 +12,7 @@ import Network
 import MediaPlayer
 import BackgroundTasks
 
+
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
     @objc var player: AVPlayer?
@@ -78,6 +79,7 @@ class RadioPlayer: NSObject, ObservableObject {
             if path.status == .satisfied {
                 print("Network connected")
                 self.isNetworkAvailable = true
+                NotificationCenter.default.post(name: .NetworkReconnectNotification, object: nil)
                 if self.wasPlayingBeforeNetworkLoss {
                     self.retryStream()
                 }
@@ -92,10 +94,14 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         let queue = DispatchQueue(label: "NetworkMonitor")
         monitor.start(queue: queue)
-
-        // Start periodic network check
-        networkRetryTimer = Timer.scheduledTimer(timeInterval: 10.0, target: self, selector: #selector(checkNetworkAndRetry), userInfo: nil, repeats: true)
     }
+    
+    private func startBuffering() {
+        isBuffering = true
+        retryStream()
+    }
+    
+    
 
     private func addObservers() {
         NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidStall), name: .AVPlayerItemPlaybackStalled, object: nil)
@@ -137,12 +143,14 @@ class RadioPlayer: NSObject, ObservableObject {
     }
 
     private func retryStream() {
-        retryCount += 1
         retryTimer?.invalidate()
-        retryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
-            self?.refreshStream()
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.isNetworkAvailable {
+                self.refreshStream()
+            }
         }
-        print("Retrying stream, attempt \(retryCount)")
+        print("Retrying stream")
     }
 
     private func refreshStream() {
@@ -150,6 +158,7 @@ class RadioPlayer: NSObject, ObservableObject {
         setStationURL(lastStationURL)
         player?.seek(to: .zero)
         player?.play()
+        resetRetryCount()
         print("Stream refreshed")
     }
 
@@ -390,4 +399,8 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
             }
         }
     }
+}
+
+extension Notification.Name {
+    static let NetworkReconnectNotification = Notification.Name("NetworkReconnectNotification")
 }
