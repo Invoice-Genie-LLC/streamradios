@@ -15,26 +15,35 @@ struct PlayerSheetView: View {
 
     var body: some View {
         NavigationView {
-            Group {
-                if UIDevice.current.orientation.isLandscape {
-                    ScrollView {
+            VStack {
+                HStack {
+                    Button(action: {
+                        presentationMode.wrappedValue.dismiss()
+                    }) {
+                        HStack {
+                            Image(systemName: "chevron.left")
+                            Text("Back")
+                        }
+                        .foregroundColor(.blue)
+                    }
+                    Spacer()
+                }
+                .padding()
+
+                Divider()
+                
+                Group {
+                    if UIDevice.current.orientation.isLandscape {
+                        ScrollView {
+                            content
+                        }
+                    } else {
                         content
                     }
-                } else {
-                    content
                 }
+                .navigationBarTitle("", displayMode: .inline)
+                .background(Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all))
             }
-            .navigationBarTitle("", displayMode: .inline)
-            .navigationBarItems(leading: Button(action: {
-                presentationMode.wrappedValue.dismiss()
-            }) {
-                HStack {
-                    Image(systemName: "chevron.left")
-                    Text("Back")
-                }
-                .foregroundColor(.blue)
-            })
-            .background(Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all))
         }
     }
 
@@ -50,6 +59,15 @@ struct PlayerSheetView: View {
                         .resizable()
                         .frame(width: 200, height: 200)
                         .cornerRadius(4)
+                        .padding(.bottom, 8)
+                } else {
+                    Image(systemName: "radio")
+                        .resizable()
+                        .frame(width: 100, height: 100) // Reduced size for the system icon
+                        .aspectRatio(contentMode: .fit)
+                        .padding(20) // Adjust padding to fit better within the circle
+                        .clipShape(Circle())
+                        .foregroundColor(.blue) // Set the color to blue
                         .padding(.bottom, 8)
                 }
 

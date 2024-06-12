@@ -1,3 +1,4 @@
+//
 // RadioStreamApp.swift
 // RadioStreamApp
 //
@@ -6,10 +7,12 @@
 
 import SwiftUI
 import WidgetKit
+import UIKit
 
 @main
 struct RadioStreamApp: App {
     @AppStorage("isDarkMode") private var isDarkMode = false
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     // Perform initial setup in an initializer
     init() {
@@ -28,6 +31,11 @@ struct RadioStreamApp: App {
                 .environmentObject(RadioPlayer.shared)
                 .environmentObject(RadioStationViewModel())
                 .preferredColorScheme(isDarkMode ? .dark : .light)
+                .onAppear {
+                    // Ensure that the orientation lock is applied when the app appears
+                    AppDelegate.orientationLock = .portrait
+                    UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+                }
         }
     }
 }
@@ -43,7 +51,7 @@ func updateWidget() {
     }
 
     let currentStation = viewModel.stations[currentStationIndex]
-    let metadata = radioPlayer.metadata
+    let metadata = radioPlayer.metadata ?? "No metadata"
 
     let sharedDefaults = UserDefaults(suiteName: "group.streamradios")
     sharedDefaults?.set(currentStation.name, forKey: "stationName")
@@ -51,5 +59,5 @@ func updateWidget() {
     sharedDefaults?.set(metadata, forKey: "stationMetadata")
 
     WidgetCenter.shared.reloadAllTimelines()
-    print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
+    print("Widget updated with station: \(currentStation.name), metadata: \(String(describing: metadata))")
 }

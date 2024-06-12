@@ -15,6 +15,8 @@
 		7707DA662C156F8D006D5EBB /* RadioStation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA652C156F8D006D5EBB /* RadioStation.swift */; };
 		7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */; };
 		7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA692C156FDA006D5EBB /* RadioStationListView.swift */; };
+		771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715539F2C19E6C800BE43FA /* AppDelegate.swift */; };
+		771553A22C19E6FD00BE43FA /* OrientationLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771553A12C19E6FD00BE43FA /* OrientationLock.swift */; };
 		7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746177B2C17290200F442B3 /* RadioStreamApp.swift */; };
 		774617842C17411C00F442B3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617832C17411C00F442B3 /* WidgetKit.framework */; };
 		774617862C17411C00F442B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617852C17411C00F442B3 /* SwiftUI.framework */; };
@@ -26,6 +28,8 @@
 		7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179B2C17834200F442B3 /* CircularProgressView.swift */; };
 		7746179E2C19526300F442B3 /* withoutAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179D2C19526300F442B3 /* withoutAnimation.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
+		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
+		779352242C1A11B6008F8416 /* ScrollingTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352232C1A11B6008F8416 /* ScrollingTextView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
@@ -68,6 +72,8 @@
 		7707DA652C156F8D006D5EBB /* RadioStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStation.swift; sourceTree = "<group>"; };
 		7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationViewModel.swift; sourceTree = "<group>"; };
 		7707DA692C156FDA006D5EBB /* RadioStationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationListView.swift; sourceTree = "<group>"; };
+		7715539F2C19E6C800BE43FA /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		771553A12C19E6FD00BE43FA /* OrientationLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrientationLock.swift; sourceTree = "<group>"; };
 		7746177B2C17290200F442B3 /* RadioStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStreamApp.swift; sourceTree = "<group>"; };
 		774617812C17411C00F442B3 /* StreamRadioWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamRadioWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		774617832C17411C00F442B3 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
@@ -81,6 +87,8 @@
 		7746179B2C17834200F442B3 /* CircularProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularProgressView.swift; sourceTree = "<group>"; };
 		7746179D2C19526300F442B3 /* withoutAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = withoutAnimation.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
+		779352232C1A11B6008F8416 /* ScrollingTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollingTextView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
@@ -139,7 +147,10 @@
 				7746179B2C17834200F442B3 /* CircularProgressView.swift */,
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
+				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
+				779352232C1A11B6008F8416 /* ScrollingTextView.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
+				779352212C1A118A008F8416 /* AlbumArtView.swift */,
 				77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */,
 				7707DA622C156D92006D5EBB /* AddStationView.swift */,
 				7707DA3C2C152EF5006D5EBB /* Assets.xcassets */,
@@ -200,6 +211,7 @@
 			isa = PBXGroup;
 			children = (
 				77CCE9652C1632850098EE74 /* saveToDocuments.swift */,
+				771553A12C19E6FD00BE43FA /* OrientationLock.swift */,
 				7746179D2C19526300F442B3 /* withoutAnimation.swift */,
 			);
 			path = Extensions;
@@ -309,10 +321,13 @@
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
+				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
 				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
 				7707DA662C156F8D006D5EBB /* RadioStation.swift in Sources */,
+				779352242C1A11B6008F8416 /* ScrollingTextView.swift in Sources */,
 				77CCE9662C1632850098EE74 /* saveToDocuments.swift in Sources */,
+				771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */,
 				7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */,
 				7746179E2C19526300F442B3 /* withoutAnimation.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
@@ -320,6 +335,7 @@
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
+				771553A22C19E6FD00BE43FA /* OrientationLock.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
