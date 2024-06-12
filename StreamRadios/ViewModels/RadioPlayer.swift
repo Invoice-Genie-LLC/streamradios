@@ -25,36 +25,36 @@ class RadioPlayer: NSObject, ObservableObject {
     private var isNetworkAvailable = true
     private var wasPlayingBeforeNetworkLoss = false
     @Published var isBuffering = false
-
+    
     @Published var isPlaying = false
     @Published var currentStationIndex: Int?
     @Published var songTitle: String = ""
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
     @Published var metadata: String?
-
+    
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
-
+    
     private let userDefaultsSuiteName = "group.streamradios"
     private var userDefaults: UserDefaults? {
         return UserDefaults(suiteName: userDefaultsSuiteName)
     }
-
+    
     private var viewModel: RadioStationViewModel?
-
+    
     private override init() {
         super.init()
         configureAudioSession()
         startNetworkMonitoring()
         addObservers()
         autoPlayLastStationSetup()
-
+        
         // Register background task
         BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.radio.refresh", using: nil) { task in
             self.handleAppRefresh(task: task as! BGAppRefreshTask)
         }
     }
-
+    
     private func autoPlayLastStationSetup() {
         if autoPlayLastStation, let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -64,11 +64,11 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
     }
-
+    
     func setViewModel(_ viewModel: RadioStationViewModel) {
         self.viewModel = viewModel
     }
-
+    
     private func configureAudioSession() {
         let audioSession = AVAudioSession.sharedInstance()
         do {
@@ -78,7 +78,7 @@ class RadioPlayer: NSObject, ObservableObject {
             print("Failed to set up audio session: \(error)")
         }
     }
-
+    
     private func startNetworkMonitoring() {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self = self else { return }
@@ -101,21 +101,21 @@ class RadioPlayer: NSObject, ObservableObject {
         let queue = DispatchQueue(label: "NetworkMonitor")
         monitor.start(queue: queue)
     }
-
+    
     private func startBuffering() {
         isBuffering = true
         retryStream()
     }
-
+    
     private func addObservers() {
         NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidStall), name: .AVPlayerItemPlaybackStalled, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFailToPlayToEnd), name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
-
+        
         // Add KVO observers for buffering and playing state
         addObserver(self, forKeyPath: #keyPath(player.currentItem.isPlaybackBufferEmpty), options: [.new, .old], context: nil)
         addObserver(self, forKeyPath: #keyPath(player.currentItem.isPlaybackLikelyToKeepUp), options: [.new, .old], context: nil)
     }
-
+    
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == #keyPath(player.currentItem.isPlaybackBufferEmpty) {
             if let isEmpty = change?[.newKey] as? Bool {
@@ -131,21 +131,21 @@ class RadioPlayer: NSObject, ObservableObject {
             super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
         }
     }
-
+    
     @objc private func playerItemDidStall(notification: Notification) {
         retryStream()
     }
-
+    
     @objc private func playerItemDidFailToPlayToEnd(notification: Notification) {
         retryStream()
     }
-
+    
     @objc private func checkNetworkAndRetry() {
         if isNetworkAvailable && wasPlayingBeforeNetworkLoss && !isPlaying {
             retryStreamIfNeeded()
         }
     }
-
+    
     private func retryStream() {
         retryTimer?.invalidate()
         retryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -156,7 +156,7 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         print("Retrying stream")
     }
-
+    
     private func refreshStream() {
         guard let lastStationURL = userDefaults?.url(forKey: "lastStationURL") else { return }
         setStationURL(lastStationURL)
@@ -165,25 +165,25 @@ class RadioPlayer: NSObject, ObservableObject {
         resetRetryCount()
         print("Stream refreshed")
     }
-
+    
     private func resetRetryCount() {
         retryCount = 0
         retryTimer?.invalidate()
     }
-
+    
     private func retryStreamIfNeeded() {
         if !isPlaying && wasPlayingBeforeNetworkLoss {
             retryStream()
         }
     }
-
+    
     func setStationURL(_ url: URL) {
         player = AVPlayer(url: url)
         userDefaults?.set(url, forKey: "lastStationURL")
-
+        
         // Cancel previous observer if it exists
         statusCancellable?.cancel()
-
+        
         // Set up observers
         statusCancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
@@ -195,13 +195,13 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         addMetadataOutput()
     }
-
+    
     private func addMetadataOutput() {
         let metadataOutput = AVPlayerItemMetadataOutput()
         metadataOutput.setDelegate(self, queue: DispatchQueue.main)
         player?.currentItem?.add(metadataOutput)
     }
-
+    
     func playPause() {
         guard let player = player else { return }
         if player.timeControlStatus == .playing {
@@ -213,7 +213,7 @@ class RadioPlayer: NSObject, ObservableObject {
         updateNowPlayingInfo()
         updateWidget()
     }
-
+    
     func play() {
         guard let player = player else { return }
         // Ensure the player is properly set up with the current station URL
@@ -228,14 +228,14 @@ class RadioPlayer: NSObject, ObservableObject {
         updateWidget()
         scheduleAppRefresh()
     }
-
+    
     func pause() {
         guard let player = player else { return }
         player.pause()
         isPlaying = false
         updateNowPlayingInfo()
     }
-
+    
     func playStation(at index: Int, from stations: [RadioStation]) {
         guard index >= 0 && index < stations.count else { return }
         stopCurrentStation()
@@ -250,29 +250,35 @@ class RadioPlayer: NSObject, ObservableObject {
         updateNowPlayingInfo()
         updateWidget()
     }
-
+    
+    func stop() {
+        player?.pause()
+        player = nil
+        isPlaying = false
+    }
+    
     func stopCurrentStation() {
         player?.pause()
         player = nil
         isPlaying = false
         updateNowPlayingInfo()
     }
-
+    
     func nextStation(from stations: [RadioStation]) {
         guard let currentIndex = currentStationIndex else { return }
         let nextIndex = (currentIndex + 1) % stations.count
         playStation(at: nextIndex, from: stations)
     }
-
+    
     func previousStation(from stations: [RadioStation]) {
         guard let currentIndex = currentStationIndex else { return }
         let previousIndex = (currentIndex - 1 + stations.count) % stations.count
         playStation(at: previousIndex, from: stations)
     }
-
+    
     private func updateNowPlayingInfo() {
         guard let viewModel = viewModel else { return }
-
+        
         var nowPlayingInfo = [String: Any]()
         if let currentStationIndex = currentStationIndex,
            currentStationIndex < viewModel.stations.count {
@@ -280,10 +286,10 @@ class RadioPlayer: NSObject, ObservableObject {
             nowPlayingInfo[MPMediaItemPropertyTitle] = songTitle.isEmpty ? currentStation.name : songTitle
             nowPlayingInfo[MPMediaItemPropertyArtist] = artistName.isEmpty ? (metadata ?? currentStation.name) : artistName
         }
-
+        
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-
+        
         if let albumArt = albumArt {
             let artwork = MPMediaItemArtwork(boundsSize: albumArt.size) { size in
                 return albumArt
@@ -299,44 +305,44 @@ class RadioPlayer: NSObject, ObservableObject {
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
             }
         }
-
+        
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         print("Updated now playing info: \(nowPlayingInfo)")
     }
-
+    
     private func updateWidget() {
         guard let currentStationIndex = currentStationIndex, let viewModel = viewModel else { return }
-
+        
         guard currentStationIndex < viewModel.stations.count else {
             return
         }
-
+        
         let currentStation = viewModel.stations[currentStationIndex]
         let metadata = self.metadata ?? "No song or album title available"
-
+        
         userDefaults?.set(currentStation.name, forKey: "stationName")
         userDefaults?.set(currentStation.iconData, forKey: "stationIcon")
         userDefaults?.set(metadata, forKey: "stationMetadata")
-
+        
         WidgetCenter.shared.reloadAllTimelines()
         print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
     }
-
+    
     func setupRemoteCommandCenter() {
         let commandCenter = MPRemoteCommandCenter.shared()
-
+        
         commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [weak self] event in
             self?.play()
             return .success
         }
-
+        
         commandCenter.pauseCommand.isEnabled = true
         commandCenter.pauseCommand.addTarget { [weak self] event in
             self?.pause()
             return .success
         }
-
+        
         commandCenter.nextTrackCommand.isEnabled = true
         commandCenter.nextTrackCommand.addTarget { [weak self] event in
             if let self = self, let viewModel = self.viewModel {
@@ -345,7 +351,7 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             return .commandFailed
         }
-
+        
         commandCenter.previousTrackCommand.isEnabled = true
         commandCenter.previousTrackCommand.addTarget { [weak self] event in
             if let self = self, let viewModel = self.viewModel {
@@ -355,27 +361,27 @@ class RadioPlayer: NSObject, ObservableObject {
             return .commandFailed
         }
     }
-
+    
     private func scheduleAppRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: "com.radio.refresh")
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // Refresh every 15 minutes.
-
+        
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
             print("Could not schedule app refresh: \(error)")
         }
     }
-
+    
     private func handleAppRefresh(task: BGAppRefreshTask) {
         scheduleAppRefresh()
-
+        
         task.expirationHandler = {
             // Clean up any resources before the task expires.
         }
-
+        
         checkNetworkAndRetry()
-
+        
         task.setTaskCompleted(success: true)
     }
 }
