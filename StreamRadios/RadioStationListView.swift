@@ -76,9 +76,27 @@ struct RadioStationListView: View {
                             .cornerRadius(10)
                             .shadow(radius: 4)
                         }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                withAnimation {
+                                    deleteStation(station)
+                                }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                         .buttonStyle(PlainButtonStyle())
                         .padding(.horizontal)
                         .padding(.vertical, 4)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                withAnimation {
+                                    deleteStation(station)
+                                }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                 }
                 .padding(.top, 10) // Add padding at the top
@@ -104,14 +122,16 @@ struct RadioStationListView: View {
         }
     }
 
-    private func updateCurrentStationIndexAfterMove(indices: IndexSet, newOffset: Int) {
-        guard let oldIndex = indices.first else { return }
-        if let currentStationIndex = radioPlayer.currentStationIndex, currentStationIndex == oldIndex {
-            radioPlayer.currentStationIndex = newOffset > oldIndex ? newOffset - 1 : newOffset
-        } else if let currentStationIndex = radioPlayer.currentStationIndex, currentStationIndex > oldIndex, currentStationIndex < newOffset {
-            radioPlayer.currentStationIndex = currentStationIndex - 1
-        } else if let currentStationIndex = radioPlayer.currentStationIndex, currentStationIndex < oldIndex, currentStationIndex >= newOffset {
-            radioPlayer.currentStationIndex = currentStationIndex + 1
+    private func deleteStation(_ station: RadioStation) {
+        if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+            viewModel.stations.remove(at: index)
+            viewModel.saveStations() // Save the updated list to UserDefaults
+            if RadioPlayer.shared.currentStationIndex == index {
+                RadioPlayer.shared.stop()
+                RadioPlayer.shared.currentStationIndex = nil
+            } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex, currentStationIndex > index {
+                RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
+            }
         }
     }
 }
