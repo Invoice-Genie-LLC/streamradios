@@ -54,8 +54,36 @@ struct AddStationView: View {
 
                 Form {
                     Section(header: Text("Station Info")) {
-                        TextField("Enter station name", text: $name)
-                        TextField("Enter station URL", text: $urlString)
+                        HStack {
+                            TextField("Enter station name", text: $name)
+                                .onChange(of: name) { newValue in
+                                    if newValue.count >= 40 {
+                                        name = String(newValue.prefix(40))
+                                    }
+                                }
+                            if !name.isEmpty {
+                                Button(action: {
+                                    name = ""
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.trailing, 8)
+                            }
+                        }
+
+                        HStack {
+                            TextField("Enter station URL", text: $urlString)
+                            if !urlString.isEmpty {
+                                Button(action: {
+                                    urlString = ""
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.trailing, 8)
+                            }
+                        }
                     }
 
                     Section(header: Text("Icon")) {
