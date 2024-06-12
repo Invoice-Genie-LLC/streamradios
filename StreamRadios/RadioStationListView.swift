@@ -1,3 +1,9 @@
+// RadioStationListView.swift
+// StreamRadios
+//
+// Created by Kley Sulo on 6/9/24.
+//
+
 import SwiftUI
 
 struct RadioStationListView: View {
@@ -48,6 +54,7 @@ struct RadioStationListView: View {
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
+            .withoutAnimation()
 
                     Spacer()
 
@@ -61,6 +68,7 @@ struct RadioStationListView: View {
                             .foregroundColor(.blue)
                             .accessibilityIdentifier("playButton-\(station.id)")
                     }
+            .withoutAnimation()
 
                     Image(systemName: "line.horizontal.3")
                         .font(.title)
@@ -73,11 +81,14 @@ struct RadioStationListView: View {
                 .padding(.vertical, 8)
                 .padding(.horizontal, 5)
                 .listRowInsets(EdgeInsets())
+                .withoutAnimation() // Apply the withoutAnimation modifier here
             }
             .onDelete(perform: viewModel.deleteStation)
             .onMove(perform: { indices, newOffset in
-                viewModel.stations.move(fromOffsets: indices, toOffset: newOffset)
-                updateCurrentStationIndexAfterMove(indices: indices, newOffset: newOffset)
+                withAnimation(nil) {
+                    viewModel.stations.move(fromOffsets: indices, toOffset: newOffset)
+                    updateCurrentStationIndexAfterMove(indices: indices, newOffset: newOffset)
+                }
             })
         }
         .listStyle(InsetGroupedListStyle())
