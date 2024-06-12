@@ -21,7 +21,7 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
-        .onChange(of: isDarkMode) { oldValue, newValue in
+        .onChange(of: isDarkMode) { newValue in
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                 windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .light
             }
