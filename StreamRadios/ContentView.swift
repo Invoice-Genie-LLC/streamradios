@@ -12,14 +12,17 @@ struct ContentView: View {
     @State private var isAddStationViewPresented = false
     @State private var isPlayerSheetPresented = false
     @State private var showSideMenu = false
-
+    @State private var isScrollingEnabled = true
+    @State private var scrollSpeed = 18.0
+    @State private var frequency = 2.0
+    
     var body: some View {
         NavigationView {
             ZStack {
                 // Background Color
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
-
+                
                 // Main content
                 VStack {
                     Spacer()
@@ -28,35 +31,31 @@ struct ContentView: View {
                         RadioStationListView()
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, 5)
+                            .frame(width: 385) // Fixed width and height
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(16) // Make the corners rounded
+                            .shadow(radius: 8) // Add shadow for better appearance
+                            .padding(.top, 50)
                     }
-                    .padding(.top, 50)
-                    .padding(.bottom, 25)
-                    .padding(.horizontal, 5)
-
+                    .padding(.top, 10) // Reduced padding at the top
+                    .padding(.bottom, 35)
+                    
                     Spacer()
-
-                    // Now Playing Section
-                    Spacer()
+                    
+                    // Play Area Section
                     VStack {
                         if radioPlayer.isPlaying, let currentStationIndex = radioPlayer.currentStationIndex,
                            currentStationIndex < viewModel.stations.count {
                             let currentStation = viewModel.stations[currentStationIndex]
-                            HStack(alignment: .center) {
-                                if let iconData = currentStation.iconData,
-                                   let imageData = Data(base64Encoded: iconData),
-                                   let image = UIImage(data: imageData) {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .frame(width: 60, height: 60)
-                                        .cornerRadius(8)
-                                        .padding(.trailing, 10)
-                                }
+                            HStack(alignment: .center, spacing: 20) {
+                                AlbumArtView(imageData: currentStation.iconData, isPlaying: radioPlayer.isPlaying)
+                                    .frame(width: 70, height: 70)
+                                    .cornerRadius(10)
                                 
-                                VStack(alignment: .leading) {
+                                VStack(alignment: .leading, spacing: 5) {
                                     Text(viewModel.stations[currentStationIndex].name)
-                                        .font(.headline)
+                                        .font(.title2)
+                                        .fontWeight(.bold)
                                         .foregroundColor(.primary)
                                     if let metadata = radioPlayer.metadata {
                                         Text(metadata)
@@ -67,21 +66,21 @@ struct ContentView: View {
                                             .font(.subheadline)
                                             .foregroundColor(.secondary)
                                     }
-                                }}
+                                }
+                                Spacer()
+                            }
                             .padding(.leading, 10) // Add padding to push everything to the far left
                         }
-
-                        HStack {
+                        
+                        HStack(spacing: 30) {
                             Button(action: {
                                 radioPlayer.previousStation(from: viewModel.stations)
                             }) {
                                 Image(systemName: "backward.fill")
-                                    .font(.title)
+                                    .font(.largeTitle)
                                     .foregroundColor(.blue)
                             }
-
-                            Spacer()
-
+                            
                             ZStack {
                                 if radioPlayer.isBuffering {
                                     CircularProgressView()
@@ -94,41 +93,40 @@ struct ContentView: View {
                                         .foregroundColor(.blue)
                                 }
                             }
-
-                            Spacer()
-
+                            
                             Button(action: {
                                 radioPlayer.nextStation(from: viewModel.stations)
                             }) {
                                 Image(systemName: "forward.fill")
-                                    .font(.title)
+                                    .font(.largeTitle)
                                     .foregroundColor(.blue)
                             }
                         }
                         .padding(.top, 8) // Add some space between text and buttons
                     }
+                    .frame(width: 355)
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(12) // Add rounded corners
                     .shadow(radius: 8) // Add shadow
-                    .frame(maxWidth: 350)
+                    .frame(maxWidth: 385)
                     .padding(.horizontal, 5)
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
                     }
-                    .frame(height: 120) // Adjust the height to fit text and buttons
+                    .frame(height: 140) // Adjust the height to fit text and buttons
                     .padding(.bottom, UIApplication.shared.connectedScenes
-                                        .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
-                                        .first ?? 0)
+                        .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
+                        .first ?? 0)
                 }
-
+                
                 // Side Menu
                 GeometryReader { geometry in
                     HStack {
                         SideMenuView()
                             .frame(width: geometry.size.width / 2)
                             .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-
+                        
                         Spacer()
                     }
                 }
@@ -138,8 +136,8 @@ struct ContentView: View {
                         showSideMenu.toggle()
                     }
                 }
-
-                // Menu and Plus button
+                
+                // Menu and Plus button with Logo Text
                 VStack {
                     HStack {
                         Button(action: {
@@ -150,14 +148,14 @@ struct ContentView: View {
                                 .foregroundColor(.blue)
                                 .padding()
                         }
-
                         Spacer()
-
+                        ScrollingTextView(text: "Streaming Radios", metadata: radioPlayer.metadata, scrollSpeed: scrollSpeed, frequency: frequency, isScrollingEnabled: isScrollingEnabled)
+                        Spacer()
                         Button(action: {
                             isAddStationViewPresented.toggle()
                         }) {
                             Image(systemName: "plus.circle.fill")
-                                .font(.title)
+                                .font(.title3)
                                 .foregroundColor(showSideMenu ? Color(.sRGB, red: 0, green: 0, blue: 0.5, opacity: 1) : .blue)
                                 .padding()
                         }
@@ -173,6 +171,9 @@ struct ContentView: View {
                 PlayerSheetView()
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
+            }
+            .onAppear {
+                UIApplication.shared.lockOrientation(.portrait)
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())

@@ -30,107 +30,94 @@ struct AddStationView: View {
     var body: some View {
         NavigationView {
             VStack {
-                Spacer()
-
-                Text(station == nil ? "Add Radio Station" : "Edit Radio Station")
-                    .font(.title)
-                    .padding()
-
-                TextField("Enter station name", text: $name)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .padding()
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(10)
-                    .padding(.horizontal)
-
-                TextField("Enter station URL", text: $urlString)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .padding()
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(10)
-                    .padding(.horizontal)
-
-                if let iconImage = iconImage {
-                    Image(uiImage: iconImage)
-                        .resizable()
-                        .frame(width: 50, height: 50)
-                        .cornerRadius(10)
-                        .padding()
-                } else {
-                    Image(systemName: "photo")
-                        .resizable()
-                        .frame(width: 50, height: 50)
-                        .cornerRadius(10)
-                        .padding()
-                }
-
+                // Custom toolbar with title and cancel button
                 HStack {
                     Button(action: {
-                        showImagePicker = true
+                        isPresented = false
                     }) {
-                        HStack {
-                            Image(systemName: "photo")
-                                .font(.headline)
-                            Text("Upload Icon")
-                                .font(.headline)
-                        }
-                        .padding(8)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                        Text("Cancel")
+                            .foregroundColor(.blue)
                     }
-                    .sheet(isPresented: $showImagePicker) {
-                        ImagePicker(image: $iconImage)
+                    Spacer()
+                    Text(station == nil ? "Add Station" : "Edit Station")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    // Placeholder to balance the HStack
+                    Button(action: {}) {
+                        Text("")
+                            .foregroundColor(.clear)
                     }
-                    .padding(.trailing, 8)
+                }
+                .padding()
+                Divider()
 
-                    Button(action: {
-                        if let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
-                            if let station = station {
-                                if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                                    viewModel.stations[index].name = name
-                                    viewModel.stations[index].url = urlString
-                                    viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-                                }
-                            } else {
-                                let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-                                let newStation = RadioStation(name: name, url: urlString, iconData: iconData)
-                                viewModel.stations.append(newStation)
-                            }
-                            viewModel.saveStations()
-                            isPresented = false // Close the sheet
+                Form {
+                    Section(header: Text("Station Info")) {
+                        TextField("Enter station name", text: $name)
+                        TextField("Enter station URL", text: $urlString)
+                    }
+
+                    Section(header: Text("Icon")) {
+                        if let iconImage = iconImage {
+                            Image(uiImage: iconImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 100, height: 100)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                         } else {
-                            showAlert = true
+                            Image(systemName: "photo")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 100, height: 100)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
-                    }) {
+
+                        Button(action: {
+                            showImagePicker = true
+                        }) {
+                            Text("Upload Icon")
+                                .foregroundColor(.blue)
+                        }
+                        .sheet(isPresented: $showImagePicker) {
+                            ImagePicker(image: $iconImage)
+                        }
+                    }
+
+                    Button(action: saveStation) {
                         HStack {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.headline)
+                            Image(systemName: station == nil ? "plus.circle.fill" : "checkmark.circle.fill")
                             Text(station == nil ? "Add Station" : "Save Changes")
-                                .font(.headline)
                         }
-                        .padding(8)
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                    }
+                    .foregroundColor(.green)
+                    .alert(isPresented: $showAlert) {
+                        Alert(title: Text("Invalid URL"), message: Text("Please enter a valid URL"), dismissButton: .default(Text("OK")))
                     }
                 }
-                .padding()
-
-                .alert(isPresented: $showAlert) {
-                    Alert(title: Text("Invalid URL"), message: Text("Please enter a valid URL"), dismissButton: .default(Text("OK")))
-                }
-                .padding()
-
-                Spacer()
             }
-            .background(Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all))
-            .navigationBarItems(trailing: Button(action: {
-                isPresented = false
-            }) {
-                Text("Done").bold()
-            })
+            .navigationBarHidden(true) // Hide the default navigation bar
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+    }
+
+    private func saveStation() {
+        guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
+            showAlert = true
+            return
+        }
+
+        if let station = station {
+            if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                viewModel.stations[index].name = name
+                viewModel.stations[index].url = urlString
+                viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+            }
+        } else {
+            let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+            let newStation = RadioStation(name: name, url: urlString, iconData: iconData)
+            viewModel.stations.append(newStation)
+        }
+        viewModel.saveStations()
+        isPresented = false
     }
 }
