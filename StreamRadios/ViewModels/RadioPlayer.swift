@@ -11,7 +11,7 @@ import WidgetKit
 import Network
 import MediaPlayer
 import BackgroundTasks
-
+import SwiftUI
 
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
@@ -33,6 +33,8 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var albumArt: UIImage?
     @Published var metadata: String?
 
+    @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
+
     private let userDefaultsSuiteName = "group.streamradios"
     private var userDefaults: UserDefaults? {
         return UserDefaults(suiteName: userDefaultsSuiteName)
@@ -45,17 +47,21 @@ class RadioPlayer: NSObject, ObservableObject {
         configureAudioSession()
         startNetworkMonitoring()
         addObservers()
-        if let userDefaults = userDefaults,
-           userDefaults.bool(forKey: "autoPlayLastStation"),
-           let lastStationURL = userDefaults.url(forKey: "lastStationURL") {
-            setStationURL(lastStationURL)
-            currentStationIndex = userDefaults.integer(forKey: "lastStationIndex")
-            play()
-        }
+        autoPlayLastStationSetup()
 
         // Register background task
         BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.radio.refresh", using: nil) { task in
             self.handleAppRefresh(task: task as! BGAppRefreshTask)
+        }
+    }
+
+    private func autoPlayLastStationSetup() {
+        if autoPlayLastStation, let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                self.setStationURL(lastStationURL)
+                self.currentStationIndex = self.userDefaults?.integer(forKey: "lastStationIndex")
+                self.play()
+            }
         }
     }
 
@@ -95,13 +101,11 @@ class RadioPlayer: NSObject, ObservableObject {
         let queue = DispatchQueue(label: "NetworkMonitor")
         monitor.start(queue: queue)
     }
-    
+
     private func startBuffering() {
         isBuffering = true
         retryStream()
     }
-    
-    
 
     private func addObservers() {
         NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidStall), name: .AVPlayerItemPlaybackStalled, object: nil)
@@ -234,6 +238,7 @@ class RadioPlayer: NSObject, ObservableObject {
 
     func playStation(at index: Int, from stations: [RadioStation]) {
         guard index >= 0 && index < stations.count else { return }
+        stopCurrentStation()
         currentStationIndex = index
         metadata = nil // Clear metadata when switching stations
         userDefaults?.set(index, forKey: "lastStationIndex")
@@ -244,6 +249,13 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         updateNowPlayingInfo()
         updateWidget()
+    }
+
+    func stopCurrentStation() {
+        player?.pause()
+        player = nil
+        isPlaying = false
+        updateNowPlayingInfo()
     }
 
     func nextStation(from stations: [RadioStation]) {
