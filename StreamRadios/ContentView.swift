@@ -12,10 +12,9 @@ struct ContentView: View {
     @State private var isAddStationViewPresented = false
     @State private var isPlayerSheetPresented = false
     @State private var showSideMenu = false
-    @State private var isScrollingEnabled = true
-    @State private var scrollSpeed = 18.0
-    @State private var frequency = 2.0
-    
+    @State private var isEditingMode = false
+    @State private var isEditingStation = false
+
     var body: some View {
         NavigationView {
             ZStack {
@@ -28,7 +27,7 @@ struct ContentView: View {
                     Spacer()
                     // Radio Stations List
                     VStack {
-                        RadioStationListView()
+                        RadioStationListView(isEditing: $isEditingMode, isEditingStation: $isEditingStation)
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
                             .frame(width: 385) // Fixed width and height
@@ -149,8 +148,21 @@ struct ContentView: View {
                                 .padding()
                         }
                         Spacer()
-                        ScrollingTextView(text: "Streaming Radios", metadata: radioPlayer.metadata, scrollSpeed: scrollSpeed, frequency: frequency, isScrollingEnabled: isScrollingEnabled)
+                        ScrollingTextView(text: "Streaming Radios", metadata: radioPlayer.metadata, scrollSpeed: 18.0, frequency: 2.0, isScrollingEnabled: true)
                         Spacer()
+                        Button(action: {
+                            isEditingMode.toggle()
+                            if isEditingMode {
+                                radioPlayer.stop()
+                                radioPlayer.metadata = nil // Reset metadata
+                                radioPlayer.currentStationIndex = nil // Reset auto-play last station
+                            }
+                        }) {
+                            Text(isEditingMode ? "Done" : "Edit")
+                                .font(.title3)
+                                .foregroundColor(.blue)
+                                .padding()
+                        }
                         Button(action: {
                             isAddStationViewPresented.toggle()
                         }) {
