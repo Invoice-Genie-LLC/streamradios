@@ -39,7 +39,7 @@ struct RadioStationListView: View {
                                     .resizable()
                                     .frame(width: 50, height: 50)
                                     .cornerRadius(8)
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.gray)
                             }
 
                             VStack(alignment: .leading, spacing: 4) {
@@ -84,7 +84,7 @@ struct RadioStationListView: View {
                             } else {
                                 Image(systemName: "line.horizontal.3")
                                     .font(.title)
-                                    .foregroundColor(.gray)
+                                    .foregroundColor(.blue)
                                     .padding(.trailing, 10)
                                     .onDrag {
                                         UIDevice.playHapticFeedback() // Provide haptic feedback

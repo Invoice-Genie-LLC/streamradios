@@ -148,7 +148,6 @@ struct ContentView: View {
                                 .padding()
                         }
                         Spacer()
-                        ScrollingTextView(text: "Streaming Radios", metadata: radioPlayer.metadata, scrollSpeed: 18.0, frequency: 2.0, isScrollingEnabled: true)
                         Spacer()
                         Button(action: {
                             isEditingMode.toggle()

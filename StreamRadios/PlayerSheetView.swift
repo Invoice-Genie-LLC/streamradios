@@ -67,7 +67,7 @@ struct PlayerSheetView: View {
                         .aspectRatio(contentMode: .fit)
                         .padding(20) // Adjust padding to fit better within the circle
                         .clipShape(Circle())
-                        .foregroundColor(.blue) // Set the color to blue
+                        .foregroundColor(.gray) // Set the color to blue
                         .padding(.bottom, 8)
                 }
 

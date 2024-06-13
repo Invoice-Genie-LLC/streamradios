@@ -42,7 +42,7 @@ struct AlbumArtView: View {
                     .aspectRatio(contentMode: .fit)
                     .padding(10)
                     .clipShape(Circle())
-                    .foregroundColor(.blue)
+                    .foregroundColor(.gray)
             }
         }
     }
