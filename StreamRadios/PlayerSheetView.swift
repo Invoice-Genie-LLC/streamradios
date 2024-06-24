@@ -1,76 +1,205 @@
-// PlayerSheetView.swift
-// StreamRadios
 //
-// Created by Kley Sulo on 6/9/24.
+//  PlayerSheetView.swift
+//  StreamRadios
+//
+//  Created by Kley Sulo on 6/9/24.
 //
 
 import SwiftUI
 import AVKit
 
+// Extension to safely access indices of a collection
+extension Collection {
+    subscript (safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
+
 struct PlayerSheetView: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Environment(\.presentationMode) var presentationMode
-    @Environment(\.horizontalSizeClass) var sizeClass
+    @StateObject private var shazamViewModel = ShazamViewModel()
+    @State private var isShazaming = false
+    @State private var showingLyrics = false
+    @State private var lyricsLoading = false
 
     var body: some View {
         NavigationView {
-            VStack {
-                HStack {
-                    Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        HStack {
-                            Image(systemName: "chevron.left")
-                            Text("Back")
-                        }
-                        .foregroundColor(.blue)
-                    }
-                    Spacer()
-                }
-                .padding()
+            ZStack {
+                backgroundImageView
+                    .blur(radius: 10, opaque: true)
+                    .opacity(0.5)
+                    .edgesIgnoringSafeArea(.all)
 
-                Divider()
-                
-                Group {
-                    if UIDevice.current.orientation.isLandscape {
-                        ScrollView {
-                            content
-                        }
-                    } else {
-                        content
-                    }
+                VStack {
+                    backButton
+                    contentView
+                    Spacer()
+                    PlaybackControls()
+                    AirPlayButtonView()
+                        .frame(width: 44, height: 44)
+                        .padding(.bottom, 20)
                 }
-                .navigationBarTitle("", displayMode: .inline)
-                .background(Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all))
+                .navigationBarHidden(true)
             }
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        VStack {
-            Spacer()
-            if let currentStationIndex = radioPlayer.currentStationIndex,
-               currentStationIndex < viewModel.stations.count {
-                let currentStation = viewModel.stations[currentStationIndex]
-                if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .frame(width: 200, height: 200)
-                        .cornerRadius(4)
-                        .padding(.bottom, 8)
-                } else {
-                    Image(systemName: "radio")
-                        .resizable()
-                        .frame(width: 100, height: 100) // Reduced size for the system icon
-                        .aspectRatio(contentMode: .fit)
-                        .padding(20) // Adjust padding to fit better within the circle
-                        .clipShape(Circle())
-                        .foregroundColor(.gray) // Set the color to blue
-                        .padding(.bottom, 8)
+    private var backButton: some View {
+        HStack {
+            Button(action: {
+                presentationMode.wrappedValue.dismiss()
+            }) {
+                HStack {
+                    Image(systemName: "chevron.left")
+                    Text("Back")
                 }
+                .foregroundColor(.blue)
+            }
+            Spacer()
+        }
+        .padding()
+    }
 
+    @ViewBuilder
+    private var backgroundImageView: some View {
+        if let uiImage = radioPlayer.albumArt {
+            Image(uiImage: uiImage)
+                .resizable()
+        } else {
+            Color.gray.opacity(0.5)
+        }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if isShazaming {
+            shazamContent
+        } else {
+            stationContent
+        }
+    }
+
+    private var shazamContent: some View {
+        VStack {
+            if let url = shazamViewModel.shazamMedia.albumArtURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable()
+                    default:
+                        RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.5))
+                    }
+                }
+                .frame(width: 385, height: 400)
+                .cornerRadius(10)
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
+                    .frame(width: 300, height: 300)
+                    .cornerRadius(10)
+            }
+
+            Text(shazamViewModel.shazamMedia.title ?? "Title")
+                .font(.title)
+                .fontWeight(.semibold)
+                .multilineTextAlignment(.center)
+
+            Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
+                .font(.title2)
+                .fontWeight(.medium)
+                .multilineTextAlignment(.center)
+                .padding()
+
+            HStack {
+                Button(action: {
+                    if isShazaming {
+                        shazamViewModel.stopListening()
+                        isShazaming = false
+                    } else {
+                        shazamViewModel.startOrEndListening()
+                        isShazaming = true
+                    }
+                }) {
+                    Text(isShazaming ? "Stop Shazaming" : "Start Shazaming")
+                }
+                .buttonStyle(CustomButtonStyle())
+                .controlSize(.large)
+                .padding()
+                Button(action: {
+                    showingLyrics.toggle()
+                    if shazamViewModel.shazamMedia.lyrics == nil {
+                        lyricsLoading = true
+                        if let artist = shazamViewModel.shazamMedia.artistName, let title = shazamViewModel.shazamMedia.title {
+                            shazamViewModel.fetchLyrics(for: artist, song: title) { result in
+                                switch result {
+                                case .success(let lyrics):
+                                    shazamViewModel.shazamMedia.lyrics = lyrics
+                                case .failure:
+                                    shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
+                                }
+                                lyricsLoading = false
+                            }
+                        }
+                    }
+                }) {
+                    Text("Show Lyrics")
+                }
+                .buttonStyle(CustomButtonStyle())
+                .controlSize(.large)
+                .padding()
+            }
+        }
+        .fullScreenCover(isPresented: $showingLyrics) {
+            if let lyrics = shazamViewModel.shazamMedia.lyrics, !lyrics.isEmpty {
+                LyricsView(
+                    lyrics: lyrics,
+                    onClose: { showingLyrics = false },
+                    getCurrentPlaybackTime: {
+                        // Return the current playback time from your audio player
+                        radioPlayer.getCurrentTime()
+                    }
+                )
+            } else if lyricsLoading {
+                Text("Fetching lyrics...")
+                    .font(.title)
+                    .padding()
+            } else {
+                Text("Lyrics not available")
+                    .font(.title)
+                    .padding()
+            }
+        }
+    }
+
+    private var stationContent: some View {
+        VStack {
+            StationDetails()
+            HStack {
+                Button(action: {
+                    shazamViewModel.startOrEndListening()
+                    isShazaming = true
+                }) {
+                    Text("Start Shazaming")
+                }
+                .buttonStyle(CustomButtonStyle())
+                .controlSize(.large)
+                .padding()
+            }
+        }
+    }
+}
+
+// Components for station details, playback controls, AirPlay button, and station image view
+struct StationDetails: View {
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @EnvironmentObject var viewModel: RadioStationViewModel
+
+    var body: some View {
+        if let currentStationIndex = radioPlayer.currentStationIndex,
+           let currentStation = viewModel.stations[safe: currentStationIndex] {
+            VStack {
+                StationImage(currentStation: currentStation)
                 Text(currentStation.name)
                     .font(.title)
                     .bold()
@@ -88,80 +217,70 @@ struct PlayerSheetView: View {
                         .padding(.top, 2)
                 }
             }
-
-            if let albumArt = radioPlayer.albumArt {
-                Image(uiImage: albumArt)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 200, height: 200)
-                    .cornerRadius(12)
-                    .shadow(radius: 8)
-            }
-
-            Text(radioPlayer.songTitle.isEmpty ? "" : radioPlayer.songTitle)
-                .font(.title)
-                .bold()
-                .padding(.top, 4)
-
-            Text(radioPlayer.artistName)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .padding(.bottom, 8)
-
-            HStack {
-                Button(action: {
-                    radioPlayer.previousStation(from: viewModel.stations)
-                }) {
-                    Image(systemName: "backward.fill")
-                        .font(.title)
-                        .foregroundColor(.blue)
-                }
-
-                Spacer()
-
-                ZStack {
-                    if radioPlayer.isBuffering {
-                        CircularProgressView()
-                    }
-                    Button(action: {
-                        radioPlayer.playPause()
-                    }) {
-                        Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.blue)
-                    }
-                }
-
-                Spacer()
-
-                Button(action: {
-                    radioPlayer.nextStation(from: viewModel.stations)
-                }) {
-                    Image(systemName: "forward.fill")
-                        .font(.title)
-                        .foregroundColor(.blue)
-                }
-            }
-            .padding()
-            .background(Color(UIColor.secondarySystemBackground))
-            .cornerRadius(12)
-            .shadow(radius: 8)
-            
-            Spacer()
-    
-            // AirPlay Button
-            AirPlayButton()
-                .frame(width: 50, height: 50)
-                .padding(.top, 16) // Add some space between the player controls and the AirPlay button
         }
-        .padding()
     }
 }
 
-struct AirPlayButton: UIViewRepresentable {
+struct PlaybackControls: View {
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @EnvironmentObject var viewModel: RadioStationViewModel
+
+    var body: some View {
+        HStack {
+            Button(action: {
+                radioPlayer.previousStation(from: viewModel.stations)
+            }) {
+                Image(systemName: "backward.fill").font(.title2)
+            }
+            .padding()
+
+            Spacer()
+
+            Button(action: {
+                radioPlayer.playPause()
+            }) {
+                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.title3)
+            }
+            .padding()
+
+            Spacer()
+
+            Button(action: {
+                radioPlayer.nextStation(from: viewModel.stations)
+            }) {
+                Image(systemName: "forward.fill").font(.title2)
+            }
+            .padding()
+        }
+        .frame(width: 350)
+        .padding(.vertical, 10)
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(12)
+        .shadow(radius: 4)
+    }
+}
+
+struct AirPlayButtonView: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
-        return AVRoutePickerView(frame: .zero)
+        let view = AVRoutePickerView()
+        view.activeTintColor = .blue
+        view.tintColor = .gray
+        return view
     }
 
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        uiView.frame = CGRect(x: 0, y: 0, width: 40, height: 40)
+    }
+}
+
+struct StationImage: View {
+    let currentStation: RadioStation
+
+    var body: some View {
+        if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+            Image(uiImage: image).resizable().frame(width: 200, height: 200).cornerRadius(4).padding(.bottom, 8)
+        } else {
+            Image(systemName: "radio").resizable().frame(width: 100, height: 100).aspectRatio(contentMode: .fit).padding(20).clipShape(Circle()).foregroundColor(.gray).padding(.bottom, 8)
+        }
+    }
 }
