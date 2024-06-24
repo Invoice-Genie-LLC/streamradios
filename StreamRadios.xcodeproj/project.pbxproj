@@ -28,6 +28,12 @@
 		7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179B2C17834200F442B3 /* CircularProgressView.swift */; };
 		7746179E2C19526300F442B3 /* withoutAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179D2C19526300F442B3 /* withoutAnimation.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
+		775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04282C287AF700E99061 /* ShazamViewModel.swift */; };
+		775D042F2C28DE3200E99061 /* StringExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D042E2C28DE3200E99061 /* StringExtensions.swift */; };
+		775D04322C28DE8B00E99061 /* Enums.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04312C28DE8B00E99061 /* Enums.swift */; };
+		775D04342C28E35900E99061 /* LyricsAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04332C28E35900E99061 /* LyricsAPI.swift */; };
+		775D04362C28E6BA00E99061 /* CustomButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04352C28E6BA00E99061 /* CustomButtonStyle.swift */; };
+		775D04382C28E89300E99061 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04372C28E89300E99061 /* LyricsView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
@@ -86,6 +92,12 @@
 		7746179B2C17834200F442B3 /* CircularProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularProgressView.swift; sourceTree = "<group>"; };
 		7746179D2C19526300F442B3 /* withoutAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = withoutAnimation.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		775D04282C287AF700E99061 /* ShazamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamViewModel.swift; sourceTree = "<group>"; };
+		775D042E2C28DE3200E99061 /* StringExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringExtensions.swift; sourceTree = "<group>"; };
+		775D04312C28DE8B00E99061 /* Enums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Enums.swift; sourceTree = "<group>"; };
+		775D04332C28E35900E99061 /* LyricsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsAPI.swift; sourceTree = "<group>"; };
+		775D04352C28E6BA00E99061 /* CustomButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomButtonStyle.swift; sourceTree = "<group>"; };
+		775D04372C28E89300E99061 /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
@@ -137,6 +149,7 @@
 		7707DA372C152EF2006D5EBB /* StreamRadios */ = {
 			isa = PBXGroup;
 			children = (
+				775D04302C28DE6D00E99061 /* Utility */,
 				7707DA462C152F36006D5EBB /* StreamRadios.entitlements */,
 				7707DA642C156F7A006D5EBB /* Models */,
 				77CCE9642C16326A0098EE74 /* Extensions */,
@@ -146,6 +159,7 @@
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
+				775D04372C28E89300E99061 /* LyricsView.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				779352212C1A118A008F8416 /* AlbumArtView.swift */,
 				77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */,
@@ -170,6 +184,8 @@
 			children = (
 				7707DA5A2C15524F006D5EBB /* RadioPlayer.swift */,
 				77CCE9622C1632380098EE74 /* ImagePicker.swift */,
+				775D04282C287AF700E99061 /* ShazamViewModel.swift */,
+				775D04352C28E6BA00E99061 /* CustomButtonStyle.swift */,
 				7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */,
 			);
 			path = ViewModels;
@@ -204,11 +220,21 @@
 			path = streamRadiosWidget;
 			sourceTree = "<group>";
 		};
+		775D04302C28DE6D00E99061 /* Utility */ = {
+			isa = PBXGroup;
+			children = (
+				775D04312C28DE8B00E99061 /* Enums.swift */,
+			);
+			path = Utility;
+			sourceTree = "<group>";
+		};
 		77CCE9642C16326A0098EE74 /* Extensions */ = {
 			isa = PBXGroup;
 			children = (
 				77CCE9652C1632850098EE74 /* saveToDocuments.swift */,
 				771553A12C19E6FD00BE43FA /* OrientationLock.swift */,
+				775D04332C28E35900E99061 /* LyricsAPI.swift */,
+				775D042E2C28DE3200E99061 /* StringExtensions.swift */,
 				7746179D2C19526300F442B3 /* withoutAnimation.swift */,
 			);
 			path = Extensions;
@@ -318,6 +344,7 @@
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
+				775D04322C28DE8B00E99061 /* Enums.swift in Sources */,
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
 				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
@@ -325,12 +352,17 @@
 				77CCE9662C1632850098EE74 /* saveToDocuments.swift in Sources */,
 				771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */,
 				7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */,
+				775D04342C28E35900E99061 /* LyricsAPI.swift in Sources */,
 				7746179E2C19526300F442B3 /* withoutAnimation.swift in Sources */,
+				775D042F2C28DE3200E99061 /* StringExtensions.swift in Sources */,
+				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
+				775D04362C28E6BA00E99061 /* CustomButtonStyle.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
+				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,
 				771553A22C19E6FD00BE43FA /* OrientationLock.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

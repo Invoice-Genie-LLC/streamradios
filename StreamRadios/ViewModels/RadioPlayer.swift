@@ -24,6 +24,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private let monitor = NWPathMonitor()
     private var isNetworkAvailable = true
     private var wasPlayingBeforeNetworkLoss = false
+    var audioPlayer: AVPlayer? 
     @Published var isBuffering = false
     
     @Published var isPlaying = false
@@ -64,6 +65,10 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
     }
+    
+    func getCurrentTime() -> TimeInterval {
+            return audioPlayer?.currentTime().seconds ?? 0
+        }
     
     func setViewModel(_ viewModel: RadioStationViewModel) {
         self.viewModel = viewModel
