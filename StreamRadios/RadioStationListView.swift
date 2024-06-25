@@ -22,6 +22,7 @@ struct RadioStationListView: View {
     @State private var selectedStation: RadioStation?
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
+    @Binding var selectedStationForEdit: RadioStation?
 
     var body: some View {
         GeometryReader { geometry in
@@ -102,9 +103,8 @@ struct RadioStationListView: View {
                         .shadow(radius: 4)
                         .contentShape(Rectangle()) // Make entire row tappable
                         .onTapGesture {
-                            if !isEditing {
-                                selectedStation = station
-                                isEditingStation = true
+                            if isEditing {
+                                selectedStationForEdit = station
                             }
                         }
                         .swipeActions(edge: .trailing) {
@@ -147,18 +147,21 @@ struct RadioStationListView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .sheet(isPresented: $isEditingStation) {
-            if let selectedStation = selectedStation {
-                AddStationView(station: selectedStation, isPresented: $isEditingStation)
-                    .environmentObject(viewModel)
-            }
-        }
+        .sheet(isPresented: $isEditingStation, onDismiss: {
+                   selectedStation = nil // Clear selectedStation when the sheet is dismissed
+               }) {
+                   if let selectedStation = selectedStation {
+                       AddStationView(station: selectedStation, isPresented: $isEditingStation)
+                           .environmentObject(viewModel)
+                   }
+               }
         .onAppear {
             NotificationCenter.default.addObserver(forName: .NetworkReconnectNotification, object: nil, queue: .main) { _ in
                 if let index = radioPlayer.currentStationIndex {
                     radioPlayer.playStation(at: index, from: viewModel.stations)
                 }
             }
+            print("RadioStationListView appeared, isEditing: \(isEditing)")
         }
         .onDisappear {
             NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
