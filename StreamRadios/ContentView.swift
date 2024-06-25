@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var showSideMenu = false
     @State private var isEditingMode = false
     @State private var isEditingStation = false
+    @State private var selectedStationForEdit: RadioStation?
 
     var body: some View {
         NavigationView {
@@ -27,14 +28,15 @@ struct ContentView: View {
                     Spacer()
                     // Radio Stations List
                     VStack {
-                        RadioStationListView(isEditing: $isEditingMode, isEditingStation: $isEditingStation)
+                        RadioStationListView(isEditing: $isEditingMode, isEditingStation: $isEditingStation, selectedStationForEdit: $selectedStationForEdit)
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
-                            .frame(width: 385) // Fixed width and height
+                            .frame(width: 385)
                             .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(16) // Make the corners rounded
-                            .shadow(radius: 8) // Add shadow for better appearance
+                            .cornerRadius(16)
+                            .shadow(radius: 8)
                             .padding(.top, 50)
+
                     }
                     .padding(.top, 10) // Reduced padding at the top
                     .padding(.bottom, 35)
@@ -176,6 +178,10 @@ struct ContentView: View {
             }
             .sheet(isPresented: $isAddStationViewPresented) {
                 AddStationView(isPresented: $isAddStationViewPresented)
+                    .environmentObject(viewModel)
+            }
+            .sheet(item: $selectedStationForEdit) { station in
+                EditStationView(station: station, isPresented: $selectedStationForEdit)
                     .environmentObject(viewModel)
             }
             .sheet(isPresented: $isPlayerSheetPresented) {
