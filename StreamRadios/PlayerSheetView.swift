@@ -38,7 +38,7 @@ struct PlayerSheetView: View {
                     Spacer()
                     PlaybackControls()
                     AirPlayButtonView()
-                        .frame(width: 44, height: 44)
+                        .frame(width: 50, height: 50)
                         .padding(.bottom, 20)
                 }
                 .navigationBarHidden(true)
@@ -55,6 +55,7 @@ struct PlayerSheetView: View {
                     Image(systemName: "chevron.left")
                     Text("Back")
                 }
+                .padding(.top, 10)
                 .foregroundColor(.blue)
             }
             Spacer()
@@ -92,7 +93,7 @@ struct PlayerSheetView: View {
                         RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.5))
                     }
                 }
-                .frame(width: 385, height: 400)
+                .frame(width: 380, height: 355)
                 .cornerRadius(10)
             } else {
                 RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
@@ -104,6 +105,9 @@ struct PlayerSheetView: View {
                 .font(.title)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(.center)
+                .lineLimit(nil)
+                .frame(maxWidth: 390)
+                .padding()
 
             Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
                 .font(.title2)
@@ -175,16 +179,27 @@ struct PlayerSheetView: View {
     private var stationContent: some View {
         VStack {
             StationDetails()
-            HStack {
+            if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
                 Button(action: {
                     shazamViewModel.startOrEndListening()
                     isShazaming = true
                 }) {
-                    Text("Start Shazaming")
+                    VStack {
+                        Image(systemName: "shazam.logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 60, height: 60)
+                            .foregroundColor(.blue)
+                        
+                        Text("Tap to Shazam")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                    }
                 }
-                .buttonStyle(CustomButtonStyle())
-                .controlSize(.large)
                 .padding()
+                .background(Color(UIColor.secondarySystemBackground))
+                .cornerRadius(10)
+                .shadow(radius: 3)
             }
         }
     }
@@ -210,11 +225,13 @@ struct StationDetails: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .padding(.top, 2)
+                        .padding(.bottom, 50)
                 } else {
                     Text("No song or album title available")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .padding(.top, 2)
+                        .padding(.bottom, 50)
                 }
             }
         }
@@ -230,7 +247,8 @@ struct PlaybackControls: View {
             Button(action: {
                 radioPlayer.previousStation(from: viewModel.stations)
             }) {
-                Image(systemName: "backward.fill").font(.title2)
+                Image(systemName: "backward.fill")
+                    .font(.largeTitle)
             }
             .padding()
 
@@ -239,7 +257,8 @@ struct PlaybackControls: View {
             Button(action: {
                 radioPlayer.playPause()
             }) {
-                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill").font(.title3)
+                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.largeTitle)
             }
             .padding()
 
@@ -248,12 +267,13 @@ struct PlaybackControls: View {
             Button(action: {
                 radioPlayer.nextStation(from: viewModel.stations)
             }) {
-                Image(systemName: "forward.fill").font(.title2)
+                Image(systemName: "forward.fill")
+                    .font(.largeTitle)
             }
             .padding()
         }
         .frame(width: 350)
-        .padding(.vertical, 10)
+        .padding(.vertical, 20)
         .background(Color(UIColor.secondarySystemBackground))
         .cornerRadius(12)
         .shadow(radius: 4)
@@ -269,7 +289,7 @@ struct AirPlayButtonView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
-        uiView.frame = CGRect(x: 0, y: 0, width: 40, height: 40)
+        uiView.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
     }
 }
 
