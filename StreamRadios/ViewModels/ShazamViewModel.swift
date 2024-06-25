@@ -58,7 +58,7 @@ class ShazamViewModel: NSObject, ObservableObject {
             } catch {
                 print("Failed to set up audio session: \(error)")
                 DispatchQueue.main.async {
-                    // Handle errors, such as by showing an alert
+                    // ToDo - Handle errors, such as by showing an alert
                 }
             }
         }
@@ -91,7 +91,7 @@ class ShazamViewModel: NSObject, ObservableObject {
         } catch {
             print("Error starting audio engine: \(error)")
             DispatchQueue.main.async {
-                // Handle UI or state updates on errors
+                // ToDo - Handle UI or state updates on errors
             }
         }
     }

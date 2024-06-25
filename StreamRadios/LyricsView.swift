@@ -6,13 +6,6 @@
 //  Created by Kley Sulo on 6/23/24.
 //
 
-//
-//  LyricsView.swift
-//  StreamRadios
-//
-//  Created by Kley Sulo on 6/23/24.
-//
-
 import SwiftUI
 import Combine
 
@@ -25,6 +18,7 @@ struct LyricsView: View {
     @State private var currentLine: Int = 0
     @State private var timer: AnyCancellable?
     @State private var currentTime: TimeInterval = 0.0
+    @State private var isUserScrolling: Bool = false // Add state to track user interaction
     
     var body: some View {
         VStack {
@@ -41,19 +35,19 @@ struct LyricsView: View {
             GeometryReader { geometry in
                 ScrollViewReader { scrollViewProxy in
                     ScrollView {
-                        VStack(alignment: .center, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 0) { // Align VStack contents to the leading edge
                             ForEach(lyricsArray.indices, id: \.self) { index in
                                 Text(lyricsArray[index].text)
                                     .font(.title2)
                                     .bold()
                                     .foregroundColor(currentLine == index ? .yellow : .white)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .padding(.vertical, 5)
+                                    .frame(maxWidth: .infinity, alignment: .leading) // Align text to the left
+                                    .padding(.vertical, 3)
                                     .id(index)
                             }
                         }
                         .padding(.horizontal)
-                        .frame(width: geometry.size.width) // Adjust width based on GeometryReader
+                        .frame(width: geometry.size.width)
                     }
                     .onAppear {
                         lyricsArray = parseLyrics(lyrics)
@@ -62,6 +56,13 @@ struct LyricsView: View {
                     .onDisappear {
                         stopLyricsSync()
                     }
+                    .gesture(
+                        DragGesture().onChanged { _ in
+                            isUserScrolling = true
+                        }.onEnded { _ in
+                            isUserScrolling = false
+                        }
+                    )
                 }
             }
         }
@@ -71,10 +72,10 @@ struct LyricsView: View {
     }
     
     private func parseLyrics(_ lyrics: String) -> [(text: String, time: TimeInterval)] {
-        let totalDuration: TimeInterval = 5 * 60 // 5 minutes in seconds
+        let totalDuration: TimeInterval = 5 * 60 // Assume a total song duration of 5 minutes
         let lines = lyrics.components(separatedBy: "\n")
         let timeIncrement = totalDuration / TimeInterval(lines.count)
-        
+
         return lines.enumerated().map { (index, line) in
             (text: line, time: TimeInterval(index) * timeIncrement)
         }
@@ -86,8 +87,10 @@ struct LyricsView: View {
             .sink { _ in
                 updateCurrentTime()
                 updateCurrentLine()
-                withAnimation(.easeInOut(duration: 0.5)) {
-                    scrollViewProxy.scrollTo(currentLine, anchor: .center)
+                if !isUserScrolling { // Check the flag before scrolling
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        scrollViewProxy.scrollTo(currentLine, anchor: .center)
+                    }
                 }
             }
     }
