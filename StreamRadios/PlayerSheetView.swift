@@ -27,36 +27,36 @@ struct PlayerSheetView: View {
     @State private var pulse = false
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                backgroundImageView
-                    .blur(radius: 10, opaque: true)
-                    .edgesIgnoringSafeArea(.all)
-                
-                VStack {
-                    backButton
-                    contentView
-                    Spacer()
-                    playbackControls
-                        .padding(.bottom, 20)
-                    AirPlayButtonView()
-                        .frame(width: 50, height: 50)
-                        .padding(.bottom, 20)
-                        .modifier(NeumorphicShadow())
+            NavigationView {
+                ZStack {
+                    // Adjusted background with subtle color for light theme
+                    backgroundView
+                        .edgesIgnoringSafeArea(.all)
+                    
+                    VStack {
+                        backButton
+                        contentView
+                        Spacer()
+                        playbackControls
+                            .padding(.bottom, 20)
+                        AirPlayButtonView()
+                            .frame(width: 50, height: 50)
+                            .padding(.bottom, 20)
+                            .modifier(NeumorphicShadow())
+                    }
+                    .navigationBarHidden(true)
                 }
-                .navigationBarHidden(true)
-            }
-            .onAppear {
-                startPulsing()
-            }
-            .onDisappear {
-                if isShazaming {
-                    shazamViewModel.stopListening()
-                    isShazaming = false
+                .onAppear {
+                    startPulsing()
+                }
+                .onDisappear {
+                    if isShazaming {
+                        shazamViewModel.stopListening()
+                        isShazaming = false
+                    }
                 }
             }
         }
-    }
     
     private func startPulsing() {
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
@@ -98,6 +98,15 @@ struct PlayerSheetView: View {
             Color(UIColor.systemBackground)
         }
     }
+    
+    @ViewBuilder
+        private var backgroundView: some View {
+            if colorScheme == .light {
+                Color(.systemGray4) // Adjust the color as per your preference
+            } else {
+                Color.clear // Transparent background for dark mode
+            }
+        }
     
     @ViewBuilder
     private var contentView: some View {
