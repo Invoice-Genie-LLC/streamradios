@@ -47,6 +47,12 @@ struct PlayerSheetView: View {
             .onAppear {
                 startPulsing()
             }
+            .onDisappear {
+                if isShazaming {
+                    shazamViewModel.stopListening()
+                    isShazaming = false
+                }
+            }
         }
     }
     
@@ -57,11 +63,15 @@ struct PlayerSheetView: View {
             }
         }
     }
-
+    
     private var backButton: some View {
         HStack {
             Button(action: {
                 presentationMode.wrappedValue.dismiss()
+                if isShazaming {
+                    shazamViewModel.stopListening()
+                    isShazaming = false
+                }
             }) {
                 HStack {
                     Image(systemName: "chevron.left")
@@ -215,6 +225,13 @@ struct PlayerSheetView: View {
                     }
                 }
                 .buttonStyle(PlainButtonStyle()) // Ensure no additional styling is applied
+                // Display the current bitrate
+                if let bitrate = radioPlayer.currentBitrate {
+                    Text("Playing at \(bitrate) kbps")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 5)
+                }
             }
         }
     }

@@ -33,6 +33,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
     @Published var metadata: String?
+    @Published var currentBitrate: Int? = 0
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
@@ -103,16 +104,8 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
             }
             
-            // Update preferred peak bitrate based on network type and conditions
-            if path.usesInterfaceType(.cellular) {
-                if path.isConstrained {
-                    self.player?.currentItem?.preferredPeakBitRate = 64000 // 64 kbps for poor mobile data
-                } else {
-                    self.player?.currentItem?.preferredPeakBitRate = 96000 // 96 kbps for mobile data
-                }
-            } else {
-                self.player?.currentItem?.preferredPeakBitRate = 1000000 // 1 Mbps for Wi-Fi
-            }
+            // Update bitrate based on network type and conditions
+            self.updateBitrateBasedOnNetwork()
         }
         let queue = DispatchQueue(label: "NetworkMonitor")
         monitor.start(queue: queue)
@@ -193,11 +186,14 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    func setStationURL(_ url: URL) {
+    private func setStationURL(_ url: URL) {
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
         player?.automaticallyWaitsToMinimizeStalling = true
         userDefaults?.set(url, forKey: "lastStationURL")
+        
+        // Set the bitrate based on network conditions
+        updateBitrateBasedOnNetwork()
         
         // Cancel previous observer if it exists
         statusCancellable?.cancel()
@@ -212,6 +208,22 @@ class RadioPlayer: NSObject, ObservableObject {
                 self.updateNowPlayingInfo()
             }
         addMetadataOutput()
+    }
+    
+    private func updateBitrateBasedOnNetwork() {
+        let path = monitor.currentPath
+        if path.usesInterfaceType(.cellular) {
+            if path.isConstrained {
+                self.player?.currentItem?.preferredPeakBitRate = 64000 // 64 kbps
+                self.currentBitrate = 64
+            } else {
+                self.player?.currentItem?.preferredPeakBitRate = 128000 // 128 kbps
+                self.currentBitrate = 128
+            }
+        } else {
+            self.player?.currentItem?.preferredPeakBitRate = 256000 // 256 kbps
+            self.currentBitrate = 256
+        }
     }
     
     private func addMetadataOutput() {
