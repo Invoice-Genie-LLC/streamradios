@@ -16,6 +16,7 @@ extension Collection {
 }
 
 struct PlayerSheetView: View {
+    @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Environment(\.presentationMode) var presentationMode
@@ -30,17 +31,18 @@ struct PlayerSheetView: View {
             ZStack {
                 backgroundImageView
                     .blur(radius: 10, opaque: true)
-                    .opacity(0.5)
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack {
                     backButton
                     contentView
                     Spacer()
-                    PlaybackControls()
+                    playbackControls
+                        .padding(.bottom, 20)
                     AirPlayButtonView()
                         .frame(width: 50, height: 50)
                         .padding(.bottom, 20)
+                        .modifier(NeumorphicShadow())
                 }
                 .navigationBarHidden(true)
             }
@@ -77,12 +79,13 @@ struct PlayerSheetView: View {
                     Image(systemName: "chevron.left")
                     Text("Back")
                 }
-                .padding(.top, 10)
-                .foregroundColor(.blue)
+                .padding(.top, 50)
+                .foregroundColor(Color.primary)
             }
             Spacer()
         }
         .padding()
+        .modifier(NeumorphicShadow())
     }
     
     @ViewBuilder
@@ -90,8 +93,9 @@ struct PlayerSheetView: View {
         if let uiImage = radioPlayer.albumArt {
             Image(uiImage: uiImage)
                 .resizable()
+                .scaledToFill()
         } else {
-            Color.gray.opacity(0.5)
+            Color(UIColor.systemBackground)
         }
     }
     
@@ -115,12 +119,14 @@ struct PlayerSheetView: View {
                         RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.5))
                     }
                 }
-                .frame(width: 380, height: 355)
+                .frame(width: 380, height: 370)
                 .cornerRadius(10)
+                .modifier(NeumorphicShadow())
             } else {
                 RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
                     .frame(width: 300, height: 300)
                     .cornerRadius(10)
+                    .modifier(NeumorphicShadow())
             }
             
             Text(shazamViewModel.shazamMedia.title ?? "Title")
@@ -137,7 +143,7 @@ struct PlayerSheetView: View {
                 .multilineTextAlignment(.center)
                 .padding()
             
-            HStack {
+            HStack(spacing: 20) {
                 Button(action: {
                     if isShazaming {
                         shazamViewModel.stopListening()
@@ -151,9 +157,11 @@ struct PlayerSheetView: View {
                 }) {
                     Text(isShazaming ? "Stop Shazaming" : "Tap to Shazam")
                         .font(.headline)
-                        .foregroundColor(.primary)
+                        .foregroundColor(Color.primary)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
+                        .modifier(NeumorphicShadow())
                 }
-                .buttonStyle(StylishButtonStyle()) // Apply the custom button style
                 
                 Button(action: {
                     showingLyrics.toggle()
@@ -174,19 +182,24 @@ struct PlayerSheetView: View {
                 }) {
                     Text("Show Lyrics")
                         .font(.headline)
-                        .foregroundColor(.primary)
+                        .foregroundColor(Color.primary)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
+                        .modifier(NeumorphicShadow())
                 }
-                .buttonStyle(StylishButtonStyle())
-                .padding()
+                
             }
+            .padding(.top, 20)
+            .padding(.bottom, 20)
         }
         .fullScreenCover(isPresented: $showingLyrics) {
             if let lyrics = shazamViewModel.shazamMedia.lyrics, !lyrics.isEmpty {
                 LyricsView(
                     lyrics: lyrics,
+                    title: shazamViewModel.shazamMedia.title ?? "Title",
+                    artistName: shazamViewModel.shazamMedia.artistName ?? "Artist Name",
                     onClose: { showingLyrics = false },
                     getCurrentPlaybackTime: {
-                        // Return the current playback time from your audio player
                         radioPlayer.getCurrentTime()
                     }
                 )
@@ -218,26 +231,64 @@ struct PlayerSheetView: View {
                             .frame(width: 100, height: 100)
                             .foregroundColor(.primary)
                             .scaleEffect(pulse ? 1.2 : 1.0)
-                            .padding(.bottom, 20)
+                            .padding(.bottom, 10)
+                            .modifier(NeumorphicShadow())
                         Text("Tap to Shazam")
                             .font(.headline)
-                            .foregroundColor(.primary)
+                            .foregroundColor(Color.primary)
                     }
                 }
                 .buttonStyle(PlainButtonStyle()) // Ensure no additional styling is applied
-                // Display the current bitrate
+                
                 if let bitrate = radioPlayer.currentBitrate {
                     Text("Playing at \(bitrate) kbps")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                        .padding(.top, 5)
+                        .padding(.top, 50)
+                        .padding(.bottom, 15)
                 }
+            }
+        }
+    }
+    
+    private var playbackControls: some View {
+        HStack(spacing: 16) {
+            Button(action: {
+                radioPlayer.previousStation(from: viewModel.stations)
+            }) {
+                Image(systemName: "backward.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.primary)
+                    .padding()
+                    .background(Circle().fill(Color(UIColor.systemBackground)))
+                    .modifier(NeumorphicShadow())
+            }
+            
+            Button(action: {
+                radioPlayer.playPause()
+            }) {
+                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.primary)
+                    .padding()
+                    .background(Circle().fill(Color(UIColor.systemBackground)))
+                    .modifier(NeumorphicShadow())
+            }
+            
+            Button(action: {
+                radioPlayer.nextStation(from: viewModel.stations)
+            }) {
+                Image(systemName: "forward.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.primary)
+                    .padding()
+                    .background(Circle().fill(Color(UIColor.systemBackground)))
+                    .modifier(NeumorphicShadow())
             }
         }
     }
 }
 
-// Components for station details, playback controls, AirPlay button, and station image view
 struct StationDetails: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
@@ -251,6 +302,7 @@ struct StationDetails: View {
                     .font(.title)
                     .bold()
                     .padding(.top, 4)
+                    .foregroundColor(.primary)
                 
                 if let metadata = radioPlayer.metadata {
                     Text(metadata)
@@ -270,45 +322,26 @@ struct StationDetails: View {
     }
 }
 
-struct PlaybackControls: View {
-    @EnvironmentObject var radioPlayer: RadioPlayer
-    @EnvironmentObject var viewModel: RadioStationViewModel
+struct StationImage: View {
+    let currentStation: RadioStation
     
     var body: some View {
-        HStack {
-            Button(action: {
-                radioPlayer.previousStation(from: viewModel.stations)
-            }) {
-                Image(systemName: "backward.fill")
-                    .font(.largeTitle)
-            }
-            .padding()
-            
-            Spacer()
-            
-            Button(action: {
-                radioPlayer.playPause()
-            }) {
-                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.largeTitle)
-            }
-            .padding()
-            
-            Spacer()
-            
-            Button(action: {
-                radioPlayer.nextStation(from: viewModel.stations)
-            }) {
-                Image(systemName: "forward.fill")
-                    .font(.largeTitle)
-            }
-            .padding()
+        if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .frame(width: 200, height: 200)
+                .cornerRadius(10)
+                .modifier(NeumorphicShadow())
+        } else {
+            Image(systemName: "radio")
+                .resizable()
+                .frame(width: 100, height: 100)
+                .aspectRatio(contentMode: .fit)
+                .padding(20)
+                .clipShape(Circle())
+                .foregroundColor(.gray)
+                .modifier(NeumorphicShadow())
         }
-        .frame(width: 350)
-        .padding(.vertical, 20)
-        .background(Color(UIColor.secondarySystemBackground))
-        .cornerRadius(12)
-        .shadow(radius: 4)
     }
 }
 
@@ -325,30 +358,10 @@ struct AirPlayButtonView: UIViewRepresentable {
     }
 }
 
-struct StationImage: View {
-    let currentStation: RadioStation
-    
-    var body: some View {
-        if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-            Image(uiImage: image).resizable().frame(width: 200, height: 200).cornerRadius(4).padding(.bottom, 8)
-        } else {
-            Image(systemName: "radio").resizable().frame(width: 100, height: 100).aspectRatio(contentMode: .fit).padding(20).clipShape(Circle()).foregroundColor(.gray).padding(.bottom, 8)
-        }
-    }
-}
-
-struct StylishButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.accentColor)
-                    .shadow(color: configuration.isPressed ? .gray : .clear, radius: 10, x: 0, y: 10)
-            )
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .foregroundColor(.white)
-            .opacity(configuration.isPressed ? 0.8 : 1.0)
-            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+struct PlayerSheetView_Previews: PreviewProvider {
+    static var previews: some View {
+        PlayerSheetView()
+            .environmentObject(RadioPlayer.shared)
+            .environmentObject(RadioStationViewModel())
     }
 }

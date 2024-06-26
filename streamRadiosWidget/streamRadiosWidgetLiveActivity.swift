@@ -14,7 +14,7 @@ struct streamRadiosWidgetAttributes: ActivityAttributes {
         // Dynamic stateful properties about your activity go here!
         var emoji: String
     }
-
+    
     // Fixed non-changing properties about your activity go here!
     var name: String
 }
@@ -28,7 +28,7 @@ struct streamRadiosWidgetLiveActivity: Widget {
             }
             .activityBackgroundTint(Color.cyan)
             .activitySystemActionForegroundColor(Color.black)
-
+            
         } dynamicIsland: { context in
             DynamicIsland {
                 // Expanded UI goes here.  Compose the expanded UI through
@@ -65,15 +65,15 @@ extension streamRadiosWidgetAttributes {
 extension streamRadiosWidgetAttributes.ContentState {
     fileprivate static var smiley: streamRadiosWidgetAttributes.ContentState {
         streamRadiosWidgetAttributes.ContentState(emoji: "😀")
-     }
-
-     fileprivate static var starEyes: streamRadiosWidgetAttributes.ContentState {
-         streamRadiosWidgetAttributes.ContentState(emoji: "🤩")
-     }
+    }
+    
+    fileprivate static var starEyes: streamRadiosWidgetAttributes.ContentState {
+        streamRadiosWidgetAttributes.ContentState(emoji: "🤩")
+    }
 }
 
 #Preview("Notification", as: .content, using: streamRadiosWidgetAttributes.preview) {
-   streamRadiosWidgetLiveActivity()
+    streamRadiosWidgetLiveActivity()
 } contentStates: {
     streamRadiosWidgetAttributes.ContentState.smiley
     streamRadiosWidgetAttributes.ContentState.starEyes

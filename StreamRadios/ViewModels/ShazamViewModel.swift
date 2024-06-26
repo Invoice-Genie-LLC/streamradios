@@ -29,12 +29,12 @@ class ShazamViewModel: NSObject, ObservableObject {
     private let audioEngine = AVAudioEngine()
     private let session = SHSession()
     private let signatureGenerator = SHSignatureGenerator()
-
+    
     override init() {
         super.init()
         session.delegate = self
     }
-
+    
     public func startOrEndListening() {
         let audioSession = AVAudioSession.sharedInstance()
         
@@ -42,7 +42,7 @@ class ShazamViewModel: NSObject, ObservableObject {
             stopListening()
             return
         }
-
+        
         audioSession.requestRecordPermission { [weak self] granted in
             guard let self = self, granted else {
                 DispatchQueue.main.async {
@@ -50,7 +50,7 @@ class ShazamViewModel: NSObject, ObservableObject {
                 }
                 return
             }
-
+            
             do {
                 try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
@@ -71,7 +71,7 @@ class ShazamViewModel: NSObject, ObservableObject {
             self.isRecording = false
         }
     }
-
+    
     private func setupAudioEngine() {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
@@ -79,10 +79,10 @@ class ShazamViewModel: NSObject, ObservableObject {
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
             self?.session.matchStreamingBuffer(buffer, at: when)
         }
-
+        
         // Since prepare() does not throw, no need to use 'try' with it
         audioEngine.prepare()
-
+        
         do {
             try audioEngine.start()
             DispatchQueue.main.async {
@@ -119,11 +119,11 @@ extension ShazamViewModel: SHSessionDelegate {
                         self.shazamMedia = media
                     }
                 }
-
+                
             }
         }
     }
-
+    
     func fetchLyrics(for artist: String, song: String, completion: @escaping (Result<String, Error>) -> Void) {
         let formattedArtist = artist.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? ""
         let formattedSong = song.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? ""
@@ -133,16 +133,16 @@ extension ShazamViewModel: SHSessionDelegate {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return
         }
-
+        
         isFetchingLyrics = true
-
+        
         let task = URLSession.shared.dataTask(with: url) { data, response, error in
             defer {
                 DispatchQueue.main.async {
                     self.isFetchingLyrics = false
                 }
             }
-
+            
             guard let data = data, error == nil else {
                 print("Error fetching lyrics: \(error?.localizedDescription ?? "Unknown error")")
                 DispatchQueue.main.async {

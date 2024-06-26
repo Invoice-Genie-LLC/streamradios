@@ -15,7 +15,7 @@ struct ContentView: View {
     @State private var isEditingMode = false
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
-
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -34,9 +34,9 @@ struct ContentView: View {
                             .frame(width: 385)
                             .background(Color(UIColor.secondarySystemBackground))
                             .cornerRadius(16)
-                            .shadow(radius: 8)
+                            .modifier(NeumorphicShadow())
                             .padding(.top, 50)
-
+                        
                     }
                     .padding(.top, 10) // Reduced padding at the top
                     .padding(.bottom, 35)
@@ -79,7 +79,7 @@ struct ContentView: View {
                             }) {
                                 Image(systemName: "backward.fill")
                                     .font(.largeTitle)
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.primary) // Adjusted to primary color
                             }
                             
                             ZStack {
@@ -91,7 +91,7 @@ struct ContentView: View {
                                 }) {
                                     Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                                         .font(.system(size: 50))
-                                        .foregroundColor(.blue)
+                                        .foregroundColor(.primary) // Adjusted to primary color
                                 }
                             }
                             
@@ -100,7 +100,7 @@ struct ContentView: View {
                             }) {
                                 Image(systemName: "forward.fill")
                                     .font(.largeTitle)
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.primary) // Adjusted to primary color
                             }
                         }
                         .padding(.top, 8) // Add some space between text and buttons
@@ -109,7 +109,7 @@ struct ContentView: View {
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(12) // Add rounded corners
-                    .shadow(radius: 8) // Add shadow
+                    .modifier(NeumorphicShadow())
                     .frame(maxWidth: 385)
                     .padding(.horizontal, 5)
                     .onTapGesture {
@@ -146,7 +146,7 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "line.horizontal.3")
                                 .font(.title)
-                                .foregroundColor(.blue)
+                                .foregroundColor(.primary) // Adjusted to primary color
                                 .padding()
                         }
                         Spacer()
@@ -161,7 +161,7 @@ struct ContentView: View {
                         }) {
                             Text(isEditingMode ? "Done" : "Edit")
                                 .font(.title3)
-                                .foregroundColor(.blue)
+                                .foregroundColor(.primary) // Adjusted to primary color
                                 .padding()
                         }
                         Button(action: {
@@ -169,7 +169,7 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title3)
-                                .foregroundColor(showSideMenu ? Color(.sRGB, red: 0, green: 0, blue: 0.5, opacity: 1) : .blue)
+                                .foregroundColor(.primary) // Adjusted to primary color
                                 .padding()
                         }
                     }
@@ -194,5 +194,12 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+    }
+}
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .preferredColorScheme(.dark)
     }
 }

@@ -47,12 +47,12 @@ struct RadioStationListView: View {
                                 HStack {
                                     if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
                                         Image(systemName: "speaker.wave.2.fill")
-                                            .foregroundColor(.blue)
+                                            .foregroundColor(.primary)
                                     }
 
                                     Text(station.name)
                                         .font(.headline)
-                                        .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .blue : .primary)
+                                        .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .primary : .primary)
                                 }
 
                                 if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
@@ -79,13 +79,13 @@ struct RadioStationListView: View {
                                 }) {
                                     Image(systemName: "play.circle.fill")
                                         .font(.title)
-                                        .foregroundColor(.blue)
+                                        .foregroundColor(.primary)
                                         .accessibilityIdentifier("playButton-\(station.id)")
                                 }
                             } else {
                                 Image(systemName: "line.horizontal.3")
                                     .font(.title)
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.primary)
                                     .padding(.trailing, 10)
                                     .onDrag {
                                         UIDevice.playHapticFeedback() // Provide haptic feedback
@@ -219,5 +219,16 @@ struct StationDropDelegate: DropDelegate {
     private func moveStation(from sourceIndex: Int, to destinationIndex: Int) {
         let itemToMove = stations.remove(at: sourceIndex)
         stations.insert(itemToMove, at: destinationIndex)
+    }
+}
+
+struct RadioStationListView_Previews: PreviewProvider {
+    @StateObject static var viewModel = RadioStationViewModel()
+    @StateObject static var radioPlayer = RadioPlayer()
+
+    static var previews: some View {
+        RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false), selectedStationForEdit: .constant(nil))
+            .environmentObject(viewModel)
+            .environmentObject(radioPlayer)
     }
 }

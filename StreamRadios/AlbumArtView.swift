@@ -47,3 +47,19 @@ struct AlbumArtView: View {
         }
     }
 }
+
+struct AlbumArtView_Previews: PreviewProvider {
+    static var previews: some View {
+        Group {
+            AlbumArtView(imageData: nil, isPlaying: false)
+                .frame(width: 100, height: 100)
+                .previewDisplayName("Default Image")
+            
+            AlbumArtView(imageData: "base64EncodedImageData", isPlaying: true)
+                .frame(width: 100, height: 100)
+                .previewDisplayName("Playing Image")
+        }
+        .padding()
+        .previewLayout(.sizeThatFits)
+    }
+}
