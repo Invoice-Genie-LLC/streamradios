@@ -23,7 +23,8 @@ struct PlayerSheetView: View {
     @State private var isShazaming = false
     @State private var showingLyrics = false
     @State private var lyricsLoading = false
-
+    @State private var pulse = false
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -31,7 +32,7 @@ struct PlayerSheetView: View {
                     .blur(radius: 10, opaque: true)
                     .opacity(0.5)
                     .edgesIgnoringSafeArea(.all)
-
+                
                 VStack {
                     backButton
                     contentView
@@ -42,6 +43,17 @@ struct PlayerSheetView: View {
                         .padding(.bottom, 20)
                 }
                 .navigationBarHidden(true)
+            }
+            .onAppear {
+                startPulsing()
+            }
+        }
+    }
+    
+    private func startPulsing() {
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 1.0)) {
+                pulse.toggle()
             }
         }
     }
@@ -62,7 +74,7 @@ struct PlayerSheetView: View {
         }
         .padding()
     }
-
+    
     @ViewBuilder
     private var backgroundImageView: some View {
         if let uiImage = radioPlayer.albumArt {
@@ -72,7 +84,7 @@ struct PlayerSheetView: View {
             Color.gray.opacity(0.5)
         }
     }
-
+    
     @ViewBuilder
     private var contentView: some View {
         if isShazaming {
@@ -81,7 +93,7 @@ struct PlayerSheetView: View {
             stationContent
         }
     }
-
+    
     private var shazamContent: some View {
         VStack {
             if let url = shazamViewModel.shazamMedia.albumArtURL {
@@ -100,7 +112,7 @@ struct PlayerSheetView: View {
                     .frame(width: 300, height: 300)
                     .cornerRadius(10)
             }
-
+            
             Text(shazamViewModel.shazamMedia.title ?? "Title")
                 .font(.title)
                 .fontWeight(.semibold)
@@ -108,28 +120,31 @@ struct PlayerSheetView: View {
                 .lineLimit(nil)
                 .frame(maxWidth: 390)
                 .padding()
-
+            
             Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
                 .font(.title2)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
                 .padding()
-
+            
             HStack {
                 Button(action: {
                     if isShazaming {
                         shazamViewModel.stopListening()
                         isShazaming = false
+                        pulse = false
                     } else {
                         shazamViewModel.startOrEndListening()
                         isShazaming = true
+                        pulse = true
                     }
                 }) {
-                    Text(isShazaming ? "Stop Shazaming" : "Start Shazaming")
+                    Text(isShazaming ? "Stop Shazaming" : "Tap to Shazam")
+                        .font(.headline)
+                        .foregroundColor(.primary)
                 }
-                .buttonStyle(CustomButtonStyle())
-                .controlSize(.large)
-                .padding()
+                .buttonStyle(StylishButtonStyle()) // Apply the custom button style
+                
                 Button(action: {
                     showingLyrics.toggle()
                     if shazamViewModel.shazamMedia.lyrics == nil {
@@ -148,9 +163,10 @@ struct PlayerSheetView: View {
                     }
                 }) {
                     Text("Show Lyrics")
+                        .font(.headline)
+                        .foregroundColor(.primary)
                 }
-                .buttonStyle(CustomButtonStyle())
-                .controlSize(.large)
+                .buttonStyle(StylishButtonStyle())
                 .padding()
             }
         }
@@ -175,31 +191,30 @@ struct PlayerSheetView: View {
             }
         }
     }
-
+    
     private var stationContent: some View {
         VStack {
             StationDetails()
             if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
                 Button(action: {
                     shazamViewModel.startOrEndListening()
-                    isShazaming = true
+                    isShazaming.toggle()
+                    pulse.toggle()
                 }) {
                     VStack {
-                        Image(systemName: "shazam.logo")
+                        Image(systemName: "shazam.logo.fill")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 60, height: 60)
-                            .foregroundColor(.blue)
-                        
+                            .frame(width: 100, height: 100)
+                            .foregroundColor(.primary)
+                            .scaleEffect(pulse ? 1.2 : 1.0)
+                            .padding(.bottom, 20)
                         Text("Tap to Shazam")
                             .font(.headline)
                             .foregroundColor(.primary)
                     }
                 }
-                .padding()
-                .background(Color(UIColor.secondarySystemBackground))
-                .cornerRadius(10)
-                .shadow(radius: 3)
+                .buttonStyle(PlainButtonStyle()) // Ensure no additional styling is applied
             }
         }
     }
@@ -209,7 +224,7 @@ struct PlayerSheetView: View {
 struct StationDetails: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
-
+    
     var body: some View {
         if let currentStationIndex = radioPlayer.currentStationIndex,
            let currentStation = viewModel.stations[safe: currentStationIndex] {
@@ -219,7 +234,7 @@ struct StationDetails: View {
                     .font(.title)
                     .bold()
                     .padding(.top, 4)
-
+                
                 if let metadata = radioPlayer.metadata {
                     Text(metadata)
                         .font(.subheadline)
@@ -241,7 +256,7 @@ struct StationDetails: View {
 struct PlaybackControls: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
-
+    
     var body: some View {
         HStack {
             Button(action: {
@@ -251,9 +266,9 @@ struct PlaybackControls: View {
                     .font(.largeTitle)
             }
             .padding()
-
+            
             Spacer()
-
+            
             Button(action: {
                 radioPlayer.playPause()
             }) {
@@ -261,9 +276,9 @@ struct PlaybackControls: View {
                     .font(.largeTitle)
             }
             .padding()
-
+            
             Spacer()
-
+            
             Button(action: {
                 radioPlayer.nextStation(from: viewModel.stations)
             }) {
@@ -287,7 +302,7 @@ struct AirPlayButtonView: UIViewRepresentable {
         view.tintColor = .gray
         return view
     }
-
+    
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
         uiView.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
     }
@@ -295,12 +310,28 @@ struct AirPlayButtonView: UIViewRepresentable {
 
 struct StationImage: View {
     let currentStation: RadioStation
-
+    
     var body: some View {
         if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             Image(uiImage: image).resizable().frame(width: 200, height: 200).cornerRadius(4).padding(.bottom, 8)
         } else {
             Image(systemName: "radio").resizable().frame(width: 100, height: 100).aspectRatio(contentMode: .fit).padding(20).clipShape(Circle()).foregroundColor(.gray).padding(.bottom, 8)
         }
+    }
+}
+
+struct StylishButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.accentColor)
+                    .shadow(color: configuration.isPressed ? .gray : .clear, radius: 10, x: 0, y: 10)
+            )
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .foregroundColor(.white)
+            .opacity(configuration.isPressed ? 0.8 : 1.0)
+            .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
     }
 }
