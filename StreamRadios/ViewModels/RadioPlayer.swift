@@ -24,7 +24,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private let monitor = NWPathMonitor()
     private var isNetworkAvailable = true
     private var wasPlayingBeforeNetworkLoss = false
-    var audioPlayer: AVPlayer? 
+    var audioPlayer: AVPlayer?
     @Published var isBuffering = false
     
     @Published var isPlaying = false
@@ -67,8 +67,8 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func getCurrentTime() -> TimeInterval {
-            return audioPlayer?.currentTime().seconds ?? 0
-        }
+        return audioPlayer?.currentTime().seconds ?? 0
+    }
     
     func setViewModel(_ viewModel: RadioStationViewModel) {
         self.viewModel = viewModel
@@ -101,6 +101,17 @@ class RadioPlayer: NSObject, ObservableObject {
                 if self.isPlaying {
                     self.pause()
                 }
+            }
+            
+            // Update preferred peak bitrate based on network type and conditions
+            if path.usesInterfaceType(.cellular) {
+                if path.isConstrained {
+                    self.player?.currentItem?.preferredPeakBitRate = 64000 // 64 kbps for poor mobile data
+                } else {
+                    self.player?.currentItem?.preferredPeakBitRate = 96000 // 96 kbps for mobile data
+                }
+            } else {
+                self.player?.currentItem?.preferredPeakBitRate = 1000000 // 1 Mbps for Wi-Fi
             }
         }
         let queue = DispatchQueue(label: "NetworkMonitor")
@@ -183,7 +194,9 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func setStationURL(_ url: URL) {
-        player = AVPlayer(url: url)
+        let playerItem = AVPlayerItem(url: url)
+        player = AVPlayer(playerItem: playerItem)
+        player?.automaticallyWaitsToMinimizeStalling = true
         userDefaults?.set(url, forKey: "lastStationURL")
         
         // Cancel previous observer if it exists
