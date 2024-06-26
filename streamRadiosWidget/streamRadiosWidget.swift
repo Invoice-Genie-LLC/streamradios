@@ -12,24 +12,24 @@ struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> SimpleEntry {
         SimpleEntry(date: Date(), stationName: "Loading...", stationIcon: nil, stationMetadata: "Loading...")
     }
-
+    
     func getSnapshot(in context: Context, completion: @escaping (SimpleEntry) -> Void) {
         let entry = SimpleEntry(date: Date(), stationName: "Station Name", stationIcon: nil, stationMetadata: "Station Metadata")
         completion(entry)
     }
-
+    
     func getTimeline(in context: Context, completion: @escaping (Timeline<SimpleEntry>) -> Void) {
         var entries: [SimpleEntry] = []
-
+        
         let sharedDefaults = UserDefaults(suiteName: "group.streamradios")
         let stationName = sharedDefaults?.string(forKey: "stationName") ?? "No Station"
         let stationIcon = sharedDefaults?.string(forKey: "stationIcon")
         let stationMetadata = sharedDefaults?.string(forKey: "stationMetadata") ?? "No Metadata"
-
+        
         let currentDate = Date()
         let entry = SimpleEntry(date: currentDate, stationName: stationName, stationIcon: stationIcon, stationMetadata: stationMetadata)
         entries.append(entry)
-
+        
         let timeline = Timeline(entries: entries, policy: .after(currentDate.addingTimeInterval(15 * 60)))
         completion(timeline)
     }
@@ -44,7 +44,7 @@ struct SimpleEntry: TimelineEntry {
 
 struct StreamRadiosWidgetEntryView: View {
     var entry: SimpleEntry
-
+    
     var body: some View {
         VStack {
             if let iconData = entry.stationIcon, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
@@ -71,7 +71,7 @@ struct StreamRadiosWidgetEntryView: View {
 
 struct streamRadiosWidget: Widget {
     let kind: String = "com.radio.streamradios.widget"
-
+    
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
             StreamRadiosWidgetEntryView(entry: entry)

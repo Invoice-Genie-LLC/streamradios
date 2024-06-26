@@ -1,4 +1,3 @@
-
 //
 //  LyricsView.swift
 //  StreamRadios
@@ -11,6 +10,8 @@ import Combine
 
 struct LyricsView: View {
     var lyrics: String
+    var title: String
+    var artistName: String
     var onClose: () -> Void
     var getCurrentPlaybackTime: () -> TimeInterval
     
@@ -23,6 +24,15 @@ struct LyricsView: View {
     var body: some View {
         VStack {
             HStack {
+                VStack(alignment: .leading) {
+                    Text(title)
+                        .font(.title)
+                        .bold()
+                        .foregroundColor(.white)
+                    Text(artistName)
+                        .font(.title2)
+                        .foregroundColor(.gray)
+                }
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark.circle.fill")
@@ -31,7 +41,11 @@ struct LyricsView: View {
                 }
             }
             .padding()
-
+            .background(Color.black)
+            
+            Divider() // Add a divider line under the title
+                .background(Color.gray.opacity(0.5))
+            
             GeometryReader { geometry in
                 ScrollViewReader { scrollViewProxy in
                     ScrollView {
@@ -40,7 +54,7 @@ struct LyricsView: View {
                                 Text(lyricsArray[index].text)
                                     .font(.title2)
                                     .bold()
-                                    .foregroundColor(currentLine == index ? .yellow : .white)
+                                    .foregroundColor(Color.white.opacity(0.7))
                                     .frame(maxWidth: .infinity, alignment: .leading) // Align text to the left
                                     .padding(.vertical, 3)
                                     .id(index)
@@ -66,7 +80,7 @@ struct LyricsView: View {
                 }
             }
         }
-        .background(LinearGradient(gradient: Gradient(colors: [.black, .gray]), startPoint: .top, endPoint: .bottom))
+        .background(Color.black)
         .foregroundColor(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -75,7 +89,7 @@ struct LyricsView: View {
         let totalDuration: TimeInterval = 5 * 60 // Assume a total song duration of 5 minutes
         let lines = lyrics.components(separatedBy: "\n")
         let timeIncrement = totalDuration / TimeInterval(lines.count)
-
+        
         return lines.enumerated().map { (index, line) in
             (text: line, time: TimeInterval(index) * timeIncrement)
         }
@@ -117,6 +131,8 @@ struct LyricsView_Previews: PreviewProvider {
     static var previews: some View {
         LyricsView(
             lyrics: "This is a sample lyric.\nIt should scroll smoothly.\nSyncing with the song playback.\nEnjoy the music!",
+            title: "Sample Song",
+            artistName: "Sample Artist",
             onClose: {},
             getCurrentPlaybackTime: { 0.0 }
         )

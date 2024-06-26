@@ -18,22 +18,19 @@ class RadioPlayer: NSObject, ObservableObject {
     @objc var player: AVPlayer?
     private var statusCancellable: AnyCancellable?
     private var retryTimer: Timer?
-    private var networkRetryTimer: Timer?
     private var retryCount = 0
-    private let maxRetryCount = 5
     private let monitor = NWPathMonitor()
     private var isNetworkAvailable = true
     private var wasPlayingBeforeNetworkLoss = false
     var audioPlayer: AVPlayer?
     @Published var isBuffering = false
-    
     @Published var isPlaying = false
     @Published var currentStationIndex: Int?
     @Published var songTitle: String = ""
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
     @Published var metadata: String?
-    @Published var currentBitrate: Int? = 0
+    @Published var currentBitrate: Int? = nil
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
@@ -44,7 +41,7 @@ class RadioPlayer: NSObject, ObservableObject {
     
     private var viewModel: RadioStationViewModel?
     
-    private override init() {
+    override init() {
         super.init()
         configureAudioSession()
         startNetworkMonitoring()

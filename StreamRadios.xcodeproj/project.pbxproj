@@ -17,6 +17,7 @@
 		7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA692C156FDA006D5EBB /* RadioStationListView.swift */; };
 		771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715539F2C19E6C800BE43FA /* AppDelegate.swift */; };
 		771553A22C19E6FD00BE43FA /* OrientationLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771553A12C19E6FD00BE43FA /* OrientationLock.swift */; };
+		771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */; };
 		7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746177B2C17290200F442B3 /* RadioStreamApp.swift */; };
 		774617842C17411C00F442B3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617832C17411C00F442B3 /* WidgetKit.framework */; };
 		774617862C17411C00F442B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617852C17411C00F442B3 /* SwiftUI.framework */; };
@@ -28,7 +29,6 @@
 		7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179B2C17834200F442B3 /* CircularProgressView.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
 		775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04282C287AF700E99061 /* ShazamViewModel.swift */; };
-		775D04362C28E6BA00E99061 /* CustomButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04352C28E6BA00E99061 /* CustomButtonStyle.swift */; };
 		775D04382C28E89300E99061 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04372C28E89300E99061 /* LyricsView.swift */; };
 		775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04562C2A969F00E99061 /* FeatureSwitch.swift */; };
 		775D04592C2B20BE00E99061 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04582C2B20BE00E99061 /* EditStationView.swift */; };
@@ -76,6 +76,7 @@
 		7707DA692C156FDA006D5EBB /* RadioStationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationListView.swift; sourceTree = "<group>"; };
 		7715539F2C19E6C800BE43FA /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		771553A12C19E6FD00BE43FA /* OrientationLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrientationLock.swift; sourceTree = "<group>"; };
+		771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeumorphicShadow.swift; sourceTree = "<group>"; };
 		7746177B2C17290200F442B3 /* RadioStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStreamApp.swift; sourceTree = "<group>"; };
 		774617812C17411C00F442B3 /* StreamRadioWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamRadioWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		774617832C17411C00F442B3 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
@@ -89,7 +90,6 @@
 		7746179B2C17834200F442B3 /* CircularProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularProgressView.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		775D04282C287AF700E99061 /* ShazamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamViewModel.swift; sourceTree = "<group>"; };
-		775D04352C28E6BA00E99061 /* CustomButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomButtonStyle.swift; sourceTree = "<group>"; };
 		775D04372C28E89300E99061 /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
 		775D04562C2A969F00E99061 /* FeatureSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSwitch.swift; sourceTree = "<group>"; };
 		775D04582C2B20BE00E99061 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
@@ -143,6 +143,7 @@
 		7707DA372C152EF2006D5EBB /* StreamRadios */ = {
 			isa = PBXGroup;
 			children = (
+				771D408C2C2C6E85005D4FF5 /* Style */,
 				775D04552C2A964400E99061 /* FeatureSwitches */,
 				7707DA462C152F36006D5EBB /* StreamRadios.entitlements */,
 				7707DA642C156F7A006D5EBB /* Models */,
@@ -180,7 +181,6 @@
 				7707DA5A2C15524F006D5EBB /* RadioPlayer.swift */,
 				77CCE9622C1632380098EE74 /* ImagePicker.swift */,
 				775D04282C287AF700E99061 /* ShazamViewModel.swift */,
-				775D04352C28E6BA00E99061 /* CustomButtonStyle.swift */,
 				7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */,
 			);
 			path = ViewModels;
@@ -192,6 +192,14 @@
 				7707DA652C156F8D006D5EBB /* RadioStation.swift */,
 			);
 			path = Models;
+			sourceTree = "<group>";
+		};
+		771D408C2C2C6E85005D4FF5 /* Style */ = {
+			isa = PBXGroup;
+			children = (
+				771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */,
+			);
+			path = Style;
 			sourceTree = "<group>";
 		};
 		774617822C17411C00F442B3 /* Frameworks */ = {
@@ -346,12 +354,12 @@
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
-				775D04362C28E6BA00E99061 /* CustomButtonStyle.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,
 				771553A22C19E6FD00BE43FA /* OrientationLock.swift in Sources */,
+				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
