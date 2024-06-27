@@ -14,32 +14,43 @@ struct RadioStreamApp: App {
     @AppStorage("isDarkMode") private var isDarkMode = false
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
+    var radioPlayer = RadioPlayer.shared
+    var viewModel = RadioStationViewModel()
+    
     // Perform initial setup in an initializer
     init() {
-        let radioPlayer = RadioPlayer.shared
-        let viewModel = RadioStationViewModel()
         radioPlayer.setViewModel(viewModel)
+        
+        // Fetch stations from CloudKit on new installations
+        if UserDefaults.standard.bool(forKey: "HasLaunchedBefore") == false {
+            DataStore.shared.fetchRadioStations { [weak viewModel] stations, error in // Capture viewModel weakly if needed or just ensure it doesn't cause a strong reference cycle.
+                DispatchQueue.main.async {
+                    if let stations = stations {
+                        viewModel?.stations = stations
+                        print("Fetched \(stations.count) stations from CloudKit and populated the list.")
+                    } else if let error = error {
+                        print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
+                    }
+                }
+            }
+            UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
+        }
         
         // Set up remote control and start receiving remote control events
         UIApplication.shared.beginReceivingRemoteControlEvents()
         radioPlayer.setupRemoteCommandCenter()
+        
     }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(RadioPlayer.shared)
-                .environmentObject(RadioStationViewModel())
+                .environmentObject(radioPlayer)
+                .environmentObject(viewModel)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
-                .onAppear {
-                    // Ensure that the orientation lock is applied when the app appears
-                    AppDelegate.orientationLock = .portrait
-                    UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
-                }
         }
     }
 }
-
 func updateWidget() {
     let radioPlayer = RadioPlayer.shared
     let viewModel = RadioStationViewModel()

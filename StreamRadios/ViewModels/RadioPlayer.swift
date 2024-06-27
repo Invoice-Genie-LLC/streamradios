@@ -209,17 +209,20 @@ class RadioPlayer: NSObject, ObservableObject {
     
     private func updateBitrateBasedOnNetwork() {
         let path = monitor.currentPath
-        if path.usesInterfaceType(.cellular) {
-            if path.isConstrained {
-                self.player?.currentItem?.preferredPeakBitRate = 64000 // 64 kbps
-                self.currentBitrate = 64
+        
+        DispatchQueue.main.async {  // Ensure UI updates are on the main thread
+            if path.usesInterfaceType(.cellular) {
+                if path.isConstrained {
+                    self.player?.currentItem?.preferredPeakBitRate = 64000 // 64 kbps
+                    self.currentBitrate = 64
+                } else {
+                    self.player?.currentItem?.preferredPeakBitRate = 128000 // 128 kbps
+                    self.currentBitrate = 128
+                }
             } else {
-                self.player?.currentItem?.preferredPeakBitRate = 128000 // 128 kbps
-                self.currentBitrate = 128
+                self.player?.currentItem?.preferredPeakBitRate = 256000 // 256 kbps
+                self.currentBitrate = 256
             }
-        } else {
-            self.player?.currentItem?.preferredPeakBitRate = 256000 // 256 kbps
-            self.currentBitrate = 256
         }
     }
     
