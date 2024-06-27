@@ -9,7 +9,7 @@ import CloudKit
 class DataStore {
     static let shared = DataStore()
     private let privateDatabase = CKContainer.default().privateCloudDatabase
-
+    
     // Save image to file system and return file path
     func saveImageToFileSystem(image: UIImage) -> String? {
         guard let data = image.jpegData(compressionQuality: 0.5) else { return nil }
@@ -23,13 +23,13 @@ class DataStore {
             return nil
         }
     }
-
+    
     // Load image from file system by file path
     func loadImageFromFileSystem(fileName: String) -> UIImage? {
         let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
         return UIImage(contentsOfFile: fileURL.path)
     }
-
+    
     // Helper function to create a CKAsset from a UIImage
     private func createAsset(from image: UIImage) -> CKAsset? {
         let fileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
@@ -44,7 +44,7 @@ class DataStore {
         }
         return nil
     }
-
+    
     // Save a new radio station to CloudKit
     func saveNewStationToCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
         let iconFileName = iconImage.flatMap { saveImageToFileSystem(image: $0) }
@@ -57,7 +57,7 @@ class DataStore {
                 record.setValue(asset, forKey: "iconData")
             }
         }
-
+        
         privateDatabase.save(record) { savedRecord, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -70,12 +70,12 @@ class DataStore {
             }
         }
     }
-
+    
     // Fetch all radio stations from CloudKit
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)  // Fetches all records
         let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
-
+        
         privateDatabase.perform(query, inZoneWith: nil) { records, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -96,7 +96,7 @@ class DataStore {
             }
         }
     }
-
+    
     private func decodeIconData(record: CKRecord) -> String? {
         if let asset = record["iconData"] as? CKAsset, let data = try? Data(contentsOf: asset.fileURL.unsafelyUnwrapped) {
             return data.base64EncodedString()
@@ -104,5 +104,20 @@ class DataStore {
             return base64String
         }
         return nil
+    }
+    
+    func deleteStationFromCloudKit(station: RadioStation, completion: @escaping (Bool) -> Void) {
+        let recordID = CKRecord.ID(recordName: station.id.uuidString)
+        privateDatabase.delete(withRecordID: recordID) { recordID, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("Error deleting record from CloudKit: \(error.localizedDescription)")
+                    completion(false)
+                } else {
+                    print("CloudKit station record deleted successfully")
+                    completion(true)
+                }
+            }
+        }
     }
 }
