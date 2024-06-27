@@ -52,7 +52,7 @@ class ShazamViewModel: NSObject, ObservableObject {
             }
             
             do {
-                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .allowAirPlay])
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
                 self.setupAudioEngine()
             } catch {
