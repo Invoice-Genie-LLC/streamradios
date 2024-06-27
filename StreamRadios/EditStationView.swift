@@ -139,11 +139,14 @@ struct EditStationView: View {
             viewModel.stations[index].name = name
             viewModel.stations[index].url = urlString
             viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+            
+            viewModel.saveStationsToFile()  // Save locally
+            viewModel.saveStationToCloud(viewModel.stations[index])  // Update in CloudKit
         }
         
-        viewModel.saveStations()
         isPresented = nil
     }
+
 }
 
 struct EditStationView_Previews: PreviewProvider {

@@ -138,10 +138,10 @@ struct AddStationView: View {
         
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         let newStation = RadioStation(name: name, url: urlString, iconData: iconData)
-        viewModel.stations.append(newStation)
-        viewModel.saveStations()
+        viewModel.addStation(name: name, url: urlString, iconData: iconData) // Modify this to handle CloudKit inside ViewModel
         isPresented = false
     }
+
 }
 
 struct AddStationView_Previews: PreviewProvider {

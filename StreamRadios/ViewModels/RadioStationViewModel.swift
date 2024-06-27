@@ -11,34 +11,115 @@ import Combine
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
     
-    private let userDefaultsKey = "SavedRadioStations"
+    private var fileURL: URL {
+           return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("SavedRadioStations.plist")
+       }
     
     init() {
-        loadStations()
+        loadStationsFromFileOrFetchNew()
     }
     
-    func addStation(name: String, url: String) {
-        let newStation = RadioStation(name: name, url: url)
+    private func loadStationsFromFileOrFetchNew() {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                loadStations()
+            } else {
+                // If the file doesn't exist, consider fetching new data from CloudKit or initializing an empty list.
+                fetchStationsAndSave()
+            }
+        }
+    
+    private func fetchStationsAndSave() {
+            DataStore.shared.fetchRadioStations { [weak self] stations, error in
+                DispatchQueue.main.async {
+                    if let stations = stations {
+                        self?.stations = stations
+                        self?.saveStationsToFile() // Save fetched stations to file
+                        print("Fetched \(stations.count) stations from CloudKit and saved to file.")
+                    } else if let error = error {
+                        print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    
+    func addStation(name: String, url: String, iconData: String?) {
+        let newStation = RadioStation(name: name, url: url, iconData: iconData)
         stations.append(newStation)
-        saveStations()
+        saveStationsToFile()  // Save locally to file
+        saveStationToCloud(newStation)  // Also save to CloudKit
     }
+
+    func saveStationsToFile() {
+        do {
+            let data = try JSONEncoder().encode(stations)
+            try data.write(to: fileURL)
+            print("Successfully saved stations to file.")
+        } catch {
+            print("Failed to write stations to file:", error)
+        }
+    }
+
+    func loadStations() {
+            do {
+                let data = try Data(contentsOf: fileURL)
+                let loadedStations = try JSONDecoder().decode([RadioStation].self, from: data)
+                self.stations = loadedStations
+                print("Successfully loaded stations from file.")
+            } catch {
+                print("Failed to load stations from file:", error)
+                self.stations = []  // default to empty if there's a problem loading
+            }
+        }
     
-    func saveStations() {
-        if let encodedStations = try? JSONEncoder().encode(stations) {
-            UserDefaults.standard.set(encodedStations, forKey: userDefaultsKey)
+func saveStationsToFile(stations: [RadioStation]) {
+        let fileManager = FileManager.default
+        let urls = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
+        guard let documentURL = urls.first else { return }
+        let fileURL = documentURL.appendingPathComponent("SavedRadioStations.plist")
+
+        do {
+            let data = try JSONEncoder().encode(stations)
+            try data.write(to: fileURL)
+        } catch {
+            print("Failed to write stations to file:", error)
+        }
+    }
+
+    func loadStationsFromFile() -> [RadioStation]? {
+        let fileManager = FileManager.default
+        let urls = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
+        guard let documentURL = urls.first else { return nil }
+        let fileURL = documentURL.appendingPathComponent("SavedRadioStations.plist")
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let stations = try JSONDecoder().decode([RadioStation].self, from: data)
+            return stations
+        } catch {
+            print("Failed to load stations from file:", error)
+            return nil
         }
     }
     
-    private func loadStations() {
-        if let savedStationsData = UserDefaults.standard.data(forKey: userDefaultsKey),
-           let savedStations = try? JSONDecoder().decode([RadioStation].self, from: savedStationsData) {
-            stations = savedStations
+    func saveStationToCloud(_ station: RadioStation) {
+        // Convert icon data from String (base64) to UIImage.
+        let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
+
+        // Correctly call the method with all expected parameters.
+        DataStore.shared.saveNewStationToCloudKit(station: station, iconImage: iconImage) { success, recordName in
+            DispatchQueue.main.async {
+                if success {
+                    print("Station saved to CloudKit with record ID:", recordName ?? "Unknown")
+                } else {
+                    print("Failed to save station to CloudKit.")
+                }
+            }
         }
     }
-    
+
+
     func deleteStation(at offsets: IndexSet) {
         if let firstIndex = offsets.first {
-            // Check if the current playing station is being deleted
             if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
                currentStationIndex == firstIndex {
                 RadioPlayer.shared.currentStationIndex = nil
@@ -46,16 +127,15 @@ class RadioStationViewModel: ObservableObject {
                 RadioPlayer.shared.player?.pause()
             } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
                       currentStationIndex > firstIndex {
-                // Update the current station index if it is after the deleted index
                 RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
             }
         }
         stations.remove(atOffsets: offsets)
-        saveStations()
+        saveStationsToFile() // Update file storage after deleting
     }
-    
+
     func moveStation(from source: IndexSet, to destination: Int) {
         stations.move(fromOffsets: source, toOffset: destination)
-        saveStations()
+        saveStationsToFile() // Save reordered list in file storage
     }
 }

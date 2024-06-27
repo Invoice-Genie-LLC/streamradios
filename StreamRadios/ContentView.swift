@@ -189,9 +189,6 @@ struct ContentView: View {
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
-            .onAppear {
-                UIApplication.shared.lockOrientation(.portrait)
-            }
         }
         .navigationViewStyle(StackNavigationViewStyle())
     }

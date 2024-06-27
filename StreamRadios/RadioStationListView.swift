@@ -171,7 +171,7 @@ struct RadioStationListView: View {
     private func deleteStation(_ station: RadioStation) {
         if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
             viewModel.stations.remove(at: index)
-            viewModel.saveStations() // Save the updated list to UserDefaults
+            viewModel.saveStationsToFile() // Save the updated list to UserDefaults
             if RadioPlayer.shared.currentStationIndex == index {
                 RadioPlayer.shared.stop()
                 RadioPlayer.shared.currentStationIndex = nil
@@ -196,7 +196,7 @@ struct StationDropDelegate: DropDelegate {
         }
         draggingStation = nil
         originalMetadata = nil
-        viewModel.saveStations() // Save the updated order to UserDefaults
+        viewModel.saveStationsToFile() // Save the updated order to UserDefaults
         return true
     }
 
@@ -209,7 +209,7 @@ struct StationDropDelegate: DropDelegate {
         withAnimation {
             moveStation(from: fromIndex, to: toIndex)
         }
-        viewModel.saveStations() // Save the updated order to UserDefaults after every move
+        viewModel.saveStationsToFile() // Save the updated order to UserDefaults after every move
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
