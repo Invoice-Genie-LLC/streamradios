@@ -40,6 +40,7 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private var viewModel: RadioStationViewModel?
+    private var cancellables = Set<AnyCancellable>()
     
     override init() {
         super.init()
@@ -70,6 +71,13 @@ class RadioPlayer: NSObject, ObservableObject {
     
     func setViewModel(_ viewModel: RadioStationViewModel) {
         self.viewModel = viewModel
+        
+        // Observe changes in the stations array
+        viewModel.$stations
+            .sink { [weak self] _ in
+                self?.updateNowPlayingInfo()
+            }
+            .store(in: &cancellables)
     }
     
     private func configureAudioSession() {
