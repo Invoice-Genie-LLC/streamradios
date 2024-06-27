@@ -117,21 +117,38 @@ func saveStationsToFile(stations: [RadioStation]) {
         }
     }
 
-
     func deleteStation(at offsets: IndexSet) {
-        if let firstIndex = offsets.first {
-            if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
-               currentStationIndex == firstIndex {
-                RadioPlayer.shared.currentStationIndex = nil
-                RadioPlayer.shared.isPlaying = false
-                RadioPlayer.shared.player?.pause()
-            } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
-                      currentStationIndex > firstIndex {
-                RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
+        offsets.forEach { index in
+            let station = stations[index]
+            
+            // Delete the station from CloudKit first
+            DataStore.shared.deleteStationFromCloudKit(station: station) { success in
+                DispatchQueue.main.async {
+                    if success {
+                        print("Station successfully deleted from CloudKit.")
+
+                        // If deletion is successful, update local data
+                        self.stations.remove(at: index)
+                        self.saveStationsToFile() // Update file storage after deleting
+                        
+                        // Handle the local player logic
+                        if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
+                           currentStationIndex == index {
+                            RadioPlayer.shared.currentStationIndex = nil
+                            RadioPlayer.shared.isPlaying = false
+                            RadioPlayer.shared.player?.pause()
+                        } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
+                                  currentStationIndex > index {
+                            RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
+                        }
+                        
+                        print("Local station data updated after successful CloudKit deletion.")
+                    } else {
+                        print("Failed to delete station from CloudKit.")
+                    }
+                }
             }
         }
-        stations.remove(atOffsets: offsets)
-        saveStationsToFile() // Update file storage after deleting
     }
 
     func moveStation(from source: IndexSet, to destination: Int) {

@@ -170,16 +170,33 @@ struct RadioStationListView: View {
 
     private func deleteStation(_ station: RadioStation) {
         if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-            viewModel.stations.remove(at: index)
-            viewModel.saveStationsToFile() // Save the updated list to UserDefaults
-            if RadioPlayer.shared.currentStationIndex == index {
-                RadioPlayer.shared.stop()
-                RadioPlayer.shared.currentStationIndex = nil
-            } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex, currentStationIndex > index {
-                RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
+            // First try to delete from CloudKit
+            DataStore.shared.deleteStationFromCloudKit(station: station) { success in
+                DispatchQueue.main.async {
+                    if success {
+                        print("Station successfully deleted from CloudKit.")
+
+                        // Proceed with local deletion
+                        self.viewModel.stations.remove(at: index)
+                        self.viewModel.saveStationsToFile() // Save the updated list to local storage
+
+                        // Adjust the RadioPlayer's current station index if needed
+                        if RadioPlayer.shared.currentStationIndex == index {
+                            RadioPlayer.shared.stop()
+                            RadioPlayer.shared.currentStationIndex = nil
+                        } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex, currentStationIndex > index {
+                            RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
+                        }
+
+                        print("Local station data updated after successful CloudKit deletion.")
+                    } else {
+                        print("Failed to delete station from CloudKit.")
+                    }
+                }
             }
         }
     }
+
 }
 
 struct StationDropDelegate: DropDelegate {
