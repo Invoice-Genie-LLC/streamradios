@@ -106,8 +106,11 @@ struct AddStationView: View {
                         Button(action: {
                             showImagePicker = true
                         }) {
-                            Text("Upload Icon")
-                                .foregroundColor(.primary)
+                            HStack {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("Upload Station Icon")
+                                    .foregroundColor(.blue)
+                            }
                         }
                         .sheet(isPresented: $showImagePicker) {
                             ImagePicker(image: $iconImage)
