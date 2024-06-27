@@ -79,7 +79,7 @@ struct PlayerSheetView: View {
                     Image(systemName: "chevron.left")
                     Text("Back")
                 }
-                .padding(.top, 50)
+                .padding(.top, 15)
                 .foregroundColor(Color.primary)
             }
             Spacer()
@@ -138,19 +138,26 @@ struct PlayerSheetView: View {
                     .modifier(NeumorphicShadow())
             }
             
-            Text(shazamViewModel.shazamMedia.title ?? "Title")
-                .font(.title)
-                .fontWeight(.semibold)
-                .multilineTextAlignment(.center)
-                .lineLimit(nil)
-                .frame(maxWidth: 390)
-                .padding()
+            GeometryReader { geometry in
+                Text(shazamViewModel.shazamMedia.title ?? "Title")
+                                .font(.title)
+                                .fontWeight(.semibold)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(nil)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .fixedSize(horizontal: false, vertical: true)
+                    
+            }.padding(.bottom, 50)
+            .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: false, vertical: true)
+
             
             Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
                 .font(.title2)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
-                .padding()
+                .padding(.top, 20)
             
             HStack(spacing: 20) {
                 Button(action: {
@@ -169,7 +176,6 @@ struct PlayerSheetView: View {
                         .foregroundColor(Color.primary)
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
-                        .modifier(NeumorphicShadow())
                 }
                 
                 Button(action: {
@@ -194,7 +200,6 @@ struct PlayerSheetView: View {
                         .foregroundColor(Color.primary)
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
-                        .modifier(NeumorphicShadow())
                 }
                 
             }
@@ -261,41 +266,36 @@ struct PlayerSheetView: View {
     }
     
     private var playbackControls: some View {
-        HStack(spacing: 16) {
-            Button(action: {
-                radioPlayer.previousStation(from: viewModel.stations)
-            }) {
-                Image(systemName: "backward.fill")
-                    .font(.largeTitle)
-                    .foregroundColor(.primary)
-                    .padding()
-                    .background(Circle().fill(Color(UIColor.systemBackground)))
-                    .modifier(NeumorphicShadow())
-            }
-            
-            Button(action: {
-                radioPlayer.playPause()
-            }) {
-                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.largeTitle)
-                    .foregroundColor(.primary)
-                    .padding()
-                    .background(Circle().fill(Color(UIColor.systemBackground)))
-                    .modifier(NeumorphicShadow())
-            }
-            
-            Button(action: {
-                radioPlayer.nextStation(from: viewModel.stations)
-            }) {
-                Image(systemName: "forward.fill")
-                    .font(.largeTitle)
-                    .foregroundColor(.primary)
-                    .padding()
-                    .background(Circle().fill(Color(UIColor.systemBackground)))
-                    .modifier(NeumorphicShadow())
+            HStack(spacing: 16) {
+                Button(action: {
+                    radioPlayer.previousStation(from: viewModel.stations)
+                }) {
+                    Image(systemName: "backward.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.primary)
+                        .padding()
+                }
+                
+                Button(action: {
+                    radioPlayer.playPause()
+                }) {
+                    Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.primary)
+                        .padding()
+                }
+                
+                Button(action: {
+                    radioPlayer.nextStation(from: viewModel.stations)
+                }) {
+                    Image(systemName: "forward.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.primary)
+                        .padding()
+                }
             }
         }
-    }
+
 }
 
 struct StationDetails: View {
