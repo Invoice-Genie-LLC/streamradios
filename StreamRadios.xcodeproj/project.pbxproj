@@ -35,6 +35,7 @@
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */; };
+		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
 /* End PBXBuildFile section */
@@ -106,6 +107,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -260,6 +262,9 @@
 				774617922C17411E00F442B3 /* PBXTargetDependency */,
 			);
 			name = StreamRadios;
+			packageProductDependencies = (
+				77CC1EB42C2DBD8600F8FD5B /* Reachability */,
+			);
 			productName = AlbRadioStream;
 			productReference = 7707DA352C152EF2006D5EBB /* StreamRadios.app */;
 			productType = "com.apple.product-type.application";
@@ -308,6 +313,9 @@
 				Base,
 			);
 			mainGroup = 7707DA2C2C152EF2006D5EBB;
+			packageReferences = (
+				77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */,
+			);
 			productRefGroup = 7707DA362C152EF2006D5EBB /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -664,6 +672,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ashleymills/Reachability.swift";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		77CC1EB42C2DBD8600F8FD5B /* Reachability */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */;
+			productName = Reachability;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 7707DA2D2C152EF2006D5EBB /* Project object */;
 }
