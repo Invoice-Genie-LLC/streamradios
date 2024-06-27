@@ -5,6 +5,7 @@
 //
 
 import SwiftUI
+import Combine
 
 struct ContentView: View {
     @StateObject private var radioPlayer = RadioPlayer.shared
@@ -15,6 +16,8 @@ struct ContentView: View {
     @State private var isEditingMode = false
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
+    @State private var bitrateMessage: String = "Playing at high bitrate: 256 kbps"
+    private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
         NavigationView {
@@ -48,29 +51,36 @@ struct ContentView: View {
                         if radioPlayer.isPlaying, let currentStationIndex = radioPlayer.currentStationIndex,
                            currentStationIndex < viewModel.stations.count {
                             let currentStation = viewModel.stations[currentStationIndex]
-                            HStack(alignment: .center, spacing: 20) {
-                                AlbumArtView(imageData: currentStation.iconData, isPlaying: radioPlayer.isPlaying)
-                                    .frame(width: 70, height: 70)
-                                    .cornerRadius(10)
+                            VStack {
+                                Text(bitrateMessage)
+                                    .font(.footnote)
+                                    .foregroundColor(.gray)
+                                    .padding(.bottom, 5) // Add padding to separate from station title
                                 
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(viewModel.stations[currentStationIndex].name)
-                                        .font(.title2)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.primary)
-                                    if let metadata = radioPlayer.metadata {
-                                        Text(metadata)
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                    } else {
-                                        Text("No song or album title available")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
+                                HStack(alignment: .center, spacing: 20) {
+                                    AlbumArtView(imageData: currentStation.iconData, isPlaying: radioPlayer.isPlaying)
+                                        .frame(width: 70, height: 70)
+                                        .cornerRadius(10)
+                                    
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(viewModel.stations[currentStationIndex].name)
+                                            .font(.title2)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.primary)
+                                        if let metadata = radioPlayer.metadata {
+                                            Text(metadata)
+                                                .font(.subheadline)
+                                                .foregroundColor(.secondary)
+                                        } else {
+                                            Text("No song or album title available")
+                                                .font(.subheadline)
+                                                .foregroundColor(.secondary)
+                                        }
                                     }
+                                    Spacer()
                                 }
-                                Spacer()
+                                .padding(.leading, 10) // Add padding to push everything to the far left
                             }
-                            .padding(.leading, 10) // Add padding to push everything to the far left
                         }
                         
                         HStack(spacing: 30) {
@@ -188,6 +198,9 @@ struct ContentView: View {
                 PlayerSheetView()
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
+            }
+            .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
+                self.bitrateMessage = newBitrateMessage
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())

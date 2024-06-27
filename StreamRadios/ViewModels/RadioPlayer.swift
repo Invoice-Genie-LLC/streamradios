@@ -36,6 +36,7 @@ class RadioPlayer: NSObject, ObservableObject {
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
+    var bitrateSubject = CurrentValueSubject<String, Never>("Playing at high bitrate: 256 kbps")
     private let userDefaultsSuiteName = "group.streamradios"
     private var userDefaults: UserDefaults? {
         return UserDefaults(suiteName: userDefaultsSuiteName)
@@ -260,12 +261,14 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
 
-        private func setBitrate(_ bitrate: Double) {
+    private func setBitrate(_ bitrate: Double) {
             guard let playerItem = player?.currentItem else { return }
             let currentBitrate = playerItem.preferredPeakBitRate
             print("Current bitrate: \(currentBitrate), New bitrate: \(bitrate)")
             if currentBitrate != bitrate {
                 playerItem.preferredPeakBitRate = bitrate
+                let bitrateMessage = "Playing at \(bitrate / 1000) kbps"
+                bitrateSubject.send(bitrateMessage)
                 print("Bitrate updated to \(bitrate)")
                 self.retryStream()
             } else {
