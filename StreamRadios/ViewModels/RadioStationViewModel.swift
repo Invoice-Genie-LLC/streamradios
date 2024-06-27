@@ -150,6 +150,26 @@ func saveStationsToFile(stations: [RadioStation]) {
             }
         }
     }
+    
+    func updateStation(_ station: RadioStation, name: String, url: String, iconData: String?) {
+           if let index = stations.firstIndex(where: { $0.id == station.id }) {
+               stations[index].name = name
+               stations[index].url = url
+               stations[index].iconData = iconData
+               saveStationsToFile()
+               
+               let iconImage = iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
+               DataStore.shared.updateStationInCloudKit(station: stations[index], iconImage: iconImage) { success, recordName in
+                   DispatchQueue.main.async {
+                       if success {
+                           print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
+                       } else {
+                           print("Failed to update station in CloudKit.")
+                       }
+                   }
+               }
+           }
+       }
 
     func moveStation(from source: IndexSet, to destination: Int) {
         stations.move(fromOffsets: source, toOffset: destination)

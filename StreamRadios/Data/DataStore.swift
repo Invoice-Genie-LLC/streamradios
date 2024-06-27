@@ -120,4 +120,36 @@ class DataStore {
             }
         }
     }
-}
+    
+    // Update station in CloudKit
+        func updateStationInCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
+            let recordID = CKRecord.ID(recordName: station.id.uuidString)
+            
+            privateDatabase.fetch(withRecordID: recordID) { fetchedRecord, error in
+                var record: CKRecord
+                if let fetchedRecord = fetchedRecord {
+                    record = fetchedRecord
+                } else {
+                    record = CKRecord(recordType: "streamingRadios", recordID: recordID)
+                }
+                
+                record.setValue(station.name, forKey: "name")
+                record.setValue(station.url, forKey: "url")
+                
+                if let iconImage = iconImage, let asset = self.createAsset(from: iconImage) {
+                    record.setValue(asset, forKey: "iconData")
+                }
+                
+                self.privateDatabase.save(record) { savedRecord, error in
+                    DispatchQueue.main.async {
+                        if let error = error {
+                            print("Error updating record in CloudKit: \(error.localizedDescription)")
+                            completion(false, nil)
+                        } else {
+                            print("CloudKit station record updated successfully")
+                            completion(true, savedRecord?.recordID.recordName)
+                        }
+                    }
+                }
+            }
+        }}
