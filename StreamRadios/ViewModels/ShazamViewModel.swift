@@ -37,25 +37,37 @@ class ShazamViewModel: NSObject, ObservableObject {
     
     public func startOrEndListening() {
         let audioSession = AVAudioSession.sharedInstance()
-        
+
         guard !audioEngine.isRunning else {
             stopListening()
             return
         }
-        
-        audioSession.requestRecordPermission { [weak self] granted in
+
+        AVAudioApplication.requestRecordPermission { [weak self] granted in
             guard let self = self, granted else {
                 DispatchQueue.main.async {
                     print("Microphone permission is denied")
                 }
                 return
             }
-            
+
             do {
-                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .allowAirPlay, .mixWithOthers])
-                                try audioSession.setPreferredSampleRate(44100) // High-quality audio
-                                try audioSession.setPreferredIOBufferDuration(0.005) // Reduce latency
+                // Set the audio session category to play and record, allowing Bluetooth options
+                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .duckOthers])
+                try audioSession.setMode(.default)
+                try audioSession.setPreferredSampleRate(44100) // High-quality audio
+                try audioSession.setPreferredIOBufferDuration(0.005) // Reduce latency
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
+                // Ensure the correct audio input source is used
+                if let availableInputs = audioSession.availableInputs {
+                    if let bluetoothInput = availableInputs.first(where: { $0.portType == .bluetoothHFP }) {
+                        try audioSession.setPreferredInput(bluetoothInput)
+                    } else if let builtInMic = availableInputs.first(where: { $0.portType == .builtInMic }) {
+                        try audioSession.setPreferredInput(builtInMic)
+                    }
+                }
+
                 self.setupAudioEngine()
             } catch {
                 print("Failed to set up audio session: \(error)")
@@ -65,26 +77,17 @@ class ShazamViewModel: NSObject, ObservableObject {
             }
         }
     }
-    
-    func stopListening() {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        DispatchQueue.main.async {
-            self.isRecording = false
-        }
-    }
-    
+
     private func setupAudioEngine() {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-        
+
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
             self?.session.matchStreamingBuffer(buffer, at: when)
         }
-        
-        // Since prepare() does not throw, no need to use 'try' with it
+
         audioEngine.prepare()
-        
+
         do {
             try audioEngine.start()
             DispatchQueue.main.async {
@@ -97,6 +100,15 @@ class ShazamViewModel: NSObject, ObservableObject {
             }
         }
     }
+
+    func stopListening() {
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        DispatchQueue.main.async {
+            self.isRecording = false
+        }
+    }
+
 }
 
 extension ShazamViewModel: SHSessionDelegate {
