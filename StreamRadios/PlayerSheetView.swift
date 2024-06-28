@@ -324,7 +324,7 @@ struct StationDetails: View {
                 
                 if let metadata = radioPlayer.metadata {
                     Text(metadata)
-                        .font(.subheadline)
+                        .font(.headline)
                         .foregroundColor(.secondary)
                         .padding(.top, 2)
                         .padding(.bottom, 50)
