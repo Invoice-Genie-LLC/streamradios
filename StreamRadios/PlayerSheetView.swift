@@ -132,7 +132,6 @@ struct PlayerSheetView: View {
                             .resizable()
                             .frame(width: 30, height: 30)
                             .cornerRadius(5)
-                            .modifier(NeumorphicShadow())
                     } else {
                         Image(systemName: "radio")
                             .resizable()
