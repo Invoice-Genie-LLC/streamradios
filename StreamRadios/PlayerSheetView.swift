@@ -38,13 +38,13 @@ struct PlayerSheetView: View {
                         contentView
                         Spacer()
                         playbackControls
-                            .padding(.bottom, 20)
+                            //.padding(.bottom, 20)
                         AirPlayButtonView()
                             .frame(width: 50, height: 50)
                             .padding(.bottom, 20)
                             .modifier(NeumorphicShadow())
                     }
-                    .padding(.bottom, 5)
+                    .padding(.bottom, 20)
                     .navigationBarHidden(true)
                 }
                 .onAppear {
@@ -80,7 +80,7 @@ struct PlayerSheetView: View {
                     Image(systemName: "chevron.left")
                     Text("Back")
                 }
-                .padding(.top, 15)
+                //.padding(.top, 25)
                 .foregroundColor(Color.primary)
             }
             Spacer()
@@ -212,8 +212,8 @@ struct PlayerSheetView: View {
                 }
 
             }
-            .padding(.top, 20)
-            .padding(.bottom, 20)
+            .padding(.top, 5)
+            .padding(.bottom, 5)
         }
         .fullScreenCover(isPresented: $showingLyrics) {
             if let lyrics = shazamViewModel.shazamMedia.lyrics, !lyrics.isEmpty {
