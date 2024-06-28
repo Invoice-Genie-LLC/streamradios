@@ -44,6 +44,7 @@ struct PlayerSheetView: View {
                             .padding(.bottom, 20)
                             .modifier(NeumorphicShadow())
                     }
+                    .padding(.bottom, 5)
                     .navigationBarHidden(true)
                 }
                 .onAppear {
@@ -85,6 +86,7 @@ struct PlayerSheetView: View {
             Spacer()
         }
         .padding()
+        .padding(.top, 25)
         .modifier(NeumorphicShadow())
     }
     
