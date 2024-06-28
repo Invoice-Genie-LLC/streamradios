@@ -37,6 +37,10 @@ struct PlayerSheetView: View {
                         backButton
                         contentView
                         Spacer()
+                        SoundVisualizerView()
+                            .frame(height: 10)
+                            .padding(.top, 10)
+                            .padding(.bottom, 20)
                         PlayerView()
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
@@ -44,8 +48,7 @@ struct PlayerSheetView: View {
                             //.padding(.bottom, 20)
                         AirPlayButtonView()
                             .frame(width: 50, height: 50)
-                            .padding(.bottom, 20)
-                            .modifier(NeumorphicShadow())
+                            .padding(.bottom, 10)
                     }
                     .padding(.bottom, 20)
                     .navigationBarHidden(true)
@@ -138,7 +141,6 @@ struct PlayerSheetView: View {
                             .frame(width: 30, height: 30)
                             .aspectRatio(contentMode: .fit)
                             .foregroundColor(.gray)
-                            .modifier(NeumorphicShadow())
                     }
                     
                     Text(currentStation.name)
@@ -159,7 +161,7 @@ struct PlayerSheetView: View {
                         RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.5))
                     }
                 }
-                .frame(width: 380, height: 370)
+                .frame(width: 380, height: 340)
                 .cornerRadius(10)
                 .modifier(NeumorphicShadow())
             } else {
