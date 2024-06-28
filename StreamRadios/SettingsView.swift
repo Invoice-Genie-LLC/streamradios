@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("isDarkMode") private var isDarkMode = false
     
     @Environment(\.presentationMode) var presentationMode
+    @State private var isImportExportViewPresented = false
     
     var body: some View {
         Form {
@@ -20,6 +21,19 @@ struct SettingsView: View {
             
             Section(header: Text("Display Settings")) {
                 Toggle("Dark Mode", isOn: $isDarkMode)
+            }
+            
+            Section(header: Text("Data Management")) {
+                Button(action: {
+                    isImportExportViewPresented.toggle()
+                }) {
+                    Text("Import/Export Stations")
+                        .foregroundColor(.primary)
+                }
+                .sheet(isPresented: $isImportExportViewPresented) {
+                    ImportExportView()
+                        .environmentObject(RadioStationViewModel())
+                }
             }
         }
         .navigationTitle("Settings")
@@ -34,7 +48,7 @@ struct SettingsView: View {
                         Image(systemName: "chevron.left")
                             .foregroundColor(.primary)
                         Text("Back")
-                            .foregroundColor(.primary) 
+                            .foregroundColor(.primary)
                     }
                 }
             }

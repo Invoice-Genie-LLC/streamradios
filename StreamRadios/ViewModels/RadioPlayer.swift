@@ -208,13 +208,10 @@ class RadioPlayer: NSObject, ObservableObject {
         player = AVPlayer(playerItem: playerItem)
         player?.automaticallyWaitsToMinimizeStalling = true
         userDefaults?.set(url, forKey: "lastStationURL")
-        
-        // Set the bitrate based on network conditions
-        updateBitrateBasedOnNetwork()
-        
+
         // Cancel previous observer if it exists
         statusCancellable?.cancel()
-        
+
         // Set up observers
         statusCancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
@@ -224,58 +221,64 @@ class RadioPlayer: NSObject, ObservableObject {
                 print("Set station URL: isPlaying = \(self.isPlaying), isBuffering = \(self.isBuffering)")
                 self.updateNowPlayingInfo()
             }
-        addMetadataOutput()
+        
+        // Set the bitrate and add metadata output
+        updateBitrateBasedOnNetwork()
     }
     
     private func updateBitrateBasedOnNetwork() {
-            let path = monitor.currentPath
+        let path = monitor.currentPath
 
-            DispatchQueue.main.async {
-                print("Network status: \(path.status == .satisfied ? "Connected" : "Disconnected")")
-                
-                if path.usesInterfaceType(.cellular) {
-                    print("Network type: Cellular")
-                    
-                    self.performReachabilityCheck { isReachable in
-                        if !isReachable {
-                            print("Cellular network is not reachable. Setting bitrate to 64 kbps.")
-                            self.setBitrate(64000) // 64 kbps
-                        } else if path.isConstrained {
-                            print("Network is constrained. Setting bitrate to 64 kbps.")
-                            self.setBitrate(64000) // 64 kbps
-                        } else if path.isExpensive {
-                            print("Network is expensive. Setting bitrate to 96 kbps.")
-                            self.setBitrate(96000) // 96 kbps
-                        } else {
-                            print("Normal cellular network. Setting bitrate to 128 kbps.")
-                            self.setBitrate(128000) // 128 kbps
-                        }
+        DispatchQueue.main.async {
+            print("Network status: \(path.status == .satisfied ? "Connected" : "Disconnected")")
+
+            if path.usesInterfaceType(.cellular) {
+                print("Network type: Cellular")
+
+                self.performReachabilityCheck { isReachable in
+                    if !isReachable {
+                        print("Cellular network is not reachable. Setting bitrate to 64 kbps.")
+                        self.setBitrate(64000) // 64 kbps
+                    } else if path.isConstrained {
+                        print("Network is constrained. Setting bitrate to 64 kbps.")
+                        self.setBitrate(64000) // 64 kbps
+                    } else if path.isExpensive {
+                        print("Network is expensive. Setting bitrate to 96 kbps.")
+                        self.setBitrate(96000) // 96 kbps
+                    } else {
+                        print("Normal cellular network. Setting bitrate to 128 kbps.")
+                        self.setBitrate(128000) // 128 kbps
                     }
-                } else if path.usesInterfaceType(.wifi) {
-                    print("Network type: Wi-Fi. Setting bitrate to 256 kbps.")
-                    self.setBitrate(256000) // 256 kbps
-                } else {
-                    print("Unknown network type. Setting bitrate to 128 kbps.")
-                    self.setBitrate(128000) // 128 kbps
                 }
-            }
-        }
-
-    private func setBitrate(_ bitrate: Double) {
-            guard let playerItem = player?.currentItem else { return }
-            let currentBitrate = playerItem.preferredPeakBitRate
-            print("Current bitrate: \(currentBitrate), New bitrate: \(bitrate)")
-            if currentBitrate != bitrate {
-                playerItem.preferredPeakBitRate = bitrate
-                let bitrateMessage = "Playing at \(bitrate / 1000) kbps"
-                bitrateSubject.send(bitrateMessage)
-                print("Bitrate updated to \(bitrate)")
-                self.retryStream()
+            } else if path.usesInterfaceType(.wifi) {
+                print("Network type: Wi-Fi. Setting bitrate to 256 kbps.")
+                self.setBitrate(256000) // 256 kbps
             } else {
-                print("Bitrate remains unchanged at \(bitrate)")
+                print("Unknown network type. Setting bitrate to 128 kbps.")
+                self.setBitrate(128000) // 128 kbps
             }
         }
+    }
+    
+    private func setBitrate(_ bitrate: Double) {
+        guard let playerItem = player?.currentItem else { return }
+        let currentBitrate = playerItem.preferredPeakBitRate
+        print("Current bitrate: \(currentBitrate), New bitrate: \(bitrate)")
+        
+        if currentBitrate != bitrate {
+            playerItem.preferredPeakBitRate = bitrate
+            let bitrateMessage = "Playing at \(bitrate / 1000) kbps"
+            bitrateSubject.send(bitrateMessage)
+            print("Bitrate updated to \(bitrate)")
+            self.retryStream()
+        } else {
+            print("Bitrate remains unchanged at \(bitrate)")
+        }
 
+        // Ensure metadata output is added
+        addMetadataOutput()
+    }
+    
         private func performReachabilityCheck(completion: @escaping (Bool) -> Void) {
             reachability = try? Reachability()
 
@@ -301,9 +304,14 @@ class RadioPlayer: NSObject, ObservableObject {
         }
 
     private func addMetadataOutput() {
+        guard let currentItem = player?.currentItem else {
+            print("No current item found in player.")
+            return
+        }
         let metadataOutput = AVPlayerItemMetadataOutput()
         metadataOutput.setDelegate(self, queue: DispatchQueue.main)
-        player?.currentItem?.add(metadataOutput)
+        currentItem.add(metadataOutput)
+        print("Metadata output added to player item.")
     }
     
     func playPause() {
@@ -494,19 +502,15 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
     func metadataOutput(_ output: AVPlayerItemMetadataOutput, didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup], from playerItemTrack: AVPlayerItemTrack?) {
         for group in groups {
             for item in group.items {
-                if item.commonKey?.rawValue == "title" {
+                if let commonKey = item.commonKey, commonKey.rawValue == "title" {
                     item.loadValuesAsynchronously(forKeys: ["stringValue"]) { [weak self] in
                         guard let self = self else { return }
                         DispatchQueue.main.async {
                             if let stringValue = item.stringValue, !stringValue.isEmpty {
-                                // Only update metadata if the station has not changed
-                                if self.currentStationIndex == self.currentStationIndex {
-                                    self.metadata = stringValue
-                                    self.updateNowPlayingInfo()
-                                    self.updateWidget()
-                                }
+                                self.metadata = stringValue
+                                self.updateNowPlayingInfo()
+                                self.updateWidget()
                             } else if self.metadata == nil {
-                                // Schedule default message after a delay if no metadata is received
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                     if self.metadata == nil || self.metadata?.isEmpty == true {
                                         self.metadata = "No song or album title available"
