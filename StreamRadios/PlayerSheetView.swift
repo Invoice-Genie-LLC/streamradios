@@ -119,6 +119,15 @@ struct PlayerSheetView: View {
     
     private var shazamContent: some View {
         VStack {
+            if let currentStationIndex = radioPlayer.currentStationIndex,
+               let currentStation = viewModel.stations[safe: currentStationIndex] {
+                Text(currentStation.name)
+                    .font(.title)
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 10)
+            }
+
             if let url = shazamViewModel.shazamMedia.albumArtURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
@@ -137,28 +146,26 @@ struct PlayerSheetView: View {
                     .cornerRadius(10)
                     .modifier(NeumorphicShadow())
             }
-            
+
             GeometryReader { geometry in
                 Text(shazamViewModel.shazamMedia.title ?? "Title")
-                                .font(.title)
-                                .fontWeight(.semibold)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(nil)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .fixedSize(horizontal: false, vertical: true)
-                    
+                    .font(.title)
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(nil)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
             }.padding(.bottom, 50)
             .frame(maxWidth: .infinity)
             .fixedSize(horizontal: false, vertical: true)
 
-            
             Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
                 .font(.title2)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
                 .padding(.top, 20)
-            
+
             HStack(spacing: 20) {
                 Button(action: {
                     if isShazaming {
@@ -177,7 +184,7 @@ struct PlayerSheetView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
                 }
-                
+
                 Button(action: {
                     showingLyrics.toggle()
                     if shazamViewModel.shazamMedia.lyrics == nil {
@@ -201,7 +208,7 @@ struct PlayerSheetView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
                 }
-                
+
             }
             .padding(.top, 20)
             .padding(.bottom, 20)
@@ -228,7 +235,7 @@ struct PlayerSheetView: View {
             }
         }
     }
-    
+
     private var stationContent: some View {
         VStack {
             StationDetails()

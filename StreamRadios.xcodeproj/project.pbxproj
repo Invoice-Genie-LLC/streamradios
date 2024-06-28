@@ -534,10 +534,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need access to your microphone to identify music with Shazam.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "We need access to your documents folder to import and export playlists.";
+				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "We need access to your files to import and export playlists.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need access to your microphone to identify songs using Shazam.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to import and export playlists.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -568,10 +572,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need access to your microphone to identify music with Shazam.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "We need access to your documents folder to import and export playlists.";
+				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "We need access to your files to import and export playlists.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need access to your microphone to identify songs using Shazam.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to import and export playlists.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
