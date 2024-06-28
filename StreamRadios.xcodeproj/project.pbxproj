@@ -33,6 +33,7 @@
 		775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04562C2A969F00E99061 /* FeatureSwitch.swift */; };
 		775D04592C2B20BE00E99061 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04582C2B20BE00E99061 /* EditStationView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
+		7794EFE12C2E1ADC00BC231F /* ImportExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7794EFE02C2E1ADC00BC231F /* ImportExportView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */; };
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
@@ -96,6 +97,7 @@
 		775D04562C2A969F00E99061 /* FeatureSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSwitch.swift; sourceTree = "<group>"; };
 		775D04582C2B20BE00E99061 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
+		7794EFE02C2E1ADC00BC231F /* ImportExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportExportView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
+				7794EFE02C2E1ADC00BC231F /* ImportExportView.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
 				779352212C1A118A008F8416 /* AlbumArtView.swift */,
@@ -356,6 +359,7 @@
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
+				7794EFE12C2E1ADC00BC231F /* ImportExportView.swift in Sources */,
 				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
 				775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */,
 				77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */,

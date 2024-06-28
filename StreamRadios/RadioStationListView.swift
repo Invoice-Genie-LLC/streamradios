@@ -21,8 +21,8 @@ struct RadioStationListView: View {
     @Binding var isEditingStation: Bool
     @State private var selectedStation: RadioStation?
     @State private var draggingStation: RadioStation?
+    //@State private var originalMetadata: String?
     @State private var originalMetadata: String?
-    @State private var bitrateMessage: String = "Playing at high bitrate: 256 kbps"
     @Binding var selectedStationForEdit: RadioStation?
 
     var body: some View {
