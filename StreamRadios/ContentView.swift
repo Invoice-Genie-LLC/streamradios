@@ -82,38 +82,11 @@ struct ContentView: View {
                                 .padding(.leading, 10) // Add padding to push everything to the far left
                             }
                         }
+                        PlayerView()
+                            .environmentObject(radioPlayer)
+                            .environmentObject(viewModel)
+                            .padding(.top, 8)
                         
-                        HStack(spacing: 30) {
-                            Button(action: {
-                                radioPlayer.previousStation(from: viewModel.stations)
-                            }) {
-                                Image(systemName: "backward.fill")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.primary) // Adjusted to primary color
-                            }
-                            
-                            ZStack {
-                                if radioPlayer.isBuffering {
-                                    CircularProgressView()
-                                }
-                                Button(action: {
-                                    radioPlayer.playPause()
-                                }) {
-                                    Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                        .font(.system(size: 50))
-                                        .foregroundColor(.primary) // Adjusted to primary color
-                                }
-                            }
-                            
-                            Button(action: {
-                                radioPlayer.nextStation(from: viewModel.stations)
-                            }) {
-                                Image(systemName: "forward.fill")
-                                    .font(.largeTitle)
-                                    .foregroundColor(.primary) // Adjusted to primary color
-                            }
-                        }
-                        .padding(.top, 8) // Add some space between text and buttons
                     }
                     .frame(width: 355)
                     .padding()

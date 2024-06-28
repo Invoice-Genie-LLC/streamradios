@@ -37,7 +37,10 @@ struct PlayerSheetView: View {
                         backButton
                         contentView
                         Spacer()
-                        playbackControls
+                        PlayerView()
+                            .environmentObject(radioPlayer)
+                            .environmentObject(viewModel)
+                            .padding(.top, 8)
                             //.padding(.bottom, 20)
                         AirPlayButtonView()
                             .frame(width: 50, height: 50)
@@ -123,11 +126,29 @@ struct PlayerSheetView: View {
         VStack {
             if let currentStationIndex = radioPlayer.currentStationIndex,
                let currentStation = viewModel.stations[safe: currentStationIndex] {
-                Text(currentStation.name)
-                    .font(.title)
-                    .fontWeight(.semibold)
-                    .multilineTextAlignment(.center)
-                    .padding(.bottom, 10)
+                HStack {
+                    if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .frame(width: 30, height: 30)
+                            .cornerRadius(5)
+                            .modifier(NeumorphicShadow())
+                    } else {
+                        Image(systemName: "radio")
+                            .resizable()
+                            .frame(width: 30, height: 30)
+                            .aspectRatio(contentMode: .fit)
+                            .foregroundColor(.gray)
+                            .modifier(NeumorphicShadow())
+                    }
+                    
+                    Text(currentStation.name)
+                        .font(.title)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
+                        .padding(.leading, 5)
+                }
+                .padding(.bottom, 10)
             }
 
             if let url = shazamViewModel.shazamMedia.albumArtURL {
