@@ -27,43 +27,46 @@ struct PlayerSheetView: View {
     @State private var pulse = false
     
     var body: some View {
-            NavigationView {
-                ZStack {
-                    // Adjusted background with subtle color for light theme
-                    backgroundView
-                        .edgesIgnoringSafeArea(.all)
-                    
-                    VStack {
-                        backButton
-                        contentView
-                        Spacer()
+        NavigationView {
+            ZStack {
+                // Adjusted background with subtle color for light theme
+                backgroundView
+                    .edgesIgnoringSafeArea(.all)
+                
+                VStack {
+                    backButton
+                    contentView
+                    Spacer()
+                    /*
+                    if radioPlayer.isPlaying {
                         SoundVisualizerView()
                             .frame(height: 10)
                             .padding(.top, 10)
                             .padding(.bottom, 20)
-                        PlayerView()
-                            .environmentObject(radioPlayer)
-                            .environmentObject(viewModel)
-                            .padding(.top, 8)
-                            //.padding(.bottom, 20)
-                        AirPlayButtonView()
-                            .frame(width: 50, height: 50)
-                            .padding(.bottom, 10)
                     }
-                    .padding(.bottom, 20)
-                    .navigationBarHidden(true)
+                     */
+                    PlayerView()
+                        .environmentObject(radioPlayer)
+                        .environmentObject(viewModel)
+                        .padding(.top, 8)
+                    AirPlayButtonView()
+                        .frame(width: 50, height: 50)
+                        .padding(.bottom, 10)
                 }
-                .onAppear {
-                    startPulsing()
-                }
-                .onDisappear {
-                    if isShazaming {
-                        shazamViewModel.stopListening()
-                        isShazaming = false
-                    }
+                .padding(.bottom, 20)
+                .navigationBarHidden(true)
+            }
+            .onAppear {
+                startPulsing()
+            }
+            .onDisappear {
+                if isShazaming {
+                    shazamViewModel.stopListening()
+                    isShazaming = false
                 }
             }
         }
+    }
     
     private func startPulsing() {
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
@@ -86,7 +89,6 @@ struct PlayerSheetView: View {
                     Image(systemName: "chevron.left")
                     Text("Back")
                 }
-                //.padding(.top, 25)
                 .foregroundColor(Color.primary)
             }
             Spacer()
@@ -108,13 +110,13 @@ struct PlayerSheetView: View {
     }
     
     @ViewBuilder
-        private var backgroundView: some View {
-            if colorScheme == .light {
-                Color(.systemGray4) // Adjust the color as per your preference
-            } else {
-                Color.clear // Transparent background for dark mode
-            }
+    private var backgroundView: some View {
+        if colorScheme == .light {
+            Color(.systemGray4) // Adjust the color as per your preference
+        } else {
+            Color.clear // Transparent background for dark mode
         }
+    }
     
     @ViewBuilder
     private var contentView: some View {
@@ -151,8 +153,8 @@ struct PlayerSheetView: View {
                 }
                 .padding(.bottom, 10)
             }
-
-            if let url = shazamViewModel.shazamMedia.albumArtURL {
+            
+            if let url = shazamViewModel.shazamMedia.albumArtURL, let title = shazamViewModel.shazamMedia.title, let artist = shazamViewModel.shazamMedia.artistName {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
@@ -164,13 +166,23 @@ struct PlayerSheetView: View {
                 .frame(width: 380, height: 340)
                 .cornerRadius(10)
                 .modifier(NeumorphicShadow())
+                .onTapGesture {
+                    openAppleMusic(title: title, artist: artist)
+                    AppleMusicManager.shared.requestAppleMusicAuthorization { granted in
+                        if granted {
+                            openAppleMusic(title: title, artist: artist)
+                        } else {
+                            print("Apple Music authorization denied or not determined")
+                        }
+                    }
+                }
             } else {
                 RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
                     .frame(width: 300, height: 300)
                     .cornerRadius(10)
                     .modifier(NeumorphicShadow())
             }
-
+            
             GeometryReader { geometry in
                 Text(shazamViewModel.shazamMedia.title ?? "Title")
                     .font(.title)
@@ -181,15 +193,15 @@ struct PlayerSheetView: View {
                     .frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true)
             }.padding(.bottom, 50)
-            .frame(maxWidth: .infinity)
-            .fixedSize(horizontal: false, vertical: true)
-
+                .frame(maxWidth: .infinity)
+                .fixedSize(horizontal: false, vertical: true)
+            
             Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
                 .font(.title2)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
                 .padding(.top, 20)
-
+            
             HStack(spacing: 20) {
                 Button(action: {
                     if isShazaming {
@@ -208,7 +220,7 @@ struct PlayerSheetView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
                 }
-
+                
                 Button(action: {
                     showingLyrics.toggle()
                     if shazamViewModel.shazamMedia.lyrics == nil {
@@ -232,7 +244,7 @@ struct PlayerSheetView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
                 }
-
+                
             }
             .padding(.top, 5)
             .padding(.bottom, 5)
@@ -259,7 +271,32 @@ struct PlayerSheetView: View {
             }
         }
     }
+    
+    private func openAppleMusic(title: String, artist: String) {
+        let searchQuery = "\(title) \(artist)"
+        print("Search Query: \(searchQuery)")
+        if let encodedQuery = searchQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            let urlString = "https://music.apple.com/us/search?term=\(encodedQuery)&media=music&entity=song"
+            print("Apple Music URL: \(urlString)")
+            if let url = URL(string: urlString) {
+                DispatchQueue.main.async {
+                    UIApplication.shared.open(url, options: [:], completionHandler: { (success) in
+                        if success {
+                            print("Opened URL successfully")
+                        } else {
+                            print("Failed to open URL: \(urlString)")
+                        }
+                    })
+                }
+            } else {
+                print("Invalid URL: \(urlString)")
+            }
+        } else {
+            print("Failed to encode query: \(searchQuery)")
+        }
+    }
 
+    
     private var stationContent: some View {
         VStack {
             StationDetails()
@@ -284,49 +321,41 @@ struct PlayerSheetView: View {
                     }
                 }
                 .buttonStyle(PlainButtonStyle()) // Ensure no additional styling is applied
-                
-                if let bitrate = radioPlayer.currentBitrate {
-                    Text("Playing at \(bitrate) kbps")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 50)
-                        .padding(.bottom, 15)
-                }
             }
         }
     }
     
     private var playbackControls: some View {
-            HStack(spacing: 16) {
-                Button(action: {
-                    radioPlayer.previousStation(from: viewModel.stations)
-                }) {
-                    Image(systemName: "backward.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(.primary)
-                        .padding()
-                }
-                
-                Button(action: {
-                    radioPlayer.playPause()
-                }) {
-                    Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(.primary)
-                        .padding()
-                }
-                
-                Button(action: {
-                    radioPlayer.nextStation(from: viewModel.stations)
-                }) {
-                    Image(systemName: "forward.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(.primary)
-                        .padding()
-                }
+        HStack(spacing: 16) {
+            Button(action: {
+                radioPlayer.previousStation(from: viewModel.stations)
+            }) {
+                Image(systemName: "backward.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.primary)
+                    .padding()
+            }
+            
+            Button(action: {
+                radioPlayer.playPause()
+            }) {
+                Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.primary)
+                    .padding()
+            }
+            
+            Button(action: {
+                radioPlayer.nextStation(from: viewModel.stations)
+            }) {
+                Image(systemName: "forward.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.primary)
+                    .padding()
             }
         }
-
+    }
+    
 }
 
 struct StationDetails: View {

@@ -41,6 +41,7 @@
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
+		77D464442C2F25CE00E509C6 /* AppleMusicManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77D464432C2F25CE00E509C6 /* AppleMusicManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,6 +107,7 @@
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
+		77D464432C2F25CE00E509C6 /* AppleMusicManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -167,6 +169,7 @@
 				775D04372C28E89300E99061 /* LyricsView.swift */,
 				7794EFE02C2E1ADC00BC231F /* ImportExportView.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
+				77D464432C2F25CE00E509C6 /* AppleMusicManager.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
 				778F746F2C2F13CE00AB81CD /* PlayerView.swift */,
 				779352212C1A118A008F8416 /* AlbumArtView.swift */,
@@ -377,6 +380,7 @@
 				778F74722C2F197300AB81CD /* SoundVisualizerView.swift in Sources */,
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
+				77D464442C2F25CE00E509C6 /* AppleMusicManager.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
@@ -534,6 +538,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
@@ -542,9 +547,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "This app requires access to your Apple Music library to fetch and play songs.";
 				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "We need access to your documents folder to import and export playlists.";
 				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "We need access to your files to import and export playlists.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need access to your microphone to identify songs using Shazam.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to the microphone to recognize songs.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to import and export playlists.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -559,6 +565,7 @@
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -572,6 +579,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
@@ -580,9 +588,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "This app requires access to your Apple Music library to fetch and play songs.";
 				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "We need access to your documents folder to import and export playlists.";
 				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "We need access to your files to import and export playlists.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We need access to your microphone to identify songs using Shazam.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to the microphone to recognize songs.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to import and export playlists.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -597,6 +606,7 @@
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

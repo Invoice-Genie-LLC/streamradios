@@ -19,17 +19,17 @@ struct RadioStationListView: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @Binding var isEditing: Bool
     @Binding var isEditingStation: Bool
-    @State private var selectedStation: RadioStation?
-    @State private var draggingStation: RadioStation?
-    //@State private var originalMetadata: String?
-    @State private var originalMetadata: String?
     @Binding var selectedStationForEdit: RadioStation?
+    @Binding var selectedTab: ContentView.Tab
+    
+    @State private var draggingStation: RadioStation?
+    @State private var originalMetadata: String?
 
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
                 LazyVStack {
-                    ForEach(viewModel.stations) { station in
+                    ForEach(currentStations) { station in
                         HStack {
                             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                                 Image(uiImage: image)
@@ -75,6 +75,7 @@ struct RadioStationListView: View {
                             if !isEditing {
                                 Button(action: {
                                     if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                                        viewModel.updateLastPlayed(for: viewModel.stations[index])
                                         radioPlayer.playStation(at: index, from: viewModel.stations)
                                     }
                                 }) {
@@ -83,16 +84,23 @@ struct RadioStationListView: View {
                                         .foregroundColor(.primary)
                                         .accessibilityIdentifier("playButton-\(station.id)")
                                 }
+                                Button(action: {
+                                    viewModel.toggleFavorite(for: station)
+                                }) {
+                                    Image(systemName: station.isFavorite ? "heart.fill" : "heart")
+                                        .font(.title)
+                                        .foregroundColor(station.isFavorite ? .red : .primary)
+                                }
                             } else {
                                 Image(systemName: "line.horizontal.3")
                                     .font(.title)
                                     .foregroundColor(.primary)
                                     .padding(.trailing, 10)
                                     .onDrag {
-                                        UIDevice.playHapticFeedback() // Provide haptic feedback
+                                        UIDevice.playHapticFeedback()
                                         self.draggingStation = station
                                         self.originalMetadata = radioPlayer.metadata
-                                        radioPlayer.metadata = nil // Reset metadata
+                                        radioPlayer.metadata = nil
                                         return NSItemProvider(object: String(station.id.uuidString) as NSString)
                                     }
                                     .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
@@ -102,7 +110,7 @@ struct RadioStationListView: View {
                         .background(self.draggingStation?.id == station.id ? Color.gray.opacity(0.2) : Color(UIColor.systemGray5))
                         .cornerRadius(10)
                         .shadow(radius: 4)
-                        .contentShape(Rectangle()) // Make entire row tappable
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             if isEditing {
                                 selectedStationForEdit = station
@@ -134,40 +142,63 @@ struct RadioStationListView: View {
                             }
                         }
                         .onDrag {
-                            UIDevice.playHapticFeedback() // Provide haptic feedback
+                            UIDevice.playHapticFeedback()
                             self.draggingStation = station
                             self.originalMetadata = radioPlayer.metadata
-                            radioPlayer.metadata = nil // Reset metadata
+                            radioPlayer.metadata = nil
                             return NSItemProvider(object: String(station.id.uuidString) as NSString)
                         }
                         .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
                     }
                 }
-                .padding(.top, 10) // Add padding at the top
+                .padding(.top, 10)
                 .padding(.vertical, 10)
             }
         }
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $isEditingStation, onDismiss: {
-                   selectedStation = nil // Clear selectedStation when the sheet is dismissed
-               }) {
-                   if let selectedStation = selectedStation {
-                       AddStationView(station: selectedStation, isPresented: $isEditingStation)
-                           .environmentObject(viewModel)
-                   }
-               }
+            selectedStationForEdit = nil
+        }) {
+            if let selectedStation = selectedStationForEdit {
+                AddStationView(station: selectedStation, isPresented: $isEditingStation)
+                    .environmentObject(viewModel)
+            }
+        }
         .onAppear {
             NotificationCenter.default.addObserver(forName: .NetworkReconnectNotification, object: nil, queue: .main) { _ in
                 if let index = radioPlayer.currentStationIndex {
                     radioPlayer.playStation(at: index, from: viewModel.stations)
                 }
             }
-            print("RadioStationListView appeared, isEditing: \(isEditing)")
         }
         .onDisappear {
             NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
         }
     }
+
+    private var currentStations: [RadioStation] {
+        switch selectedTab {
+        case .recent:
+            return viewModel.recentStations()
+        case .favorites:
+            return viewModel.favoriteStations()
+        case .all:
+            return viewModel.stations
+        }
+    }
+    
+    private var stationsToDisplay: [RadioStation] {
+        switch selectedTab {
+        case .recent:
+            return viewModel.recentStations()
+        case .favorites:  // Corrected the case to match the Tab enum
+            return viewModel.favoriteStations()
+        case .all:  // Added the missing case to make the switch exhaustive
+            return viewModel.stations
+        }
+    }
+
+
 
     private func deleteStation(_ station: RadioStation) {
         if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
@@ -245,8 +276,10 @@ struct RadioStationListView_Previews: PreviewProvider {
     @StateObject static var radioPlayer = RadioPlayer()
 
     static var previews: some View {
-        RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false), selectedStationForEdit: .constant(nil))
+        RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false),
+                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent))
             .environmentObject(viewModel)
             .environmentObject(radioPlayer)
     }
 }
+

@@ -33,6 +33,7 @@ class ShazamViewModel: NSObject, ObservableObject {
     override init() {
         super.init()
         session.delegate = self
+        NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance())
     }
     
     public func startOrEndListening() {
@@ -43,7 +44,7 @@ class ShazamViewModel: NSObject, ObservableObject {
             return
         }
 
-        AVAudioApplication.requestRecordPermission { [weak self] granted in
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             guard let self = self, granted else {
                 DispatchQueue.main.async {
                     print("Microphone permission is denied")
@@ -109,6 +110,26 @@ class ShazamViewModel: NSObject, ObservableObject {
         }
     }
 
+    @objc private func handleInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let interruptionType = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+        
+        switch interruptionType {
+        case .began:
+            // Interruption began, take appropriate actions
+            print("Audio interruption began")
+        case .ended:
+            // Interruption ended, take appropriate actions
+            print("Audio interruption ended")
+            try? AVAudioSession.sharedInstance().setActive(true)
+            setupAudioEngine()
+        @unknown default:
+            break
+        }
+    }
 }
 
 extension ShazamViewModel: SHSessionDelegate {
@@ -133,7 +154,6 @@ extension ShazamViewModel: SHSessionDelegate {
                         self.shazamMedia = media
                     }
                 }
-                
             }
         }
     }
