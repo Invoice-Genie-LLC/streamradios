@@ -17,16 +17,16 @@ struct RadioStreamApp: App {
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel()
     
-    // Perform initial setup in an initializer
     init() {
         radioPlayer.setViewModel(viewModel)
         
         // Fetch stations from CloudKit on new installations
         if UserDefaults.standard.bool(forKey: "HasLaunchedBefore") == false {
-            DataStore.shared.fetchRadioStations { [weak viewModel] stations, error in // Capture viewModel weakly if needed or just ensure it doesn't cause a strong reference cycle.
+            DataStore.shared.fetchRadioStations { [weak viewModel] stations, error in
                 DispatchQueue.main.async {
                     if let stations = stations {
                         viewModel?.stations = stations
+                        viewModel?.saveStationsToFile() // Save fetched stations to file
                         print("Fetched \(stations.count) stations from CloudKit and populated the list.")
                     } else if let error = error {
                         print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
@@ -34,12 +34,12 @@ struct RadioStreamApp: App {
                 }
             }
             UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
+        } else {
+            viewModel.loadStations() // Load stations from file if the app has been launched before
         }
         
-        // Set up remote control and start receiving remote control events
         UIApplication.shared.beginReceivingRemoteControlEvents()
         radioPlayer.setupRemoteCommandCenter()
-        
     }
     
     var body: some Scene {
@@ -51,6 +51,7 @@ struct RadioStreamApp: App {
         }
     }
 }
+
 func updateWidget() {
     let radioPlayer = RadioPlayer.shared
     let viewModel = RadioStationViewModel()

@@ -1,7 +1,7 @@
-//  DataStore.swift
-//  StreamRadios
+// DataStore.swift
+// StreamRadios
 //
-//  Created by Kley Sulo on 6/26/24.
+// Created by Kley Sulo on 6/26/24.
 
 import UIKit
 import CloudKit
@@ -9,8 +9,7 @@ import CloudKit
 class DataStore {
     static let shared = DataStore()
     private let privateDatabase = CKContainer.default().privateCloudDatabase
-    
-    // Save image to file system and return file path
+
     func saveImageToFileSystem(image: UIImage) -> String? {
         guard let data = image.jpegData(compressionQuality: 0.5) else { return nil }
         let fileName = UUID().uuidString + ".jpg"
@@ -23,14 +22,12 @@ class DataStore {
             return nil
         }
     }
-    
-    // Load image from file system by file path
+
     func loadImageFromFileSystem(fileName: String) -> UIImage? {
         let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
         return UIImage(contentsOfFile: fileURL.path)
     }
-    
-    // Helper function to create a CKAsset from a UIImage
+
     private func createAsset(from image: UIImage) -> CKAsset? {
         let fileURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
         if let imageData = image.jpegData(compressionQuality: 0.8) {
@@ -44,20 +41,20 @@ class DataStore {
         }
         return nil
     }
-    
-    // Save a new radio station to CloudKit
+
     func saveNewStationToCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
         let iconFileName = iconImage.flatMap { saveImageToFileSystem(image: $0) }
         let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id.uuidString))
         record.setValue(station.name, forKey: "name")
         record.setValue(station.url, forKey: "url")
-        
+        record.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
+
         if let iconFileName = iconFileName, let image = loadImageFromFileSystem(fileName: iconFileName) {
             if let asset = createAsset(from: image) {
                 record.setValue(asset, forKey: "iconData")
             }
         }
-        
+
         privateDatabase.save(record) { savedRecord, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -70,12 +67,11 @@ class DataStore {
             }
         }
     }
-    
-    // Fetch all radio stations from CloudKit
+
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
-        let predicate = NSPredicate(value: true)  // Fetches all records
+        let predicate = NSPredicate(value: true)
         let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
-        
+
         privateDatabase.perform(query, inZoneWith: nil) { records, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -88,15 +84,16 @@ class DataStore {
                             return nil
                         }
                         let iconData = self.decodeIconData(record: record)
+                        let isFavorite = (record["isFavorite"] as? String) == "true"  // Convert to Bool
                         let id = UUID(uuidString: record.recordID.recordName) ?? UUID()
-                        return RadioStation(id: id, name: name, url: url, iconData: iconData)
+                        return RadioStation(id: id, name: name, url: url, iconData: iconData, isFavorite: isFavorite)
                     }
                     completion(stations, nil)
                 }
             }
         }
     }
-    
+
     private func decodeIconData(record: CKRecord) -> String? {
         if let asset = record["iconData"] as? CKAsset, let data = try? Data(contentsOf: asset.fileURL.unsafelyUnwrapped) {
             return data.base64EncodedString()
@@ -105,7 +102,7 @@ class DataStore {
         }
         return nil
     }
-    
+
     func deleteStationFromCloudKit(station: RadioStation, completion: @escaping (Bool) -> Void) {
         let recordID = CKRecord.ID(recordName: station.id.uuidString)
         privateDatabase.delete(withRecordID: recordID) { recordID, error in
@@ -120,27 +117,21 @@ class DataStore {
             }
         }
     }
-    
-    // Update station in CloudKit
-        func updateStationInCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
-            let recordID = CKRecord.ID(recordName: station.id.uuidString)
-            
-            privateDatabase.fetch(withRecordID: recordID) { fetchedRecord, error in
-                var record: CKRecord
-                if let fetchedRecord = fetchedRecord {
-                    record = fetchedRecord
-                } else {
-                    record = CKRecord(recordType: "streamingRadios", recordID: recordID)
-                }
-                
-                record.setValue(station.name, forKey: "name")
-                record.setValue(station.url, forKey: "url")
-                
+
+    func updateStationInCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
+        let recordID = CKRecord.ID(recordName: station.id.uuidString)
+
+        privateDatabase.fetch(withRecordID: recordID) { fetchedRecord, error in
+            if let fetchedRecord = fetchedRecord {
+                fetchedRecord.setValue(station.name, forKey: "name")
+                fetchedRecord.setValue(station.url, forKey: "url")
+                fetchedRecord.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
+
                 if let iconImage = iconImage, let asset = self.createAsset(from: iconImage) {
-                    record.setValue(asset, forKey: "iconData")
+                    fetchedRecord.setValue(asset, forKey: "iconData")
                 }
-                
-                self.privateDatabase.save(record) { savedRecord, error in
+
+                self.privateDatabase.save(fetchedRecord) { savedRecord, error in
                     DispatchQueue.main.async {
                         if let error = error {
                             print("Error updating record in CloudKit: \(error.localizedDescription)")
@@ -151,5 +142,9 @@ class DataStore {
                         }
                     }
                 }
+            } else {
+                self.saveNewStationToCloudKit(station: station, iconImage: iconImage, completion: completion)
             }
-        }}
+        }
+    }
+}

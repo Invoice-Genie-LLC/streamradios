@@ -198,8 +198,6 @@ struct RadioStationListView: View {
         }
     }
 
-
-
     private func deleteStation(_ station: RadioStation) {
         if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
             // First try to delete from CloudKit
@@ -228,7 +226,6 @@ struct RadioStationListView: View {
             }
         }
     }
-
 }
 
 struct StationDropDelegate: DropDelegate {
@@ -282,4 +279,3 @@ struct RadioStationListView_Previews: PreviewProvider {
             .environmentObject(radioPlayer)
     }
 }
-

@@ -1,8 +1,7 @@
+// RadioStationViewModel.swift
+// StreamRadios
 //
-//  RadioStationViewModel.swift
-//  StreamRadios
-//
-//  Created by Kley Sulo on 6/9/24.
+// Created by Kley Sulo on 6/9/24.
 //
 
 import SwiftUI
@@ -10,65 +9,73 @@ import Combine
 
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
-    
+
     private var fileURL: URL {
-           return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("SavedRadioStations.plist")
-       }
-    
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("SavedRadioStations.plist")
+    }
+
     init() {
         loadStationsFromFileOrFetchNew()
     }
-    
+
     private func loadStationsFromFileOrFetchNew() {
-            if FileManager.default.fileExists(atPath: fileURL.path) {
-                loadStations()
-            } else {
-                // If the file doesn't exist, consider fetching new data from CloudKit or initializing an empty list.
-                fetchStationsAndSave()
-            }
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            loadStations()
+        } else {
+            fetchStationsAndSave()
         }
-    
+    }
+
     private func fetchStationsAndSave() {
-            DataStore.shared.fetchRadioStations { [weak self] stations, error in
-                DispatchQueue.main.async {
-                    if let stations = stations {
-                        self?.stations = stations
-                        self?.saveStationsToFile() // Save fetched stations to file
-                        print("Fetched \(stations.count) stations from CloudKit and saved to file.")
-                    } else if let error = error {
-                        print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
-                    }
+        DataStore.shared.fetchRadioStations { [weak self] stations, error in
+            DispatchQueue.main.async {
+                if let stations = stations {
+                    self?.stations = stations
+                    self?.saveStationsToFile()
+                    print("Fetched \(stations.count) stations from CloudKit and saved to file.")
+                } else if let error = error {
+                    print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
                 }
             }
         }
-    
-    func toggleFavorite(for station: RadioStation) {
-           if let index = stations.firstIndex(of: station) {
-               stations[index].isFavorite.toggle()
-               saveStationsToFile()
-           }
-       }
+    }
 
-    func recentStations() -> [RadioStation] {
-            return stations.sorted(by: { $0.lastPlayed ?? .distantPast > $1.lastPlayed ?? .distantPast }).prefix(10).map { $0 }
-        }
-        
-    func favoriteStations() -> [RadioStation] {
-            return stations.filter { $0.isFavorite }
-        }
-    
-    func updateLastPlayed(for station: RadioStation) {
-            if let index = stations.firstIndex(of: station) {
-                stations[index].lastPlayed = Date()
+    func toggleFavorite(for station: RadioStation) {
+        if let index = stations.firstIndex(of: station) {
+            stations[index].isFavorite.toggle()
+            saveStationsToFile()
+            updateStationInCloudKit(station: stations[index])
+            
+            // Move favorited station to the top of the favorite list
+            if stations[index].isFavorite {
+                let favoritedStation = stations.remove(at: index)
+                stations.insert(favoritedStation, at: 0)
                 saveStationsToFile()
             }
         }
-    
+    }
+
+    func recentStations() -> [RadioStation] {
+        return stations.sorted { ($0.lastPlayed ?? Date.distantPast) > ($1.lastPlayed ?? Date.distantPast) }
+    }
+
+    func favoriteStations() -> [RadioStation] {
+        return stations.filter { $0.isFavorite }
+    }
+
+    func updateLastPlayed(for station: RadioStation) {
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            stations[index].lastPlayed = Date()
+            saveStationsToFile()
+            updateStationInCloudKit(station: stations[index])
+        }
+    }
+
     func addStation(name: String, url: String, iconData: String?) {
         let newStation = RadioStation(name: name, url: url, iconData: iconData)
         stations.append(newStation)
-        saveStationsToFile()  // Save locally to file
-        saveStationToCloud(newStation)  // Also save to CloudKit
+        saveStationsToFile()
+        saveStationToCloud(newStation)
     }
 
     func saveStationsToFile() {
@@ -82,119 +89,89 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func loadStations() {
-            do {
-                let data = try Data(contentsOf: fileURL)
-                let loadedStations = try JSONDecoder().decode([RadioStation].self, from: data)
-                self.stations = loadedStations
-                print("Successfully loaded stations from file.")
-            } catch {
-                print("Failed to load stations from file:", error)
-                self.stations = []  // default to empty if there's a problem loading
-            }
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let loadedStations = try JSONDecoder().decode([RadioStation].self, from: data)
+            self.stations = loadedStations
+            print("Successfully loaded stations from file.")
+        } catch {
+            print("Failed to load stations from file:", error)
+            self.stations = []
         }
-    
-    func saveStationsToFile(stations: [RadioStation]) {
-            let fileManager = FileManager.default
-            let urls = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
-            guard let documentURL = urls.first else { return }
-            let fileURL = documentURL.appendingPathComponent("SavedRadioStations.plist")
+    }
 
-            do {
-                let data = try JSONEncoder().encode(stations)
-                try data.write(to: fileURL)
-            } catch {
-                print("Failed to write stations to file:", error)
-            }
-        }
-
-    func loadStationsFromFile() -> [RadioStation]? {
-            let fileManager = FileManager.default
-            let urls = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
-            guard let documentURL = urls.first else { return nil }
-            let fileURL = documentURL.appendingPathComponent("SavedRadioStations.plist")
-
-            do {
-                let data = try Data(contentsOf: fileURL)
-                let stations = try JSONDecoder().decode([RadioStation].self, from: data)
-                return stations
-            } catch {
-                print("Failed to load stations from file:", error)
-                return nil
-            }
-        }
-    
     func saveStationToCloud(_ station: RadioStation) {
-            // Convert icon data from String (base64) to UIImage.
-            let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
-
-            // Correctly call the method with all expected parameters.
-            DataStore.shared.saveNewStationToCloudKit(station: station, iconImage: iconImage) { success, recordName in
-                DispatchQueue.main.async {
-                    if success {
-                        print("Station saved to CloudKit with record ID:", recordName ?? "Unknown")
-                    } else {
-                        print("Failed to save station to CloudKit.")
-                    }
+        let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
+        DataStore.shared.saveNewStationToCloudKit(station: station, iconImage: iconImage) { success, recordName in
+            DispatchQueue.main.async {
+                if success {
+                    print("Station saved to CloudKit with record ID:", recordName ?? "Unknown")
+                } else {
+                    print("Failed to save station to CloudKit.")
                 }
             }
         }
+    }
 
     func deleteStation(at offsets: IndexSet) {
-            offsets.forEach { index in
-                let station = stations[index]
-                
-                // Delete the station from CloudKit first
-                DataStore.shared.deleteStationFromCloudKit(station: station) { success in
-                    DispatchQueue.main.async {
-                        if success {
-                            print("Station successfully deleted from CloudKit.")
+        offsets.forEach { index in
+            let station = stations[index]
+            DataStore.shared.deleteStationFromCloudKit(station: station) { success in
+                DispatchQueue.main.async {
+                    if success {
+                        print("Station successfully deleted from CloudKit.")
+                        self.stations.remove(at: index)
+                        self.saveStationsToFile()
+                        if let currentStationIndex = RadioPlayer.shared.currentStationIndex, currentStationIndex == index {
+                            RadioPlayer.shared.currentStationIndex = nil
+                            RadioPlayer.shared.isPlaying = false
+                            RadioPlayer.shared.player?.pause()
+                        } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex, currentStationIndex > index {
+                            RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
+                        }
+                        print("Local station data updated after successful CloudKit deletion.")
+                    } else {
+                        print("Failed to delete station from CloudKit.")
+                    }
+                }
+            }
+        }
+    }
 
-                            // If deletion is successful, update local data
-                            self.stations.remove(at: index)
-                            self.saveStationsToFile() // Update file storage after deleting
-                            
-                            // Handle the local player logic
-                            if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
-                               currentStationIndex == index {
-                                RadioPlayer.shared.currentStationIndex = nil
-                                RadioPlayer.shared.isPlaying = false
-                                RadioPlayer.shared.player?.pause()
-                            } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex,
-                                      currentStationIndex > index {
-                                RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
-                            }
-                            
-                            print("Local station data updated after successful CloudKit deletion.")
-                        } else {
-                            print("Failed to delete station from CloudKit.")
-                        }
-                    }
-                }
-            }
-        }
-    
     func updateStation(_ station: RadioStation, name: String, url: String, iconData: String?) {
-            if let index = stations.firstIndex(where: { $0.id == station.id }) {
-                stations[index].name = name
-                stations[index].url = url
-                stations[index].iconData = iconData
-                saveStationsToFile()
-                
-                let iconImage = iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
-                DataStore.shared.updateStationInCloudKit(station: stations[index], iconImage: iconImage) { success, recordName in
-                    DispatchQueue.main.async {
-                        if success {
-                            print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
-                        } else {
-                            print("Failed to update station in CloudKit.")
-                        }
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            stations[index].name = name
+            stations[index].url = url
+            stations[index].iconData = iconData
+            saveStationsToFile()
+            let iconImage = iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
+            DataStore.shared.updateStationInCloudKit(station: stations[index], iconImage: iconImage) { success, recordName in
+                DispatchQueue.main.async {
+                    if success {
+                        print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
+                    } else {
+                        print("Failed to update station in CloudKit.")
                     }
                 }
             }
         }
-    
-    func moveStation(from source: IndexSet, to destination: Int) {
-            stations.move(fromOffsets: source, toOffset: destination)
-            saveStationsToFile() // Save reordered list in file storage
+    }
+
+    func updateStationInCloudKit(station: RadioStation) {
+        let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
+        DataStore.shared.updateStationInCloudKit(station: station, iconImage: iconImage) { success, recordName in
+            DispatchQueue.main.async {
+                if success {
+                    print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
+                } else {
+                    print("Failed to update station in CloudKit.")
+                }
+            }
         }
+    }
+
+    func moveStation(from source: IndexSet, to destination: Int) {
+        stations.move(fromOffsets: source, toOffset: destination)
+        saveStationsToFile()
+    }
 }
