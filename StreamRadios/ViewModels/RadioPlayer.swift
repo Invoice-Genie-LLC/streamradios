@@ -267,7 +267,7 @@ class RadioPlayer: NSObject, ObservableObject {
         
         if currentBitrate != bitrate {
             playerItem.preferredPeakBitRate = bitrate
-            let bitrateMessage = "Playing at \(bitrate / 1000) kbps"
+            let bitrateMessage = "Playing at \(Int(bitrate / 1000)) kbps"
             bitrateSubject.send(bitrateMessage)
             print("Bitrate updated to \(bitrate)")
             self.retryStream()

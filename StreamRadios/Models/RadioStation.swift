@@ -7,9 +7,19 @@
 import Foundation
 
 struct RadioStation: Identifiable, Codable, Equatable {
-    var id: UUID = UUID()
+    var id = UUID()
     var name: String
     var url: String
     var iconData: String?
-}
+    var isFavorite: Bool = false
+    var lastPlayed: Date?  // Add this line to track the most recent plays
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case url
+        case iconData
+        case isFavorite
+        case lastPlayed  // Add this line
+    }
+}
