@@ -166,16 +166,6 @@ struct PlayerSheetView: View {
                 .frame(width: 380, height: 340)
                 .cornerRadius(10)
                 .modifier(NeumorphicShadow())
-                .onTapGesture {
-                    openAppleMusic(title: title, artist: artist)
-                    AppleMusicManager.shared.requestAppleMusicAuthorization { granted in
-                        if granted {
-                            openAppleMusic(title: title, artist: artist)
-                        } else {
-                            print("Apple Music authorization denied or not determined")
-                        }
-                    }
-                }
             } else {
                 RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
                     .frame(width: 300, height: 300)
@@ -271,31 +261,6 @@ struct PlayerSheetView: View {
             }
         }
     }
-    
-    private func openAppleMusic(title: String, artist: String) {
-        let searchQuery = "\(title) \(artist)"
-        print("Search Query: \(searchQuery)")
-        if let encodedQuery = searchQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            let urlString = "https://music.apple.com/us/search?term=\(encodedQuery)&media=music&entity=song"
-            print("Apple Music URL: \(urlString)")
-            if let url = URL(string: urlString) {
-                DispatchQueue.main.async {
-                    UIApplication.shared.open(url, options: [:], completionHandler: { (success) in
-                        if success {
-                            print("Opened URL successfully")
-                        } else {
-                            print("Failed to open URL: \(urlString)")
-                        }
-                    })
-                }
-            } else {
-                print("Invalid URL: \(urlString)")
-            }
-        } else {
-            print("Failed to encode query: \(searchQuery)")
-        }
-    }
-
     
     private var stationContent: some View {
         VStack {
