@@ -20,7 +20,8 @@ struct RadioStationListView: View {
     @Binding var isEditing: Bool
     @Binding var isEditingStation: Bool
     @Binding var selectedStationForEdit: RadioStation?
-    @Binding var selectedTab: ContentView.Tab
+    @Binding var selectedTab: Tab
+    @Binding var searchText: String
     
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
@@ -29,7 +30,7 @@ struct RadioStationListView: View {
         GeometryReader { geometry in
             ScrollView {
                 LazyVStack {
-                    ForEach(currentStations) { station in
+                    ForEach(filteredStations) { station in
                         HStack {
                             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                                 Image(uiImage: image)
@@ -37,26 +38,26 @@ struct RadioStationListView: View {
                                     .frame(width: 50, height: 50)
                                     .cornerRadius(8)
                             } else {
-                                Image(systemName: "radio")
+                                Image(systemName: station.isFavorite ? "star.fill" : "radio")
                                     .resizable()
                                     .frame(width: 50, height: 50)
                                     .cornerRadius(8)
-                                    .foregroundColor(.gray)
+                                    .foregroundColor(station.isFavorite ? .yellow : .gray)
                             }
 
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
-                                    if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
+                                    if isCurrentStation(station: station) {
                                         Image(systemName: "speaker.wave.2.fill")
                                             .foregroundColor(.primary)
                                     }
 
                                     Text(station.name)
                                         .font(.headline)
-                                        .foregroundColor(radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station ? .primary : .primary)
+                                        .foregroundColor(.primary)
                                 }
 
-                                if radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station {
+                                if isCurrentStation(station: station) {
                                     if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                                         Text(metadata)
                                             .font(.subheadline)
@@ -91,6 +92,7 @@ struct RadioStationListView: View {
                                         .font(.title)
                                         .foregroundColor(station.isFavorite ? .red : .primary)
                                 }
+
                             } else {
                                 Image(systemName: "line.horizontal.3")
                                     .font(.title)
@@ -176,26 +178,26 @@ struct RadioStationListView: View {
         }
     }
 
-    private var currentStations: [RadioStation] {
+    private var filteredStations: [RadioStation] {
+        let stations: [RadioStation]
         switch selectedTab {
         case .recent:
-            return viewModel.recentStations()
+            stations = viewModel.recentStations()
         case .favorites:
-            return viewModel.favoriteStations()
+            stations = viewModel.favoriteStations()
         case .all:
-            return viewModel.stations
+            stations = viewModel.stations
+        }
+        
+        if searchText.isEmpty {
+            return stations
+        } else {
+            return stations.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
         }
     }
-    
-    private var stationsToDisplay: [RadioStation] {
-        switch selectedTab {
-        case .recent:
-            return viewModel.recentStations()
-        case .favorites:  // Corrected the case to match the Tab enum
-            return viewModel.favoriteStations()
-        case .all:  // Added the missing case to make the switch exhaustive
-            return viewModel.stations
-        }
+
+    private func isCurrentStation(station: RadioStation) -> Bool {
+        return radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station
     }
 
     private func deleteStation(_ station: RadioStation) {
@@ -274,7 +276,7 @@ struct RadioStationListView_Previews: PreviewProvider {
 
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false),
-                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent))
+                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent), searchText: .constant(""))
             .environmentObject(viewModel)
             .environmentObject(radioPlayer)
     }

@@ -62,12 +62,13 @@ class ShazamViewModel: NSObject, ObservableObject {
 
                 // Ensure the correct audio input source is used
                 if let availableInputs = audioSession.availableInputs {
-                    if let bluetoothInput = availableInputs.first(where: { $0.portType == .bluetoothHFP }) {
-                        try audioSession.setPreferredInput(bluetoothInput)
-                    } else if let builtInMic = availableInputs.first(where: { $0.portType == .builtInMic }) {
-                        try audioSession.setPreferredInput(builtInMic)
-                    }
-                }
+                                   self.logAudioPorts(audioSession: audioSession)
+                                   if let bluetoothInput = availableInputs.first(where: { self.isBluetoothInput(audioPort: $0) }) {
+                                       try audioSession.setPreferredInput(bluetoothInput)
+                                   } else if let builtInMic = availableInputs.first(where: { $0.portType == .builtInMic }) {
+                                       try audioSession.setPreferredInput(builtInMic)
+                                   }
+                               }
 
                 self.setupAudioEngine()
             } catch {
@@ -76,6 +77,16 @@ class ShazamViewModel: NSObject, ObservableObject {
                     // ToDo - Handle errors, such as by showing an alert
                 }
             }
+        }
+    }
+
+private func isBluetoothInput(audioPort: AVAudioSessionPortDescription) -> Bool {
+        return audioPort.portType == .bluetoothA2DP || audioPort.portType == .bluetoothHFP || audioPort.portType == .bluetoothLE;
+    }
+    
+    private func logAudioPorts(audioSession: AVAudioSession) {
+        for input in audioSession.availableInputs ?? [] {
+            print("Available audio input - \(input.portName) | type: \(input.portType) | uid: \(input.uid)")
         }
     }
 

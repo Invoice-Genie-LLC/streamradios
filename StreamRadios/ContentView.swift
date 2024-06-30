@@ -7,6 +7,12 @@
 import SwiftUI
 import Combine
 
+extension UIApplication {
+    func endEditing() {
+        sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
 struct ContentView: View {
     @StateObject private var radioPlayer = RadioPlayer.shared
     @StateObject private var viewModel = RadioStationViewModel()
@@ -17,12 +23,9 @@ struct ContentView: View {
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
     @State private var bitrateMessage: String = "Playing at high bitrate: 256 kbps"
-    @State private var selectedTab: Tab = .recent
+    @State private var selectedTab: Tab = .favorites
+    @State private var searchText = ""
     private var cancellables = Set<AnyCancellable>()
-
-    enum Tab {
-        case recent, favorites, all
-    }
     
     var body: some View {
         NavigationView {
@@ -40,7 +43,7 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "line.horizontal.3")
                                 .font(.title)
-                                .foregroundColor(.primary) // Adjusted to primary color
+                                .foregroundColor(.primary)
                                 .padding()
                         }
                         Spacer()
@@ -49,13 +52,13 @@ struct ContentView: View {
                             isEditingMode.toggle()
                             if isEditingMode {
                                 radioPlayer.stop()
-                                radioPlayer.metadata = nil // Reset metadata
-                                radioPlayer.currentStationIndex = nil // Reset auto-play last station
+                                radioPlayer.metadata = nil
+                                radioPlayer.currentStationIndex = nil
                             }
                         }) {
                             Text(isEditingMode ? "Done" : "Edit")
                                 .font(.title3)
-                                .foregroundColor(.primary) // Adjusted to primary color
+                                .foregroundColor(.primary)
                                 .padding()
                         }
                         Button(action: {
@@ -63,56 +66,88 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title3)
-                                .foregroundColor(.primary) // Adjusted to primary color
+                                .foregroundColor(.primary)
                                 .padding()
                         }
                     }
-                    .padding(.bottom, 15)
+                    // .padding(.bottom, 15)
+                    
+                    // Search bar
+                    HStack {
+                        TextField("Search Stations", text: $searchText)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .padding(.horizontal)
+                            .disableAutocorrection(true)
+                            .overlay(
+                                HStack {
+                                    Spacer()
+                                    if !searchText.isEmpty {
+                                        Button(action: {
+                                            searchText = ""
+                                            UIApplication.shared.endEditing() // Optionally dismiss the keyboard
+                                        }) {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundColor(Color(UIColor.opaqueSeparator))
+                                        }
+                                        .padding(.trailing, 30)
+                                    }
+                                }
+                            )
+                    }
 
+                    
                     // Tabbed Menu
                     HStack {
                         Picker("", selection: $selectedTab) {
                             Text("Recent").tag(Tab.recent)
-                            Text("Favorites").tag(Tab.favorites) // Changed from .favorite to .favorites
-                            Text("All").tag(Tab.all) // Added "All" to the Picker
+                            Text("Favorites").tag(Tab.favorites)
+                            Text("All").tag(Tab.all)
                         }
                         .pickerStyle(SegmentedPickerStyle())
                         .padding(.horizontal)
                     }
-
+                    
                     Spacer()
-
+                    
                     // Radio Stations List
                     VStack {
                         RadioStationListView(isEditing: $isEditingMode,
                                              isEditingStation: $isEditingStation,
                                              selectedStationForEdit: $selectedStationForEdit,
-                                             selectedTab: $selectedTab)
-                            .environmentObject(viewModel)
-                            .environmentObject(radioPlayer)
-                            .frame(width: 385)
-                            .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(16)
-                            .modifier(NeumorphicShadow())
-                            .padding(.top, 10)
+                                             selectedTab: $selectedTab,
+                                             searchText: $searchText)
+                        .environmentObject(viewModel)
+                        .environmentObject(radioPlayer)
+                        .frame(width: 385)
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(16)
+                        .modifier(NeumorphicShadow())
+                        .padding(.top, 10)
                     }
                     .padding(.bottom, 35)
                     
                     Spacer()
-
+                    
                     // Play Area Section
                     VStack {
-                        if radioPlayer.isPlaying, let currentStationIndex = radioPlayer.currentStationIndex,
-                           currentStationIndex < viewModel.stations.count {
-                            let currentStation = viewModel.stations[currentStationIndex]
+                        if let currentStation = viewModel.currentlyPlayingStation {
                             VStack {
                                 HStack(alignment: .center, spacing: 20) {
-                                    AlbumArtView(imageData: currentStation.iconData, isPlaying: radioPlayer.isPlaying)
-                                        .frame(width: 70, height: 70)
-                                        .cornerRadius(10)
+                                    if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                                        Image(uiImage: image)
+                                            .resizable()
+                                            .frame(width: 70, height: 70)
+                                            .cornerRadius(10)
+                                    } else {
+                                        Image(systemName: "radio")
+                                            .resizable()
+                                            .frame(width: 70, height: 70)
+                                            .cornerRadius(10)
+                                            .foregroundColor(.gray)
+                                    }
                                     
                                     VStack(alignment: .leading, spacing: 5) {
-                                        Text(viewModel.stations[currentStationIndex].name)
+                                        Text(currentStation.name)
                                             .font(.title2)
                                             .fontWeight(.bold)
                                             .foregroundColor(.primary)
@@ -128,7 +163,7 @@ struct ContentView: View {
                                     }
                                     Spacer()
                                 }
-                                .padding(.leading, 10) // Add padding to push everything to the far left
+                                .padding(.leading, 10)
                             }
                         }
                         PlayerView()
@@ -139,19 +174,19 @@ struct ContentView: View {
                     .frame(width: 355)
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(12) // Add rounded corners
+                    .cornerRadius(12)
                     .modifier(NeumorphicShadow())
                     .frame(maxWidth: 385)
                     .padding(.horizontal, 5)
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
                     }
-                    .frame(height: 140) // Adjust the height to fit text and buttons
+                    .frame(height: 140)
                     .padding(.bottom, UIApplication.shared.connectedScenes
                         .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
                         .first ?? 0)
                 }
-
+                
                 // Side Menu
                 GeometryReader { geometry in
                     HStack {
@@ -187,6 +222,9 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+        .onAppear {
+            UIApplication.shared.addTapGestureRecognizer()
+        }
     }
 }
 
