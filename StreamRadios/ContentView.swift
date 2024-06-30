@@ -14,6 +14,7 @@ extension UIApplication {
 }
 
 struct ContentView: View {
+    // State properties from your original code
     @StateObject private var radioPlayer = RadioPlayer.shared
     @StateObject private var viewModel = RadioStationViewModel()
     @State private var isAddStationViewPresented = false
@@ -22,17 +23,20 @@ struct ContentView: View {
     @State private var isEditingMode = false
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
-    @State private var bitrateMessage: String = "Playing at high bitrate: 256 kbps"
     @State private var selectedTab: Tab = .favorites
     @State private var searchText = ""
     private var cancellables = Set<AnyCancellable>()
-    
+    @State private var bitrateMessage = "Loading bitrate information..."
+
+    @Environment(\.horizontalSizeClass) var sizeClass
+
     var body: some View {
         NavigationView {
             ZStack {
-                // Background Color
-                Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all)
-                
+                // Background color
+                Color(UIColor.systemBackground)
+        .edgesIgnoringSafeArea(.all)
+
                 // Main content
                 VStack {
                     HStack {
@@ -45,12 +49,11 @@ struct ContentView: View {
                                 .padding([.leading, .top, .bottom])
                         }
 
-                        // Search bar positioned here with reduced size
                         VStack {
                             TextField("Search Stations", text: $searchText)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
                                 .padding(.horizontal, 8)
-                                .padding(.trailing, 30) // Right padding to prevent text from hiding behind the button
+                                .padding(.trailing, 30)
                                 .overlay(
                                     HStack {
                                         Spacer()
@@ -92,9 +95,8 @@ struct ContentView: View {
                                 .padding([.top, .bottom, .trailing])
                         }
                     }
-                    .padding(.horizontal, 10) // Additional horizontal padding
-                    
-                    // Tabbed Menu
+                    .padding(.horizontal, sizeClass == .regular ? 20 : 10)
+
                     HStack {
                         Picker("", selection: $selectedTab) {
                             Text("Recent").tag(Tab.recent)
@@ -104,11 +106,10 @@ struct ContentView: View {
                         .pickerStyle(SegmentedPickerStyle())
                         .padding(.horizontal)
                     }
-                    .frame(width: 410)
+                    .frame(width: sizeClass == .regular ? 650 : 410)
                     
                     Spacer()
                     
-                    // Radio Stations List
                     VStack {
                         RadioStationListView(isEditing: $isEditingMode,
                                              isEditingStation: $isEditingStation,
@@ -117,17 +118,17 @@ struct ContentView: View {
                                              searchText: $searchText)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
-                        .frame(width: 385)
+                        .frame(width: sizeClass == .regular ? 600 : 385)
                         .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(16)
                         .modifier(NeumorphicShadow())
                         .padding(.top, 10)
                     }
                     .padding(.bottom, 35)
+                    .padding(.bottom, sizeClass == .regular ? 5 : 0)
                     
                     Spacer()
                     
-                    // Play Area Section
                     VStack {
                         if let currentStation = viewModel.currentlyPlayingStation {
                             VStack {
@@ -165,17 +166,17 @@ struct ContentView: View {
                                 .padding(.leading, 10)
                             }
                         }
-                        PlayerView()
+                            PlayerView()
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
                             .padding(.top, 8)
                     }
-                    .frame(width: 355)
+                    .frame(width: sizeClass == .regular ? 565 : 355)
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(12)
                     .modifier(NeumorphicShadow())
-                    .frame(maxWidth: 385)
+                    .frame(maxWidth: sizeClass == .regular ? 600 : 385)
                     .padding(.horizontal, 5)
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
@@ -184,7 +185,8 @@ struct ContentView: View {
                     .padding(.bottom, UIApplication.shared.connectedScenes
                         .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
                         .first ?? 0)
-                }
+ }
+                .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
                 // Side Menu
                 GeometryReader { geometry in
@@ -221,7 +223,7 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .onAppear {
+ .onAppear {
             UIApplication.shared.addTapGestureRecognizer()
         }
     }
