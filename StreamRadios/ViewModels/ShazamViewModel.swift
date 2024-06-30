@@ -38,12 +38,12 @@ class ShazamViewModel: NSObject, ObservableObject {
     
     public func startOrEndListening() {
         let audioSession = AVAudioSession.sharedInstance()
-
+        
         guard !audioEngine.isRunning else {
             stopListening()
             return
         }
-
+        
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             guard let self = self, granted else {
                 DispatchQueue.main.async {
@@ -51,7 +51,7 @@ class ShazamViewModel: NSObject, ObservableObject {
                 }
                 return
             }
-
+            
             do {
                 // Set the audio session category to play and record, allowing Bluetooth options
                 try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .duckOthers])
@@ -59,17 +59,17 @@ class ShazamViewModel: NSObject, ObservableObject {
                 try audioSession.setPreferredSampleRate(44100) // High-quality audio
                 try audioSession.setPreferredIOBufferDuration(0.005) // Reduce latency
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
+                
                 // Ensure the correct audio input source is used
                 if let availableInputs = audioSession.availableInputs {
-                                   self.logAudioPorts(audioSession: audioSession)
-                                   if let bluetoothInput = availableInputs.first(where: { self.isBluetoothInput(audioPort: $0) }) {
-                                       try audioSession.setPreferredInput(bluetoothInput)
-                                   } else if let builtInMic = availableInputs.first(where: { $0.portType == .builtInMic }) {
-                                       try audioSession.setPreferredInput(builtInMic)
-                                   }
-                               }
-
+                    self.logAudioPorts(audioSession: audioSession)
+                    if let bluetoothInput = availableInputs.first(where: { self.isBluetoothInput(audioPort: $0) }) {
+                        try audioSession.setPreferredInput(bluetoothInput)
+                    } else if let builtInMic = availableInputs.first(where: { $0.portType == .builtInMic }) {
+                        try audioSession.setPreferredInput(builtInMic)
+                    }
+                }
+                
                 self.setupAudioEngine()
             } catch {
                 print("Failed to set up audio session: \(error)")
@@ -89,27 +89,17 @@ class ShazamViewModel: NSObject, ObservableObject {
             print("Available audio input - \(input.portName) | type: \(input.portType) | uid: \(input.uid)")
         }
     }
-
-private func isBluetoothInput(audioPort: AVAudioSessionPortDescription) -> Bool {
-        return audioPort.portType == .bluetoothA2DP || audioPort.portType == .bluetoothHFP || audioPort.portType == .bluetoothLE;
-    }
     
-    private func logAudioPorts(audioSession: AVAudioSession) {
-        for input in audioSession.availableInputs ?? [] {
-            print("Available audio input - \(input.portName) | type: \(input.portType) | uid: \(input.uid)")
-        }
-    }
-
     private func setupAudioEngine() {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-
+        
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
             self?.session.matchStreamingBuffer(buffer, at: when)
         }
-
+        
         audioEngine.prepare()
-
+        
         do {
             try audioEngine.start()
             DispatchQueue.main.async {
@@ -122,7 +112,7 @@ private func isBluetoothInput(audioPort: AVAudioSessionPortDescription) -> Bool 
             }
         }
     }
-
+    
     func stopListening() {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -130,7 +120,7 @@ private func isBluetoothInput(audioPort: AVAudioSessionPortDescription) -> Bool 
             self.isRecording = false
         }
     }
-
+    
     @objc private func handleInterruption(notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
