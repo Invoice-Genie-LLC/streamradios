@@ -154,7 +154,9 @@ struct PlayerSheetView: View {
                 .padding(.bottom, 10)
             }
             
-            if let url = shazamViewModel.shazamMedia.albumArtURL, let title = shazamViewModel.shazamMedia.title, let artist = shazamViewModel.shazamMedia.artistName {
+            if let url = shazamViewModel.shazamMedia.albumArtURL,
+               let title = shazamViewModel.shazamMedia.title,
+               let artist = shazamViewModel.shazamMedia.artistName {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
@@ -166,8 +168,8 @@ struct PlayerSheetView: View {
                 .frame(width: 380, height: 340)
                 .cornerRadius(10)
                 .modifier(NeumorphicShadow())
-                .onTapGesture {
-                    openAppleMusic(title: title, artist: artist)
+                
+                Button("Open in Apple Music") {
                     AppleMusicManager.shared.requestAppleMusicAuthorization { granted in
                         if granted {
                             openAppleMusic(title: title, artist: artist)
@@ -176,6 +178,12 @@ struct PlayerSheetView: View {
                         }
                     }
                 }
+                .font(.headline)
+                .foregroundColor(.primary)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color(UIColor.secondarySystemBackground)))
+                .padding(.top, 10)
+                
             } else {
                 RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
                     .frame(width: 300, height: 300)
@@ -271,31 +279,67 @@ struct PlayerSheetView: View {
             }
         }
     }
-    
+
     private func openAppleMusic(title: String, artist: String) {
-        let searchQuery = "\(title) \(artist)"
-        print("Search Query: \(searchQuery)")
-        if let encodedQuery = searchQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            let urlString = "https://music.apple.com/us/search?term=\(encodedQuery)&media=music&entity=song"
-            print("Apple Music URL: \(urlString)")
-            if let url = URL(string: urlString) {
+        AppleMusicAPI.searchSong(title: title, artist: artist) { songID in
+            guard let songID = songID else {
                 DispatchQueue.main.async {
-                    UIApplication.shared.open(url, options: [:], completionHandler: { (success) in
-                        if success {
-                            print("Opened URL successfully")
-                        } else {
-                            print("Failed to open URL: \(urlString)")
-                        }
-                    })
+                    self.showErrorAlert(message: "Song not found.")
                 }
-            } else {
-                print("Invalid URL: \(urlString)")
+                return
             }
-        } else {
-            print("Failed to encode query: \(searchQuery)")
+
+            let urlString = "https://music.apple.com/us/song/\(songID)"
+            DispatchQueue.main.async {
+                if let url = URL(string: urlString) {
+                    if UIApplication.shared.canOpenURL(url) {
+                        UIApplication.shared.open(url, options: [:], completionHandler: { success in
+                            if success {
+                                print("Opened URL successfully")
+                            } else {
+                                print("Failed to open URL: \(urlString)")
+                                self.logErrorDetails(url: urlString, reason: "Failed to open URL")
+                                self.showErrorAlert(message: "An error occurred while trying to open Apple Music. Please try again.")
+                            }
+                        })
+                    } else {
+                        print("Cannot open URL on this device: \(urlString)")
+                        self.logErrorDetails(url: urlString, reason: "Cannot open URL on this device")
+                        self.showErrorAlert(message: "This device cannot open Apple Music. Please check your settings.")
+                    }
+                } else {
+                    print("Invalid URL: \(urlString)")
+                    self.logErrorDetails(url: urlString, reason: "Invalid URL")
+                    self.showErrorAlert(message: "The URL for Apple Music is invalid. Please try again.")
+                }
+            }
         }
     }
+    
+    private func logErrorDetails(url: String? = nil, query: String? = nil, reason: String) {
+        var errorDetails = "Error opening Apple Music URL"
+        if let url = url {
+            errorDetails += "\nURL: \(url)"
+        }
+        if let query = query {
+            errorDetails += "\nQuery: \(query)"
+        }
+        errorDetails += "\nReason: \(reason)"
+        print(errorDetails)
+    }
 
+    private func showErrorAlert(message: String) {
+        let alert = UIAlertController(title: "Error", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+
+        if let topController = UIApplication.shared.windows.first?.rootViewController {
+            var currentController = topController
+            while let presentedController = currentController.presentedViewController {
+                currentController = presentedController
+            }
+            currentController.present(alert, animated: true, completion: nil)
+        }
+    }
     
     private var stationContent: some View {
         VStack {
@@ -315,6 +359,7 @@ struct PlayerSheetView: View {
                             .scaleEffect(pulse ? 1.2 : 1.0)
                             .padding(.bottom, 10)
                             .modifier(NeumorphicShadow())
+                        
                         Text("Tap to Shazam")
                             .font(.headline)
                             .foregroundColor(Color.primary)

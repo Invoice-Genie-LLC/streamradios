@@ -39,6 +39,7 @@
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		7794EFE12C2E1ADC00BC231F /* ImportExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7794EFE02C2E1ADC00BC231F /* ImportExportView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
+		77BC0EA02C31FAAA002FDD8E /* AppleMusicAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BC0E9F2C31FAAA002FDD8E /* AppleMusicAPI.swift */; };
 		77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */; };
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
@@ -108,6 +109,7 @@
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		7794EFE02C2E1ADC00BC231F /* ImportExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportExportView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
+		77BC0E9F2C31FAAA002FDD8E /* AppleMusicAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicAPI.swift; sourceTree = "<group>"; };
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
@@ -159,6 +161,7 @@
 		7707DA372C152EF2006D5EBB /* StreamRadios */ = {
 			isa = PBXGroup;
 			children = (
+				77BC0E9E2C31FA9D002FDD8E /* API */,
 				775B55552C30E8B200ECDBF0 /* Enums */,
 				77130BF62C307D4B00D4711A /* Extensions */,
 				77313D6B2C2C9CEE005F4AC8 /* Data */,
@@ -276,6 +279,14 @@
 				775D04562C2A969F00E99061 /* FeatureSwitch.swift */,
 			);
 			path = FeatureSwitches;
+			sourceTree = "<group>";
+		};
+		77BC0E9E2C31FA9D002FDD8E /* API */ = {
+			isa = PBXGroup;
+			children = (
+				77BC0E9F2C31FAAA002FDD8E /* AppleMusicAPI.swift */,
+			);
+			path = API;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -408,6 +419,7 @@
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
+				77BC0EA02C31FAAA002FDD8E /* AppleMusicAPI.swift in Sources */,
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,
