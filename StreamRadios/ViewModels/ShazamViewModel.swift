@@ -79,6 +79,16 @@ class ShazamViewModel: NSObject, ObservableObject {
             }
         }
     }
+    
+    private func isBluetoothInput(audioPort: AVAudioSessionPortDescription) -> Bool {
+        return audioPort.portType == .bluetoothA2DP || audioPort.portType == .bluetoothHFP || audioPort.portType == .bluetoothLE;
+    }
+    
+    private func logAudioPorts(audioSession: AVAudioSession) {
+        for input in audioSession.availableInputs ?? [] {
+            print("Available audio input - \(input.portName) | type: \(input.portType) | uid: \(input.uid)")
+        }
+    }
 
 private func isBluetoothInput(audioPort: AVAudioSessionPortDescription) -> Bool {
         return audioPort.portType == .bluetoothA2DP || audioPort.portType == .bluetoothHFP || audioPort.portType == .bluetoothLE;
