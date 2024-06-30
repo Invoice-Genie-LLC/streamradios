@@ -38,11 +38,11 @@ struct RadioStationListView: View {
                                     .frame(width: 50, height: 50)
                                     .cornerRadius(8)
                             } else {
-                                Image(systemName: station.isFavorite ? "star.fill" : "radio")
+                                Image(systemName: station.isFavorite ? "radio" : "radio")
                                     .resizable()
                                     .frame(width: 50, height: 50)
                                     .cornerRadius(8)
-                                    .foregroundColor(station.isFavorite ? .yellow : .gray)
+                                    .foregroundColor(station.isFavorite ? .primary : .primary)
                             }
 
                             VStack(alignment: .leading, spacing: 4) {

@@ -31,12 +31,10 @@ struct ContentView: View {
         NavigationView {
             ZStack {
                 // Background Color
-                Color(UIColor.systemBackground)
-                    .edgesIgnoringSafeArea(.all)
+                Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all)
                 
                 // Main content
                 VStack {
-                    // Menu and Plus button with Logo Text
                     HStack {
                         Button(action: {
                             showSideMenu.toggle()
@@ -44,10 +42,33 @@ struct ContentView: View {
                             Image(systemName: "line.horizontal.3")
                                 .font(.title)
                                 .foregroundColor(.primary)
-                                .padding()
+                                .padding([.leading, .top, .bottom])
                         }
+
+                        // Search bar positioned here with reduced size
+                        VStack {
+                            TextField("Search Stations", text: $searchText)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .padding(.horizontal, 8)
+                                .padding(.trailing, 30) // Right padding to prevent text from hiding behind the button
+                                .overlay(
+                                    HStack {
+                                        Spacer()
+                                        if !searchText.isEmpty {
+                                            Button(action: {
+                                                searchText = ""
+                                                UIApplication.shared.endEditing()
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(Color(UIColor.opaqueSeparator))
+                                            }
+                                            .padding(.trailing, 8)
+                                        }
+                                    }
+                                )
+                        }.padding(.horizontal, 8)
                         Spacer()
-                        Spacer()
+
                         Button(action: {
                             isEditingMode.toggle()
                             if isEditingMode {
@@ -59,42 +80,19 @@ struct ContentView: View {
                             Text(isEditingMode ? "Done" : "Edit")
                                 .font(.title3)
                                 .foregroundColor(.primary)
-                                .padding()
+                                .padding([.top, .bottom, .trailing])
                         }
+
                         Button(action: {
                             isAddStationViewPresented.toggle()
                         }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title3)
                                 .foregroundColor(.primary)
-                                .padding()
+                                .padding([.top, .bottom, .trailing])
                         }
                     }
-                    // .padding(.bottom, 15)
-                    
-                    // Search bar
-                    HStack {
-                        TextField("Search Stations", text: $searchText)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .padding(.horizontal)
-                            .disableAutocorrection(true)
-                            .overlay(
-                                HStack {
-                                    Spacer()
-                                    if !searchText.isEmpty {
-                                        Button(action: {
-                                            searchText = ""
-                                            UIApplication.shared.endEditing() // Optionally dismiss the keyboard
-                                        }) {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(Color(UIColor.opaqueSeparator))
-                                        }
-                                        .padding(.trailing, 30)
-                                    }
-                                }
-                            )
-                    }
-
+                    .padding(.horizontal, 10) // Additional horizontal padding
                     
                     // Tabbed Menu
                     HStack {
@@ -106,6 +104,7 @@ struct ContentView: View {
                         .pickerStyle(SegmentedPickerStyle())
                         .padding(.horizontal)
                     }
+                    .frame(width: 410)
                     
                     Spacer()
                     
