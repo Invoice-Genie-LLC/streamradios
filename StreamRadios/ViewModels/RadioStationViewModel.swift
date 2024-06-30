@@ -25,6 +25,14 @@ class RadioStationViewModel: ObservableObject {
             fetchStationsAndSave()
         }
     }
+    
+    var currentlyPlayingStation: RadioStation? {
+        guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
+              stations.indices.contains(currentStationIndex) else {
+            return nil
+        }
+        return stations[currentStationIndex]
+    }
 
     private func fetchStationsAndSave() {
         DataStore.shared.fetchRadioStations { [weak self] stations, error in
@@ -39,35 +47,57 @@ class RadioStationViewModel: ObservableObject {
             }
         }
     }
+    
+       func isStationPlaying(_ station: RadioStation) -> Bool {
+           guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
+                 currentStationIndex < stations.count,
+                 stations[currentStationIndex].id == station.id else {
+               return false
+           }
+           return true
+       }
 
     func toggleFavorite(for station: RadioStation) {
-        if let index = stations.firstIndex(of: station) {
-            stations[index].isFavorite.toggle()
-            saveStationsToFile()
-            updateStationInCloudKit(station: stations[index])
-            
-            // Move favorited station to the top of the favorite list
-            if stations[index].isFavorite {
-                let favoritedStation = stations.remove(at: index)
-                stations.insert(favoritedStation, at: 0)
-                saveStationsToFile()
+        if let index = stations.firstIndex(of: station), !isStationPlaying(stations[index]) {
+            var updatedStation = stations[index]
+            updatedStation.isFavorite.toggle()
+            stations[index] = updatedStation
+
+            // If the station is added to favorites, reorder only in the favorites list
+            if updatedStation.isFavorite {
+                let favoriteStation = stations.remove(at: index)
+                stations.insert(favoriteStation, at: index)
+            } else {
+                // Maintain the order in the All tab, only remove the favorite flag
+                stations[index] = updatedStation
             }
+
+            saveStationsToFile()
+            updateStationInCloudKit(station: updatedStation)  // Ensure the change is saved in CloudKit
         }
     }
 
     func recentStations() -> [RadioStation] {
-        return stations.sorted { ($0.lastPlayed ?? Date.distantPast) > ($1.lastPlayed ?? Date.distantPast) }
+        return stations.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
     }
 
     func favoriteStations() -> [RadioStation] {
         return stations.filter { $0.isFavorite }
     }
+    
+    func playStation(_ station: RadioStation) {
+        if let index = stations.firstIndex(of: station) {
+            // Play the station without reordering it
+            RadioPlayer.shared.playStation(at: index, from: stations)
+            updateLastPlayed(for: station)
+        }
+    }
 
     func updateLastPlayed(for station: RadioStation) {
-        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+        if let index = stations.firstIndex(of: station) {
             stations[index].lastPlayed = Date()
             saveStationsToFile()
-            updateStationInCloudKit(station: stations[index])
+            updateStationInCloudKit(station: stations[index])  // Ensure the change is saved in CloudKit
         }
     }
 

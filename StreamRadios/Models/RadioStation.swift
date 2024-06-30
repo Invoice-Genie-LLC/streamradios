@@ -12,7 +12,8 @@ struct RadioStation: Identifiable, Codable, Equatable {
     var url: String
     var iconData: String?
     var isFavorite: Bool = false
-    var lastPlayed: Date?  // Add this line to track the most recent plays
+    var lastPlayed: Date?
+    var isRecent: Bool = false  // Add this line to track the most recent plays
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -20,6 +21,7 @@ struct RadioStation: Identifiable, Codable, Equatable {
         case url
         case iconData
         case isFavorite
-        case lastPlayed  // Add this line
+        case lastPlayed
+        case isRecent  // Add this line
     }
 }
