@@ -18,27 +18,36 @@ struct ShazamMedia: Decodable {
     var lyrics: String?  // Optional to handle cases where lyrics might not be available
 }
 
-class ShazamViewModel: NSObject, ObservableObject {
+class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     @Published var shazamMedia = ShazamMedia(title: "",
                                              subtitle: "Subtitle...",
                                              artistName: "",
-                                             albumArtURL: URL(string: "https://google.com"),
+                                             albumArtURL: URL(string: "https://example.com/default.jpg"),
                                              genres: ["Pop"])
     @Published var isRecording = false
     @Published var isFetchingLyrics = false
-    private let audioEngine = AVAudioEngine()
-    private let session = SHSession()
-    private let signatureGenerator = SHSignatureGenerator()
+    
+    private var audioEngine = AVAudioEngine()
+    private var session = SHSession()
     
     override init() {
         super.init()
         session.delegate = self
-        NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance())
+        configureAudioSession()
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioSessionInterruption), name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance())
+    }
+    
+    private func configureAudioSession() {
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
+            try audioSession.setActive(true)
+        } catch {
+            print("Failed to set up the audio session: \(error)")
+        }
     }
     
     public func startOrEndListening() {
-        let audioSession = AVAudioSession.sharedInstance()
-
         guard !audioEngine.isRunning else {
             stopListening()
             return
@@ -51,43 +60,16 @@ class ShazamViewModel: NSObject, ObservableObject {
                 }
                 return
             }
-
-            do {
-                // Set the audio session category to play and record, allowing Bluetooth options
-                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers, .duckOthers])
-                try audioSession.setMode(.default)
-                try audioSession.setPreferredSampleRate(44100) // High-quality audio
-                try audioSession.setPreferredIOBufferDuration(0.005) // Reduce latency
-                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
-                // Ensure the correct audio input source is used
-                if let availableInputs = audioSession.availableInputs {
-                    if let bluetoothInput = availableInputs.first(where: { $0.portType == .bluetoothHFP }) {
-                        try audioSession.setPreferredInput(bluetoothInput)
-                    } else if let builtInMic = availableInputs.first(where: { $0.portType == .builtInMic }) {
-                        try audioSession.setPreferredInput(builtInMic)
-                    }
-                }
-
-                self.setupAudioEngine()
-            } catch {
-                print("Failed to set up audio session: \(error)")
-                DispatchQueue.main.async {
-                    // ToDo - Handle errors, such as by showing an alert
-                }
-            }
+            self.setupAudioEngine()
         }
     }
 
     private func setupAudioEngine() {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
             self?.session.matchStreamingBuffer(buffer, at: when)
         }
-
-        audioEngine.prepare()
 
         do {
             try audioEngine.start()
@@ -97,7 +79,7 @@ class ShazamViewModel: NSObject, ObservableObject {
         } catch {
             print("Error starting audio engine: \(error)")
             DispatchQueue.main.async {
-                // ToDo - Handle UI or state updates on errors
+                // Handle UI or state updates on errors
             }
         }
     }
@@ -110,54 +92,55 @@ class ShazamViewModel: NSObject, ObservableObject {
         }
     }
 
-    @objc private func handleInterruption(notification: Notification) {
+    @objc private func handleAudioSessionInterruption(notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let interruptionType = AVAudioSession.InterruptionType(rawValue: typeValue) else {
             return
         }
-        
+
         switch interruptionType {
         case .began:
-            // Interruption began, take appropriate actions
-            print("Audio interruption began")
+            print("Audio interruption began.")
         case .ended:
-            // Interruption ended, take appropriate actions
-            print("Audio interruption ended")
-            try? AVAudioSession.sharedInstance().setActive(true)
-            setupAudioEngine()
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt,
+               AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume) {
+                print("Audio interruption ended. Resuming audio engine...")
+                setupAudioEngine()
+            }
         @unknown default:
             break
         }
     }
-}
-
-extension ShazamViewModel: SHSessionDelegate {
+    
     func session(_ session: SHSession, didFind match: SHMatch) {
         DispatchQueue.main.async {
             if let firstItem = match.mediaItems.first {
-                var media = ShazamMedia(title: firstItem.title,
-                                        subtitle: firstItem.subtitle,
-                                        artistName: firstItem.artist,
-                                        albumArtURL: firstItem.artworkURL,
-                                        genres: firstItem.genres,
-                                        lyrics: nil)
-                
-                if let artist = media.artistName, let title = media.title {
-                    self.fetchLyrics(for: artist, song: title) { result in
-                        switch result {
-                        case .success(let lyrics):
-                            media.lyrics = lyrics
-                        case .failure:
-                            media.lyrics = "Lyrics not available"
-                        }
-                        self.shazamMedia = media
-                    }
-                }
+                self.updateShazamMedia(from: firstItem)
             }
         }
     }
-    
+
+    private func updateShazamMedia(from item: SHMediaItem) {
+        var media = ShazamMedia(title: item.title,
+                                subtitle: item.subtitle,
+                                artistName: item.artist,
+                                albumArtURL: item.artworkURL,
+                                genres: item.genres,
+                                lyrics: nil)
+        if let artist = media.artistName, let title = media.title {
+            fetchLyrics(for: artist, song: title) { result in
+                switch result {
+                case .success(let lyrics):
+                    media.lyrics = lyrics
+                case .failure:
+                    media.lyrics = "Lyrics not available"
+                }
+                self.shazamMedia = media
+            }
+        }
+    }
+
     func fetchLyrics(for artist: String, song: String, completion: @escaping (Result<String, Error>) -> Void) {
         let formattedArtist = artist.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? ""
         let formattedSong = song.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? ""
@@ -171,23 +154,16 @@ extension ShazamViewModel: SHSessionDelegate {
         isFetchingLyrics = true
         
         let task = URLSession.shared.dataTask(with: url) { data, response, error in
-            defer {
-                DispatchQueue.main.async {
-                    self.isFetchingLyrics = false
-                }
-            }
+            defer { DispatchQueue.main.async { self.isFetchingLyrics = false } }
             
             guard let data = data, error == nil else {
                 print("Error fetching lyrics: \(error?.localizedDescription ?? "Unknown error")")
-                DispatchQueue.main.async {
-                    completion(.failure(error ?? NSError(domain: "Unknown error", code: 0, userInfo: nil)))
-                }
+                completion(.failure(error ?? NSError(domain: "Unknown error", code: 0, userInfo: nil)))
                 return
             }
             
             do {
-                if let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let lyrics = result["lyrics"] as? String {
+                if let result = try JSONSerialization.jsonObject(with: data) as? [String: Any], let lyrics = result["lyrics"] as? String {
                     DispatchQueue.main.async {
                         completion(.success(lyrics))
                     }
@@ -198,9 +174,7 @@ extension ShazamViewModel: SHSessionDelegate {
                 }
             } catch {
                 print("Error parsing lyrics data: \(error)")
-                DispatchQueue.main.async {
-                    completion(.failure(error))
-                }
+                completion(.failure(error))
             }
         }
         task.resume()

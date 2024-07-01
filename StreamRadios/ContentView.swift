@@ -80,10 +80,12 @@ struct ContentView: View {
                                 radioPlayer.currentStationIndex = nil
                             }
                         }) {
-                            Text(isEditingMode ? "Done" : "Edit")
-                                .font(.title3)
-                                .foregroundColor(.primary)
-                                .padding([.top, .bottom, .trailing])
+                            HStack {
+                                Text(isEditingMode ? "Done" : "Edit")
+                                    .font(.title3)
+                                    .foregroundColor(.primary)
+                                    .padding([.top, .bottom, .trailing])
+                            }
                         }
 
                         Button(action: {
@@ -118,12 +120,13 @@ struct ContentView: View {
                                              searchText: $searchText)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
-                        .frame(width: sizeClass == .regular ? 600 : 385)
+                        .frame(width: sizeClass == .regular ? 600 : 400)
                         .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(16)
                         .modifier(NeumorphicShadow())
                         .padding(.top, 10)
                     }
+                
                     .padding(.bottom, 35)
                     .padding(.bottom, sizeClass == .regular ? 5 : 0)
                     
@@ -154,11 +157,11 @@ struct ContentView: View {
                                         if let metadata = radioPlayer.metadata {
                                             Text(metadata)
                                                 .font(.subheadline)
-                                                .foregroundColor(.secondary)
+                                                .foregroundColor(.primary)
                                         } else {
                                             Text("No song or album title available")
                                                 .font(.subheadline)
-                                                .foregroundColor(.secondary)
+                                                .foregroundColor(.primary)
                                         }
                                     }
                                     Spacer()
