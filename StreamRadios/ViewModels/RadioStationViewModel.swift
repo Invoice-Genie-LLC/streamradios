@@ -9,6 +9,7 @@ import Combine
 
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
+    @State var showingPurchaseView = false
 
     private var fileURL: URL {
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("SavedRadioStations.plist")
@@ -102,11 +103,16 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func addStation(name: String, url: String, iconData: String?) {
-        let newStation = RadioStation(name: name, url: url, iconData: iconData)
-        stations.append(newStation)
-        saveStationsToFile()
-        saveStationToCloud(newStation)
-    }
+            if stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium() {
+                // Trigger view to show purchase option
+                showingPurchaseView = true
+            } else {
+                let newStation = RadioStation(name: name, url: url, iconData: iconData)
+                stations.append(newStation)
+                saveStationsToFile()
+                saveStationToCloud(newStation)
+            }
+        }
 
     func saveStationsToFile() {
         do {

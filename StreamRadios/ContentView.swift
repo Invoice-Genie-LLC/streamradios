@@ -27,16 +27,16 @@ struct ContentView: View {
     @State private var searchText = ""
     private var cancellables = Set<AnyCancellable>()
     @State private var bitrateMessage = "Loading bitrate information..."
-
+    
     @Environment(\.horizontalSizeClass) var sizeClass
-
+    
     var body: some View {
         NavigationView {
             ZStack {
                 // Background color
                 Color(UIColor.systemBackground)
-        .edgesIgnoringSafeArea(.all)
-
+                    .edgesIgnoringSafeArea(.all)
+                
                 // Main content
                 VStack {
                     HStack {
@@ -48,7 +48,7 @@ struct ContentView: View {
                                 .foregroundColor(.primary)
                                 .padding([.leading, .top, .bottom])
                         }
-
+                        
                         VStack {
                             TextField("Search Stations", text: $searchText)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -71,7 +71,7 @@ struct ContentView: View {
                                 )
                         }.padding(.horizontal, 8)
                         Spacer()
-
+                        
                         Button(action: {
                             isEditingMode.toggle()
                             if isEditingMode {
@@ -87,7 +87,7 @@ struct ContentView: View {
                                     .padding([.top, .bottom, .trailing])
                             }
                         }
-
+                        
                         Button(action: {
                             isAddStationViewPresented.toggle()
                         }) {
@@ -98,7 +98,7 @@ struct ContentView: View {
                         }
                     }
                     .padding(.horizontal, sizeClass == .regular ? 20 : 10)
-
+                    
                     HStack {
                         Picker("", selection: $selectedTab) {
                             Text("Recent").tag(Tab.recent)
@@ -126,7 +126,7 @@ struct ContentView: View {
                         .modifier(NeumorphicShadow())
                         .padding(.top, 10)
                     }
-                
+                    
                     .padding(.bottom, 35)
                     .padding(.bottom, sizeClass == .regular ? 5 : 0)
                     
@@ -169,7 +169,7 @@ struct ContentView: View {
                                 .padding(.leading, 10)
                             }
                         }
-                            PlayerView()
+                        PlayerView()
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
                             .padding(.top, 8)
@@ -188,7 +188,7 @@ struct ContentView: View {
                     .padding(.bottom, UIApplication.shared.connectedScenes
                         .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
                         .first ?? 0)
- }
+                }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
                 // Side Menu
@@ -225,8 +225,11 @@ struct ContentView: View {
                 self.bitrateMessage = newBitrateMessage
             }
         }
+        .sheet(isPresented: $viewModel.showingPurchaseView) {
+            PurchaseView(isPresented: $viewModel.showingPurchaseView)
+        }
         .navigationViewStyle(StackNavigationViewStyle())
- .onAppear {
+        .onAppear {
             UIApplication.shared.addTapGestureRecognizer()
         }
     }

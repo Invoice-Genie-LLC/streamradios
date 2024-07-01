@@ -13,8 +13,8 @@ struct RadioStation: Identifiable, Codable, Equatable {
     var iconData: String?
     var isFavorite: Bool = false
     var lastPlayed: Date?
-    var isRecent: Bool = false  // Add this line to track the most recent plays
-
+    var isRecent: Bool = false
+    
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -22,33 +22,8 @@ struct RadioStation: Identifiable, Codable, Equatable {
         case iconData
         case isFavorite
         case lastPlayed
-        case isRecent  // Add this line
+        case isRecent
     }
 }
 
 
-struct Podcast: Codable, Identifiable {
-    let id: UUID
-    let title: String
-    let episodes: [Episode]
-
-    // Explicit initializer accepting an 'id'
-    init(id: UUID = UUID(), title: String, episodes: [Episode]) {
-        self.id = id
-        self.title = title
-        self.episodes = episodes
-    }
-}
-
-struct Episode: Codable, Identifiable, Equatable {
-    let id: UUID
-    let title: String
-    let audioURL: URL?
-
-    // You can manually implement the Equatable conformance if needed, but often,
-    // for simple struct like this, Swift can automatically provide conformance.
-    // Here's how you might implement it manually:
-    static func ==(lhs: Episode, rhs: Episode) -> Bool {
-        return lhs.id == rhs.id // Typically comparison by 'id' is sufficient
-    }
-}

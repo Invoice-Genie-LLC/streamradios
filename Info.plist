@@ -2,19 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>NSAppleMusicUsageDescription</key>
-    <string>This app requires access to your Apple Music library to fetch and play songs.</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>This app needs access to the microphone to recognize songs.</string>
-    <key>LSApplicationQueriesSchemes</key>
-    <array>
-        <string>music</string>
-        <string>musics</string>
-    </array>
-
 	<key>AppGroup</key>
 	<array>
 		<string>group.streamradios</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.radio.streamradios.backgroundfetch</string>
 	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
@@ -26,8 +20,6 @@
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<true/>
 		<key>UISceneConfigurations</key>
 		<dict>
 			<key>UIWindowSceneSessionRoleApplication</key>
