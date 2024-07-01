@@ -103,7 +103,7 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func addStation(name: String, url: String, iconData: String?) {
-            if stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium() {
+            if stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
                 // Trigger view to show purchase option
                 showingPurchaseView = true
             } else {

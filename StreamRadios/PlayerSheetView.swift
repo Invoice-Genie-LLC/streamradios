@@ -17,6 +17,8 @@ extension Collection {
 
 struct PlayerSheetView: View {
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.horizontalSizeClass) var horizontalSizeClass
+    
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Environment(\.presentationMode) var presentationMode
@@ -31,22 +33,13 @@ struct PlayerSheetView: View {
         NavigationView {
             ZStack {
                 // Adjusted background with subtle color for light theme
-                backgroundView
-                    .edgesIgnoringSafeArea(.all)
+                backgroundView.edgesIgnoringSafeArea(.all)
                 
                 VStack {
                     backButton
-                        .padding(.top, UIScreen.main.bounds.height < 700 ? 110 : 25) // Conditional padding
+                        .padding(.top, UIScreen.main.bounds.height < 700 ? 110 : 25)
                     contentView
                     Spacer()
-                    /*
-                    if radioPlayer.isPlaying {
-                        SoundVisualizerView()
-                            .frame(height: 10)
-                            .padding(.top, 10)
-                            .padding(.bottom, 20)
-                    }
-                     */
                     PlayerView()
                         .environmentObject(radioPlayer)
                         .environmentObject(viewModel)
@@ -166,7 +159,7 @@ struct PlayerSheetView: View {
                     }
                 }
                 .frame(width: UIScreen.main.bounds.height < 900 ? 280 : 380, height: UIScreen.main.bounds.height < 900 ? 280 : 380)
-
+                
                 //.frame(width: 380, height: 340)
                 .cornerRadius(10)
                 .modifier(NeumorphicShadow())
@@ -216,17 +209,20 @@ struct PlayerSheetView: View {
                 }
                 
                 Button(action: {
-                    if PurchaseManager.shared.hasPurchasedPremium() {
+                    if PurchaseManager.shared.hasPurchasedPremium {
                         showingLyrics.toggle()
                         if shazamViewModel.shazamMedia.lyrics == nil {
                             lyricsLoading = true
                             if let artist = shazamViewModel.shazamMedia.artistName, let title = shazamViewModel.shazamMedia.title {
                                 shazamViewModel.fetchLyrics(for: artist, song: title) { result in
-                                    switch result {
-                                    case .success(let lyrics):
-                                        shazamViewModel.shazamMedia.lyrics = lyrics
-                                    case .failure:
-                                        shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
+                                    DispatchQueue.main.async { // Ensure UI updates are on the main thread
+                                        switch result {
+                                        case .success(let lyrics):
+                                            shazamViewModel.shazamMedia.lyrics = lyrics
+                                        case .failure:
+                                            shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
+                                        }
+                                        lyricsLoading = false
                                     }
                                     lyricsLoading = false
                                 }
@@ -296,7 +292,7 @@ struct PlayerSheetView: View {
                             .foregroundColor(Color.primary)
                     }
                 }
-                .buttonStyle(PlainButtonStyle()) // Ensure no additional styling is applied
+                .buttonStyle(PlainButtonStyle())
             }
         }
     }

@@ -5,56 +5,113 @@
 //  Created by Kley Sulo on 7/1/24.
 //
 
+import Foundation
 import StoreKit
 
-class PurchaseManager: NSObject, SKProductsRequestDelegate, SKPaymentTransactionObserver {
+class PurchaseManager: NSObject, ObservableObject, SKProductsRequestDelegate, SKPaymentTransactionObserver {
     static let shared = PurchaseManager()
-    var products: [SKProduct] = []
-    
-    func setupIAP() {
+
+    @Published var purchaseInProgress = false
+    @Published var product: SKProduct?
+    @Published var transactionState: SKPaymentTransactionState?
+    @Published var restorationInProgress = false
+    @Published var restorationError: String?
+
+    private let productIdentifier = "d1e5bb7d"
+    private let premiumFeaturesKey = "hasPremiumFeatures"
+
+    override init() {
+        super.init()
         SKPaymentQueue.default().add(self)
-        let request = SKProductsRequest(productIdentifiers: Set(["com.streamradios.premiumfeatures"]))
+        fetchProducts()
+    }
+
+    deinit {
+        SKPaymentQueue.default().remove(self)
+    }
+
+    func fetchProducts() {
+        let request = SKProductsRequest(productIdentifiers: [productIdentifier])
         request.delegate = self
         request.start()
     }
     
-    func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
-        products = response.products
-        // Optionally post notification here to update the UI
-    }
-    
-    func buyProduct(_ product: SKProduct?) {
-        guard let product = product else {
-            // Handle the error, e.g., show an alert or log the error
-            print("Product not available")
+    func resetTransactionState() {
+            DispatchQueue.main.async {
+                self.transactionState = nil
+            }
+        }
+
+    func buyProduct() {
+        guard let product = self.product else {
+            print("Attempted to buy a product that is not available")
             return
         }
+        purchaseInProgress = true
         let payment = SKPayment(product: product)
         SKPaymentQueue.default().add(payment)
     }
-    
+
+    func restorePurchases() {
+        restorationInProgress = true
+        SKPaymentQueue.default().restoreCompletedTransactions()
+    }
+
+    var hasPurchasedPremium: Bool {
+        return UserDefaults.standard.bool(forKey: premiumFeaturesKey)
+    }
+
+    // MARK: - SKProductsRequestDelegate
+    func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
+        DispatchQueue.main.async {
+            if let product = response.products.first {
+                self.product = product
+            }
+        }
+    }
+
+    // MARK: - SKPaymentTransactionObserver
     func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
         for transaction in transactions {
             switch transaction.transactionState {
             case .purchased, .restored:
-                // Unlock features here
-                UserDefaults.standard.set(true, forKey: "isPremiumUser")
+                UserDefaults.standard.set(true, forKey: premiumFeaturesKey)
                 SKPaymentQueue.default().finishTransaction(transaction)
+                DispatchQueue.main.async {
+                    self.purchaseInProgress = false
+                    self.restorationInProgress = false
+                    self.transactionState = transaction.transactionState
+                }
             case .failed:
+                if let error = transaction.error as NSError? {
+                    DispatchQueue.main.async {
+                        self.restorationError = error.localizedDescription
+                    }
+                }
                 SKPaymentQueue.default().finishTransaction(transaction)
+                DispatchQueue.main.async {
+                    self.purchaseInProgress = false
+                    self.restorationInProgress = false
+                    self.transactionState = .failed
+                }
             default:
                 break
             }
         }
     }
-    
-    func restorePurchases() {
-        SKPaymentQueue.default().restoreCompletedTransactions()
-    }
-}
 
-extension PurchaseManager {
-    func hasPurchasedPremium() -> Bool {
-        return UserDefaults.standard.bool(forKey: "isPremiumUser")
+    func paymentQueueRestoreCompletedTransactionsFinished(_ queue: SKPaymentQueue) {
+        DispatchQueue.main.async {
+            self.restorationInProgress = false
+            self.transactionState = .restored
+        }
+    }
+
+    func paymentQueue(_ queue: SKPaymentQueue, restoreCompletedTransactionsFailedWithError error: Error) {
+        DispatchQueue.main.async {
+            self.restorationInProgress = false
+            self.restorationError = error.localizedDescription
+            self.transactionState = .failed
+        }
     }
 }

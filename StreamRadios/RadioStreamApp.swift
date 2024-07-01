@@ -13,6 +13,7 @@ import UIKit
 struct RadioStreamApp: App {
     @AppStorage("isDarkMode") private var isDarkMode = false
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    var purchaseManager = PurchaseManager.shared
     
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel()
@@ -45,6 +46,7 @@ struct RadioStreamApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(purchaseManager)
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
