@@ -28,7 +28,7 @@ struct SideMenuView: View {
 
             // Footer
             VStack(alignment: .leading) {
-                Text("Copyright StreamingRadios")
+                Text("Copyright StreamRadios")
                     .font(.footnote)
                     .padding(.horizontal, 20)
                 Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")

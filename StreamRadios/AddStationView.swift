@@ -145,7 +145,7 @@ struct AddStationView: View {
             }
             
             // Check if the user can add more stations or needs to purchase premium
-            if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium() {
+            if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
                 showingPurchaseView = true
             } else {
                 let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
