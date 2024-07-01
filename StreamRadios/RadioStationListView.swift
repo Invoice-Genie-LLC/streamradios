@@ -54,14 +54,15 @@ struct RadioStationListView: View {
 
                                     Text(station.name)
                                         .font(.headline)
-                                        .foregroundColor(.primary)
+                                        .foregroundColor(isCurrentStation(station: station) ? .primary : .gray) // Conditional color change
+                                            .background(isCurrentStation(station: station) ? Color.clear : Color(UIColor.systemGray5)) // Conditional background change
                                 }
 
                                 if isCurrentStation(station: station) {
                                     if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                                         Text(metadata)
                                             .font(.subheadline)
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(.primary)
                                     }
                                 } else {
                                     Text("Not Playing")

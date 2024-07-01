@@ -22,19 +22,6 @@ struct SettingsView: View {
             Section(header: Text("Display Settings")) {
                 Toggle("Dark Mode", isOn: $isDarkMode)
             }
-            
-            Section(header: Text("Data Management")) {
-                Button(action: {
-                    isImportExportViewPresented.toggle()
-                }) {
-                    Text("Import/Export Stations")
-                        .foregroundColor(.primary)
-                }
-                .sheet(isPresented: $isImportExportViewPresented) {
-                    ImportExportView()
-                        .environmentObject(RadioStationViewModel())
-                }
-            }
         }
         .navigationTitle("Settings")
         .navigationBarBackButtonHidden(true) // Hide default back button
