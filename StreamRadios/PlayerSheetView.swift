@@ -25,6 +25,7 @@ struct PlayerSheetView: View {
     @State private var showingLyrics = false
     @State private var lyricsLoading = false
     @State private var pulse = false
+    @State private var showingPurchaseView = false
     
     var body: some View {
         NavigationView {
@@ -35,6 +36,7 @@ struct PlayerSheetView: View {
                 
                 VStack {
                     backButton
+                        .padding(.top, UIScreen.main.bounds.height < 700 ? 110 : 25) // Conditional padding
                     contentView
                     Spacer()
                     /*
@@ -163,12 +165,14 @@ struct PlayerSheetView: View {
                         RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.5))
                     }
                 }
-                .frame(width: 380, height: 340)
+                .frame(width: UIScreen.main.bounds.height < 900 ? 280 : 380, height: UIScreen.main.bounds.height < 900 ? 280 : 380)
+
+                //.frame(width: 380, height: 340)
                 .cornerRadius(10)
                 .modifier(NeumorphicShadow())
             } else {
                 RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
-                    .frame(width: 300, height: 300)
+                    .frame(width: UIScreen.main.bounds.height < 900 ? 280 : 380, height: UIScreen.main.bounds.height < 900 ? 280 : 380)
                     .cornerRadius(10)
                     .modifier(NeumorphicShadow())
             }
@@ -212,20 +216,24 @@ struct PlayerSheetView: View {
                 }
                 
                 Button(action: {
-                    showingLyrics.toggle()
-                    if shazamViewModel.shazamMedia.lyrics == nil {
-                        lyricsLoading = true
-                        if let artist = shazamViewModel.shazamMedia.artistName, let title = shazamViewModel.shazamMedia.title {
-                            shazamViewModel.fetchLyrics(for: artist, song: title) { result in
-                                switch result {
-                                case .success(let lyrics):
-                                    shazamViewModel.shazamMedia.lyrics = lyrics
-                                case .failure:
-                                    shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
+                    if PurchaseManager.shared.hasPurchasedPremium() {
+                        showingLyrics.toggle()
+                        if shazamViewModel.shazamMedia.lyrics == nil {
+                            lyricsLoading = true
+                            if let artist = shazamViewModel.shazamMedia.artistName, let title = shazamViewModel.shazamMedia.title {
+                                shazamViewModel.fetchLyrics(for: artist, song: title) { result in
+                                    switch result {
+                                    case .success(let lyrics):
+                                        shazamViewModel.shazamMedia.lyrics = lyrics
+                                    case .failure:
+                                        shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
+                                    }
+                                    lyricsLoading = false
                                 }
-                                lyricsLoading = false
                             }
                         }
+                    } else {
+                        showingPurchaseView = true
                     }
                 }) {
                     Text("Show Lyrics")
@@ -233,6 +241,9 @@ struct PlayerSheetView: View {
                         .foregroundColor(Color.primary)
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
+                }
+                .sheet(isPresented: $showingPurchaseView) {
+                    PurchaseView(isPresented: $showingPurchaseView)
                 }
                 
             }

@@ -9,7 +9,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     @AppStorage("isDarkMode") private var isDarkMode = false
-    
+    @State private var showingPurchase = false
     @Environment(\.presentationMode) var presentationMode
     @State private var isImportExportViewPresented = false
     
@@ -21,6 +21,11 @@ struct SettingsView: View {
             
             Section(header: Text("Display Settings")) {
                 Toggle("Dark Mode", isOn: $isDarkMode)
+            }
+            Section(header: Text("Premium Features")) {
+                Button("Enable Premium Features") {
+                                showingPurchase = true
+                            }
             }
         }
         .navigationTitle("Settings")
@@ -45,6 +50,9 @@ struct SettingsView: View {
                 windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .light
             }
         }
+        .sheet(isPresented: $showingPurchase) {
+                        PurchaseView(isPresented: $showingPurchase)
+                    }
     }
 }
 
