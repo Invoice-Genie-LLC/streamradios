@@ -13,22 +13,23 @@ struct AddStationView: View {
     @State private var iconImage: UIImage? = nil
     @State private var showImagePicker = false
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @EnvironmentObject var permissionManager: PermissionManager
     @Binding var isPresented: Bool
     @Binding var isEditingStation: RadioStation?
     @State private var showingPurchaseView = false
     var station: RadioStation?
     
     init(station: RadioStation? = nil, isPresented: Binding<Bool>? = nil, isEditingStation: Binding<RadioStation?>? = nil) {
-            _name = State(initialValue: station?.name ?? "")
-            _urlString = State(initialValue: station?.url ?? "")
-            self.station = station
-            _isPresented = isPresented ?? .constant(false)
-            _isEditingStation = isEditingStation ?? .constant(nil)
-
-            if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                _iconImage = State(initialValue: image)
-            }
+        _name = State(initialValue: station?.name ?? "")
+        _urlString = State(initialValue: station?.url ?? "")
+        self.station = station
+        _isPresented = isPresented ?? .constant(false)
+        _isEditingStation = isEditingStation ?? .constant(nil)
+        
+        if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+            _iconImage = State(initialValue: image)
         }
+    }
     
     var body: some View {
         NavigationView {
@@ -105,7 +106,9 @@ struct AddStationView: View {
                         }
                         
                         Button(action: {
-                            showImagePicker = true
+                            permissionManager.checkPhotoLibraryPermission {
+                                showImagePicker = true
+                            }
                         }) {
                             HStack {
                                 Image(systemName: "square.and.arrow.up")
@@ -128,32 +131,42 @@ struct AddStationView: View {
                     .alert(isPresented: $showAlert) {
                         Alert(title: Text("Invalid URL"), message: Text("Please enter a valid URL"), dismissButton: .default(Text("OK")))
                     }
+                    .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
+                        Alert(
+                            title: Text("Permission Required"),
+                            message: Text(permissionManager.alertMessage),
+                            primaryButton: .default(Text("Settings"), action: {
+                                permissionManager.openAppSettings()
+                            }),
+                            secondaryButton: .cancel()
+                        )
+                    }
                 }
             }
             .navigationBarHidden(true)
             .sheet(isPresented: $showingPurchaseView) {
-                            // Assuming PurchaseView is a SwiftUI view handling purchases
-                            PurchaseView(isPresented: $showingPurchaseView)
-                        }// Hide the default navigation bar
+                // Assuming PurchaseView is a SwiftUI view handling purchases
+                PurchaseView(isPresented: $showingPurchaseView)
+            }// Hide the default navigation bar
         }
     }
     
     private func saveStation() {
-            guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
-                showAlert = true
-                return
-            }
-            
-            // Check if the user can add more stations or needs to purchase premium
-            if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
-                showingPurchaseView = true
-            } else {
-                let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-                viewModel.addStation(name: name, url: urlString, iconData: iconData)
-                isPresented = false
-            }
+        guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
+            showAlert = true
+            return
         }
-
+        
+        // Check if the user can add more stations or needs to purchase premium
+        if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
+            showingPurchaseView = true
+        } else {
+            let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+            viewModel.addStation(name: name, url: urlString, iconData: iconData)
+            isPresented = false
+        }
+    }
+    
 }
 
 struct AddStationView_Previews: PreviewProvider {

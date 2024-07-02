@@ -85,10 +85,16 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     }
 
     func stopListening() {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        DispatchQueue.main.async {
-            self.isRecording = false
+        // Perform the audio stopping logic in the background if needed
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.audioEngine.stop()
+            self.audioEngine.inputNode.removeTap(onBus: 0)
+
+            // Once stopping is done, update any UI elements on the main thread
+            DispatchQueue.main.async {
+                self.isRecording = false
+                // Any other UI updates related to stopping the recording
+            }
         }
     }
 

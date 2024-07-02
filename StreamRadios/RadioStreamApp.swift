@@ -46,6 +46,7 @@ struct RadioStreamApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(PermissionManager())
                 .environmentObject(purchaseManager)
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)

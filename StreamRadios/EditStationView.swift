@@ -14,6 +14,7 @@ struct EditStationView: View {
     @State private var iconImage: UIImage? = nil
     @State private var showImagePicker = false
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @EnvironmentObject var permissionManager: PermissionManager
     @Binding var isPresented: RadioStation?
     var station: RadioStation
     
@@ -103,7 +104,9 @@ struct EditStationView: View {
                         }
                         
                         Button(action: {
-                            showImagePicker = true
+                            permissionManager.checkPhotoLibraryPermission {
+                                showImagePicker = true
+                            }
                         }) {
                             HStack {
                                 Image(systemName: "square.and.arrow.up")
@@ -126,6 +129,16 @@ struct EditStationView: View {
                     .alert(isPresented: $showAlert) {
                         Alert(title: Text("Invalid URL"), message: Text("Please enter a valid URL"), dismissButton: .default(Text("OK")))
                     }
+                    .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
+                        Alert(
+                            title: Text("Permission Required"),
+                            message: Text(permissionManager.alertMessage),
+                            primaryButton: .default(Text("Settings"), action: {
+                                permissionManager.openAppSettings()
+                            }),
+                            secondaryButton: .cancel()
+                        )
+                    }
                 }
             }
             .navigationBarHidden(true) // Hide the default navigation bar
@@ -133,31 +146,31 @@ struct EditStationView: View {
     }
     
     private func saveStation() {
-            guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
-                showAlert = true
-                return
-            }
+        guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
+            showAlert = true
+            return
+        }
+        
+        if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+            viewModel.stations[index].name = name
+            viewModel.stations[index].url = urlString
+            viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
             
-            if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                viewModel.stations[index].name = name
-                viewModel.stations[index].url = urlString
-                viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-                
-                viewModel.saveStationsToFile()  // Save locally
-                
-                // Update in CloudKit
-                DataStore.shared.updateStationInCloudKit(station: viewModel.stations[index], iconImage: iconImage) { success, recordName in
-                    if success {
-                        print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
-                    } else {
-                        print("Failed to update station in CloudKit.")
-                    }
+            viewModel.saveStationsToFile()  // Save locally
+            
+            // Update in CloudKit
+            DataStore.shared.updateStationInCloudKit(station: viewModel.stations[index], iconImage: iconImage) { success, recordName in
+                if success {
+                    print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
+                } else {
+                    print("Failed to update station in CloudKit.")
                 }
             }
-            
-            isPresented = nil
         }
-
+        
+        isPresented = nil
+    }
+    
 }
 
 struct EditStationView_Previews: PreviewProvider {
