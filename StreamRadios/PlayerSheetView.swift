@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AVKit
+import Combine
 
 // Extension to safely access indices of a collection
 extension Collection {
@@ -21,6 +22,7 @@ struct PlayerSheetView: View {
     
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @StateObject private var permissionManager = PermissionManager()
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var shazamViewModel = ShazamViewModel()
     @State private var isShazaming = false
@@ -61,7 +63,29 @@ struct PlayerSheetView: View {
                 }
             }
         }
+        .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
+            Alert(
+                title: Text("Permission Required"),
+                message: Text(permissionManager.alertMessage),
+                primaryButton: .default(Text("Settings"), action: permissionManager.openAppSettings),
+                secondaryButton: .cancel()
+            )
+        }
     }
+    
+    private func shazamAction() {
+        permissionManager.checkMicrophonePermission { granted in
+            if granted {
+                shazamViewModel.startOrEndListening()
+                isShazaming = true
+                pulse = true
+            } else {
+                // Handle the case where permission is not granted
+                // This could involve updating the UI or showing an alert
+            }
+        }
+    }
+    
     
     private func startPulsing() {
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
@@ -149,7 +173,7 @@ struct PlayerSheetView: View {
                 .padding(.bottom, 10)
             }
             
-            if let url = shazamViewModel.shazamMedia.albumArtURL, let title = shazamViewModel.shazamMedia.title, let artist = shazamViewModel.shazamMedia.artistName {
+            if let url = shazamViewModel.shazamMedia.albumArtURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
@@ -269,6 +293,18 @@ struct PlayerSheetView: View {
         }
     }
     
+    private func startOrStopShazaming() {
+        if isShazaming {
+            shazamViewModel.stopListening()
+            isShazaming = false
+            pulse = false
+        } else {
+            shazamViewModel.startOrEndListening()
+            isShazaming = true
+            pulse = true
+        }
+    }
+    
     private var stationContent: some View {
         VStack {
             StationDetails()
@@ -276,6 +312,16 @@ struct PlayerSheetView: View {
                 Button(action: {
                     shazamViewModel.startOrEndListening()
                     isShazaming.toggle()
+                    permissionManager.checkMicrophonePermission { granted in
+                        if granted {
+                            print("Microphone permission granted.")
+                            
+                        } else {
+                            print("Microphone permission denied or restricted.")
+                            
+                        }
+                    }
+                    
                     pulse.toggle()
                 }) {
                     VStack {

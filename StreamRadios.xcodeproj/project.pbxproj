@@ -35,16 +35,15 @@
 		775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04562C2A969F00E99061 /* FeatureSwitch.swift */; };
 		775D04592C2B20BE00E99061 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04582C2B20BE00E99061 /* EditStationView.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
-		778F74722C2F197300AB81CD /* SoundVisualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F74712C2F197300AB81CD /* SoundVisualizerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77BC0EAC2C32F923002FDD8E /* PurchaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BC0EAB2C32F923002FDD8E /* PurchaseManager.swift */; };
 		77BC0EAE2C32F954002FDD8E /* PurchaseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BC0EAD2C32F954002FDD8E /* PurchaseView.swift */; };
+		77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */; };
 		77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */; };
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
-		77D464442C2F25CE00E509C6 /* AppleMusicManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77D464432C2F25CE00E509C6 /* AppleMusicManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -105,15 +104,14 @@
 		775D04562C2A969F00E99061 /* FeatureSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSwitch.swift; sourceTree = "<group>"; };
 		775D04582C2B20BE00E99061 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
-		778F74712C2F197300AB81CD /* SoundVisualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundVisualizerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77BC0EAB2C32F923002FDD8E /* PurchaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseManager.swift; sourceTree = "<group>"; };
 		77BC0EAD2C32F954002FDD8E /* PurchaseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PurchaseView.swift; sourceTree = "<group>"; };
+		77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
-		77D464432C2F25CE00E509C6 /* AppleMusicManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleMusicManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,12 +175,11 @@
 				775D04372C28E89300E99061 /* LyricsView.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				77BC0EAB2C32F923002FDD8E /* PurchaseManager.swift */,
+				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
 				77BC0EAD2C32F954002FDD8E /* PurchaseView.swift */,
-				77D464432C2F25CE00E509C6 /* AppleMusicManager.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
 				778F746F2C2F13CE00AB81CD /* PlayerView.swift */,
 				779352212C1A118A008F8416 /* AlbumArtView.swift */,
-				778F74712C2F197300AB81CD /* SoundVisualizerView.swift */,
 				77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */,
 				77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */,
 				7707DA622C156D92006D5EBB /* AddStationView.swift */,
@@ -403,11 +400,9 @@
 				771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */,
 				77BC0EAC2C32F923002FDD8E /* PurchaseManager.swift in Sources */,
 				7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */,
-				778F74722C2F197300AB81CD /* SoundVisualizerView.swift in Sources */,
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
-				77D464442C2F25CE00E509C6 /* AppleMusicManager.swift in Sources */,
 				77130BF82C307D5F00D4711A /* EndEditing.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
@@ -415,6 +410,7 @@
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,
+				77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */,
 				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -575,11 +571,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
-				INFOPLIST_KEY_NSAppleMusicUsageDescription = "This app requires access to your Apple Music library to fetch and play songs.";
-				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "We need access to your documents folder to import and export playlists.";
-				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "We need access to your files to import and export playlists.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to the microphone to recognize songs.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to import and export playlists.";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StreamRadios uses the microphone to identify songs through Shazam, enhancing your ability to discover and interact with music playing around you.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to select custom icons for your radio stations.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -588,7 +582,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.1.3;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -615,11 +609,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
-				INFOPLIST_KEY_NSAppleMusicUsageDescription = "This app requires access to your Apple Music library to fetch and play songs.";
-				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "We need access to your documents folder to import and export playlists.";
-				INFOPLIST_KEY_NSFileProviderDomainUsageDescription = "We need access to your files to import and export playlists.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app needs access to the microphone to recognize songs.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photo library to import and export playlists.";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StreamRadios uses the microphone to identify songs through Shazam, enhancing your ability to discover and interact with music playing around you.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to select custom icons for your radio stations.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -628,7 +620,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.1.3;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
