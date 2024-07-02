@@ -35,12 +35,12 @@ class PurchaseManager: NSObject, ObservableObject, SKProductsRequestDelegate, SK
         request.delegate = self
         request.start()
     }
-    
+
     func resetTransactionState() {
-            DispatchQueue.main.async {
-                self.transactionState = nil
-            }
+        DispatchQueue.main.async {
+            self.transactionState = nil
         }
+    }
 
     func buyProduct() {
         guard let product = self.product else {
@@ -64,9 +64,7 @@ class PurchaseManager: NSObject, ObservableObject, SKProductsRequestDelegate, SK
     // MARK: - SKProductsRequestDelegate
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
         DispatchQueue.main.async {
-            if let product = response.products.first {
-                self.product = product
-            }
+            self.product = response.products.first
         }
     }
 
