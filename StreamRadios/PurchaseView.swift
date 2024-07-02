@@ -48,6 +48,7 @@ struct PurchaseView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .onReceive(purchaseManager.$transactionState) { state in
             if state == .purchased || state == .restored {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
