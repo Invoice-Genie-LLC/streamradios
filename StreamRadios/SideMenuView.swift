@@ -8,10 +8,14 @@
 import SwiftUI
 
 struct SideMenuView: View {
+    @Binding var showSideMenu: Bool
+    
     var body: some View {
         VStack(alignment: .leading) {
             VStack {
-                NavigationLink(destination: SettingsView()) {
+                NavigationLink(destination: SettingsView().onAppear {
+                    self.showSideMenu = false
+                }) {
                     HStack {
                         Image(systemName: "gear")
                             .font(.headline)
@@ -42,9 +46,9 @@ struct SideMenuView: View {
         .edgesIgnoringSafeArea(.all)
     }
 }
-    
+
 struct SideMenuView_Previews: PreviewProvider {
     static var previews: some View {
-        SideMenuView()
+        SideMenuView(showSideMenu: .constant(true))
     }
 }

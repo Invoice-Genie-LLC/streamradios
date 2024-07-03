@@ -14,7 +14,6 @@ extension UIApplication {
 }
 
 struct ContentView: View {
-    // State properties from your original code
     @StateObject private var radioPlayer = RadioPlayer.shared
     @StateObject private var viewModel = RadioStationViewModel()
     @State private var isAddStationViewPresented = false
@@ -27,12 +26,13 @@ struct ContentView: View {
     @State private var searchText = ""
     private var cancellables = Set<AnyCancellable>()
     @State private var bitrateMessage = "Loading bitrate information..."
-    
+
     @Environment(\.horizontalSizeClass) var sizeClass
     
     var body: some View {
         NavigationView {
             ZStack {
+                SideMenuView(showSideMenu: $showSideMenu)
                 // Background color
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
@@ -194,7 +194,7 @@ struct ContentView: View {
                 // Side Menu
                 GeometryReader { geometry in
                     HStack {
-                        SideMenuView()
+                        SideMenuView(showSideMenu: $showSideMenu)
                             .frame(width: geometry.size.width / 2)
                             .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
                         
