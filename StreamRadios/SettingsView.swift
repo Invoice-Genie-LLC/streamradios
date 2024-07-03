@@ -8,11 +8,12 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
-    @AppStorage("isDarkMode") private var isDarkMode = false
+    // Ensure dark mode is on by default for new installs
+    @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
     @State private var showingPurchase = false
     @Environment(\.presentationMode) var presentationMode
     @State private var isImportExportViewPresented = false
-    
+
     var body: some View {
         Form {
             Section(header: Text("Playback Settings")) {
@@ -24,24 +25,22 @@ struct SettingsView: View {
             }
             Section(header: Text("Premium Features")) {
                 Button("Enable Premium Features") {
-                                showingPurchase = true
-                            }
+                    showingPurchase = true
+                }
             }
         }
         .navigationTitle("Settings")
-        .navigationBarBackButtonHidden(true) // Hide default back button
-        .toolbar { // Add a custom toolbar item for the back button
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: {
-                    // Action to pop the view
                     presentationMode.wrappedValue.dismiss()
                 }) {
                     HStack {
                         Image(systemName: "chevron.left")
-                            .foregroundColor(.primary)
                         Text("Back")
-                            .foregroundColor(.primary)
                     }
+                    .foregroundColor(.primary)
                 }
             }
         }
@@ -49,10 +48,11 @@ struct SettingsView: View {
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                 windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .light
             }
+            UserDefaults.standard.set(true, forKey: "isDarkModeSet") // Mark the setting as initialized
         }
         .sheet(isPresented: $showingPurchase) {
-                        PurchaseView(isPresented: $showingPurchase)
-                    }
+            PurchaseView(isPresented: $showingPurchase)
+        }
     }
 }
 

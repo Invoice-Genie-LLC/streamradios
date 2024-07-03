@@ -11,7 +11,7 @@ import UIKit
 
 @main
 struct RadioStreamApp: App {
-    @AppStorage("isDarkMode") private var isDarkMode = false
+    @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var purchaseManager = PurchaseManager.shared
     
