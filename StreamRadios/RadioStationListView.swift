@@ -28,145 +28,167 @@ struct RadioStationListView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollView {
-                LazyVStack {
-                    ForEach(filteredStations) { station in
-                        HStack {
-                            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .frame(width: 50, height: 50)
-                                    .cornerRadius(8)
-                            } else {
-                                Image(systemName: station.isFavorite ? "radio" : "radio")
-                                    .resizable()
-                                    .frame(width: 50, height: 50)
-                                    .cornerRadius(8)
-                                    .foregroundColor(station.isFavorite ? .primary : .primary)
-                            }
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    if isCurrentStation(station: station) {
-                                        Image(systemName: "speaker.wave.2.fill")
-                                            .foregroundColor(.primary)
-                                    }
-
-                                    Text(station.name)
-                                        .font(.headline)
-                                        .foregroundColor(isCurrentStation(station: station) ? .primary : .gray) // Conditional color change
-                                            .background(isCurrentStation(station: station) ? Color.clear : Color(UIColor.systemGray5)) // Conditional background change
-                                }
-
-                                if isCurrentStation(station: station) {
-                                    if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                                        Text(metadata)
-                                            .font(.subheadline)
-                                            .foregroundColor(.primary)
-                                    }
-                                } else {
-                                    Text("Not Playing")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .padding(.leading, 10)
-
-                            Spacer()
-
-                            if !isEditing {
+            if filteredStations.isEmpty {
+                            VStack {
+                                Text("No stations configured")
+                                    .font(.title)
+                                    .foregroundColor(.gray)
+                                    .padding(.bottom, 15)
                                 Button(action: {
-                                    if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                                        viewModel.updateLastPlayed(for: viewModel.stations[index])
-                                        radioPlayer.playStation(at: index, from: viewModel.stations)
-                                    }
+                                    isEditingStation = true
                                 }) {
-                                    Image(systemName: "play.circle.fill")
+                                    Image(systemName: "plus.circle")
+                                        .font(.largeTitle)
+                                        .foregroundColor(.primary)
+                                }
+                
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .transition(.scale)
+            } else {
+                ScrollView {
+                    LazyVStack {
+                        ForEach(filteredStations) { station in
+                            HStack {
+                                if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .frame(width: 50, height: 50)
+                                        .cornerRadius(8)
+                                } else {
+                                    Image(systemName: station.isFavorite ? "radio" : "radio")
+                                        .resizable()
+                                        .frame(width: 50, height: 50)
+                                        .cornerRadius(8)
+                                        .foregroundColor(station.isFavorite ? .primary : .primary)
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        if isCurrentStation(station: station) {
+                                            Image(systemName: "speaker.wave.2.fill")
+                                                .foregroundColor(.primary)
+                                        }
+                                        
+                                        Text(station.name)
+                                            .font(.headline)
+                                            .foregroundColor(isCurrentStation(station: station) ? .primary : .gray) // Conditional color change
+                                            .background(isCurrentStation(station: station) ? Color.clear : Color(UIColor.systemGray5)) // Conditional background change
+                                    }
+                                    
+                                    if isCurrentStation(station: station) {
+                                        if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+                                            Text(metadata)
+                                                .font(.subheadline)
+                                                .foregroundColor(.primary)
+                                        }
+                                    } else {
+                                        Text("Not Playing")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .padding(.leading, 10)
+                                
+                                Spacer()
+                                
+                                if !isEditing {
+                                    Button(action: {
+                                        if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                                            viewModel.updateLastPlayed(for: viewModel.stations[index])
+                                            radioPlayer.playStation(at: index, from: viewModel.stations)
+                                        }
+                                    }) {
+                                        Image(systemName: "play.circle.fill")
+                                            .font(.title)
+                                            .foregroundColor(.primary)
+                                            .accessibilityIdentifier("playButton-\(station.id)")
+                                    }
+                                    Button(action: {
+                                        viewModel.toggleFavorite(for: station)
+                                    }) {
+                                        Image(systemName: station.isFavorite ? "heart.fill" : "heart")
+                                            .font(.title)
+                                            .foregroundColor(station.isFavorite ? .red : .primary)
+                                    }
+                                    
+                                } else {
+                                    Image(systemName: "line.horizontal.3")
                                         .font(.title)
                                         .foregroundColor(.primary)
-                                        .accessibilityIdentifier("playButton-\(station.id)")
+                                        .padding(.trailing, 10)
+                                        .onDrag {
+                                            UIDevice.playHapticFeedback()
+                                            self.draggingStation = station
+                                            self.originalMetadata = radioPlayer.metadata
+                                            radioPlayer.metadata = nil
+                                            return NSItemProvider(object: String(station.id.uuidString) as NSString)
+                                        }
+                                        .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
                                 }
-                                Button(action: {
-                                    viewModel.toggleFavorite(for: station)
-                                }) {
-                                    Image(systemName: station.isFavorite ? "heart.fill" : "heart")
-                                        .font(.title)
-                                        .foregroundColor(station.isFavorite ? .red : .primary)
+                            }
+                            .padding()
+                            .background(self.draggingStation?.id == station.id ? Color.gray.opacity(0.2) : Color(UIColor.systemGray5))
+                            .cornerRadius(10)
+                            .shadow(radius: 4)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if isEditing {
+                                    selectedStationForEdit = station
                                 }
-
-                            } else {
-                                Image(systemName: "line.horizontal.3")
-                                    .font(.title)
-                                    .foregroundColor(.primary)
-                                    .padding(.trailing, 10)
-                                    .onDrag {
-                                        UIDevice.playHapticFeedback()
-                                        self.draggingStation = station
-                                        self.originalMetadata = radioPlayer.metadata
-                                        radioPlayer.metadata = nil
-                                        return NSItemProvider(object: String(station.id.uuidString) as NSString)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                if !isEditing {
+                                    Button(role: .destructive) {
+                                        withAnimation {
+                                            deleteStation(station)
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
                                     }
-                                    .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
-                            }
-                        }
-                        .padding()
-                        .background(self.draggingStation?.id == station.id ? Color.gray.opacity(0.2) : Color(UIColor.systemGray5))
-                        .cornerRadius(10)
-                        .shadow(radius: 4)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if isEditing {
-                                selectedStationForEdit = station
-                            }
-                        }
-                        .swipeActions(edge: .trailing) {
-                            if !isEditing {
-                                Button(role: .destructive) {
-                                    withAnimation {
-                                        deleteStation(station)
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
                                 }
                             }
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .padding(.horizontal)
-                        .padding(.vertical, 4)
-                        .contextMenu {
-                            if !isEditing {
-                                Button(role: .destructive) {
-                                    withAnimation {
-                                        deleteStation(station)
+                            .buttonStyle(PlainButtonStyle())
+                            .padding(.horizontal)
+                            .padding(.vertical, 4)
+                            .contextMenu {
+                                if !isEditing {
+                                    Button(role: .destructive) {
+                                        withAnimation {
+                                            deleteStation(station)
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
                                     }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
                                 }
                             }
+                            .onDrag {
+                                UIDevice.playHapticFeedback()
+                                self.draggingStation = station
+                                self.originalMetadata = radioPlayer.metadata
+                                radioPlayer.metadata = nil
+                                return NSItemProvider(object: String(station.id.uuidString) as NSString)
+                            }
+                            .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
                         }
-                        .onDrag {
-                            UIDevice.playHapticFeedback()
-                            self.draggingStation = station
-                            self.originalMetadata = radioPlayer.metadata
-                            radioPlayer.metadata = nil
-                            return NSItemProvider(object: String(station.id.uuidString) as NSString)
-                        }
-                        .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
                     }
+                    .padding(.top, 10)
+                    .padding(.vertical, 10)
                 }
-                .padding(.top, 10)
-                .padding(.vertical, 10)
             }
         }
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $isEditingStation, onDismiss: {
-            selectedStationForEdit = nil
-        }) {
-            if let selectedStation = selectedStationForEdit {
-                AddStationView(station: selectedStation, isPresented: $isEditingStation)
-                    .environmentObject(viewModel)
-            }
-        }
+                    selectedStationForEdit = nil
+                }) {
+                    if let selectedStation = selectedStationForEdit {
+                        AddStationView(station: selectedStation, isPresented: $isEditingStation)
+                            .environmentObject(viewModel)
+                    } else {
+                        AddStationView(isPresented: $isEditingStation)
+                            .environmentObject(viewModel)
+                    }
+                }
         .onAppear {
             NotificationCenter.default.addObserver(forName: .NetworkReconnectNotification, object: nil, queue: .main) { _ in
                 if let index = radioPlayer.currentStationIndex {
