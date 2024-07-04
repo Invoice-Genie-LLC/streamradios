@@ -48,7 +48,7 @@ struct RadioStationListView: View {
             else {
                 ScrollView {
                     LazyVStack {
-                        ForEach(filteredStations) { station in
+                        ForEach(viewModel.filteredStations) { station in
                             HStack {
                                 if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                                     Image(uiImage: image)

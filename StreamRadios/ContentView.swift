@@ -18,6 +18,7 @@ struct ContentView: View {
     @StateObject private var viewModel = RadioStationViewModel()
     @State private var isAddStationViewPresented = false
     @State private var isPlayerSheetPresented = false
+    @State private var isEditing: Bool = false
     @State private var showSideMenu = false
     @State private var isEditingMode = false
     @State private var isEditingStation = false
@@ -50,25 +51,20 @@ struct ContentView: View {
                         }
                         
                         VStack {
-                            TextField("Search Stations", text: $searchText)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .padding(.horizontal, 8)
-                                .padding(.trailing, 30)
-                                .overlay(
-                                    HStack {
-                                        Spacer()
-                                        if !searchText.isEmpty {
-                                            Button(action: {
-                                                searchText = ""
-                                                UIApplication.shared.endEditing()
-                                            }) {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .foregroundColor(Color(UIColor.opaqueSeparator))
+                            Picker("Select Country", selection: $viewModel.selectedCountry) {
+                                                ForEach(viewModel.countries, id: \.self) { country in
+                                                    Text(country).tag(country)
+                                                }
                                             }
-                                            .padding(.trailing, 8)
-                                        }
-                                    }
-                                )
+                            .pickerStyle(MenuPickerStyle())
+                            RadioStationListView(
+                                                isEditing: $isEditing,
+                                                isEditingStation: $isEditingStation,
+                                                selectedStationForEdit: $selectedStationForEdit,
+                                                selectedTab: $selectedTab,
+                                                searchText: $searchText
+                                            )
+                                            .environmentObject(viewModel)
                         }.padding(.horizontal, 8)
                         Spacer()
                         
