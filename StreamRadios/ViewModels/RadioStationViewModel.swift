@@ -9,6 +9,21 @@ import Combine
 
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
+       @Published var selectedCountry: String = "Unknown Region" // Initialize with default value
+       @Published var countries: [String] = [
+           "Albania", "Angola", "Argentina", "Australia", "Bangladesh", "Bolivia",
+           "Brazil", "Bulgaria", "Canada", "Costa Rica", "Czech Republic", "France",
+           "Germany", "Greece", "Haiti", "Hungary", "India", "Indonesia", "Italy",
+           "Japan", "Malaysia", "Mexico", "Netherlands", "New Zealand", "Peru",
+           "Poland", "Portugal", "Russia", "Serbia", "Slovakia", "South Africa",
+           "Spain", "Sweden", "Switzerland", "Tanzania", "Turkey", "UK", "USA",
+           "Zimbabwe", "Unknown Region"
+       ]
+
+       var filteredStations: [RadioStation] {
+           stations.filter { $0.country == selectedCountry }
+       }
+    
     @State var showingPurchaseView = false
 
     private var fileURL: URL {
