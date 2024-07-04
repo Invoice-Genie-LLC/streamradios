@@ -2,7 +2,6 @@
 // StreamRadios
 //
 // Created by Kley Sulo on 6/8/24.
-//
 
 import SwiftUI
 import Combine
@@ -18,7 +17,6 @@ struct ContentView: View {
     @StateObject private var viewModel = RadioStationViewModel()
     @State private var isAddStationViewPresented = false
     @State private var isPlayerSheetPresented = false
-    @State private var isEditing: Bool = false
     @State private var showSideMenu = false
     @State private var isEditingMode = false
     @State private var isEditingStation = false
@@ -50,22 +48,18 @@ struct ContentView: View {
                                 .padding([.leading, .top, .bottom])
                         }
                         
-                        VStack {
-                            Picker("Select Country", selection: $viewModel.selectedCountry) {
-                                                ForEach(viewModel.countries, id: \.self) { country in
-                                                    Text(country).tag(country)
-                                                }
-                                            }
-                            .pickerStyle(MenuPickerStyle())
-                            RadioStationListView(
-                                                isEditing: $isEditing,
-                                                isEditingStation: $isEditingStation,
-                                                selectedStationForEdit: $selectedStationForEdit,
-                                                selectedTab: $selectedTab,
-                                                searchText: $searchText
-                                            )
-                                            .environmentObject(viewModel)
-                        }.padding(.horizontal, 8)
+                        Picker("Select Country", selection: $viewModel.selectedCountry) {
+                            Text("Select Country").tag("")
+                            ForEach(viewModel.countries, id: \.self) { country in
+                                Text(country).tag(country)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .frame(maxWidth: 200)
+                        .padding()
+                        .background(Color(UIColor.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .shadow(radius: 5)
                         Spacer()
                         
                         Button(action: {
