@@ -9,20 +9,28 @@ import Combine
 
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
-       @Published var selectedCountry: String = "Unknown Region" // Initialize with default value
-       @Published var countries: [String] = [
-           "Albania", "Angola", "Argentina", "Australia", "Bangladesh", "Bolivia",
-           "Brazil", "Bulgaria", "Canada", "Costa Rica", "Czech Republic", "France",
-           "Germany", "Greece", "Haiti", "Hungary", "India", "Indonesia", "Italy",
-           "Japan", "Malaysia", "Mexico", "Netherlands", "New Zealand", "Peru",
-           "Poland", "Portugal", "Russia", "Serbia", "Slovakia", "South Africa",
-           "Spain", "Sweden", "Switzerland", "Tanzania", "Turkey", "UK", "USA",
-           "Zimbabwe", "Unknown Region"
-       ]
+    @Published var countries: [String] = [
+        "Albania", "Angola", "Argentina", "Australia", "Bangladesh", "Bolivia",
+        "Brazil", "Bulgaria", "Canada", "Costa Rica", "Czech Republic", "France",
+        "Germany", "Greece", "Haiti", "Hungary", "India", "Indonesia", "Italy",
+        "Japan", "Malaysia", "Mexico", "Netherlands", "New Zealand", "Peru",
+        "Poland", "Portugal", "Russia", "Serbia", "Slovakia", "South Africa",
+        "Spain", "Sweden", "Switzerland", "Tanzania", "Turkey", "UK", "USA",
+        "Zimbabwe", "Unknown Region"
+    ]
+    @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region" {
+        didSet {
+            saveSelectedCountry()
+        }
+    }
 
-       var filteredStations: [RadioStation] {
-           stations.filter { $0.country == selectedCountry }
-       }
+    private func saveSelectedCountry() {
+        UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
+    }
+    
+    var filteredStations: [RadioStation] {
+       return stations.filter { $0.country == selectedCountry }
+    }
     
     @State var showingPurchaseView = false
 
@@ -31,6 +39,7 @@ class RadioStationViewModel: ObservableObject {
     }
 
     init() {
+        selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
         loadStationsFromFileOrFetchNew()
     }
 
@@ -64,14 +73,14 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
-       func isStationPlaying(_ station: RadioStation) -> Bool {
-           guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
-                 currentStationIndex < stations.count,
-                 stations[currentStationIndex].id == station.id else {
-               return false
-           }
-           return true
-       }
+    func isStationPlaying(_ station: RadioStation) -> Bool {
+        guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
+              currentStationIndex < stations.count,
+              stations[currentStationIndex].id == station.id else {
+            return false
+        }
+        return true
+    }
 
     func toggleFavorite(for station: RadioStation) {
         if let index = stations.firstIndex(of: station), !isStationPlaying(stations[index]) {
@@ -117,17 +126,13 @@ class RadioStationViewModel: ObservableObject {
         }
     }
 
-    func addStation(name: String, url: String, iconData: String?) {
-            if stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
-                // Trigger view to show purchase option
-                showingPurchaseView = true
-            } else {
-                let newStation = RadioStation(name: name, url: url, iconData: iconData)
-                stations.append(newStation)
-                saveStationsToFile()
-                saveStationToCloud(newStation)
-            }
+    func addStation(name: String, url: String, iconData: String?, country: String) {
+        let newStation = RadioStation(name: name, url: url, iconData: iconData, country: country)
+        DispatchQueue.main.async {
+            self.stations.append(newStation)
+            self.saveStationToCloud(newStation)
         }
+    }
 
     func saveStationsToFile() {
         do {
@@ -194,6 +199,7 @@ class RadioStationViewModel: ObservableObject {
             stations[index].name = name
             stations[index].url = url
             stations[index].iconData = iconData
+            stations[index].country = selectedCountry
             saveStationsToFile()
             let iconImage = iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
             DataStore.shared.updateStationInCloudKit(station: stations[index], iconImage: iconImage) { success, recordName in
@@ -209,17 +215,19 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func updateStationInCloudKit(station: RadioStation) {
+        objectWillChange.send() // Notify subscribers that an update will happen
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
         DataStore.shared.updateStationInCloudKit(station: station, iconImage: iconImage) { success, recordName in
             DispatchQueue.main.async {
                 if success {
-                    print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
+                    print("Station updated in CloudKit.")
                 } else {
                     print("Failed to update station in CloudKit.")
                 }
             }
         }
     }
+
 
     func moveStation(from source: IndexSet, to destination: Int) {
         stations.move(fromOffsets: source, toOffset: destination)

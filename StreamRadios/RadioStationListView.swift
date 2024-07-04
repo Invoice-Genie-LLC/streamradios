@@ -48,7 +48,7 @@ struct RadioStationListView: View {
             else {
                 ScrollView {
                     LazyVStack {
-                        ForEach(viewModel.filteredStations) { station in
+                        ForEach(filteredStations) { station in
                             HStack {
                                 if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                                     Image(uiImage: image)
@@ -205,20 +205,16 @@ struct RadioStationListView: View {
     }
     
     private var filteredStations: [RadioStation] {
-        let stations: [RadioStation]
         switch selectedTab {
         case .recent:
-            stations = viewModel.recentStations()
+            // Filter for recent stations that were played and match the selected country.
+            return viewModel.recentStations().filter { $0.country == viewModel.selectedCountry }
         case .favorites:
-            stations = viewModel.favoriteStations()
+            // Filter for stations that are favorited and match the selected country.
+            return viewModel.favoriteStations().filter { $0.country == viewModel.selectedCountry }
         case .all:
-            stations = viewModel.stations
-        }
-        
-        if searchText.isEmpty {
-            return stations
-        } else {
-            return stations.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+            // Display all stations that match the selected country.
+            return viewModel.stations.filter { $0.country == viewModel.selectedCountry }
         }
     }
     

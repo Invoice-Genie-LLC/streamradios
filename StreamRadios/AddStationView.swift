@@ -2,13 +2,13 @@
 // StreamRadios
 //
 // Created by Kley Sulo on 6/9/24.
-//
 
 import SwiftUI
 
 struct AddStationView: View {
-    @State private var name: String
-    @State private var urlString: String
+    @State private var name: String = ""
+    @State private var urlString: String = ""
+    @State private var selectedCountry: String = "Unknown Region"
     @State private var showAlert = false
     @State private var iconImage: UIImage? = nil
     @State private var showImagePicker = false
@@ -20,8 +20,6 @@ struct AddStationView: View {
     var station: RadioStation?
     
     init(station: RadioStation? = nil, isPresented: Binding<Bool>? = nil, isEditingStation: Binding<RadioStation?>? = nil) {
-        _name = State(initialValue: station?.name ?? "")
-        _urlString = State(initialValue: station?.url ?? "")
         self.station = station
         _isPresented = isPresented ?? .constant(false)
         _isEditingStation = isEditingStation ?? .constant(nil)
@@ -88,6 +86,13 @@ struct AddStationView: View {
                                 .padding(.trailing, 8)
                             }
                         }
+                        
+                        Picker("Select Country", selection: $selectedCountry) {
+                            ForEach(viewModel.countries, id: \.self) { country in
+                                Text(country).tag(country)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
                     }
                     
                     Section(header: Text("Icon")) {
@@ -157,16 +162,18 @@ struct AddStationView: View {
             return
         }
         
-        // Check if the user can add more stations or needs to purchase premium
-        if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
-            showingPurchaseView = true
-        } else {
-            let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-            viewModel.addStation(name: name, url: urlString, iconData: iconData)
-            isPresented = false
+        let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+        let newStation = RadioStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
+        viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
+        DataStore.shared.saveNewStationToCloudKit(station: newStation, iconImage: iconImage) { success, recordName in
+            if success {
+                print("Station saved to CloudKit with record ID:", recordName ?? "Unknown")
+            } else {
+                print("Failed to save station to CloudKit.")
+            }
         }
+        isPresented = false
     }
-    
 }
 
 struct AddStationView_Previews: PreviewProvider {

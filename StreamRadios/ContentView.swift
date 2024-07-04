@@ -48,18 +48,20 @@ struct ContentView: View {
                                 .padding([.leading, .top, .bottom])
                         }
                         
+                        Spacer()
+                        
                         Picker("Select Country", selection: $viewModel.selectedCountry) {
-                            Text("Select Country").tag("")
-                            ForEach(viewModel.countries, id: \.self) { country in
-                                Text(country).tag(country)
+                                ForEach(viewModel.countries, id: \.self) { country in
+                                    Text(country).tag(country)
+                                }
                             }
-                        }
                         .pickerStyle(MenuPickerStyle())
                         .frame(maxWidth: 200)
                         .padding()
                         .background(Color(UIColor.systemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         .shadow(radius: 5)
+                        
                         Spacer()
                         
                         Button(action: {

@@ -1,15 +1,14 @@
+// EditStationView.swift
+// StreamRadios
 //
-//  EditStationView.swift
-//  StreamRadios
-//
-//  Created by Kley Sulo on 6/25/24.
-//
+// Created by Kley Sulo on 6/25/24.
 
 import SwiftUI
 
 struct EditStationView: View {
     @State private var name: String
     @State private var urlString: String
+    @State private var selectedCountry: String
     @State private var showAlert = false
     @State private var iconImage: UIImage? = nil
     @State private var showImagePicker = false
@@ -21,6 +20,7 @@ struct EditStationView: View {
     init(station: RadioStation, isPresented: Binding<RadioStation?>) {
         _name = State(initialValue: station.name)
         _urlString = State(initialValue: station.url)
+        _selectedCountry = State(initialValue: station.country ?? "Unknown Region")
         self.station = station
         _isPresented = isPresented
         
@@ -86,6 +86,13 @@ struct EditStationView: View {
                                 .padding(.trailing, 8)
                             }
                         }
+                        
+                        Picker("Select Country", selection: $selectedCountry) {
+                            ForEach(viewModel.countries, id: \.self) { country in
+                                Text(country).tag(country)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
                     }
                     
                     Section(header: Text("Icon")) {
@@ -155,6 +162,7 @@ struct EditStationView: View {
             viewModel.stations[index].name = name
             viewModel.stations[index].url = urlString
             viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+            viewModel.stations[index].country = selectedCountry
             
             viewModel.saveStationsToFile()  // Save locally
             
@@ -170,12 +178,11 @@ struct EditStationView: View {
         
         isPresented = nil
     }
-    
 }
 
 struct EditStationView_Previews: PreviewProvider {
     static var previews: some View {
-        let station = RadioStation(name: "Sample Station", url: "http://samplestation.com", iconData: nil)
+        let station = RadioStation(name: "Sample Station", url: "http://samplestation.com", iconData: nil, country: "Unknown Region")
         EditStationView(station: station, isPresented: .constant(station))
             .environmentObject(RadioStationViewModel())
     }
