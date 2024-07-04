@@ -47,8 +47,8 @@ class DataStore {
         let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id.uuidString))
         record.setValue(station.name, forKey: "name")
         record.setValue(station.url, forKey: "url")
-        record.setValue(station.country, forKey: "country")
         record.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
+        record.setValue(station.country, forKey: "country")  // Store country
 
         if let iconFileName = iconFileName, let image = loadImageFromFileSystem(fileName: iconFileName) {
             if let asset = createAsset(from: image) {
@@ -86,8 +86,8 @@ class DataStore {
                         }
                         let iconData = self.decodeIconData(record: record)
                         let isFavorite = (record["isFavorite"] as? String) == "true"  // Convert to Bool
+                        let country = record["country"] as? String ?? "Unknown Region"  // Retrieve country
                         let id = UUID(uuidString: record.recordID.recordName) ?? UUID()
-                        let country = record["country"] as? String ?? "Unknown Region"
                         return RadioStation(id: id, name: name, url: url, iconData: iconData, country: country, isFavorite: isFavorite)
                     }
                     completion(stations, nil)
@@ -128,6 +128,7 @@ class DataStore {
                 fetchedRecord.setValue(station.name, forKey: "name")
                 fetchedRecord.setValue(station.url, forKey: "url")
                 fetchedRecord.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
+                fetchedRecord.setValue(station.country, forKey: "country")  // Store country
 
                 if let iconImage = iconImage, let asset = self.createAsset(from: iconImage) {
                     fetchedRecord.setValue(asset, forKey: "iconData")
