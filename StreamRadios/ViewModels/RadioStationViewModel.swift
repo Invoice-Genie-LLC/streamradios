@@ -24,8 +24,6 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
-    
-
     private func saveSelectedCountry() {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
     }
@@ -68,16 +66,28 @@ class RadioStationViewModel: ObservableObject {
                     self?.stations = stations
                     self?.saveStationsToFile()
                     print("Fetched \(stations.count) stations from CloudKit and saved to file.")
+                    self?.checkAndLoadMissingDefaultStations()
                 } else {
                     if let error = error {
                         print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
                     }
-                    // Check if there are already stations loaded, if not, load default stations
-                    if self?.stations.isEmpty == true {
-                        self?.loadDefaultStations()
-                        print("Loaded default stations due to CloudKit fetch failure or no stations.")
-                    }
+                    self?.checkAndLoadMissingDefaultStations()
                 }
+            }
+        }
+    }
+    
+    func checkAndLoadMissingDefaultStations() {
+        let defaultStationsByCountry = [
+            "Albania": addDefaultStationsForAlbania,
+            "Argentina": addDefaultStationsForArgentina
+            // Add other countries here as needed
+        ]
+        
+        for (country, addFunction) in defaultStationsByCountry {
+            if !stations.contains(where: { $0.country == country }) {
+                print("Adding default stations for \(country)...")
+                addFunction()
             }
         }
     }
@@ -87,6 +97,29 @@ class RadioStationViewModel: ObservableObject {
         // For instance, this method can be something like `addDefaultStationsForAlbania()`
         self.addDefaultStationsForAlbania() // or whatever method you use to load defaults
         saveStationsToFile() // Save these default stations to your file system
+    }
+    
+    
+    func addDefaultStationsForArgentina() {
+        let existingStationNames = Set(stations.filter { $0.country == "Argentina" }.map { $0.name })
+        let newStations = [
+            ("Blue FM", "https://19793.live.streamtheworld.com/BLUE_FM_100_7AAC_SC?pname=TDSdk"),
+            ("Radio 10", "https://frontend.radiohdvivo.com/radio10/live"),
+            ("Pop FM", "https://edge01.radiohdvivo.com/stream/popradio"),
+            ("El Observador", "https://s8.stweb.tv/observador/live/playlist.m3u8"),
+            ("Radio One Argentina", "https://s8.stweb.tv/one/live/playlist.m3u8"),
+            ("La Popu FM", "https://27573.live.streamtheworld.com/LAPOPU_SC?dist=c3-web")
+            // Add the rest
+        ].filter { !existingStationNames.contains($0.0) }
+        .map { (name, url) -> RadioStation in
+            let iconData = loadImageData(named: name)
+            return RadioStation(name: name, url: url, iconData: iconData, country: "Argentina")
+        }
+        
+        if !newStations.isEmpty {
+            stations.append(contentsOf: newStations)
+            saveStationsToFile()
+        }
     }
     
     func isStationPlaying(_ station: RadioStation) -> Bool {
