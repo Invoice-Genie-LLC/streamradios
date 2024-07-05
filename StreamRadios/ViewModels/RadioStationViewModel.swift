@@ -77,19 +77,20 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
+    // Modify this function to add new countries
     func checkAndLoadMissingDefaultStations() {
+        // Albania
+        if !stations.contains(where: { $0.country == "Albania" }) {
+            print("Checking and adding default stations for Albania...")
+            DefaultStations.addDefaultStationsForAlbania(to: self)
+        }
+        // Aregentina
         if !stations.contains(where: { $0.country == "Argentina" }) {
             print("Checking and adding default stations for Argentina...")
             DefaultStations.addDefaultStationsForArgentina(to: self)
         }
-        if !stations.contains(where: { $0.country == "Albania" }) {
-            print("Checking and adding default stations for Albania...")
-            DefaultStations.addDefaultStationsForAlania(to: self)
-        }
-        // Add similar checks for other countries
     }
-    
-    
+
     
     func isStationPlaying(_ station: RadioStation) -> Bool {
         guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,

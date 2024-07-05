@@ -8,28 +8,8 @@
 import Foundation
 
 struct DefaultStations {
-    static func addDefaultStationsForArgentina(to viewModel: RadioStationViewModel) {
-        let existingStationNames = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.name })
-        let newStations = [
-            ("Blue FM", "https://19793.live.streamtheworld.com/BLUE_FM_100_7AAC_SC?pname=TDSdk"),
-            ("Radio 10", "https://frontend.radiohdvivo.com/radio10/live"),
-            ("Pop FM", "https://edge01.radiohdvivo.com/stream/popradio"),
-            ("El Observador", "https://s8.stweb.tv/observador/live/playlist.m3u8"),
-            ("Radio One Argentina", "https://s8.stweb.tv/one/live/playlist.m3u8"),
-            ("La Popu FM", "https://27573.live.streamtheworld.com/LAPOPU_SC?dist=c3-web")
-        ].filter { !existingStationNames.contains($0.0) }
-        .map { (name, url) -> RadioStation in
-            let iconData = viewModel.loadImageData(named: name)
-            return RadioStation(name: name, url: url, iconData: iconData, country: "Argentina")
-        }
-        
-        if !newStations.isEmpty {
-            viewModel.stations.append(contentsOf: newStations)
-            viewModel.saveStationsToFile()
-        }
-    }
-    
-    static func addDefaultStationsForAlania(to viewModel: RadioStationViewModel) {
+    // Albania
+    static func addDefaultStationsForAlbania(to viewModel: RadioStationViewModel) {
         let existingStationNames = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.name })
         let newStations = [
             ("OraNews", "https://radio.oranews.tv:8443/stream"),
@@ -60,7 +40,43 @@ struct DefaultStations {
             viewModel.saveStationsToFile()
         }
     }
-
-    // Similarly, add methods for other countries like Albania, etc.
+    
+    // Angola
+    static func addDefaultStationsForAngola(to viewModel: RadioStationViewModel) {
+        let existingStationNames = Set(viewModel.stations.filter { $0.country == "Angola" }.map { $0.name })
+        let newStations = [
+            ("Radio MFM", "https://centova87.instainternet.com/proxy/mfm?mp=/stream"),
+        ].filter { !existingStationNames.contains($0.0) }
+        .map { (name, url) -> RadioStation in
+            let iconData = viewModel.loadImageData(named: name)
+            return RadioStation(name: name, url: url, iconData: iconData, country: "Angola")
+        }
+        
+        if !newStations.isEmpty {
+            viewModel.stations.append(contentsOf: newStations)
+            viewModel.saveStationsToFile()
+        }
+    }
+    // Argentina
+    static func addDefaultStationsForArgentina(to viewModel: RadioStationViewModel) {
+        let existingStationNames = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.name })
+        let newStations = [
+            ("Blue FM", "https://19793.live.streamtheworld.com/BLUE_FM_100_7AAC_SC?pname=TDSdk"),
+            ("Radio 10", "https://frontend.radiohdvivo.com/radio10/live"),
+            ("Pop FM", "https://edge01.radiohdvivo.com/stream/popradio"),
+            ("El Observador", "https://s8.stweb.tv/observador/live/playlist.m3u8"),
+            ("Radio One Argentina", "https://s8.stweb.tv/one/live/playlist.m3u8"),
+            ("La Popu FM", "https://27573.live.streamtheworld.com/LAPOPU_SC?dist=c3-web")
+        ].filter { !existingStationNames.contains($0.0) }
+        .map { (name, url) -> RadioStation in
+            let iconData = viewModel.loadImageData(named: name)
+            return RadioStation(name: name, url: url, iconData: iconData, country: "Argentina")
+        }
+        
+        if !newStations.isEmpty {
+            viewModel.stations.append(contentsOf: newStations)
+            viewModel.saveStationsToFile()
+        }
+    }
 }
 
