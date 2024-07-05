@@ -40,14 +40,39 @@ class RadioStationViewModel: ObservableObject {
 
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
+        loadStationsFromCloudKit()
         loadStationsFromFileOrFetchNew()
     }
+    
+    func saveMultipleStationsToCloud(stations: [RadioStation]) {
+        DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
+            if success {
+                print("Batch saved stations to CloudKit successfully.")
+            } else {
+                print("Failed to batch save stations to CloudKit.")
+            }
+        }
+    }
 
+    private func loadStationsFromCloudKit() {
+           DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
+               if let fetchedStations = fetchedStations {
+                   DispatchQueue.main.async {
+                       self?.stations = fetchedStations
+                       self?.checkAndAddDefaultStationsIfNeeded()
+                   }
+               } else {
+                   print("Error fetching stations: \(error?.localizedDescription ?? "Unknown error")")
+                   self?.checkAndAddDefaultStationsIfNeeded() // Try to add defaults if fetch fails
+               }
+           }
+       }
+    
     private func loadStationsFromFileOrFetchNew() {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             loadStations()
         } else {
-            fetchStationsAndSave()
+            fetchStationsAndSave()  // Attempts to fetch from CloudKit first
         }
     }
     
@@ -63,33 +88,70 @@ class RadioStationViewModel: ObservableObject {
         DataStore.shared.fetchRadioStations { [weak self] stations, error in
             DispatchQueue.main.async {
                 if let stations = stations, !stations.isEmpty {
+                    // If stations exist, load them into the model
                     self?.stations = stations
                     self?.saveStationsToFile()
                     print("Fetched \(stations.count) stations from CloudKit and saved to file.")
-                    self?.checkAndLoadMissingDefaultStations()
                 } else {
-                    if let error = error {
-                        print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
-                    }
-                    self?.checkAndLoadMissingDefaultStations()
+                    // If no stations are found, either due to an error or because they simply don't exist, add defaults
+                    print("No stations found or error: \(error?.localizedDescription ?? "Unknown error"). Adding default stations.")
+                    self?.addDefaultStationsIfNeeded()
                 }
             }
         }
     }
     
-    // Modify this function to add new countries
-    func checkAndLoadMissingDefaultStations() {
-        // Albania
-        if !stations.contains(where: { $0.country == "Albania" }) {
-            print("Checking and adding default stations for Albania...")
-            DefaultStations.addDefaultStationsForAlbania(to: self)
+    private func addDefaultStationsIfNeeded() {
+        if stations.isEmpty {
+            print("No stations are currently saved. Adding default stations.")
+            DefaultStations.addAllDefaults(to: self)
+            saveStationsToFile()  // Saves the newly added default stations locally
+            saveMultipleStationsToCloud(stations: stations)  // Saves the newly added default stations to CloudKit
         }
-        // Aregentina
-        if !stations.contains(where: { $0.country == "Argentina" }) {
-            print("Checking and adding default stations for Argentina...")
+    }
+
+    
+    private func loadAndSaveDefaultStations() {
+            print("Loading and saving default stations because no stations are available.")
+            // Load default stations for all countries or based on selected country
+            DefaultStations.addAllDefaults(to: self)
+            // Save to CloudKit
+            saveMultipleStationsToCloud(stations: stations)
+            // Save locally
+            saveStationsToFile()
+        }
+    
+    private func checkAndAddDefaultStationsIfNeeded() {
+        if stations.isEmpty {
+            // Here, add all default stations for each country since it's a fresh install or no stations are loaded.
+            DefaultStations.addDefaultStationsForAlbania(to: self)
+            DefaultStations.addDefaultStationsForAngola(to: self)
+            DefaultStations.addDefaultStationsForAustralia(to: self)
             DefaultStations.addDefaultStationsForArgentina(to: self)
         }
     }
+    
+    // Modify this function to add new countries
+    private func checkAndAddDefaultStations() {
+            let allCountries = ["Albania", "Angola", "Australia", "Argentina"]  // Expand this list as necessary
+            for country in allCountries {
+                if !stations.contains(where: { $0.country == country }) {
+                    switch country {
+                    case "Albania":
+                        DefaultStations.addDefaultStationsForAlbania(to: self)
+                    case "Angola":
+                        DefaultStations.addDefaultStationsForAngola(to: self)
+                    case "Australia":
+                        DefaultStations.addDefaultStationsForAustralia(to: self)
+                    case "Argentina":
+                        DefaultStations.addDefaultStationsForArgentina(to: self)
+                    default:
+                        break
+                    }
+                    print("Added default stations for \(country)")
+                }
+            }
+        }
 
     
     func isStationPlaying(_ station: RadioStation) -> Bool {
@@ -269,3 +331,4 @@ class RadioStationViewModel: ObservableObject {
         saveStationsToFile()
     }
 }
+
