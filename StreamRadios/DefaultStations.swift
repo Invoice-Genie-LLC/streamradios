@@ -8,9 +8,25 @@
 import Foundation
 
 struct DefaultStations {
+    static func stationExists(_ stationName: String, in viewModel: RadioStationViewModel) -> Bool {
+        return viewModel.stations.contains(where: { $0.name == stationName })
+    }
+    
+    // Generic function to add stations if they are missing
+    static func addStations(stations: [(String, String)], country: String, to viewModel: RadioStationViewModel) {
+        for (name, url) in stations where !stationExists(name, in: viewModel) {
+            if let iconData = viewModel.loadImageData(named: name) {
+                let newStation = RadioStation(name: name, url: url, iconData: iconData, country: country)
+                viewModel.stations.append(newStation)
+                viewModel.saveStationToCloud(newStation)
+                viewModel.saveStationsToFile()
+            }
+        }
+    }
+    
     // Albania
     static func addDefaultStationsForAlbania(to viewModel: RadioStationViewModel) {
-        let defaultStations = [
+        let stations = [
             ("OraNews", "https://radio.oranews.tv:8443/stream"),
             ("Love Radio", "https://radio.albanialoveradio.al/stream"),
             ("Beatfm.al", "http://streaming.ihost.al:8010"),
@@ -30,50 +46,21 @@ struct DefaultStations {
             ("Radio Shqip", "https://cp1.sednastream.com/proxy/radioshqip?mp=%2F%3Bstream.mp3"),
         ]
         
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.name })
-        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
-        
-        var newStations = [RadioStation]()
-        
-        for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
-            let newStation = RadioStation(name: station.0, url: station.1, iconData: iconData, country: "Albania")
-            viewModel.stations.append(newStation)
-            newStations.append(newStation)
-        }
-        if !newStations.isEmpty {
-            viewModel.saveMultipleStationsToCloud(stations: newStations)
-            viewModel.saveStationsToFile()
-        }
-        // Logic to add these stations to the viewModel
+        addStations(stations: stations, country: "Albania", to: viewModel)
     }
+    
     
     // Angola
     static func addDefaultStationsForAngola(to viewModel: RadioStationViewModel) {
-        let defaultStations = [
+        let stations = [
             ("Radio MFM", "https://centova87.instainternet.com/proxy/mfm?mp=/stream"),
         ]
-        
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Angola" }.map { $0.name })
-        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
-        
-        var newStations = [RadioStation]()
-        
-        for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
-            let newStation = RadioStation(name: station.0, url: station.1, iconData: iconData, country: "Angolia")
-            viewModel.stations.append(newStation)
-            newStations.append(newStation)
-        }
-        if !newStations.isEmpty {
-            viewModel.saveMultipleStationsToCloud(stations: newStations)
-            viewModel.saveStationsToFile()
-        }
+        addStations(stations: stations, country: "Angola", to: viewModel)
     }
     
     // Australia
     static func addDefaultStationsForAustralia(to viewModel: RadioStationViewModel) {
-        let defaultStations = [
+        let stations = [
             ("ABC NewsRadio", "http://www.abc.net.au/res/streaming/audio/mp3/news_radio.pls"),
             ("Kiss FM 87.6", "http://cc.net2streams.com:8565/kissfm.mp3"),
             ("ABC Radio National", "http://www.abc.net.au/res/streaming/audio/aac/radio_national.pls"),
@@ -103,27 +90,13 @@ struct DefaultStations {
             ("Totally Radio - 90s", "https://23033.live.streamtheworld.com/T_RAD_90S_S01AAC.aac"),
             
         ]
-        
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Australia" }.map { $0.name })
-        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
-        
-        var newStations = [RadioStation]()
-        
-        for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
-            let newStation = RadioStation(name: station.0, url: station.1, iconData: iconData, country: "Australia")
-            viewModel.stations.append(newStation)
-            newStations.append(newStation)
-        }
-        if !newStations.isEmpty {
-            viewModel.saveMultipleStationsToCloud(stations: newStations)
-            viewModel.saveStationsToFile()
-        }
+        addStations(stations: stations, country: "Australia", to: viewModel)
     }
+    
     
     // Argentina
     static func addDefaultStationsForArgentina(to viewModel: RadioStationViewModel) {
-        let defaultStations = [
+        let stations = [
             ("Blue FM", "https://19793.live.streamtheworld.com/BLUE_FM_100_7AAC_SC?pname=TDSdk"),
             ("Radio 10", "https://frontend.radiohdvivo.com/radio10/live"),
             ("Pop FM", "https://edge01.radiohdvivo.com/stream/popradio"),
@@ -132,22 +105,9 @@ struct DefaultStations {
             ("La Popu FM", "https://27573.live.streamtheworld.com/LAPOPU_SC?dist=c3-web")
         ]
         
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.name })
-        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
-        
-        var newStations = [RadioStation]()
-        
-        for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
-            let newStation = RadioStation(name: station.0, url: station.1, iconData: iconData, country: "Argentina")
-            viewModel.stations.append(newStation)
-            newStations.append(newStation)
-        }
-        if !newStations.isEmpty {
-            viewModel.saveMultipleStationsToCloud(stations: newStations)
-            viewModel.saveStationsToFile()
-        }
+        addStations(stations: stations, country: "Argentina", to: viewModel)
     }
+    
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
         addDefaultStationsForAlbania(to: viewModel)
         addDefaultStationsForAngola(to: viewModel)
