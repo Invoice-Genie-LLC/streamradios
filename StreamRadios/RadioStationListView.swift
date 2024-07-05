@@ -213,11 +213,11 @@ struct RadioStationListView: View {
     private func checkAndAddDefaultStations() {
         if viewModel.stations.isEmpty || !viewModel.stations.contains(where: { $0.country == "Albania" }) {
             print("Adding default stations for Albania...")
-            viewModel.addDefaultStationsForAlbania()
+            DefaultStations.addDefaultStationsForAlania(to: viewModel)
         }
         if viewModel.stations.isEmpty || !viewModel.stations.contains(where: { $0.country == "Argentina" }) {
             print("Adding default stations for Argentina...")
-            viewModel.addDefaultStationsForArgentina()
+            DefaultStations.addDefaultStationsForArgentina(to: viewModel)
         }
     }
 
