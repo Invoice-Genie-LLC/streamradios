@@ -50,18 +50,9 @@ struct RadioStationListView: View {
                     LazyVStack {
                         ForEach(filteredStations) { station in
                             HStack {
-                                if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .frame(width: 50, height: 50)
-                                        .cornerRadius(8)
-                                } else {
-                                    Image(systemName: station.isFavorite ? "radio" : "radio")
-                                        .resizable()
-                                        .frame(width: 50, height: 50)
-                                        .cornerRadius(8)
-                                        .foregroundColor(station.isFavorite ? .primary : .primary)
-                                }
+                                imageForStation(station)
+                                            .frame(width: 50, height: 50)
+                                            .cornerRadius(8)
                                 
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
@@ -198,9 +189,30 @@ struct RadioStationListView: View {
                     radioPlayer.playStation(at: index, from: viewModel.stations)
                 }
             }
+            checkAndAddDefaultStations()  // Ensuring this method is called to check and add stations if necessary.
         }
         .onDisappear {
             NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
+        }
+    }
+    
+    @ViewBuilder
+    private func imageForStation(_ station: RadioStation) -> some View {
+        if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(systemName: "radio")
+                .resizable()
+                .scaledToFit()
+        }
+    }
+    
+    private func checkAndAddDefaultStations() {
+        if viewModel.stations.isEmpty || !viewModel.stations.contains(where: { $0.country == "Albania" }) {
+            print("Adding default stations for Albania...")
+            viewModel.addDefaultStationsForAlbania()
         }
     }
     
@@ -303,3 +315,4 @@ struct RadioStationListView_Previews: PreviewProvider {
         .environmentObject(radioPlayer)
     }
 }
+

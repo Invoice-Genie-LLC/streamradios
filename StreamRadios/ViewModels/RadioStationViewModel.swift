@@ -23,6 +23,8 @@ class RadioStationViewModel: ObservableObject {
             saveSelectedCountry()
         }
     }
+    
+    
 
     private func saveSelectedCountry() {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
@@ -125,6 +127,22 @@ class RadioStationViewModel: ObservableObject {
             updateStationInCloudKit(station: stations[index])  // Ensure the change is saved in CloudKit
         }
     }
+    
+    private func loadImageData(named name: String) -> String? {
+            // Replace spaces with underscores to match asset names
+            let assetName = name.replacingOccurrences(of: " ", with: "_")
+            
+            guard let image = UIImage(named: assetName) else {
+                print("Failed to load image named: \(assetName)")
+                return nil
+            }
+            guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+                print("Failed to compress image named: \(assetName)")
+                return nil
+            }
+            print("Image loaded and encoded for: \(assetName)")
+            return imageData.base64EncodedString()
+        }
 
     func addStation(name: String, url: String, iconData: String?, country: String) {
         let newStation = RadioStation(name: name, url: url, iconData: iconData, country: country)

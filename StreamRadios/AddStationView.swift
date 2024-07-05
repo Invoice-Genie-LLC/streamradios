@@ -156,15 +156,31 @@ struct AddStationView: View {
         }
     }
     
+    func loadImageData(named name: String) -> String? {
+        let assetName = name.replacingOccurrences(of: " ", with: "_")  // Adjust this if your asset names are formatted differently
+        guard let image = UIImage(named: assetName),
+              let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("Failed to load/compress image for station: \(name)")
+            return nil
+        }
+        return imageData.base64EncodedString()
+    }
+
+    
     private func saveStation() {
         guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
             showAlert = true
             return
         }
         
-        let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+        let iconData = loadImageData(named: name)
         let newStation = RadioStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
+
+        // Now, call the addStation method with all required parameters
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
+
+        // Assuming newStation is created correctly before this call
+        let iconImage = iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
         DataStore.shared.saveNewStationToCloudKit(station: newStation, iconImage: iconImage) { success, recordName in
             if success {
                 print("Station saved to CloudKit with record ID:", recordName ?? "Unknown")
