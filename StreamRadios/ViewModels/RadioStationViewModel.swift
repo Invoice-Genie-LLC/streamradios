@@ -78,49 +78,18 @@ class RadioStationViewModel: ObservableObject {
     }
     
     func checkAndLoadMissingDefaultStations() {
-        let defaultStationsByCountry = [
-            "Albania": addDefaultStationsForAlbania,
-            "Argentina": addDefaultStationsForArgentina
-            // Add other countries here as needed
-        ]
-        
-        for (country, addFunction) in defaultStationsByCountry {
-            if !stations.contains(where: { $0.country == country }) {
-                print("Adding default stations for \(country)...")
-                addFunction()
-            }
+        if !stations.contains(where: { $0.country == "Argentina" }) {
+            print("Checking and adding default stations for Argentina...")
+            DefaultStations.addDefaultStationsForArgentina(to: self)
         }
-    }
-
-    private func loadDefaultStations() {
-        // Assuming you have a method in your ViewModel to handle loading default stations
-        // For instance, this method can be something like `addDefaultStationsForAlbania()`
-        self.addDefaultStationsForAlbania() // or whatever method you use to load defaults
-        saveStationsToFile() // Save these default stations to your file system
+        if !stations.contains(where: { $0.country == "Albania" }) {
+            print("Checking and adding default stations for Albania...")
+            DefaultStations.addDefaultStationsForAlania(to: self)
+        }
+        // Add similar checks for other countries
     }
     
     
-    func addDefaultStationsForArgentina() {
-        let existingStationNames = Set(stations.filter { $0.country == "Argentina" }.map { $0.name })
-        let newStations = [
-            ("Blue FM", "https://19793.live.streamtheworld.com/BLUE_FM_100_7AAC_SC?pname=TDSdk"),
-            ("Radio 10", "https://frontend.radiohdvivo.com/radio10/live"),
-            ("Pop FM", "https://edge01.radiohdvivo.com/stream/popradio"),
-            ("El Observador", "https://s8.stweb.tv/observador/live/playlist.m3u8"),
-            ("Radio One Argentina", "https://s8.stweb.tv/one/live/playlist.m3u8"),
-            ("La Popu FM", "https://27573.live.streamtheworld.com/LAPOPU_SC?dist=c3-web")
-            // Add the rest
-        ].filter { !existingStationNames.contains($0.0) }
-        .map { (name, url) -> RadioStation in
-            let iconData = loadImageData(named: name)
-            return RadioStation(name: name, url: url, iconData: iconData, country: "Argentina")
-        }
-        
-        if !newStations.isEmpty {
-            stations.append(contentsOf: newStations)
-            saveStationsToFile()
-        }
-    }
     
     func isStationPlaying(_ station: RadioStation) -> Bool {
         guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
@@ -175,7 +144,7 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
-    private func loadImageData(named name: String) -> String? {
+    func loadImageData(named name: String) -> String? {
             // Replace spaces with underscores to match asset names
             let assetName = name.replacingOccurrences(of: " ", with: "_")
             
