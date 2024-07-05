@@ -215,7 +215,12 @@ struct RadioStationListView: View {
             print("Adding default stations for Albania...")
             viewModel.addDefaultStationsForAlbania()
         }
+        if viewModel.stations.isEmpty || !viewModel.stations.contains(where: { $0.country == "Argentina" }) {
+            print("Adding default stations for Argentina...")
+            viewModel.addDefaultStationsForArgentina()
+        }
     }
+
     
     private var filteredStations: [RadioStation] {
         switch selectedTab {
