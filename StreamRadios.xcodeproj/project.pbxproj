@@ -34,6 +34,7 @@
 		775D04382C28E89300E99061 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04372C28E89300E99061 /* LyricsView.swift */; };
 		775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04562C2A969F00E99061 /* FeatureSwitch.swift */; };
 		775D04592C2B20BE00E99061 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04582C2B20BE00E99061 /* EditStationView.swift */; };
+		77899F372C3771300035F8E1 /* CountryDefaultStations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77899F362C3771300035F8E1 /* CountryDefaultStations.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
@@ -103,6 +104,7 @@
 		775D04372C28E89300E99061 /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
 		775D04562C2A969F00E99061 /* FeatureSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSwitch.swift; sourceTree = "<group>"; };
 		775D04582C2B20BE00E99061 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
+		77899F362C3771300035F8E1 /* CountryDefaultStations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryDefaultStations.swift; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
@@ -221,6 +223,7 @@
 			isa = PBXGroup;
 			children = (
 				77130BF72C307D5F00D4711A /* EndEditing.swift */,
+				77899F362C3771300035F8E1 /* CountryDefaultStations.swift */,
 			);
 			path = Extensions;
 			sourceTree = "<group>";
@@ -386,6 +389,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
+				77899F372C3771300035F8E1 /* CountryDefaultStations.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
