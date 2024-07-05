@@ -122,12 +122,27 @@ class RadioStationViewModel: ObservableObject {
         }
     
     private func checkAndAddDefaultStationsIfNeeded() {
-        if stations.isEmpty {
-            // Here, add all default stations for each country since it's a fresh install or no stations are loaded.
-            DefaultStations.addDefaultStationsForAlbania(to: self)
-            DefaultStations.addDefaultStationsForAngola(to: self)
-            DefaultStations.addDefaultStationsForAustralia(to: self)
-            DefaultStations.addDefaultStationsForArgentina(to: self)
+        fetchStationsFromCloudKit { [weak self] existingStations in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                if existingStations.isEmpty {
+                    print("No stations are currently saved. Adding default stations.")
+                    DefaultStations.addAllDefaults(to: self)
+                    self.saveStationsToFile()  // Saves the newly added default stations locally
+                    self.saveMultipleStationsToCloud(stations: self.stations)  // Saves the newly added default stations to CloudKit
+                }
+            }
+        }
+    }
+    
+    private func fetchStationsFromCloudKit(completion: @escaping ([RadioStation]) -> Void) {
+        DataStore.shared.fetchRadioStations { fetchedStations, error in
+            if let stations = fetchedStations, !stations.isEmpty {
+                completion(stations)
+            } else {
+                print("Failed to fetch stations from CloudKit or no stations exist. Error: \(error?.localizedDescription ?? "Unknown error")")
+                completion([])
+            }
         }
     }
     
