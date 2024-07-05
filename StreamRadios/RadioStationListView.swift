@@ -221,6 +221,11 @@ struct RadioStationListView: View {
             print("Adding default stations for Angola...")
             DefaultStations.addDefaultStationsForAngola(to: viewModel)
         }
+        // Australia
+        if viewModel.stations.isEmpty || !viewModel.stations.contains(where: { $0.country == "Australia" }) {
+            print("Adding default stations for Angola...")
+            DefaultStations.addDefaultStationsForAustralia(to: viewModel)
+        }
         // Argentina
         if viewModel.stations.isEmpty || !viewModel.stations.contains(where: { $0.country == "Argentina" }) {
             print("Adding default stations for Argentina...")
