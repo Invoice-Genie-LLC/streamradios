@@ -68,6 +68,38 @@ class DataStore {
             }
         }
     }
+    
+    func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        var recordsToSave = [CKRecord]()
+
+        for station in stations {
+            let record = CKRecord(recordType: "RadioStation")
+            record["name"] = station.name
+            record["url"] = station.url
+            record["country"] = station.country
+            record["isFavorite"] = station.isFavorite
+
+            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                if let asset = createAsset(from: image) {
+                    record["iconData"] = asset
+                }
+            }
+            recordsToSave.append(record)
+        }
+
+        let modifyOperation = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: nil)
+        modifyOperation.savePolicy = .allKeys
+        modifyOperation.modifyRecordsCompletionBlock = { savedRecords, deletedRecordIDs, error in
+            if let error = error {
+                print("Error saving records to CloudKit: \(error.localizedDescription)")
+                completion(false, nil)
+            } else {
+                let savedRecordIDs = savedRecords?.map { $0.recordID.recordName }
+                completion(true, savedRecordIDs)
+            }
+        }
+        CKContainer.default().privateCloudDatabase.add(modifyOperation)
+    }
 
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)
