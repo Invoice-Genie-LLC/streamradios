@@ -64,15 +64,29 @@ class RadioStationViewModel: ObservableObject {
     private func fetchStationsAndSave() {
         DataStore.shared.fetchRadioStations { [weak self] stations, error in
             DispatchQueue.main.async {
-                if let stations = stations {
+                if let stations = stations, !stations.isEmpty {
                     self?.stations = stations
                     self?.saveStationsToFile()
                     print("Fetched \(stations.count) stations from CloudKit and saved to file.")
-                } else if let error = error {
-                    print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
+                } else {
+                    if let error = error {
+                        print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
+                    }
+                    // Check if there are already stations loaded, if not, load default stations
+                    if self?.stations.isEmpty == true {
+                        self?.loadDefaultStations()
+                        print("Loaded default stations due to CloudKit fetch failure or no stations.")
+                    }
                 }
             }
         }
+    }
+
+    private func loadDefaultStations() {
+        // Assuming you have a method in your ViewModel to handle loading default stations
+        // For instance, this method can be something like `addDefaultStationsForAlbania()`
+        self.addDefaultStationsForAlbania() // or whatever method you use to load defaults
+        saveStationsToFile() // Save these default stations to your file system
     }
     
     func isStationPlaying(_ station: RadioStation) -> Bool {
