@@ -165,7 +165,6 @@ struct AddStationView: View {
         }
         return imageData.base64EncodedString()
     }
-
     
     private func saveStation() {
         guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
@@ -174,7 +173,7 @@ struct AddStationView: View {
         }
         
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-        let newStation = RadioStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
+        let newStation = RadioStation(id: UUID().uuidString, name: name, url: urlString, iconData: iconData, country: selectedCountry)
 
         // Now, call the addStation method with all required parameters
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)

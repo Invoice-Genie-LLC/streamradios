@@ -44,7 +44,7 @@ class DataStore {
 
     func saveNewStationToCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
         let iconFileName = iconImage.flatMap { saveImageToFileSystem(image: $0) }
-        let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id.uuidString))
+        let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
         record.setValue(station.name, forKey: "name")
         record.setValue(station.url, forKey: "url")
         record.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
@@ -120,7 +120,7 @@ class DataStore {
                         let isFavorite = (record["isFavorite"] as? String) == "true"  // Convert to Bool
                         let country = record["country"] as? String ?? "Unknown Region"  // Retrieve country
                         let id = UUID(uuidString: record.recordID.recordName) ?? UUID()
-                        return RadioStation(id: id, name: name, url: url, iconData: iconData, country: country, isFavorite: isFavorite)
+                        return RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: isFavorite)
                     }
                     completion(stations, nil)
                 }
@@ -138,7 +138,7 @@ class DataStore {
     }
 
     func deleteStationFromCloudKit(station: RadioStation, completion: @escaping (Bool) -> Void) {
-            let recordID = CKRecord.ID(recordName: station.id.uuidString)
+        let recordID = CKRecord.ID(recordName: station.id)
 
             // Ensuring operation is on the main queue to handle UI updates or subsequent calls safely
             DispatchQueue.main.async {
@@ -164,7 +164,7 @@ class DataStore {
         }
 
     func updateStationInCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
-        let recordID = CKRecord.ID(recordName: station.id.uuidString)
+        let recordID = CKRecord.ID(recordName: station.id)
 
         privateDatabase.fetch(withRecordID: recordID) { fetchedRecord, error in
             if let fetchedRecord = fetchedRecord {

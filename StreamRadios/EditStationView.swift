@@ -168,7 +168,7 @@ struct EditStationView: View {
 
 struct EditStationView_Previews: PreviewProvider {
     static var previews: some View {
-        let station = RadioStation(name: "Sample Station", url: "http://samplestation.com", iconData: nil, country: "Unknown Region")
+        let station = RadioStation(id: "ABC", name: "Sample Station", url: "http://samplestation.com", iconData: nil, country: "Unknown Region")
         EditStationView(station: station, isPresented: .constant(station))
             .environmentObject(RadioStationViewModel())
     }
