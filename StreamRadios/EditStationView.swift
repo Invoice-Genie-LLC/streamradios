@@ -158,24 +158,10 @@ struct EditStationView: View {
             return
         }
         
-        if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-            viewModel.stations[index].name = name
-            viewModel.stations[index].url = urlString
-            viewModel.stations[index].iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-            viewModel.stations[index].country = selectedCountry
-            
-            viewModel.saveStationsToFile()  // Save locally
-            
-            // Update in CloudKit
-            DataStore.shared.updateStationInCloudKit(station: viewModel.stations[index], iconImage: iconImage) { success, recordName in
-                if success {
-                    print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
-                } else {
-                    print("Failed to update station in CloudKit.")
-                }
-            }
-        }
+        let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         
+        // Update the existing station instead of creating a new one
+        viewModel.updateStation(station, name: name, url: urlString, iconData: iconData, country: selectedCountry)
         isPresented = nil
     }
 }

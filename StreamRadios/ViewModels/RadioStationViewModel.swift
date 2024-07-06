@@ -41,6 +41,7 @@ class RadioStationViewModel: ObservableObject {
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
         loadStations()
+        loadStationsFromFileOrFetchNew()
     }
     
     private func initializeStationsForFirstTime() {
@@ -52,7 +53,7 @@ class RadioStationViewModel: ObservableObject {
     
     
     
-    
+    /*
     private func loadStationsFromCloudKit() {
             DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
                 DispatchQueue.main.async {
@@ -65,7 +66,9 @@ class RadioStationViewModel: ObservableObject {
                 }
             }
         }
+     */
     
+    /*
     private func loadStationsFromFileOrFetchNew() {
         if FileManager.default.fileExists(atPath: fileURL.path) {
             loadStations()
@@ -73,6 +76,15 @@ class RadioStationViewModel: ObservableObject {
             fetchStationsAndSave()  // Attempts to fetch from CloudKit first
         }
     }
+     */
+    
+    private func loadStationsFromFileOrFetchNew() {
+           if FileManager.default.fileExists(atPath: fileURL.path) {
+               loadStations()
+           } else {
+               fetchStationsAndSave()
+           }
+       }
     
     var currentlyPlayingStation: RadioStation? {
         guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
@@ -316,33 +328,31 @@ class RadioStationViewModel: ObservableObject {
         }
     }
 
-    func updateStation(_ station: RadioStation, name: String, url: String, iconData: String?) {
-        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+    func updateStation(_ existingStation: RadioStation, name: String, url: String, iconData: String?, country: String) {
+        // First, find the station in the local data.
+        if let index = stations.firstIndex(where: { $0.id == existingStation.id }) {
+            // Update the local copy with new details.
             stations[index].name = name
             stations[index].url = url
             stations[index].iconData = iconData
-            stations[index].country = selectedCountry
-            saveStationsToFile()
-            let iconImage = iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
-            DataStore.shared.updateStationInCloudKit(station: stations[index], iconImage: iconImage) { success, recordName in
-                DispatchQueue.main.async {
-                    if success {
-                        print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
-                    } else {
-                        print("Failed to update station in CloudKit.")
-                    }
-                }
-            }
+            stations[index].country = country
+            
+            saveStationsToFile()  // Save the updated list to local storage
+            
+            // Now, update the station in CloudKit.
+            updateStationInCloudKit(station: stations[index])
+        } else {
+            // If the station does not exist locally, log an error or handle it appropriately.
+            print("Error: Station not found in local data.")
         }
     }
 
     func updateStationInCloudKit(station: RadioStation) {
-        objectWillChange.send() // Notify subscribers that an update will happen
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
         DataStore.shared.updateStationInCloudKit(station: station, iconImage: iconImage) { success, recordName in
             DispatchQueue.main.async {
                 if success {
-                    print("Station updated in CloudKit.")
+                    print("Station updated in CloudKit with record ID:", recordName ?? "Unknown")
                 } else {
                     print("Failed to update station in CloudKit.")
                 }
