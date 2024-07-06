@@ -198,7 +198,7 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func imageForStation(_ station: RadioStation) -> some View {
-        if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), 
+        if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData),
             let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()

@@ -70,63 +70,36 @@ class DataStore {
     }
     
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
-        // Map station IDs to CKRecord.ID objects
-        let recordIDs = stations.map { CKRecord.ID(recordName: $0.id.uuidString) }
-        
-        // Create a predicate that checks if any recordIDs already exist in CloudKit
-        let predicate = NSPredicate(format: "recordID IN %@", recordIDs)
-        let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
+        var recordsToSave = [CKRecord]()
 
-        // Perform the query
-        privateDatabase.perform(query, inZoneWith: nil) { existingRecords, error in
-            if let error = error {
-                print("Error fetching existing records: \(error.localizedDescription)")
-                completion(false, nil)
-                return
-            }
-            
-            // Create a set of existing record IDs
-            let existingRecordIDs = Set(existingRecords?.map { $0.recordID } ?? [])
-            
-            // Filter out stations that already exist in CloudKit
-            let recordsToSave = stations.filter { !existingRecordIDs.contains(CKRecord.ID(recordName: $0.id.uuidString)) }.map { station -> CKRecord in
-                let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id.uuidString))
-                record["name"] = station.name
-                record["url"] = station.url
-                record["country"] = station.country
-                record["isFavorite"] = station.isFavorite ? "true" : "false"
+        for station in stations {
+            let record = CKRecord(recordType: "streamingRadios")
+            record["name"] = station.name
+            record["url"] = station.url
+            record["country"] = station.country
+            record["isFavorite"] = station.isFavorite ? "true" : "false"  // Save as string
 
-                if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                    if let asset = self.createAsset(from: image) {
-                        record["iconData"] = asset
-                    }
-                }
-                return record
-            }
-
-            // Only proceed if there are new records to save
-            if recordsToSave.isEmpty {
-                print("No new stations to save to CloudKit.")
-                completion(true, [])
-                return
-            }
-
-            // Prepare the operation to save new records
-            let modifyOperation = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: nil)
-            modifyOperation.savePolicy = .allKeys
-            modifyOperation.modifyRecordsCompletionBlock = { savedRecords, deletedRecordIDs, error in
-                if let error = error {
-                    print("Error saving new records to CloudKit: \(error.localizedDescription)")
-                    completion(false, nil)
-                } else {
-                    let savedRecordIDs = savedRecords?.map { $0.recordID.recordName }
-                    completion(true, savedRecordIDs)
+            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                if let asset = createAsset(from: image) {
+                    record["iconData"] = asset
                 }
             }
-            CKContainer.default().privateCloudDatabase.add(modifyOperation)
+            recordsToSave.append(record)
         }
-    }
 
+        let modifyOperation = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: nil)
+        modifyOperation.savePolicy = .allKeys
+        modifyOperation.modifyRecordsCompletionBlock = { savedRecords, deletedRecordIDs, error in
+            if let error = error {
+                print("Error saving records to CloudKit: \(error.localizedDescription)")
+                completion(false, nil)
+            } else {
+                let savedRecordIDs = savedRecords?.map { $0.recordID.recordName }
+                completion(true, savedRecordIDs)
+            }
+        }
+        CKContainer.default().privateCloudDatabase.add(modifyOperation)
+    }
 
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)

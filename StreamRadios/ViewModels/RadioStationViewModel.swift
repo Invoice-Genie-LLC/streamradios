@@ -40,33 +40,31 @@ class RadioStationViewModel: ObservableObject {
 
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
-        loadStationsFromCloudKit()
-        loadStationsFromFileOrFetchNew()
+        loadStations()
     }
     
-    func saveMultipleStationsToCloud(stations: [RadioStation]) {
-        DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
-            if success {
-                print("Batch saved stations to CloudKit successfully.")
-            } else {
-                print("Failed to batch save stations to CloudKit.")
+    private func initializeStationsForFirstTime() {
+            print("Initializing default stations for first time setup.")
+            DefaultStations.addAllDefaults(to: self)
+            saveStationsToFile()
+            saveStationsToCloudKit()
+        }
+    
+    
+    
+    
+    private func loadStationsFromCloudKit() {
+            DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
+                DispatchQueue.main.async {
+                    if let fetchedStations = fetchedStations, !fetchedStations.isEmpty {
+                        self?.stations = fetchedStations
+                        self?.saveStationsToFile()
+                    } else {
+                        self?.initializeStationsForFirstTime()
+                    }
+                }
             }
         }
-    }
-
-    private func loadStationsFromCloudKit() {
-           DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
-               if let fetchedStations = fetchedStations {
-                   DispatchQueue.main.async {
-                       self?.stations = fetchedStations
-                       self?.checkAndAddDefaultStationsIfNeeded()
-                   }
-               } else {
-                   print("Error fetching stations: \(error?.localizedDescription ?? "Unknown error")")
-                   self?.checkAndAddDefaultStationsIfNeeded() // Try to add defaults if fetch fails
-               }
-           }
-       }
     
     private func loadStationsFromFileOrFetchNew() {
         if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -90,7 +88,7 @@ class RadioStationViewModel: ObservableObject {
                 if let stations = stations, !stations.isEmpty {
                     // If stations exist, load them into the model
                     self?.stations = stations
-                    self?.saveStationsToFile()
+                   // self?.saveStationsToFile()
                     print("Fetched \(stations.count) stations from CloudKit and saved to file.")
                 } else {
                     // If no stations are found, either due to an error or because they simply don't exist, add defaults
@@ -106,7 +104,7 @@ class RadioStationViewModel: ObservableObject {
             print("No stations are currently saved. Adding default stations.")
             DefaultStations.addAllDefaults(to: self)
             saveStationsToFile()  // Saves the newly added default stations locally
-            saveMultipleStationsToCloud(stations: stations)  // Saves the newly added default stations to CloudKit
+           // saveMultipleStationsToCloud(stations: stations)  // Saves the newly added default stations to CloudKit
         }
     }
 
@@ -116,33 +114,18 @@ class RadioStationViewModel: ObservableObject {
             // Load default stations for all countries or based on selected country
             DefaultStations.addAllDefaults(to: self)
             // Save to CloudKit
-            saveMultipleStationsToCloud(stations: stations)
+           // saveMultipleStationsToCloud(stations: stations)
             // Save locally
-            saveStationsToFile()
+           // saveStationsToFile()
         }
     
     private func checkAndAddDefaultStationsIfNeeded() {
-        fetchStationsFromCloudKit { [weak self] existingStations in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                if existingStations.isEmpty {
-                    print("No stations are currently saved. Adding default stations.")
-                    DefaultStations.addAllDefaults(to: self)
-                    self.saveStationsToFile()  // Saves the newly added default stations locally
-                    self.saveMultipleStationsToCloud(stations: self.stations)  // Saves the newly added default stations to CloudKit
-                }
-            }
-        }
-    }
-    
-    private func fetchStationsFromCloudKit(completion: @escaping ([RadioStation]) -> Void) {
-        DataStore.shared.fetchRadioStations { fetchedStations, error in
-            if let stations = fetchedStations, !stations.isEmpty {
-                completion(stations)
-            } else {
-                print("Failed to fetch stations from CloudKit or no stations exist. Error: \(error?.localizedDescription ?? "Unknown error")")
-                completion([])
-            }
+        if stations.isEmpty {
+            // Here, add all default stations for each country since it's a fresh install or no stations are loaded.
+            DefaultStations.addDefaultStationsForAlbania(to: self)
+            DefaultStations.addDefaultStationsForAngola(to: self)
+            DefaultStations.addDefaultStationsForAustralia(to: self)
+            DefaultStations.addDefaultStationsForArgentina(to: self)
         }
     }
     
@@ -239,34 +222,23 @@ class RadioStationViewModel: ObservableObject {
         }
 
     func addStation(name: String, url: String, iconData: String?, country: String) {
-        let newStation = RadioStation(name: name, url: url, iconData: iconData, country: country)
-        DispatchQueue.main.async {
-            self.stations.append(newStation)
-            self.saveStationToCloud(newStation)
+            let newStation = RadioStation(name: name, url: url, iconData: iconData, country: country)
+            stations.append(newStation)
+            saveStationsToFile()
+           // saveStationsToCloudKit(stations: [newStation])
         }
-    }
-
-    func saveStationsToFile() {
-        do {
-            let data = try JSONEncoder().encode(stations)
-            try data.write(to: fileURL)
-            print("Successfully saved stations to file.")
-        } catch {
-            print("Failed to write stations to file:", error)
+    
+    func saveStationsToCloudKit(stations: [RadioStation]) {
+        DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
+            DispatchQueue.main.async {
+                if success {
+                    print("Successfully saved stations to CloudKit.")
+                } else {
+                    print("Failed to save stations to CloudKit.")
+                }
+            }
         }
-    }
-
-    func loadStations() {
-        do {
-            let data = try Data(contentsOf: fileURL)
-            let loadedStations = try JSONDecoder().decode([RadioStation].self, from: data)
-            self.stations = loadedStations
-            print("Successfully loaded stations from file.")
-        } catch {
-            print("Failed to load stations from file:", error)
-            self.stations = []
         }
-    }
 
     func saveStationToCloud(_ station: RadioStation) {
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
@@ -280,6 +252,44 @@ class RadioStationViewModel: ObservableObject {
             }
         }
     }
+    
+     func saveStationsToFile() {
+            do {
+                let data = try JSONEncoder().encode(stations)
+                try data.write(to: fileURL)
+                print("Stations saved locally.")
+            } catch {
+                print("Failed to save stations locally: \(error)")
+            }
+        }
+
+     func loadStations() {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                loadStationsFromFile()
+            } else {
+                initializeStationsForFirstTime()
+            }
+        }
+    
+    private func saveStationsToCloudKit(stations: [RadioStation]? = nil) {
+            let stationsToSave = stations ?? self.stations
+            DataStore.shared.saveStationsToCloudKit(stations: stationsToSave) { success, recordIDs in
+                if success {
+                    print("Stations saved to CloudKit successfully.")
+                } else {
+                    print("Failed to save stations to CloudKit.")
+                }
+            }
+        }
+
+        private func loadStationsFromFile() {
+            do {
+                let data = try Data(contentsOf: fileURL)
+                stations = try JSONDecoder().decode([RadioStation].self, from: data)
+            } catch {
+                print("Failed to load stations from file: \(error)")
+            }
+        }
 
     func deleteStation(at offsets: IndexSet) {
         offsets.forEach { index in
