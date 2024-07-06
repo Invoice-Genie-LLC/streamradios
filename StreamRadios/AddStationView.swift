@@ -173,7 +173,7 @@ struct AddStationView: View {
             return
         }
         
-        let iconData = loadImageData(named: name)
+        let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         let newStation = RadioStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
 
         // Now, call the addStation method with all required parameters
