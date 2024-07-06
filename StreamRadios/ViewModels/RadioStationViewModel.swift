@@ -234,7 +234,7 @@ class RadioStationViewModel: ObservableObject {
         }
 
     func addStation(name: String, url: String, iconData: String?, country: String) {
-            let newStation = RadioStation(name: name, url: url, iconData: iconData, country: country)
+        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country)
             stations.append(newStation)
             saveStationsToFile()
            // saveStationsToCloudKit(stations: [newStation])

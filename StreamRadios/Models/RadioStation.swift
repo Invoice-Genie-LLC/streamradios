@@ -7,7 +7,7 @@
 import Foundation
 
 struct RadioStation: Identifiable, Codable, Equatable {
-    var id = UUID()
+    var id: String
     var name: String
     var url: String
     var iconData: String?
