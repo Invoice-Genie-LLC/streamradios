@@ -138,19 +138,30 @@ class DataStore {
     }
 
     func deleteStationFromCloudKit(station: RadioStation, completion: @escaping (Bool) -> Void) {
-        let recordID = CKRecord.ID(recordName: station.id.uuidString)
-        privateDatabase.delete(withRecordID: recordID) { recordID, error in
+            let recordID = CKRecord.ID(recordName: station.id.uuidString)
+
+            // Ensuring operation is on the main queue to handle UI updates or subsequent calls safely
             DispatchQueue.main.async {
-                if let error = error {
-                    print("Error deleting record from CloudKit: \(error.localizedDescription)")
-                    completion(false)
-                } else {
-                    print("CloudKit station record deleted successfully")
-                    completion(true)
+                self.privateDatabase.delete(withRecordID: recordID) { deletedRecordID, error in
+                    DispatchQueue.main.async {
+                        if let error = error {
+                            self.handleCloudKitError(error, operation: "delete")
+                            completion(false)
+                        } else {
+                            print("CloudKit station record deleted successfully, Record ID: \(deletedRecordID?.recordName ?? "Unknown")")
+                            completion(true)
+                        }
+                    }
                 }
             }
         }
-    }
+
+        private func handleCloudKitError(_ error: Error, operation: String) {
+            let ckError = error as? CKError
+            let errorMessage = ckError?.localizedDescription ?? "Unknown error"
+            let reason = ckError?.errorUserInfo[CKErrorRetryAfterKey] as? TimeInterval ?? 0
+            print("Failed to \(operation) record from CloudKit. Error: \(errorMessage), retry after: \(reason) seconds")
+        }
 
     func updateStationInCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
         let recordID = CKRecord.ID(recordName: station.id.uuidString)
