@@ -73,7 +73,7 @@ class DataStore {
         var recordsToSave = [CKRecord]()
 
         for station in stations {
-            let record = CKRecord(recordType: "streamingRadios")
+            let record = CKRecord(recordType: "streamingRadios", recordID:  CKRecord.ID(recordName: station.id))
             record["name"] = station.name
             record["url"] = station.url
             record["country"] = station.country
@@ -119,8 +119,8 @@ class DataStore {
                         let iconData = self.decodeIconData(record: record)
                         let isFavorite = (record["isFavorite"] as? String) == "true"  // Convert to Bool
                         let country = record["country"] as? String ?? "Unknown Region"  // Retrieve country
-                        let id = UUID(uuidString: record.recordID.recordName) ?? UUID()
-                        return RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: isFavorite)
+                        let id = record.recordID.recordName
+                        return RadioStation(id: id, name: name, url: url, iconData: iconData, country: country, isFavorite: isFavorite)
                     }
                     completion(stations, nil)
                 }
