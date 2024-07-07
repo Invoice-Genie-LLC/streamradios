@@ -27,7 +27,6 @@ struct RadioStreamApp: App {
                 DispatchQueue.main.async {
                     if let stations = stations {
                         viewModel?.stations = stations
-                        viewModel?.saveStationsToFile() // Save fetched stations to file
                         print("Fetched \(stations.count) stations from CloudKit and populated the list.")
                     } else if let error = error {
                         print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
@@ -35,8 +34,6 @@ struct RadioStreamApp: App {
                 }
             }
             UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
-        } else {
-            viewModel.loadStations() // Load stations from file if the app has been launched before
         }
         
         UIApplication.shared.beginReceivingRemoteControlEvents()

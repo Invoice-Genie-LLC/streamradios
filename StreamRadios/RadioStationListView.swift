@@ -247,7 +247,7 @@ struct RadioStationListView: View {
                     if success {
                         print("Station successfully deleted from CloudKit.")
                         self.viewModel.stations.remove(at: index)
-                        self.viewModel.saveStationsToFile()
+                       // self.viewModel.saveStationsToFile()
                         adjustRadioPlayerIndexAfterDeletion(at: index)
                     } else {
                         print("Failed to delete station from CloudKit.")
@@ -326,7 +326,6 @@ struct StationDropDelegate: DropDelegate {
         }
         draggingStation = nil
         originalMetadata = nil
-        viewModel.saveStationsToFile()
         return true
     }
 
@@ -339,7 +338,6 @@ struct StationDropDelegate: DropDelegate {
         withAnimation {
             moveStation(from: fromIndex, to: toIndex)
         }
-        viewModel.saveStationsToFile()
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {

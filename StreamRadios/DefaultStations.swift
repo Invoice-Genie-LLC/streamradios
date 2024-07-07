@@ -68,7 +68,7 @@ struct DefaultStations {
     // Argentina
     static func addDefaultStationsForArgentina(to viewModel: RadioStationViewModel) {
         let defaultStations = [
-            ("tv.balkanweb.com:8081/news24/livestream/playlist.m3u8", "Argentina Channel 1", "http://tv.balkanweb.com:8081/news24/livestream/playlist.m3u8"),
+            ("tv.balkanwebOne.com:8081/news24/livestream/playlist.m3u8", "Argentina Channel 1", "http://tv.balkanweb.com:8081/news24/livestream/playlist.m3u8"),
                        
         ]
         let existingStations = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.id })
