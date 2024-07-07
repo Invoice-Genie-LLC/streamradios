@@ -173,20 +173,10 @@ struct AddStationView: View {
         }
         
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-        let newStation = RadioStation(id: UUID().uuidString, name: name, url: urlString, iconData: iconData, country: selectedCountry)
-
-        // Now, call the addStation method with all required parameters
+        
+        // Call the addStation method with all required parameters
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
-
-        // Assuming newStation is created correctly before this call
-        let iconImage = iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
-        DataStore.shared.saveNewStationToCloudKit(station: newStation, iconImage: iconImage) { success, recordName in
-            if success {
-                print("Station saved to CloudKit with record ID:", recordName ?? "Unknown")
-            } else {
-                print("Failed to save station to CloudKit.")
-            }
-        }
+        
         isPresented = false
     }
 }
