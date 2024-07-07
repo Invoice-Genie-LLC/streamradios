@@ -15,13 +15,13 @@ struct DefaultStations {
                       
         ]
         
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.name })
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.id })
         let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
         
         var newStations = [RadioStation]()
         
         for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
+            let iconData = viewModel.loadImageData(named: station.1)
             let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Albania");            viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
@@ -33,13 +33,13 @@ struct DefaultStations {
             ("tv.balkanweb.com:8081/news24/livestream/playlist.m3u8", "Angola Channel 1", "http://tv.balkanweb.com:8081/news24/livestream/playlist.m3u8"),
         ]
         
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Angola" }.map { $0.name })
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Angola" }.map { $0.id })
         let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
         
         var newStations = [RadioStation]()
         
         for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
+            let iconData = viewModel.loadImageData(named: station.1)
             let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Angola");            viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
@@ -52,13 +52,13 @@ struct DefaultStations {
 
         ]
         
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Australia" }.map { $0.name })
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Australia" }.map { $0.id })
         let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
         
         var newStations = [RadioStation]()
         
         for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
+            let iconData = viewModel.loadImageData(named: station.1)
             let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Australia")
             viewModel.stations.append(newStation)
             newStations.append(newStation)
@@ -71,13 +71,13 @@ struct DefaultStations {
             ("tv.balkanweb.com:8081/news24/livestream/playlist.m3u8", "Argentina Channel 1", "http://tv.balkanweb.com:8081/news24/livestream/playlist.m3u8"),
                        
         ]
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.name })
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.id })
         let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
         
         var newStations = [RadioStation]()
         
         for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.0)
+            let iconData = viewModel.loadImageData(named: station.1)
             let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Argentina");            viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
