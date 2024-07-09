@@ -5,6 +5,7 @@
 
 import SwiftUI
 import Combine
+import FlagKit
 
 extension UIApplication {
     func endEditing() {
@@ -49,19 +50,13 @@ struct ContentView: View {
                         }
                         
                         Spacer()
-                        
-                        Picker("Select Country", selection: $viewModel.selectedCountry) {
-                                ForEach(viewModel.countries, id: \.self) { country in
-                                    Text(country).tag(country)
-                                }
-                            }
-                        .pickerStyle(MenuPickerStyle())
-                        .frame(maxWidth: 200)
-                        .padding()
-                        .background(Color(UIColor.systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .shadow(radius: 5)
-                        
+                        HStack {
+                            StyledPickerView(
+                                selectedCountry: $viewModel.selectedCountry,
+                                countries: viewModel.countries  // Directly pass the array of Country structs
+                            )
+                        }
+                        .padding(.horizontal, 16)
                         Spacer()
                         
                         Button(action: {
