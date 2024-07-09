@@ -1,6 +1,15 @@
 {
-  "originHash" : "c06de472a75fee291e178a428c479dc02189153b0e67c00bae0272e4611c99bc",
+  "originHash" : "867e1ac255a4f83094f007d44328f1da6be968d7e50406f97c4dd000e1b54d6f",
   "pins" : [
+    {
+      "identity" : "flagkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/madebybowtie/FlagKit",
+      "state" : {
+        "revision" : "f12111d91902d23fd1d9cc7ad9198030b049795d",
+        "version" : "2.4.0"
+      }
+    },
     {
       "identity" : "reachability.swift",
       "kind" : "remoteSourceControl",

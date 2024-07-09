@@ -11,7 +11,24 @@ struct DefaultStations {
     // Albania
     static func addDefaultStationsForAlbania(to viewModel: RadioStationViewModel) {
         let defaultStations = [
-            ("live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("1live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("2live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("3live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("4live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("5live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("6live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("7live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("8live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("9live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("10live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("11live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("12live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("13live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("14live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("15live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("16live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("17live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            ("18live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                       
         ]
         

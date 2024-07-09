@@ -9,15 +9,49 @@ import Combine
 
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
-    @Published var countries: [String] = [
-        "Albania", "Angola", "Argentina", "Australia", "Bangladesh", "Bolivia",
-        "Brazil", "Bulgaria", "Canada", "Costa Rica", "Czech Republic", "France",
-        "Germany", "Greece", "Haiti", "Hungary", "India", "Indonesia", "Italy",
-        "Japan", "Malaysia", "Mexico", "Netherlands", "New Zealand", "Peru",
-        "Poland", "Portugal", "Russia", "Serbia", "Slovakia", "South Africa",
-        "Spain", "Sweden", "Switzerland", "Tanzania", "Turkey", "UK", "USA",
-        "Zimbabwe", "Unknown Region"
-    ]
+    @Published var countries: [Country] = [
+            Country(name: "Albania", flag: "AL"),
+            Country(name: "Angola", flag: "AO"),
+            Country(name: "Argentina", flag: "AR"),
+            Country(name: "Australia", flag: "AU"),
+            Country(name: "Bangladesh", flag: "BD"),
+            Country(name: "Bolivia", flag: "BO"),
+            Country(name: "Brazil", flag: "BR"),
+            Country(name: "Bulgaria", flag: "BG"),
+            Country(name: "Canada", flag: "CA"),
+            Country(name: "Costa Rica", flag: "CR"),
+            Country(name: "Czech Republic", flag: "CZ"),
+            Country(name: "France", flag: "FR"),
+            Country(name: "Germany", flag: "DE"),
+            Country(name: "Greece", flag: "GR"),
+            Country(name: "Haiti", flag: "HT"),
+            Country(name: "Hungary", flag: "HU"),
+            Country(name: "India", flag: "IN"),
+            Country(name: "Indonesia", flag: "ID"),
+            Country(name: "Italy", flag: "IT"),
+            Country(name: "Japan", flag: "JP"),
+            Country(name: "Malaysia", flag: "MY"),
+            Country(name: "Mexico", flag: "MX"),
+            Country(name: "Netherlands", flag: "NL"),
+            Country(name: "New Zealand", flag: "NZ"),
+            Country(name: "Peru", flag: "PE"),
+            Country(name: "Poland", flag: "PL"),
+            Country(name: "Portugal", flag: "PT"),
+            Country(name: "Russia", flag: "RU"),
+            Country(name: "Serbia", flag: "RS"),
+            Country(name: "Slovakia", flag: "SK"),
+            Country(name: "South Africa", flag: "ZA"),
+            Country(name: "Spain", flag: "ES"),
+            Country(name: "Sweden", flag: "SE"),
+            Country(name: "Switzerland", flag: "CH"),
+            Country(name: "Tanzania", flag: "TZ"),
+            Country(name: "Turkey", flag: "TR"),
+            Country(name: "UK", flag: "GB"),
+            Country(name: "USA", flag: "US"),
+            Country(name: "Zimbabwe", flag: "ZW"),
+           // Country(name: "Unknown Region", flag: "")  // Handle Unknown Region without a flag
+        ]
+    
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region" {
         didSet {
             saveSelectedCountry()
@@ -221,4 +255,12 @@ class RadioStationViewModel: ObservableObject {
     func moveStation(from source: IndexSet, to destination: Int) {
         stations.move(fromOffsets: source, toOffset: destination)
     }
+}
+
+
+struct Country: Identifiable, Hashable {
+    let id = UUID()
+    var name: String
+    var flag: String
+   
 }

@@ -88,11 +88,12 @@ struct AddStationView: View {
                         }
                         
                         Picker("Select Country", selection: $selectedCountry) {
-                            ForEach(viewModel.countries, id: \.self) { country in
-                                Text(country).tag(country)
+                            ForEach(viewModel.countries, id: \.name) { country in
+                                Text(country.name).tag(country.name)
                             }
                         }
                         .pickerStyle(MenuPickerStyle())
+
                     }
                     
                     Section(header: Text("Icon")) {

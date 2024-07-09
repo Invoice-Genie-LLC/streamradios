@@ -34,6 +34,8 @@
 		775D04382C28E89300E99061 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04372C28E89300E99061 /* LyricsView.swift */; };
 		775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04562C2A969F00E99061 /* FeatureSwitch.swift */; };
 		775D04592C2B20BE00E99061 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04582C2B20BE00E99061 /* EditStationView.swift */; };
+		7780E9622C3CDEF2009CCF6F /* FlagKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7780E9612C3CDEF2009CCF6F /* FlagKit */; };
+		7780E9642C3CE2F7009CCF6F /* StyledPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
@@ -104,6 +106,7 @@
 		775D04372C28E89300E99061 /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
 		775D04562C2A969F00E99061 /* FeatureSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSwitch.swift; sourceTree = "<group>"; };
 		775D04582C2B20BE00E99061 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
+		7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyledPickerView.swift; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
@@ -122,6 +125,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */,
+				7780E9622C3CDEF2009CCF6F /* FlagKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -179,6 +183,7 @@
 				77EAD07D2C37B04F0095AF2F /* DefaultStations.swift */,
 				77BC0EAB2C32F923002FDD8E /* PurchaseManager.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
+				7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */,
 				77BC0EAD2C32F954002FDD8E /* PurchaseView.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
 				778F746F2C2F13CE00AB81CD /* PlayerView.swift */,
@@ -301,6 +306,7 @@
 			name = StreamRadios;
 			packageProductDependencies = (
 				77CC1EB42C2DBD8600F8FD5B /* Reachability */,
+				7780E9612C3CDEF2009CCF6F /* FlagKit */,
 			);
 			productName = AlbRadioStream;
 			productReference = 7707DA352C152EF2006D5EBB /* StreamRadios.app */;
@@ -352,6 +358,7 @@
 			mainGroup = 7707DA2C2C152EF2006D5EBB;
 			packageReferences = (
 				77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */,
+				7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */,
 			);
 			productRefGroup = 7707DA362C152EF2006D5EBB /* Products */;
 			projectDirPath = "";
@@ -388,6 +395,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7780E9642C3CE2F7009CCF6F /* StyledPickerView.swift in Sources */,
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
@@ -726,6 +734,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/madebybowtie/FlagKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.0;
+			};
+		};
 		77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ashleymills/Reachability.swift";
@@ -737,6 +753,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		7780E9612C3CDEF2009CCF6F /* FlagKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */;
+			productName = FlagKit;
+		};
 		77CC1EB42C2DBD8600F8FD5B /* Reachability */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */;
