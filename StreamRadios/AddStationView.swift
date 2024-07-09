@@ -176,7 +176,6 @@ struct AddStationView: View {
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
         viewModel.saveStationsToCoreData() 
-        viewModel.saveStationsToLocal()
         isPresented = false
     }
 

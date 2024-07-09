@@ -17,3 +17,8 @@ public class CDStation: NSManagedObject {
     @NSManaged public var isFavorite: Bool
 }
 
+extension CDStation {
+    @nonobjc public class func fetchRequest() -> NSFetchRequest<CDStation> {
+        return NSFetchRequest<CDStation>(entityName: "CDStation")  // Ensure this matches the entity name in your Core Data model
+    }
+}
