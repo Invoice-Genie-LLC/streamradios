@@ -10,6 +10,7 @@ import Combine
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
     @Published var countries: [Country] = [
+        Country(name: "Select Station", flag: ""),
             Country(name: "Albania", flag: "AL"),
             Country(name: "Angola", flag: "AO"),
             Country(name: "Argentina", flag: "AR"),
@@ -51,7 +52,7 @@ class RadioStationViewModel: ObservableObject {
             Country(name: "Zimbabwe", flag: "ZW"),
            // Country(name: "Unknown Region", flag: "")  // Handle Unknown Region without a flag
         ]
-    
+    @Published var isLoading = false
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region" {
         didSet {
             saveSelectedCountry()
@@ -96,8 +97,10 @@ class RadioStationViewModel: ObservableObject {
     }
     
     func loadStationsFromCloudKit() {
+        isLoading = true  // Start loading
         DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
             DispatchQueue.main.async {
+                self?.isLoading = false  // Stop loading regardless of the outcome
                 if let fetchedStations = fetchedStations, !fetchedStations.isEmpty {
                     self?.stations = fetchedStations
                     self?.applySavedStationOrder() // Reorder stations based on saved order
