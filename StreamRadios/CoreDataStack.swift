@@ -11,7 +11,7 @@ class CoreDataStack {
     static let shared = CoreDataStack()
 
     lazy var persistentContainer: NSPersistentContainer = {
-        let container = NSPersistentContainer(name: "Model")  // This name should match your .xcdatamodeld file's name
+        let container = NSPersistentContainer(name: "YourModelName")
         container.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {
                 fatalError("Unresolved error \(error), \(error.userInfo)")
@@ -24,7 +24,7 @@ class CoreDataStack {
         return persistentContainer.viewContext
     }
 
-    func saveContext () {
+    func saveContext() {
         let context = persistentContainer.viewContext
         if context.hasChanges {
             do {

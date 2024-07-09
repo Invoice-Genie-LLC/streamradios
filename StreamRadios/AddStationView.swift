@@ -174,12 +174,11 @@ struct AddStationView: View {
         }
         
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-        
-        // Call the addStation method with all required parameters
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
-        
+        viewModel.saveStationsToCoreData()  // Save changes to CoreData
         isPresented = false
     }
+
 }
 
 struct AddStationView_Previews: PreviewProvider {

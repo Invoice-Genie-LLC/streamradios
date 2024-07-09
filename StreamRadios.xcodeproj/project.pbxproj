@@ -36,7 +36,6 @@
 		775D04592C2B20BE00E99061 /* EditStationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04582C2B20BE00E99061 /* EditStationView.swift */; };
 		7780E9622C3CDEF2009CCF6F /* FlagKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7780E9612C3CDEF2009CCF6F /* FlagKit */; };
 		7780E9642C3CE2F7009CCF6F /* StyledPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */; };
-		7780E9662C3D0172009CCF6F /* SaveStationsToCoreData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9652C3D0172009CCF6F /* SaveStationsToCoreData.swift */; };
 		7780E9682C3D01DA009CCF6F /* CoreDataStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */; };
 		7780E96A2C3D0255009CCF6F /* CDStation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9692C3D0255009CCF6F /* CDStation.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
@@ -110,7 +109,6 @@
 		775D04562C2A969F00E99061 /* FeatureSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSwitch.swift; sourceTree = "<group>"; };
 		775D04582C2B20BE00E99061 /* EditStationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditStationView.swift; sourceTree = "<group>"; };
 		7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyledPickerView.swift; sourceTree = "<group>"; };
-		7780E9652C3D0172009CCF6F /* SaveStationsToCoreData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SaveStationsToCoreData.swift; sourceTree = "<group>"; };
 		7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataStack.swift; sourceTree = "<group>"; };
 		7780E9692C3D0255009CCF6F /* CDStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDStation.swift; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
@@ -237,7 +235,6 @@
 			isa = PBXGroup;
 			children = (
 				77130BF72C307D5F00D4711A /* EndEditing.swift */,
-				7780E9652C3D0172009CCF6F /* SaveStationsToCoreData.swift */,
 			);
 			path = Extensions;
 			sourceTree = "<group>";
@@ -405,7 +402,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				7780E9642C3CE2F7009CCF6F /* StyledPickerView.swift in Sources */,
-				7780E9662C3D0172009CCF6F /* SaveStationsToCoreData.swift in Sources */,
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,

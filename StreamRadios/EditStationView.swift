@@ -158,13 +158,13 @@ struct EditStationView: View {
             showAlert = true
             return
         }
-        
+
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-        
-        // Update the existing station instead of creating a new one
         viewModel.updateStation(station, name: name, url: urlString, iconData: iconData, country: selectedCountry)
+        viewModel.saveStationsToCoreData()  // Save changes to CoreData
         isPresented = nil
     }
+
 }
 
 struct EditStationView_Previews: PreviewProvider {
