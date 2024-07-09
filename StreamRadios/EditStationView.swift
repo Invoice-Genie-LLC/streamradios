@@ -161,7 +161,8 @@ struct EditStationView: View {
 
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         viewModel.updateStation(station, name: name, url: urlString, iconData: iconData, country: selectedCountry)
-        viewModel.saveStationsToCoreData()  // Save changes to CoreData
+        viewModel.saveStationsToCoreData() 
+        viewModel.saveStationsToLocal()// Save changes to CoreData
         isPresented = nil
     }
 
