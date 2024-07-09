@@ -59,6 +59,24 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
+    func saveStationsToLocal() {
+           do {
+               let data = try JSONEncoder().encode(stations)
+               UserDefaults.standard.set(data, forKey: "SavedStations")
+           } catch {
+               print("Failed to encode stations: \(error)")
+           }
+       }
+    
+    func loadStationsFromLocal() {
+            guard let data = UserDefaults.standard.data(forKey: "SavedStations") else { return }
+            do {
+                stations = try JSONDecoder().decode([RadioStation].self, from: data)
+            } catch {
+                print("Failed to decode stations: \(error)")
+            }
+        }
+    
     func applySavedStationOrder() {
         if let savedOrder = UserDefaults.standard.array(forKey: "stationOrder") as? [String] {
             var orderedStations: [RadioStation] = []
@@ -87,7 +105,10 @@ class RadioStationViewModel: ObservableObject {
 
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
-        loadStationsFromCloudKit()
+        loadStationsFromLocal()
+            if stations.isEmpty {
+                loadStationsFromCloudKit()
+            }
     }
     
     private func initializeStationsForFirstTime() {
@@ -206,29 +227,42 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func deleteStation(at offsets: IndexSet) {
-        offsets.forEach { index in
+        for index in offsets {
+            guard stations.indices.contains(index) else {
+                print("Attempted to delete a station at an out-of-range index: \(index)")
+                continue
+            }
             let station = stations[index]
+            print("Deleting station: \(station.name) with ID: \(station.id)")
+
             DataStore.shared.deleteStationFromCloudKit(station: station) { [weak self] success in
                 DispatchQueue.main.async {
                     if success {
-                        print("Station successfully deleted from CloudKit.")
+                        print("Station successfully deleted from CloudKit: \(station.name)")
                         self?.stations.remove(at: index)
-                        
-                        if let currentStationIndex = RadioPlayer.shared.currentStationIndex, currentStationIndex == index {
-                            RadioPlayer.shared.currentStationIndex = nil
-                            RadioPlayer.shared.isPlaying = false
-                            RadioPlayer.shared.player?.pause()
-                        } else if let currentStationIndex = RadioPlayer.shared.currentStationIndex, currentStationIndex > index {
-                            RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
-                        }
-                        print("View updated after successful CloudKit deletion.")
+                        self?.updateRadioPlayerAfterDeletion(deletedIndex: index)
                     } else {
-                        print("Failed to delete station from CloudKit.")
+                        print("Failed to delete station from CloudKit: \(station.name)")
                     }
                 }
             }
         }
     }
+
+    private func updateRadioPlayerAfterDeletion(deletedIndex: Int) {
+        guard let currentIndex = RadioPlayer.shared.currentStationIndex else { return }
+
+        if currentIndex == deletedIndex {
+            RadioPlayer.shared.currentStationIndex = nil
+            RadioPlayer.shared.isPlaying = false
+            RadioPlayer.shared.player?.pause()
+            print("Stopped playing as the current station was deleted.")
+        } else if currentIndex > deletedIndex {
+            RadioPlayer.shared.currentStationIndex! -= 1
+            print("Adjusted player index after deletion.")
+        }
+    }
+
 
     func updateStation(_ existingStation: RadioStation, name: String, url: String, iconData: String?, country: String) {
         if let index = stations.firstIndex(where: { $0.id == existingStation.id }) {

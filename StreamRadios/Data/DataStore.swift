@@ -11,17 +11,18 @@ class DataStore {
     private let privateDatabase = CKContainer.default().privateCloudDatabase
 
     func saveImageToFileSystem(image: UIImage) -> String? {
-        guard let data = image.jpegData(compressionQuality: 0.5) else { return nil }
-        let fileName = UUID().uuidString + ".jpg"
-        let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
-        do {
-            try data.write(to: fileURL)
-            return fileName
-        } catch {
-            print("Error saving image to file system:", error)
-            return nil
+            guard let data = image.jpegData(compressionQuality: 0.5) else { return nil }
+            let fileName = UUID().uuidString + ".jpg"
+            let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
+            do {
+                try data.write(to: fileURL)
+                print("Image saved to filesystem at URL: \(fileURL.path)")  // Print the file path
+                return fileName
+            } catch {
+                print("Error saving image to file system:", error)
+                return nil
+            }
         }
-    }
 
     func loadImageFromFileSystem(fileName: String) -> UIImage? {
         let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
