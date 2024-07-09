@@ -254,7 +254,7 @@ struct RadioStationListView: View {
                     if success {
                         print("Station successfully deleted from CloudKit.")
                         self.viewModel.stations.remove(at: index)
-                       // self.viewModel.saveStationsToFile()
+                        viewModel.saveStationsToLocal()
                         adjustRadioPlayerIndexAfterDeletion(at: index)
                     } else {
                         print("Failed to delete station from CloudKit.")
@@ -357,6 +357,8 @@ struct StationDropDelegate: DropDelegate {
 
         // Save the new station order to UserDefaults
         viewModel.saveStationsOrder()
+        
+        viewModel.saveStationsToLocal()
 
         // Print the new station list
         viewModel.printStationsList()
