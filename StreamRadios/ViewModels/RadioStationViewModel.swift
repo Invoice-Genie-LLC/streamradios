@@ -6,6 +6,7 @@
 
 import SwiftUI
 import Combine
+import CoreData
 
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
@@ -106,10 +107,18 @@ class RadioStationViewModel: ObservableObject {
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
         loadStationsFromLocal()
-            if stations.isEmpty {
+        if stations.isEmpty {
+                    loadFromCloudKitIfNeeded()
+                }
+    }
+    
+    private func loadFromCloudKitIfNeeded() {
+            // Check if we've already loaded data from CloudKit
+            let hasLoadedFromCloudKit = UserDefaults.standard.bool(forKey: "HasLoadedFromCloudKit")
+            if !hasLoadedFromCloudKit {
                 loadStationsFromCloudKit()
             }
-    }
+        }
     
     private func initializeStationsForFirstTime() {
         print("Initializing default stations for first time setup.")
@@ -118,19 +127,21 @@ class RadioStationViewModel: ObservableObject {
     }
     
     func loadStationsFromCloudKit() {
-        isLoading = true  // Start loading
-        DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
-            DispatchQueue.main.async {
-                self?.isLoading = false  // Stop loading regardless of the outcome
-                if let fetchedStations = fetchedStations, !fetchedStations.isEmpty {
-                    self?.stations = fetchedStations
-                    self?.applySavedStationOrder() // Reorder stations based on saved order
-                } else {
-                    self?.initializeStationsForFirstTime()
+            isLoading = true
+            DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
+                DispatchQueue.main.async {
+                    self?.isLoading = false
+                    if let fetchedStations = fetchedStations, !fetchedStations.isEmpty {
+                        self?.stations = fetchedStations
+                        self?.applySavedStationOrder()
+                        UserDefaults.standard.set(true, forKey: "HasLoadedFromCloudKit")
+                        self?.saveStationsToLocal() // Optionally save to local storage for faster future loads
+                    } else {
+                        self?.initializeStationsForFirstTime()
+                    }
                 }
             }
         }
-    }
     
     var currentlyPlayingStation: RadioStation? {
         guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
@@ -300,4 +311,56 @@ struct Country: Identifiable, Hashable {
     var name: String
     var flag: String
    
+}
+
+extension RadioStationViewModel {
+    
+    func saveStationsToCoreData() {
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        // Example: Delete all existing records to avoid duplicates
+        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = CDStation.fetchRequest()
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        do {
+            try context.execute(deleteRequest)
+            // Now create and insert new records
+            for station in stations {
+                let cdStation = CDStation(context: context)
+                cdStation.id = station.id
+                cdStation.name = station.name
+                cdStation.url = station.url
+                cdStation.iconData = station.iconData
+                cdStation.country = station.country
+                cdStation.isFavorite = station.isFavorite
+            }
+            try context.save()
+            print("Successfully saved stations to CoreData.")
+        } catch {
+            print("Failed to save to CoreData: \(error)")
+        }
+    }
+
+    func loadStationsFromCoreData() {
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        // Explicitly cast the fetch request to the correct type
+        let request: NSFetchRequest<CDStation> = CDStation.fetchRequest() as! NSFetchRequest<CDStation>
+        do {
+            let results = try context.fetch(request)
+            stations = results.map { cdStation in
+                // Assuming that `id`, `name`, `url`, `iconData`, and `country` are optional in your Core Data Model.
+                // Make sure to handle optionals properly here.
+                RadioStation(
+                    id: cdStation.id ?? UUID().uuidString, // Provide default values or handle optionals more gracefully
+                    name: cdStation.name ?? "Unknown",
+                    url: cdStation.url ?? "http://default.url",
+                    iconData: cdStation.iconData,
+                    country: cdStation.country ?? "Unknown",
+                    isFavorite: cdStation.isFavorite
+                )
+            }
+            print("Loaded \(stations.count) stations from CoreData.")
+        } catch {
+            print("Failed to load stations from CoreData: \(error)")
+        }
+    }
+
 }
