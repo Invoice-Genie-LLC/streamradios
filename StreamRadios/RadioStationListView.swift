@@ -28,12 +28,19 @@ struct RadioStationListView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if viewModel.stations.isEmpty {
-                emptyStateView
-            } else {
-                stationsListView
-            }
-        }
+            if viewModel.isLoading {
+                           VStack {
+                               ProgressView("Loading stations...")
+                                   .progressViewStyle(CircularProgressViewStyle())
+                                   .scaleEffect(1.5)  // Make the spinner larger
+                           }
+                           .frame(maxWidth: .infinity, maxHeight: .infinity)
+                       } else if viewModel.stations.isEmpty {
+                           emptyStateView
+                       } else {
+                           stationsListView
+                       }
+                   }
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $isEditingStation, onDismiss: handleDismiss) {
             if let selectedStation = selectedStationForEdit {
