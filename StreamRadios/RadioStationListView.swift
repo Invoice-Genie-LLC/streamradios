@@ -344,10 +344,17 @@ struct StationDropDelegate: DropDelegate {
         return DropProposal(operation: .move)
     }
 
-    private func moveStation(from sourceIndex: Int, to destinationIndex: Int) {
-        let itemToMove = stations.remove(at: sourceIndex)
-        stations.insert(itemToMove, at: destinationIndex)
+    func moveStation(from sourceIndex: Int, to destinationIndex: Int) {
+        let itemToMove = viewModel.stations.remove(at: sourceIndex)
+        viewModel.stations.insert(itemToMove, at: destinationIndex)
+
+        // Save the new station order to UserDefaults
+        viewModel.saveStationsOrder()
+
+        // Print the new station list
+        viewModel.printStationsList()
     }
+
 }
 
 struct RadioStationListView_Previews: PreviewProvider {
@@ -359,5 +366,18 @@ struct RadioStationListView_Previews: PreviewProvider {
                              selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent), searchText: .constant(""))
         .environmentObject(viewModel)
         .environmentObject(radioPlayer)
+    }
+}
+extension RadioStationViewModel {
+    func saveStationsOrder() {
+        let stationIDs = stations.map { $0.id }
+        UserDefaults.standard.set(stationIDs, forKey: "stationOrder")
+        UserDefaults.standard.synchronize() // Make sure the UserDefaults is updated immediately
+    }
+
+    func printStationsList() {
+        for station in stations {
+            print("\(station.name) - \(station.url)")
+        }
     }
 }
