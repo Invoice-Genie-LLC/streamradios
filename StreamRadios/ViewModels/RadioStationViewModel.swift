@@ -61,22 +61,38 @@ class RadioStationViewModel: ObservableObject {
     }
     
     func saveStationsToLocal() {
-           do {
-               let data = try JSONEncoder().encode(stations)
-               UserDefaults.standard.set(data, forKey: "SavedStations")
-           } catch {
-               print("Failed to encode stations: \(error)")
-           }
-       }
-    
-    func loadStationsFromLocal() {
-            guard let data = UserDefaults.standard.data(forKey: "SavedStations") else { return }
+        if stations.isEmpty {
+            print("No stations available. Clearing local storage.")
+            UserDefaults.standard.removeObject(forKey: "SavedStations")
+        } else {
             do {
-                stations = try JSONDecoder().decode([RadioStation].self, from: data)
+                let data = try JSONEncoder().encode(stations)
+                UserDefaults.standard.set(data, forKey: "SavedStations")
+                print("Stations saved locally, count: \(stations.count)")
             } catch {
-                print("Failed to decode stations: \(error)")
+                print("Failed to encode and save stations: \(error)")
             }
         }
+        UserDefaults.standard.synchronize() // Ensure changes are saved immediately
+    }
+
+    
+    func loadStationsFromLocal() {
+        guard let data = UserDefaults.standard.data(forKey: "SavedStations") else {
+            print("No data found in UserDefaults for 'SavedStations'.")
+            return
+        }
+        do {
+            stations = try JSONDecoder().decode([RadioStation].self, from: data)
+            print("Loaded stations from UserDefaults:")
+            for station in stations {
+                print("\(station.name) - \(station.url) - \(station.country) - \(station.isFavorite)")
+            }
+        } catch {
+            print("Failed to decode stations from UserDefaults: \(error)")
+        }
+    }
+
     
     func applySavedStationOrder() {
         if let savedOrder = UserDefaults.standard.array(forKey: "stationOrder") as? [String] {
@@ -106,7 +122,9 @@ class RadioStationViewModel: ObservableObject {
 
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
-        loadStationsFromLocal()
+       // loadStationsFromLocal()
+        loadStationsFromCoreData()
+        UserDefaults.standard.synchronize()
         if stations.isEmpty {
                     loadFromCloudKitIfNeeded()
                 }
@@ -237,26 +255,45 @@ class RadioStationViewModel: ObservableObject {
         }
     }
 
-    func deleteStation(at offsets: IndexSet) {
-        for index in offsets {
-            guard stations.indices.contains(index) else {
-                print("Attempted to delete a station at an out-of-range index: \(index)")
-                continue
-            }
-            let station = stations[index]
-            print("Deleting station: \(station.name) with ID: \(station.id)")
+    func deleteStation(at index: Int) {
+        let stationToDelete = stations[index]
 
-            DataStore.shared.deleteStationFromCloudKit(station: station) { [weak self] success in
-                DispatchQueue.main.async {
-                    if success {
-                        print("Station successfully deleted from CloudKit: \(station.name)")
-                        self?.stations.remove(at: index)
-                        self?.updateRadioPlayerAfterDeletion(deletedIndex: index)
-                    } else {
-                        print("Failed to delete station from CloudKit: \(station.name)")
-                    }
+        // Delete from CloudKit
+        DataStore.shared.deleteStationFromCloudKit(station: stationToDelete) { [weak self] success in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if success {
+                    // Remove station from the local list
+                    self.stations.remove(at: index)
+                    
+                    // Directly delete the station from CoreData
+                    self.deleteStationFromCoreData(stationToDelete)
+
+                    // Update the radio player index if needed
+                    self.updateRadioPlayerAfterDeletion(deletedIndex: index)
+
+                    print("Station successfully deleted from CloudKit and local.")
+                } else {
+                    print("Failed to delete station from CloudKit: \(stationToDelete.name)")
                 }
             }
+        }
+    }
+
+    private func deleteStationFromCoreData(_ station: RadioStation) {
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        let request: NSFetchRequest<CDStation> = CDStation.fetchRequest() as! NSFetchRequest<CDStation>
+        request.predicate = NSPredicate(format: "id == %@", station.id)
+        
+        do {
+            let results = try context.fetch(request)
+            for object in results {
+                context.delete(object)
+            }
+            try context.save()
+            print("Station deleted from CoreData successfully.")
+        } catch {
+            print("Failed to delete station from CoreData: \(error)")
         }
     }
 
@@ -316,51 +353,60 @@ struct Country: Identifiable, Hashable {
 extension RadioStationViewModel {
     
     func saveStationsToCoreData() {
-        let context = CoreDataStack.shared.persistentContainer.viewContext
-        // Example: Delete all existing records to avoid duplicates
-        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = CDStation.fetchRequest()
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
-        do {
-            try context.execute(deleteRequest)
-            // Now create and insert new records
-            for station in stations {
-                let cdStation = CDStation(context: context)
-                cdStation.id = station.id
-                cdStation.name = station.name
-                cdStation.url = station.url
-                cdStation.iconData = station.iconData
-                cdStation.country = station.country
-                cdStation.isFavorite = station.isFavorite
+            let context = CoreDataStack.shared.context
+
+            // Delete all existing records to ensure synchronization
+            let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+            do {
+                try context.execute(deleteRequest)
+                print("All existing stations deleted from CoreData.")
+                
+                // Only create new records if there are stations to save
+                if !stations.isEmpty {
+                    for station in stations {
+                        let cdStation = CDStation(context: context)
+                        cdStation.id = station.id
+                        cdStation.name = station.name
+                        cdStation.url = station.url
+                        cdStation.iconData = station.iconData
+                        cdStation.country = station.country
+                        cdStation.isFavorite = station.isFavorite
+                    }
+                    print("New stations are being saved to CoreData.")
+                } else {
+                    print("No stations available to save to CoreData.")
+                }
+                
+                // Attempt to save context changes
+                try context.save()
+                print("CoreData context saved successfully.")
+            } catch {
+                print("Failed to save to CoreData or delete records: \(error)")
             }
-            try context.save()
-            print("Successfully saved stations to CoreData.")
-        } catch {
-            print("Failed to save to CoreData: \(error)")
         }
-    }
 
     func loadStationsFromCoreData() {
-        let context = CoreDataStack.shared.persistentContainer.viewContext
-        // Explicitly cast the fetch request to the correct type
-        let request: NSFetchRequest<CDStation> = CDStation.fetchRequest() as! NSFetchRequest<CDStation>
-        do {
-            let results = try context.fetch(request)
-            stations = results.map { cdStation in
-                // Assuming that `id`, `name`, `url`, `iconData`, and `country` are optional in your Core Data Model.
-                // Make sure to handle optionals properly here.
-                RadioStation(
-                    id: cdStation.id ?? UUID().uuidString, // Provide default values or handle optionals more gracefully
-                    name: cdStation.name ?? "Unknown",
-                    url: cdStation.url ?? "http://default.url",
-                    iconData: cdStation.iconData,
-                    country: cdStation.country ?? "Unknown",
-                    isFavorite: cdStation.isFavorite
-                )
-            }
-            print("Loaded \(stations.count) stations from CoreData.")
-        } catch {
-            print("Failed to load stations from CoreData: \(error)")
-        }
-    }
+            let context = CoreDataStack.shared.context
+            let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
 
+            do {
+                let results = try context.fetch(request)
+                if results.isEmpty {
+                    print("No stations found in CoreData.")
+                }
+                stations = results.map { cdStation in
+                    RadioStation(
+                        id: cdStation.id ?? UUID().uuidString,
+                        name: cdStation.name ?? "Unknown",
+                        url: cdStation.url ?? "http://default.url",
+                        iconData: cdStation.iconData,
+                        country: cdStation.country ?? "Unknown",
+                        isFavorite: cdStation.isFavorite
+                    )
+                }
+                print("Loaded \(stations.count) stations from CoreData.")
+            } catch {
+                print("Failed to load stations from CoreData: \(error)")
+            }
+        }
 }

@@ -38,6 +38,7 @@
 		7780E9642C3CE2F7009CCF6F /* StyledPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */; };
 		7780E9682C3D01DA009CCF6F /* CoreDataStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */; };
 		7780E96A2C3D0255009CCF6F /* CDStation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9692C3D0255009CCF6F /* CDStation.swift */; };
+		7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 7780E96B2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
@@ -111,6 +112,7 @@
 		7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StyledPickerView.swift; sourceTree = "<group>"; };
 		7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataStack.swift; sourceTree = "<group>"; };
 		7780E9692C3D0255009CCF6F /* CDStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDStation.swift; sourceTree = "<group>"; };
+		7780E96C2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamRadiosModel.xcdatamodel; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
@@ -251,6 +253,7 @@
 			isa = PBXGroup;
 			children = (
 				77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */,
+				7780E96B2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld */,
 			);
 			path = Data;
 			sourceTree = "<group>";
@@ -422,6 +425,7 @@
 				7780E96A2C3D0255009CCF6F /* CDStation.swift in Sources */,
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
+				7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */,
 				77130BF82C307D5F00D4711A /* EndEditing.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
@@ -772,6 +776,20 @@
 			productName = Reachability;
 		};
 /* End XCSwiftPackageProductDependency section */
+
+/* Begin XCVersionGroup section */
+		7780E96B2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				7780E96C2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodel */,
+			);
+			currentVersion = 7780E96C2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodel */;
+			name = StreamRadiosModel.xcdatamodeld;
+			path = /Users/kley/Documents/StreamRadios/StreamRadios/Data/StreamRadiosModel.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
 	};
 	rootObject = 7707DA2D2C152EF2006D5EBB /* Project object */;
 }
