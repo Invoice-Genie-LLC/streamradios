@@ -338,8 +338,9 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func moveStation(from source: IndexSet, to destination: Int) {
-        stations.move(fromOffsets: source, toOffset: destination)
-    }
+            stations.move(fromOffsets: source, toOffset: destination)
+            saveStationsToCoreData()  // Save the updated order to CoreData
+        }
 }
 
 
@@ -351,43 +352,48 @@ struct Country: Identifiable, Hashable {
 }
 
 extension RadioStationViewModel {
-    
-    func saveStationsToCoreData() {
-            let context = CoreDataStack.shared.context
 
-            // Delete all existing records to ensure synchronization
-            let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
-            do {
-                try context.execute(deleteRequest)
-                print("All existing stations deleted from CoreData.")
-                
-                // Only create new records if there are stations to save
-                if !stations.isEmpty {
-                    for station in stations {
-                        let cdStation = CDStation(context: context)
-                        cdStation.id = station.id
-                        cdStation.name = station.name
-                        cdStation.url = station.url
-                        cdStation.iconData = station.iconData
-                        cdStation.country = station.country
-                        cdStation.isFavorite = station.isFavorite
-                    }
-                    print("New stations are being saved to CoreData.")
-                } else {
-                    print("No stations available to save to CoreData.")
+    func saveStationsToCoreData() {
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+
+        // Delete all existing records to ensure synchronization
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+        do {
+            try context.execute(deleteRequest)
+            print("All existing stations deleted from CoreData.")
+            
+            // Only create new records if there are stations to save
+            if !stations.isEmpty {
+                for (index, station) in stations.enumerated() {
+                    let cdStation = CDStation(context: context)
+                    cdStation.id = station.id
+                    cdStation.name = station.name
+                    cdStation.url = station.url
+                    cdStation.iconData = station.iconData
+                    cdStation.country = station.country
+                    cdStation.isFavorite = station.isFavorite
+                    cdStation.order = Int16(index)  // Set the order attribute
                 }
-                
-                // Attempt to save context changes
-                try context.save()
-                print("CoreData context saved successfully.")
-            } catch {
-                print("Failed to save to CoreData or delete records: \(error)")
+                print("New stations are being saved to CoreData.")
+            } else {
+                print("No stations available to save to CoreData.")
             }
+            
+            // Attempt to save context changes
+            try context.save()
+            print("CoreData context saved successfully.")
+        } catch {
+            print("Failed to save to CoreData or delete records: \(error)")
         }
+    }
 
     func loadStationsFromCoreData() {
-            let context = CoreDataStack.shared.context
+            let context = CoreDataStack.shared.persistentContainer.viewContext
             let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+
+            // Add a sort descriptor to ensure stations are loaded in the correct order
+            let sortDescriptor = NSSortDescriptor(key: "order", ascending: true)
+            request.sortDescriptors = [sortDescriptor]
 
             do {
                 let results = try context.fetch(request)
