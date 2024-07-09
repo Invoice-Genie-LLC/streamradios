@@ -24,6 +24,22 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
+    func applySavedStationOrder() {
+        if let savedOrder = UserDefaults.standard.array(forKey: "stationOrder") as? [String] {
+            var orderedStations: [RadioStation] = []
+            for id in savedOrder {
+                if let station = stations.first(where: { $0.id == id }) {
+                    orderedStations.append(station)
+                }
+            }
+            // Append stations that may not be in the saved order
+            for station in stations where !savedOrder.contains(station.id) {
+                orderedStations.append(station)
+            }
+            stations = orderedStations
+        }
+    }
+    
     private func saveSelectedCountry() {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
     }
@@ -45,11 +61,12 @@ class RadioStationViewModel: ObservableObject {
         saveStationsToCloudKit()
     }
     
-     func loadStationsFromCloudKit() {
+    func loadStationsFromCloudKit() {
         DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
             DispatchQueue.main.async {
                 if let fetchedStations = fetchedStations, !fetchedStations.isEmpty {
                     self?.stations = fetchedStations
+                    self?.applySavedStationOrder() // Reorder stations based on saved order
                 } else {
                     self?.initializeStationsForFirstTime()
                 }
