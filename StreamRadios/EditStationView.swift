@@ -10,6 +10,7 @@ struct EditStationView: View {
     @State private var urlString: String
     @State private var selectedCountry: String
     @State private var showAlert = false
+    @State private var alertMessage: String = ""
     @State private var iconImage: UIImage? = nil
     @State private var showImagePicker = false
     @EnvironmentObject var viewModel: RadioStationViewModel
@@ -30,112 +31,110 @@ struct EditStationView: View {
     }
     
     var body: some View {
-        NavigationView {
-            VStack {
-                // Custom toolbar with title and cancel button
-                HStack {
-                    Button(action: {
-                        isPresented = nil
-                    }) {
-                        Text("Cancel")
-                            .foregroundColor(.primary)
-                    }
-                    Spacer()
-                    Text("Edit Station")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    Spacer()
-                    // Placeholder to balance the HStack
-                    Button(action: {}) {
-                        Text("")
-                            .foregroundColor(.clear)
-                    }
-                }
-                .padding()
-                Divider()
-                
-                Form {
-                    Section(header: Text("Station Info")) {
-                        HStack {
-                            TextField("Enter station name", text: $name)
-                                .onChange(of: name) { newValue in
-                                    if newValue.count >= 40 {
-                                        name = String(newValue.prefix(40))
-                                    }
-                                }
-                            if !name.isEmpty {
-                                Button(action: {
-                                    name = ""
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.trailing, 8)
-                            }
-                        }
-                        
-                        HStack {
-                            TextField("Enter station URL", text: $urlString)
-                            if !urlString.isEmpty {
-                                Button(action: {
-                                    urlString = ""
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.gray)
-                                }
-                                .padding(.trailing, 8)
-                            }
-                        }
-                        
-                        Picker("Select Country", selection: $selectedCountry) {
-                            ForEach(viewModel.countries, id: \.name) { country in
-                                Text(country.name).tag(country.name)
-                            }
-                        }
-                        .pickerStyle(MenuPickerStyle())
-
-                    }
-                    
-                    Section(header: Text("Icon")) {
-                        if let iconImage = iconImage {
-                            Image(uiImage: iconImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 100, height: 100)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        } else {
-                            Image(systemName: "photo")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 100, height: 100)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                        
+        ZStack {
+            NavigationView {
+                VStack {
+                    // Custom toolbar with title and cancel button
+                    HStack {
                         Button(action: {
-                            permissionManager.checkPhotoLibraryPermission {
-                                showImagePicker = true
-                            }
+                            isPresented = nil
                         }) {
+                            Text("Cancel")
+                                .foregroundColor(.primary)
+                        }
+                        Spacer()
+                        Text("Edit Station")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Spacer()
+                        // Placeholder to balance the HStack
+                        Button(action: {}) {
+                            Text("")
+                                .foregroundColor(.clear)
+                        }
+                    }
+                    .padding()
+                    Divider()
+                    
+                    Form {
+                        Section(header: Text("Station Info")) {
                             HStack {
-                                Image(systemName: "square.and.arrow.up")
-                                Text("Upload Station Icon")
-                                    .foregroundColor(.blue)
+                                TextField("Enter station name", text: $name)
+                                    .onChange(of: name) { newValue in
+                                        if newValue.count >= 40 {
+                                            name = String(newValue.prefix(40))
+                                        }
+                                    }
+                                if !name.isEmpty {
+                                    Button(action: {
+                                        name = ""
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding(.trailing, 8)
+                                }
+                            }
+                            
+                            HStack {
+                                TextField("Enter station URL", text: $urlString)
+                                if !urlString.isEmpty {
+                                    Button(action: {
+                                        urlString = ""
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding(.trailing, 8)
+                                }
+                            }
+                            
+                            Picker("Select Country", selection: $selectedCountry) {
+                                ForEach(viewModel.countries, id: \.name) { country in
+                                    Text(country.name).tag(country.name)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                        }
+                        
+                        Section(header: Text("Icon")) {
+                            if let iconImage = iconImage {
+                                Image(uiImage: iconImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            } else {
+                                Image(systemName: "photo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 100, height: 100)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            
+                            Button(action: {
+                                permissionManager.checkPhotoLibraryPermission {
+                                    showImagePicker = true
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "square.and.arrow.up")
+                                    Text("Upload Station Icon")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                            .sheet(isPresented: $showImagePicker) {
+                                ImagePicker(image: $iconImage)
                             }
                         }
-                        .sheet(isPresented: $showImagePicker) {
-                            ImagePicker(image: $iconImage)
+                        
+                        Button(action: saveStation) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                Text("Save Changes")
+                            }
                         }
-                    }
-                    
-                    Button(action: saveStation) {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                            Text("Save Changes")
-                        }
-                    }
-                    .foregroundColor(.green)
-                    .alert(isPresented: $showAlert) {
-                        Alert(title: Text("Invalid URL"), message: Text("Please enter a valid URL"), dismissButton: .default(Text("OK")))
+                        .foregroundColor(.green)
                     }
                     .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
                         Alert(
@@ -148,23 +147,43 @@ struct EditStationView: View {
                         )
                     }
                 }
+                .navigationBarHidden(true) // Hide the default navigation bar
             }
-            .navigationBarHidden(true) // Hide the default navigation bar
+            
+            if showAlert {
+                Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                CustomAlertView(title: "Validation Error", message: alertMessage, buttonText: "OK") {
+                    self.showAlert = false
+                }
+                .transition(.opacity)
+            }
         }
     }
     
     private func saveStation() {
+        guard !name.isEmpty else {
+            alertMessage = "Station name is required."
+            showAlert = true
+            return
+        }
+        
         guard let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) else {
+            alertMessage = "Please enter a valid URL."
+            showAlert = true
+            return
+        }
+        
+        guard selectedCountry != "Select Country" else {
+            alertMessage = "Please select a valid country."
             showAlert = true
             return
         }
 
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         viewModel.updateStation(station, name: name, url: urlString, iconData: iconData, country: selectedCountry)
-        viewModel.saveStationsToCoreData() 
+        viewModel.saveStationsToCoreData()
         isPresented = nil
     }
-
 }
 
 struct EditStationView_Previews: PreviewProvider {

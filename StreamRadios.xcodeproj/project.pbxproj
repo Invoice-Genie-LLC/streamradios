@@ -39,6 +39,7 @@
 		7780E9682C3D01DA009CCF6F /* CoreDataStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */; };
 		7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 7780E96B2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld */; };
 		7780E96F2C3E2C05009CCF6F /* Country.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E96E2C3E2C05009CCF6F /* Country.swift */; };
+		7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9702C3F2110009CCF6F /* CustomAlertView.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
@@ -113,6 +114,7 @@
 		7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreDataStack.swift; sourceTree = "<group>"; };
 		7780E96C2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamRadiosModel.xcdatamodel; sourceTree = "<group>"; };
 		7780E96E2C3E2C05009CCF6F /* Country.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Country.swift; sourceTree = "<group>"; };
+		7780E9702C3F2110009CCF6F /* CustomAlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomAlertView.swift; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
@@ -190,6 +192,7 @@
 				77EAD07D2C37B04F0095AF2F /* DefaultStations.swift */,
 				77BC0EAB2C32F923002FDD8E /* PurchaseManager.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
+				7780E9702C3F2110009CCF6F /* CustomAlertView.swift */,
 				7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */,
 				77BC0EAD2C32F954002FDD8E /* PurchaseView.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
@@ -406,6 +409,7 @@
 			files = (
 				7780E9642C3CE2F7009CCF6F /* StyledPickerView.swift in Sources */,
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
+				7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
