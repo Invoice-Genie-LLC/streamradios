@@ -11,7 +11,7 @@ class CoreDataStack {
     static let shared = CoreDataStack()
 
     lazy var persistentContainer: NSPersistentContainer = {
-        let container = NSPersistentContainer(name: "StreamRadiosModel")  // Ensure this name matches your .xcdatamodeld file name
+        let container = NSPersistentContainer(name: "StreamRadiosModel")  // Name here should match the .xcdatamodeld file name
         container.loadPersistentStores { (storeDescription, error) in
             print("CoreData: Loaded store at \(storeDescription.url?.absoluteString ?? "Unknown URL")")
             if let error = error as NSError? {
@@ -34,7 +34,7 @@ class CoreDataStack {
                 print("CoreData: Successfully saved changes to the context.")
             } catch let error as NSError {
                 print("CoreData: Failed to save context: \(error), \(error.userInfo)")
-                // Handle the error according to your app's needs, e.g., showing UI to inform the user
+                // ToDo: Handle the error according to your app's needs, e.g., showing UI to inform the user
             }
         } else {
             print("CoreData: No changes to save in context.")

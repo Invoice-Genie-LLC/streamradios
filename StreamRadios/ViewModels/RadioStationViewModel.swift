@@ -12,101 +12,51 @@ class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
     @Published var countries: [Country] = [
         Country(name: "Select Station", flag: ""),
-            Country(name: "Albania", flag: "AL"),
-            Country(name: "Angola", flag: "AO"),
-            Country(name: "Argentina", flag: "AR"),
-            Country(name: "Australia", flag: "AU"),
-            Country(name: "Bangladesh", flag: "BD"),
-            Country(name: "Bolivia", flag: "BO"),
-            Country(name: "Brazil", flag: "BR"),
-            Country(name: "Bulgaria", flag: "BG"),
-            Country(name: "Canada", flag: "CA"),
-            Country(name: "Costa Rica", flag: "CR"),
-            Country(name: "Czech Republic", flag: "CZ"),
-            Country(name: "France", flag: "FR"),
-            Country(name: "Germany", flag: "DE"),
-            Country(name: "Greece", flag: "GR"),
-            Country(name: "Haiti", flag: "HT"),
-            Country(name: "Hungary", flag: "HU"),
-            Country(name: "India", flag: "IN"),
-            Country(name: "Indonesia", flag: "ID"),
-            Country(name: "Italy", flag: "IT"),
-            Country(name: "Japan", flag: "JP"),
-            Country(name: "Malaysia", flag: "MY"),
-            Country(name: "Mexico", flag: "MX"),
-            Country(name: "Netherlands", flag: "NL"),
-            Country(name: "New Zealand", flag: "NZ"),
-            Country(name: "Peru", flag: "PE"),
-            Country(name: "Poland", flag: "PL"),
-            Country(name: "Portugal", flag: "PT"),
-            Country(name: "Russia", flag: "RU"),
-            Country(name: "Serbia", flag: "RS"),
-            Country(name: "Slovakia", flag: "SK"),
-            Country(name: "South Africa", flag: "ZA"),
-            Country(name: "Spain", flag: "ES"),
-            Country(name: "Sweden", flag: "SE"),
-            Country(name: "Switzerland", flag: "CH"),
-            Country(name: "Tanzania", flag: "TZ"),
-            Country(name: "Turkey", flag: "TR"),
-            Country(name: "UK", flag: "GB"),
-            Country(name: "USA", flag: "US"),
-            Country(name: "Zimbabwe", flag: "ZW"),
-           // Country(name: "Unknown Region", flag: "")  // Handle Unknown Region without a flag
-        ]
+        Country(name: "Albania", flag: "AL"),
+        Country(name: "Angola", flag: "AO"),
+        Country(name: "Argentina", flag: "AR"),
+        Country(name: "Australia", flag: "AU"),
+        Country(name: "Bangladesh", flag: "BD"),
+        Country(name: "Bolivia", flag: "BO"),
+        Country(name: "Brazil", flag: "BR"),
+        Country(name: "Bulgaria", flag: "BG"),
+        Country(name: "Canada", flag: "CA"),
+        Country(name: "Costa Rica", flag: "CR"),
+        Country(name: "Czech Republic", flag: "CZ"),
+        Country(name: "France", flag: "FR"),
+        Country(name: "Germany", flag: "DE"),
+        Country(name: "Greece", flag: "GR"),
+        Country(name: "Haiti", flag: "HT"),
+        Country(name: "Hungary", flag: "HU"),
+        Country(name: "India", flag: "IN"),
+        Country(name: "Indonesia", flag: "ID"),
+        Country(name: "Italy", flag: "IT"),
+        Country(name: "Japan", flag: "JP"),
+        Country(name: "Malaysia", flag: "MY"),
+        Country(name: "Mexico", flag: "MX"),
+        Country(name: "Netherlands", flag: "NL"),
+        Country(name: "New Zealand", flag: "NZ"),
+        Country(name: "Peru", flag: "PE"),
+        Country(name: "Poland", flag: "PL"),
+        Country(name: "Portugal", flag: "PT"),
+        Country(name: "Russia", flag: "RU"),
+        Country(name: "Serbia", flag: "RS"),
+        Country(name: "Slovakia", flag: "SK"),
+        Country(name: "South Africa", flag: "ZA"),
+        Country(name: "Spain", flag: "ES"),
+        Country(name: "Sweden", flag: "SE"),
+        Country(name: "Switzerland", flag: "CH"),
+        Country(name: "Tanzania", flag: "TZ"),
+        Country(name: "Turkey", flag: "TR"),
+        Country(name: "UK", flag: "GB"),
+        Country(name: "USA", flag: "US"),
+        Country(name: "Zimbabwe", flag: "ZW"),
+        Country(name: "Unknown Region", flag: "")  // ToDo: Handle Unknown Region without a flag
+    ]
     @Published var isLoading = false
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region" {
         didSet {
             saveSelectedCountry()
-        }
-    }
-    
-    func saveStationsToLocal() {
-        if stations.isEmpty {
-            print("No stations available. Clearing local storage.")
-            UserDefaults.standard.removeObject(forKey: "SavedStations")
-        } else {
-            do {
-                let data = try JSONEncoder().encode(stations)
-                UserDefaults.standard.set(data, forKey: "SavedStations")
-                print("Stations saved locally, count: \(stations.count)")
-            } catch {
-                print("Failed to encode and save stations: \(error)")
-            }
-        }
-        UserDefaults.standard.synchronize() // Ensure changes are saved immediately
-    }
-
-    
-    func loadStationsFromLocal() {
-        guard let data = UserDefaults.standard.data(forKey: "SavedStations") else {
-            print("No data found in UserDefaults for 'SavedStations'.")
-            return
-        }
-        do {
-            stations = try JSONDecoder().decode([RadioStation].self, from: data)
-            print("Loaded stations from UserDefaults:")
-            for station in stations {
-                print("\(station.name) - \(station.url) - \(station.country) - \(station.isFavorite)")
-            }
-        } catch {
-            print("Failed to decode stations from UserDefaults: \(error)")
-        }
-    }
-
-    
-    func applySavedStationOrder() {
-        if let savedOrder = UserDefaults.standard.array(forKey: "stationOrder") as? [String] {
-            var orderedStations: [RadioStation] = []
-            for id in savedOrder {
-                if let station = stations.first(where: { $0.id == id }) {
-                    orderedStations.append(station)
-                }
-            }
-            // Append stations that may not be in the saved order
-            for station in stations where !savedOrder.contains(station.id) {
-                orderedStations.append(station)
-            }
-            stations = orderedStations
         }
     }
     
@@ -115,51 +65,39 @@ class RadioStationViewModel: ObservableObject {
     }
     
     var filteredStations: [RadioStation] {
-       return stations.filter { $0.country == selectedCountry }
+        return stations.filter { $0.country == selectedCountry }
     }
     
     @State var showingPurchaseView = false
-
+    
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
-       // loadStationsFromLocal()
-        loadStationsFromCoreData()
-        UserDefaults.standard.synchronize()
         if stations.isEmpty {
-                    loadFromCloudKitIfNeeded()
-                }
-    }
-    
-    private func loadFromCloudKitIfNeeded() {
-            // Check if we've already loaded data from CloudKit
-            let hasLoadedFromCloudKit = UserDefaults.standard.bool(forKey: "HasLoadedFromCloudKit")
-            if !hasLoadedFromCloudKit {
-                loadStationsFromCloudKit()
-            }
+            initializeStationsForFirstTime()
         }
+        loadStationsFromCoreData()
+    }
     
     private func initializeStationsForFirstTime() {
-        print("Initializing default stations for first time setup.")
-        DefaultStations.addAllDefaults(to: self)
-        saveStationsToCloudKit()
-    }
-    
-    func loadStationsFromCloudKit() {
-            isLoading = true
-            DataStore.shared.fetchRadioStations { [weak self] fetchedStations, error in
-                DispatchQueue.main.async {
-                    self?.isLoading = false
-                    if let fetchedStations = fetchedStations, !fetchedStations.isEmpty {
-                        self?.stations = fetchedStations
-                        self?.applySavedStationOrder()
-                        UserDefaults.standard.set(true, forKey: "HasLoadedFromCloudKit")
-                        self?.saveStationsToLocal() // Optionally save to local storage for faster future loads
-                    } else {
-                        self?.initializeStationsForFirstTime()
-                    }
-                }
-            }
+        let userDefaults = UserDefaults.standard
+        let hasLaunchedBeforeKey = "HasLaunchedBefore"
+        
+        // Check if the app has been launched before
+        if userDefaults.bool(forKey: hasLaunchedBeforeKey) == false {
+            print("Initializing default stations for first time setup.")
+            
+            // Add default stations
+            DefaultStations.addAllDefaults(to: self)
+            
+            // Save stations to CloudKit and CoreData
+            saveStationsToCloudKit()
+            saveStationsToCoreData()
+            
+            // Set the flag to indicate that the app has been launched before
+            userDefaults.set(true, forKey: hasLaunchedBeforeKey)
+            userDefaults.synchronize() // Ensure the flag is saved immediately
         }
+    }
     
     var currentlyPlayingStation: RadioStation? {
         guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
@@ -177,7 +115,7 @@ class RadioStationViewModel: ObservableObject {
         }
         return true
     }
-
+    
     func toggleFavorite(for station: RadioStation) {
         if let index = stations.firstIndex(of: station), !isStationPlaying(stations[index]) {
             var updatedStation = stations[index]
@@ -186,11 +124,11 @@ class RadioStationViewModel: ObservableObject {
             updateStationInCloudKit(station: updatedStation)
         }
     }
-
+    
     func recentStations() -> [RadioStation] {
         return stations.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
     }
-
+    
     func favoriteStations() -> [RadioStation] {
         return stations.filter { $0.isFavorite }
     }
@@ -201,7 +139,7 @@ class RadioStationViewModel: ObservableObject {
             updateLastPlayed(for: station)
         }
     }
-
+    
     func updateLastPlayed(for station: RadioStation) {
         if let index = stations.firstIndex(of: station) {
             stations[index].lastPlayed = Date()
@@ -223,11 +161,12 @@ class RadioStationViewModel: ObservableObject {
         print("Image loaded and encoded for: \(assetName)")
         return imageData.base64EncodedString()
     }
-
+    
     func addStation(name: String, url: String, iconData: String?, country: String) {
         let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country)
         stations.append(newStation)
         saveStationToCloudKit(station: newStation)
+        saveStationsToCoreData()
     }
     
     func saveStationsToCloudKit() {
@@ -241,7 +180,7 @@ class RadioStationViewModel: ObservableObject {
             }
         }
     }
-
+    
     func saveStationToCloudKit(station: RadioStation) {
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
         DataStore.shared.saveNewStationToCloudKit(station: station, iconImage: iconImage) { success, recordName in
@@ -254,10 +193,10 @@ class RadioStationViewModel: ObservableObject {
             }
         }
     }
-
+    
     func deleteStation(at index: Int) {
         let stationToDelete = stations[index]
-
+        
         // Delete from CloudKit
         DataStore.shared.deleteStationFromCloudKit(station: stationToDelete) { [weak self] success in
             DispatchQueue.main.async {
@@ -268,10 +207,15 @@ class RadioStationViewModel: ObservableObject {
                     
                     // Directly delete the station from CoreData
                     self.deleteStationFromCoreData(stationToDelete)
-
+                    
+                    // If no stations left, delete the local CoreData file
+                    //if self.stations.isEmpty {
+                    // self.deleteLocalFile()
+                    // }
+                    
                     // Update the radio player index if needed
                     self.updateRadioPlayerAfterDeletion(deletedIndex: index)
-
+                    
                     print("Station successfully deleted from CloudKit and local.")
                 } else {
                     print("Failed to delete station from CloudKit: \(stationToDelete.name)")
@@ -279,10 +223,10 @@ class RadioStationViewModel: ObservableObject {
             }
         }
     }
-
-    private func deleteStationFromCoreData(_ station: RadioStation) {
+    
+    func deleteStationFromCoreData(_ station: RadioStation) {
         let context = CoreDataStack.shared.persistentContainer.viewContext
-        let request: NSFetchRequest<CDStation> = CDStation.fetchRequest() as! NSFetchRequest<CDStation>
+        let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
         request.predicate = NSPredicate(format: "id == %@", station.id)
         
         do {
@@ -291,15 +235,55 @@ class RadioStationViewModel: ObservableObject {
                 context.delete(object)
             }
             try context.save()
+            
+            // Check if there are no more stations left
+            let remainingStations = try context.fetch(CDStation.fetchRequest())
+            if remainingStations.isEmpty {
+                deleteLocalFile()
+            }
+            
+            
             print("Station deleted from CoreData successfully.")
         } catch {
             print("Failed to delete station from CoreData: \(error)")
         }
     }
-
+    
+    func deleteLocalFile() {
+        let fileManager = FileManager.default
+        guard let storeURL = CoreDataStack.shared.persistentContainer.persistentStoreDescriptions.first?.url else {
+            print("Failed to get CoreData file URL.")
+            return
+        }
+        
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        let coordinator = CoreDataStack.shared.persistentContainer.persistentStoreCoordinator
+        
+        do {
+            // Ensure any changes are saved
+            if context.hasChanges {
+                try context.save()
+            }
+            
+            // Remove the persistent store
+            if let store = coordinator.persistentStore(for: storeURL) {
+                try coordinator.remove(store)
+            }
+            
+            // Delete the file
+            try fileManager.removeItem(at: storeURL)
+            print("Local CoreData file deleted successfully.")
+            
+            // Reset the context to clear any cached data
+            context.reset()
+        } catch {
+            print("Failed to delete local CoreData file: \(error)")
+        }
+    }
+    
     private func updateRadioPlayerAfterDeletion(deletedIndex: Int) {
         guard let currentIndex = RadioPlayer.shared.currentStationIndex else { return }
-
+        
         if currentIndex == deletedIndex {
             RadioPlayer.shared.currentStationIndex = nil
             RadioPlayer.shared.isPlaying = false
@@ -310,8 +294,8 @@ class RadioStationViewModel: ObservableObject {
             print("Adjusted player index after deletion.")
         }
     }
-
-
+    
+    
     func updateStation(_ existingStation: RadioStation, name: String, url: String, iconData: String?, country: String) {
         if let index = stations.firstIndex(where: { $0.id == existingStation.id }) {
             stations[index].name = name
@@ -319,11 +303,12 @@ class RadioStationViewModel: ObservableObject {
             stations[index].iconData = iconData
             stations[index].country = country
             updateStationInCloudKit(station: stations[index])
+            saveStationsToCoreData()
         } else {
             print("Error: Station not found in local data.")
         }
     }
-
+    
     func updateStationInCloudKit(station: RadioStation) {
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
         DataStore.shared.updateStationInCloudKit(station: station, iconImage: iconImage) { success, recordName in
@@ -336,26 +321,18 @@ class RadioStationViewModel: ObservableObject {
             }
         }
     }
-
+    
     func moveStation(from source: IndexSet, to destination: Int) {
-            stations.move(fromOffsets: source, toOffset: destination)
-            saveStationsToCoreData()  // Save the updated order to CoreData
-        }
-}
-
-
-struct Country: Identifiable, Hashable {
-    let id = UUID()
-    var name: String
-    var flag: String
-   
+        stations.move(fromOffsets: source, toOffset: destination)
+        saveStationsToCoreData()  // Save the updated order to CoreData
+    }
 }
 
 extension RadioStationViewModel {
-
+    
     func saveStationsToCoreData() {
         let context = CoreDataStack.shared.persistentContainer.viewContext
-
+        
         // Delete all existing records to ensure synchronization
         let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
         do {
@@ -386,33 +363,33 @@ extension RadioStationViewModel {
             print("Failed to save to CoreData or delete records: \(error)")
         }
     }
-
+    
     func loadStationsFromCoreData() {
-            let context = CoreDataStack.shared.persistentContainer.viewContext
-            let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
-
-            // Add a sort descriptor to ensure stations are loaded in the correct order
-            let sortDescriptor = NSSortDescriptor(key: "order", ascending: true)
-            request.sortDescriptors = [sortDescriptor]
-
-            do {
-                let results = try context.fetch(request)
-                if results.isEmpty {
-                    print("No stations found in CoreData.")
-                }
-                stations = results.map { cdStation in
-                    RadioStation(
-                        id: cdStation.id ?? UUID().uuidString,
-                        name: cdStation.name ?? "Unknown",
-                        url: cdStation.url ?? "http://default.url",
-                        iconData: cdStation.iconData,
-                        country: cdStation.country ?? "Unknown",
-                        isFavorite: cdStation.isFavorite
-                    )
-                }
-                print("Loaded \(stations.count) stations from CoreData.")
-            } catch {
-                print("Failed to load stations from CoreData: \(error)")
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+        
+        // Add a sort descriptor to ensure stations are loaded in the correct order
+        let sortDescriptor = NSSortDescriptor(key: "order", ascending: true)
+        request.sortDescriptors = [sortDescriptor]
+        
+        do {
+            let results = try context.fetch(request)
+            if results.isEmpty {
+                print("No stations found in CoreData.")
             }
+            stations = results.map { cdStation in
+                RadioStation(
+                    id: cdStation.id ?? UUID().uuidString,
+                    name: cdStation.name ?? "Unknown",
+                    url: cdStation.url ?? "http://default.url",
+                    iconData: cdStation.iconData,
+                    country: cdStation.country ?? "Unknown",
+                    isFavorite: cdStation.isFavorite
+                )
+            }
+            print("Loaded \(stations.count) stations from CoreData.")
+        } catch {
+            print("Failed to load stations from CoreData: \(error)")
         }
+    }
 }
