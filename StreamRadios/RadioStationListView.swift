@@ -195,6 +195,7 @@ struct RadioStationListView: View {
         }
         Button(action: {
             viewModel.toggleFavorite(for: station)
+            viewModel.saveStationsToCoreData()
         }) {
             Image(systemName: station.isFavorite ? "heart.fill" : "heart")
                 .font(.title)
@@ -237,7 +238,7 @@ struct RadioStationListView: View {
         case .recent:
             return viewModel.recentStations().filter { $0.country == viewModel.selectedCountry }
         case .favorites:
-            return viewModel.favoriteStations().filter { $0.country == viewModel.selectedCountry }
+            return viewModel.favoriteStations()
         case .all:
             return viewModel.stations.filter { $0.country == viewModel.selectedCountry }
         }
