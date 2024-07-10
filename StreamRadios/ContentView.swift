@@ -59,16 +59,18 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         // Main Menu
                         HStack {
-                            Button(action: {
-                                showSideMenu.toggle()
-                            }) {
-                                Image(systemName: "line.horizontal.3")
-                                    .font(.title)
-                                    .foregroundColor(.primary)
-                                    .padding(.leading, 10)
-                                    
-                            }
-                        }
+                                    Button(action: {
+                                        showSideMenu.toggle()
+                                    }) {
+                                        Image(systemName: "line.horizontal.3")
+                                            .font(.title)
+                                            .foregroundColor(.primary)
+                                            .padding(.leading, 15)
+                                            .padding(.trailing, 2)  // Added padding on the right side
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.leading, 20)
                         .frame(width: isIPhone15ProMax ? 30 : isIPhone15 ? 30 : isIPadMini ? 30 : isIPad ? 30 : 30)
                         .padding(.bottom, 5)
                         
@@ -79,10 +81,10 @@ struct ContentView: View {
                                 countries: viewModel.countries
                             )
                         }
-                        .frame(width: isIPhone15ProMax ? 230 : isIPhone15 ? 240 : isIPadMini ? 300 : isIPad ? 400 : 350)
-                        .padding(.bottom, 25)
+                        .frame(width: isIPhone15ProMax ? 270 : isIPhone15 ? 250 : isIPadMini ? 300 : isIPad ? 400 : 350)
+                        .padding(.bottom, 5)
                         
-                        // Done and Edit Buttos
+                        // Done and Edit Buttons
                         HStack {
                             Button(action: {
                                 isEditingMode.toggle()
