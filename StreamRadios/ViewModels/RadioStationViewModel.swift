@@ -122,11 +122,14 @@ class RadioStationViewModel: ObservableObject {
             updatedStation.isFavorite.toggle()
             stations[index] = updatedStation
             updateStationInCloudKit(station: updatedStation)
+            saveStationsToCoreData()
         }
     }
     
     func recentStations() -> [RadioStation] {
-        return stations.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
+        let recentStations = stations.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
+        saveStationsToCoreData()  // Save the updated order to CoreData
+        return recentStations
     }
     
     func favoriteStations() -> [RadioStation] {
@@ -144,8 +147,10 @@ class RadioStationViewModel: ObservableObject {
         if let index = stations.firstIndex(of: station) {
             stations[index].lastPlayed = Date()
             updateStationInCloudKit(station: stations[index])
+            saveStationsToCoreData()  // Save the updated lastPlayed time to CoreData
         }
     }
+
     
     func loadImageData(named name: String) -> String? {
         let assetName = name.replacingOccurrences(of: " ", with: "_")
@@ -329,7 +334,6 @@ class RadioStationViewModel: ObservableObject {
 }
 
 extension RadioStationViewModel {
-    
     func saveStationsToCoreData() {
         let context = CoreDataStack.shared.persistentContainer.viewContext
         
@@ -350,6 +354,7 @@ extension RadioStationViewModel {
                     cdStation.country = station.country
                     cdStation.isFavorite = station.isFavorite
                     cdStation.order = Int16(index)  // Set the order attribute
+                    cdStation.lastPlayed = station.lastPlayed  // Add this line
                 }
                 print("New stations are being saved to CoreData.")
             } else {
@@ -384,7 +389,8 @@ extension RadioStationViewModel {
                     url: cdStation.url ?? "http://default.url",
                     iconData: cdStation.iconData,
                     country: cdStation.country ?? "Unknown",
-                    isFavorite: cdStation.isFavorite
+                    isFavorite: cdStation.isFavorite,
+                    lastPlayed: cdStation.lastPlayed
                 )
             }
             print("Loaded \(stations.count) stations from CoreData.")
