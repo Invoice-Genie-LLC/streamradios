@@ -1,10 +1,3 @@
-//
-//  StyledPickerView.swift
-//  StreamRadios
-//
-//  Created by Kley Sulo on 7/8/24.
-//
-
 import SwiftUI
 import FlagKit
 
@@ -13,18 +6,34 @@ struct StyledPickerView: View {
     var countries: [Country]
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 25) {
-            Picker("Select a Country", selection: $selectedCountry) {
-                ForEach(countries) { country in
+        Menu {
+            ForEach(countries) { country in
+                Button(action: {
+                    selectedCountry = country.name
+                }) {
                     CountryPickerRow(country: country)
-                        .tag(country.name)
                 }
             }
-            .pickerStyle(MenuPickerStyle())
-            .accentColor(.primary) // Highlight color for selection
+        } label: {
+            HStack {
+                if let selectedCountryFlag = countries.first(where: { $0.name == selectedCountry })?.flag, !selectedCountryFlag.isEmpty {
+                    Image(selectedCountryFlag)
+                        .resizable()
+                        .frame(width: 24, height: 18) // Increased flag size
+                }
+                Text(selectedCountry.isEmpty ? "Select Country" : selectedCountry)
+                    .font(.headline)  // Increased font size
+                    .foregroundColor(.primary)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .foregroundColor(.primary)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal)
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
+        .padding(.horizontal)
     }
 }
 
@@ -32,36 +41,25 @@ struct CountryPickerRow: View {
     let country: Country
     
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             if country.flag.isEmpty {
-                            Image(systemName: country.displayFlag)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 45, height: 45)
-                                .foregroundColor(.gray)
-                                .padding()
-                        } else {
-                            Image(country.flag)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 45, height: 45)
-                                .padding()
-                        }
-            Text(country.name)
-                .font(.title) // Larger font size for better readability
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
+                Image(systemName: "flag.slash.fill")
+                    .resizable()
+                    .frame(width: 24, height: 18) // Increased flag size
+                    .foregroundColor(.gray)
+            } else {
+                Image(country.flag)
+                    .resizable()
+                    .frame(width: 24, height: 18) // Increased flag size
+            }
             
+            Text(country.name)
+                .font(.headline)  // Increased font size
+                .fontWeight(.medium)
+                .foregroundColor(.primary)
             Spacer()
         }
-        .padding(.vertical, 10)
-    }
-
-    /// Fetches the flag image using FlagKit based on the country code.
-    func flagImage(for countryCode: String) -> Image {
-        let bundle = FlagKit.assetBundle
-        let image = UIImage(named: countryCode, in: bundle, compatibleWith: nil) ?? UIImage()
-        return Image(uiImage: image)
+        .padding(.vertical, 4)
     }
 }
 
@@ -74,5 +72,7 @@ struct StyledPickerView_Previews: PreviewProvider {
             Country(name: "Mexico", flag: "MX")
         ])
         .previewLayout(.sizeThatFits)
+        .padding()
     }
 }
+
