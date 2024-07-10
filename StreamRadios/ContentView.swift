@@ -117,8 +117,6 @@ struct ContentView: View {
                         .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPadMini ? 50 : isIPad ? 50 : 50)
 
                     }
-                   // .padding(.horizontal, sizeClass == .regular ? 20 : 10)
-                  //  .padding(.vertical, 10)
                     
                     HStack {
                         Picker("", selection: $selectedTab) {
