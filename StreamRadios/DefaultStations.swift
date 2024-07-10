@@ -14,8 +14,8 @@ struct DefaultStations {
         let defaultStations = [
             ("1live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
             ("2live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
-           
-                      
+            
+            
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.id })
@@ -25,8 +25,8 @@ struct DefaultStations {
         
         for station in missingStations {
             let iconData = viewModel.loadImageData(named: station.1)
-            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Albania");            viewModel.stations.append(newStation)
-            viewModel.saveStationsToCoreData()
+            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Albania");
+            viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
     }
@@ -36,7 +36,7 @@ struct DefaultStations {
         let defaultStations = [
             ("1live.top-media.al/tar1", "Top Albania Radio", "https://live.top-media.al/tar"),
             ("2live.top-media.al/tar2", "Top Albania Radio", "https://live.top-media.al/tar"),
-           
+            
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Angola" }.map { $0.id })
@@ -46,8 +46,8 @@ struct DefaultStations {
         
         for station in missingStations {
             let iconData = viewModel.loadImageData(named: station.1)
-            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Angola");            viewModel.stations.append(newStation)
-            viewModel.saveStationsToCoreData()
+            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Angola");
+            viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
     }
@@ -57,8 +57,8 @@ struct DefaultStations {
         let defaultStations = [
             ("1live.top-media.al1/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
             ("2live.top-media.al2/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
-           
-
+            
+            
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Australia" }.map { $0.id })
@@ -70,18 +70,17 @@ struct DefaultStations {
             let iconData = viewModel.loadImageData(named: station.1)
             let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Australia")
             viewModel.stations.append(newStation)
-            viewModel.saveStationsToCoreData()
             newStations.append(newStation)
         }
     }
-
+    
     // Argentina
     static func addDefaultStationsForArgentina(to viewModel: RadioStationViewModel) {
         let defaultStations = [
             ("1live.top1-media.al/tar", "Top1 Albania Radio", "https://live.top-media.al/tar"),
             ("2live.to2p-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
-           
-                       
+            
+
         ]
         let existingStations = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.id })
         let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
@@ -90,25 +89,18 @@ struct DefaultStations {
         
         for station in missingStations {
             let iconData = viewModel.loadImageData(named: station.1)
-            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Argentina");            viewModel.stations.append(newStation)
-            viewModel.saveStationsToCoreData()
+            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Argentina");
+            viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
     }
     @StateObject private var viewModel = RadioStationViewModel()
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
-            let shouldAddDefaults = UserDefaults.standard.bool(forKey: "shouldAddDefaultStations")
-            if shouldAddDefaults {
-                addDefaultStationsForAlbania(to: viewModel)
-                addDefaultStationsForAngola(to: viewModel)
-                addDefaultStationsForAustralia(to: viewModel)
-                addDefaultStationsForArgentina(to: viewModel)
-                // Add more calls here for other countries as you expand
-                UserDefaults.standard.set(false, forKey: "shouldAddDefaultStations")  // Reset the flag
-                UserDefaults.standard.synchronize()
-            }
-        }
-   
+        addDefaultStationsForAlbania(to: viewModel)
+        addDefaultStationsForAngola(to: viewModel)
+        addDefaultStationsForAustralia(to: viewModel)
+        addDefaultStationsForArgentina(to: viewModel)
+    }
 }
 
 

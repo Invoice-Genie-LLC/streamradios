@@ -22,25 +22,25 @@ struct RadioStationListView: View {
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
     @Binding var searchText: String
-
+    
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
-
+    
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
-                           VStack {
-                               ProgressView("Loading stations...")
-                                   .progressViewStyle(CircularProgressViewStyle())
-                                   .scaleEffect(1.5)  // Make the spinner larger
-                           }
-                           .frame(maxWidth: .infinity, maxHeight: .infinity)
-                       } else if viewModel.stations.isEmpty {
-                           emptyStateView
-                       } else {
-                           stationsListView
-                       }
-                   }
+                VStack {
+                    ProgressView("Loading stations...")
+                        .progressViewStyle(CircularProgressViewStyle())
+                        .scaleEffect(1.5)  // Make the spinner larger
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if viewModel.stations.isEmpty {
+                emptyStateView
+            } else {
+                stationsListView
+            }
+        }
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $isEditingStation, onDismiss: handleDismiss) {
             if let selectedStation = selectedStationForEdit {
@@ -54,7 +54,7 @@ struct RadioStationListView: View {
         .onAppear(perform: setup)
         .onDisappear(perform: cleanup)
     }
-
+    
     private var emptyStateView: some View {
         VStack {
             Text("No stations configured")
@@ -72,7 +72,7 @@ struct RadioStationListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.scale)
     }
-
+    
     private var stationsListView: some View {
         ScrollView {
             LazyVStack {
@@ -84,22 +84,22 @@ struct RadioStationListView: View {
             .padding(.vertical, 10)
         }
     }
-
+    
     @ViewBuilder
     private func stationRow(for station: RadioStation) -> some View {
         HStack {
             imageForStation(station)
                 .frame(width: 50, height: 50)
                 .cornerRadius(8)
-
+            
             VStack(alignment: .leading, spacing: 4) {
                 stationInfo(for: station)
                 stationMetadata(for: station)
             }
             .padding(.leading, 10)
-
+            
             Spacer()
-
+            
             if isEditing {
                 editControls(for: station)
             } else {
@@ -150,7 +150,7 @@ struct RadioStationListView: View {
         }
         .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
     }
-
+    
     @ViewBuilder
     private func stationInfo(for station: RadioStation) -> some View {
         HStack {
@@ -164,7 +164,7 @@ struct RadioStationListView: View {
                 .background(isCurrentStation(station: station) ? Color.clear : Color(UIColor.systemGray5))
         }
     }
-
+    
     @ViewBuilder
     private func stationMetadata(for station: RadioStation) -> some View {
         if isCurrentStation(station: station) {
@@ -179,7 +179,7 @@ struct RadioStationListView: View {
                 .foregroundColor(.secondary)
         }
     }
-
+    
     @ViewBuilder
     private func playbackControls(for station: RadioStation) -> some View {
         Button(action: {
@@ -201,7 +201,7 @@ struct RadioStationListView: View {
                 .foregroundColor(station.isFavorite ? .red : .primary)
         }
     }
-
+    
     @ViewBuilder
     private func editControls(for station: RadioStation) -> some View {
         Image(systemName: "line.horizontal.3")
@@ -217,7 +217,7 @@ struct RadioStationListView: View {
             }
             .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
     }
-
+    
     @ViewBuilder
     private func imageForStation(_ station: RadioStation) -> some View {
         if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData),
@@ -231,7 +231,7 @@ struct RadioStationListView: View {
                 .scaledToFit()
         }
     }
-
+    
     private var filteredStations: [RadioStation] {
         switch selectedTab {
         case .recent:
@@ -242,11 +242,11 @@ struct RadioStationListView: View {
             return viewModel.stations.filter { $0.country == viewModel.selectedCountry }
         }
     }
-
+    
     private func isCurrentStation(station: RadioStation) -> Bool {
         return radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station
     }
-
+    
     private func deleteStation(_ station: RadioStation) {
         if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
             DataStore.shared.deleteStationFromCloudKit(station: station) { success in
@@ -254,8 +254,10 @@ struct RadioStationListView: View {
                     if success {
                         print("Station successfully deleted from CloudKit.")
                         self.viewModel.stations.remove(at: index)
-                        viewModel.saveStationsToCoreData()
-                        adjustRadioPlayerIndexAfterDeletion(at: index)
+                        
+                        // Delete from CoreData
+                        self.viewModel.deleteStationFromCoreData(station)
+                        self.adjustRadioPlayerIndexAfterDeletion(at: index)
                     } else {
                         print("Failed to delete station from CloudKit.")
                     }
@@ -263,7 +265,7 @@ struct RadioStationListView: View {
             }
         }
     }
-
+    
     private func adjustRadioPlayerIndexAfterDeletion(at index: Int) {
         if RadioPlayer.shared.currentStationIndex == index {
             RadioPlayer.shared.stop()
@@ -272,50 +274,24 @@ struct RadioStationListView: View {
             RadioPlayer.shared.currentStationIndex = currentStationIndex - 1
         }
     }
-
+    
     private func handleDismiss() {
         selectedStationForEdit = nil
         if !viewModel.stations.isEmpty {
             selectedTab = .all
         }
     }
-
+    
     private func setup() {
         NotificationCenter.default.addObserver(forName: .NetworkReconnectNotification, object: nil, queue: .main) { _ in
             if let index = radioPlayer.currentStationIndex {
                 radioPlayer.playStation(at: index, from: viewModel.stations)
             }
         }
-        checkAndAddDefaultStations()
     }
-
+    
     private func cleanup() {
         NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
-    }
-
-    private func checkAndAddDefaultStations() {
-        addDefaultStations(for: "Albania")
-        addDefaultStations(for: "Angola")
-        addDefaultStations(for: "Australia")
-        addDefaultStations(for: "Argentina")
-    }
-
-    private func addDefaultStations(for country: String) {
-        if viewModel.stations.isEmpty || !viewModel.stations.contains(where: { $0.country == country }) {
-            print("Adding default stations for \(country)...")
-            switch country {
-            case "Albania":
-                DefaultStations.addDefaultStationsForAlbania(to: viewModel)
-            case "Angola":
-                DefaultStations.addDefaultStationsForAngola(to: viewModel)
-            case "Australia":
-                DefaultStations.addDefaultStationsForAustralia(to: viewModel)
-            case "Argentina":
-                DefaultStations.addDefaultStationsForArgentina(to: viewModel)
-            default:
-                break
-            }
-        }
     }
 }
 
@@ -326,7 +302,7 @@ struct StationDropDelegate: DropDelegate {
     @Binding var originalMetadata: String?
     let viewModel: RadioStationViewModel
     let radioPlayer: RadioPlayer
-
+    
     func performDrop(info: DropInfo) -> Bool {
         if let metadata = originalMetadata {
             radioPlayer.metadata = metadata
@@ -335,41 +311,47 @@ struct StationDropDelegate: DropDelegate {
         originalMetadata = nil
         return true
     }
-
+    
     func dropEntered(info: DropInfo) {
         guard let draggingStation = draggingStation,
               let fromIndex = stations.firstIndex(of: draggingStation),
               let toIndex = stations.firstIndex(of: station),
               fromIndex != toIndex else { return }
-
+        
         withAnimation {
             moveStation(from: fromIndex, to: toIndex)
         }
     }
-
+    
     func dropUpdated(info: DropInfo) -> DropProposal? {
         return DropProposal(operation: .move)
     }
-
+    
     func moveStation(from sourceIndex: Int, to destinationIndex: Int) {
         let itemToMove = viewModel.stations.remove(at: sourceIndex)
         viewModel.stations.insert(itemToMove, at: destinationIndex)
-
-        // Save the new station order to UserDefaults
-        // viewModel.loadStationsFromCoreData()
-        viewModel.saveStationsOrder()
+        
+        // Save the new station order to CoreData
         viewModel.saveStationsToCoreData()
-
-        // Print the new station list
-        viewModel.printStationsList()
+        
+        // Print the new station list. Uncomment for debugging only
+        // viewModel.printStationsList()
     }
-
+    
+    // Uncomment for debugging only
+    /*
+     func printStationsList() {
+     for station in stations {
+     print("\(station.name) - \(station.url)")
+     }
+     }
+     */
 }
 
 struct RadioStationListView_Previews: PreviewProvider {
     @StateObject static var viewModel = RadioStationViewModel()
     @StateObject static var radioPlayer = RadioPlayer()
-
+    
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false),
                              selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent), searchText: .constant(""))
@@ -377,17 +359,3 @@ struct RadioStationListView_Previews: PreviewProvider {
         .environmentObject(radioPlayer)
     }
 }
-extension RadioStationViewModel {
-    func saveStationsOrder() {
-        let stationIDs = stations.map { $0.id }
-        UserDefaults.standard.set(stationIDs, forKey: "stationOrder")
-        UserDefaults.standard.synchronize() // Make sure the UserDefaults is updated immediately
-    }
-
-    func printStationsList() {
-        for station in stations {
-            print("\(station.name) - \(station.url)")
-        }
-    }
-}
-
