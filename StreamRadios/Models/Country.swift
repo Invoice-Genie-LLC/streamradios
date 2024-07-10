@@ -11,5 +11,10 @@ struct Country: Identifiable, Hashable {
     let id = UUID()
     var name: String
     var flag: String
+    
+    var displayFlag: String {
+        return flag.isEmpty ? "flag.slash.fill" : flag
+        
+    }
    
 }

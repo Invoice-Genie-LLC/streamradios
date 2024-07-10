@@ -33,13 +33,20 @@ struct CountryPickerRow: View {
     
     var body: some View {
         HStack {
-            flagImage(for: country.flag)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 60, height: 60)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.gray, lineWidth: 1)) // Optional: add a border
-
+            if country.flag.isEmpty {
+                            Image(systemName: country.displayFlag)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 45, height: 45)
+                                .foregroundColor(.gray)
+                                .padding()
+                        } else {
+                            Image(country.flag)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 45, height: 45)
+                                .padding()
+                        }
             Text(country.name)
                 .font(.title) // Larger font size for better readability
                 .fontWeight(.semibold)
