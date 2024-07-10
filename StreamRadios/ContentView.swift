@@ -28,7 +28,24 @@ struct ContentView: View {
     @State private var bitrateMessage = "Loading bitrate information..."
 
     @Environment(\.horizontalSizeClass) var sizeClass
-    
+
+    // Variables to detect specific devices
+    private var isIPhone15: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2556
+    }
+
+    private var isIPhone15ProMax: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2796
+    }
+
+    private var isIPadMini: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.nativeBounds.height == 2266
+    }
+
+    private var isIPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.nativeBounds.height == 2732
+    }
+
     var body: some View {
         NavigationView {
             ZStack {
@@ -36,55 +53,70 @@ struct ContentView: View {
                 // Background color
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
-                
+
                 // Main content
                 VStack {
-                    HStack {
-                        Button(action: {
-                            showSideMenu.toggle()
-                        }) {
-                            Image(systemName: "line.horizontal.3")
-                                .font(.title)
-                                .foregroundColor(.primary)
-                                .padding([.leading, .top, .bottom])
+                    HStack(spacing: 8) {
+                        // Main Menu
+                        HStack {
+                            Button(action: {
+                                showSideMenu.toggle()
+                            }) {
+                                Image(systemName: "line.horizontal.3")
+                                    .font(.title)
+                                    .foregroundColor(.primary)
+                                    .padding(.leading, 10)
+                                    
+                            }
                         }
+                        .frame(width: isIPhone15ProMax ? 30 : isIPhone15 ? 30 : isIPadMini ? 30 : isIPad ? 30 : 30)
+                        .padding(.bottom, 5)
                         
-                        Spacer()
+                        // Country Picker
                         HStack {
                             StyledPickerView(
                                 selectedCountry: $viewModel.selectedCountry,
-                                countries: viewModel.countries  // Directly pass the array of Country structs
+                                countries: viewModel.countries
                             )
                         }
-                        .padding(.horizontal, 16)
-                        Spacer()
+                        .frame(width: isIPhone15ProMax ? 230 : isIPhone15 ? 240 : isIPadMini ? 300 : isIPad ? 400 : 350)
+                        .padding(.bottom, 25)
                         
-                        Button(action: {
-                            isEditingMode.toggle()
-                            if isEditingMode {
-                                radioPlayer.stop()
-                                radioPlayer.metadata = nil
-                                radioPlayer.currentStationIndex = nil
-                            }
-                        }) {
-                            HStack {
+                        // Done and Edit Buttos
+                        HStack {
+                            Button(action: {
+                                isEditingMode.toggle()
+                                if isEditingMode {
+                                    radioPlayer.stop()
+                                    radioPlayer.metadata = nil
+                                    radioPlayer.currentStationIndex = nil
+                                }
+                            }) {
                                 Text(isEditingMode ? "Done" : "Edit")
                                     .font(.title3)
                                     .foregroundColor(.primary)
-                                    .padding([.top, .bottom, .trailing])
                             }
                         }
+                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPadMini ? 100 : isIPad ? 150 : 50)
+                        .padding(.bottom, 5)
                         
-                        Button(action: {
-                            isAddStationViewPresented.toggle()
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title3)
-                                .foregroundColor(.primary)
-                                .padding([.top, .bottom, .trailing])
+                        HStack {
+                            Button(action: {
+                                isAddStationViewPresented.toggle()
+                            }) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.title)
+                                    .foregroundColor(.primary)
+                                    .padding(.trailing, 10)
+                                    
+                            }
                         }
+                        .padding(.bottom, 5)
+                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPadMini ? 50 : isIPad ? 50 : 50)
+
                     }
-                    .padding(.horizontal, sizeClass == .regular ? 20 : 10)
+                   // .padding(.horizontal, sizeClass == .regular ? 20 : 10)
+                  //  .padding(.vertical, 10)
                     
                     HStack {
                         Picker("", selection: $selectedTab) {
@@ -105,13 +137,13 @@ struct ContentView: View {
                                              selectedStationForEdit: $selectedStationForEdit,
                                              selectedTab: $selectedTab,
                                              searchText: $searchText)
-                        .environmentObject(viewModel)
-                        .environmentObject(radioPlayer)
-                        .frame(width: sizeClass == .regular ? 600 : 400)
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(16)
-                        .modifier(NeumorphicShadow())
-                        .padding(.top, 10)
+                            .environmentObject(viewModel)
+                            .environmentObject(radioPlayer)
+                            .frame(width: sizeClass == .regular ? 615 : 380)
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(16)
+                            .modifier(NeumorphicShadow())
+                            .padding(.top, 10)
                     }
                     
                     .padding(.bottom, 35)
@@ -177,14 +209,14 @@ struct ContentView: View {
                         .first ?? 0)
                 }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
-                
+
                 // Side Menu
                 GeometryReader { geometry in
                     HStack {
                         SideMenuView(showSideMenu: $showSideMenu)
                             .frame(width: geometry.size.width / 2)
                             .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-                        
+
                         Spacer()
                     }
                 }
