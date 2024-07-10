@@ -236,7 +236,7 @@ struct RadioStationListView: View {
     private var filteredStations: [RadioStation] {
         switch selectedTab {
         case .recent:
-            return viewModel.recentStations().filter { $0.country == viewModel.selectedCountry }
+            return viewModel.recentStations()
         case .favorites:
             return viewModel.favoriteStations()
         case .all:
