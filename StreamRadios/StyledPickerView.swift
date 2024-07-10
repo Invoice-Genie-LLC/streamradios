@@ -1,3 +1,10 @@
+//
+//  StyledPickerView.swift
+//  StreamRadios
+//
+//  Created by Kley Sulo on 7/8/24.
+//
+
 import SwiftUI
 import FlagKit
 
@@ -19,10 +26,10 @@ struct StyledPickerView: View {
                 if let selectedCountryFlag = countries.first(where: { $0.name == selectedCountry })?.flag, !selectedCountryFlag.isEmpty {
                     Image(selectedCountryFlag)
                         .resizable()
-                        .frame(width: 24, height: 18) // Increased flag size
+                        .frame(width: 24, height: 18)
                 }
                 Text(selectedCountry.isEmpty ? "Select Country" : selectedCountry)
-                    .font(.headline)  // Increased font size
+                    .font(.headline)  
                     .foregroundColor(.primary)
                 Spacer()
                 Image(systemName: "chevron.down")
@@ -45,16 +52,16 @@ struct CountryPickerRow: View {
             if country.flag.isEmpty {
                 Image(systemName: "flag.slash.fill")
                     .resizable()
-                    .frame(width: 24, height: 18) // Increased flag size
+                    .frame(width: 24, height: 18)
                     .foregroundColor(.gray)
             } else {
                 Image(country.flag)
                     .resizable()
-                    .frame(width: 24, height: 18) // Increased flag size
+                    .frame(width: 24, height: 18)
             }
             
             Text(country.name)
-                .font(.headline)  // Increased font size
+                .font(.headline)
                 .fontWeight(.medium)
                 .foregroundColor(.primary)
             Spacer()

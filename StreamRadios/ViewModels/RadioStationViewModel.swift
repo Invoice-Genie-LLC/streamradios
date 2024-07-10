@@ -11,7 +11,7 @@ import CoreData
 class RadioStationViewModel: ObservableObject {
     @Published var stations: [RadioStation] = []
     @Published var countries: [Country] = [
-        Country(name: "Select Station", flag: ""),
+        Country(name: "Select Country", flag: ""),
         Country(name: "Albania", flag: "AL"),
         Country(name: "Angola", flag: "AO"),
         Country(name: "Argentina", flag: "AR"),
@@ -54,7 +54,7 @@ class RadioStationViewModel: ObservableObject {
         Country(name: "Unknown Region", flag: "")  // ToDo: Handle Unknown Region without a flag
     ]
     @Published var isLoading = false
-    @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region" {
+    @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
         }
@@ -71,7 +71,7 @@ class RadioStationViewModel: ObservableObject {
     @State var showingPurchaseView = false
     
     init() {
-        selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Unknown Region"
+        selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
         if stations.isEmpty {
             initializeStationsForFirstTime()
         }
