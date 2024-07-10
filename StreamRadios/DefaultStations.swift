@@ -15,6 +15,7 @@ struct DefaultStations {
             ("1live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("2live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("3live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            /*
                        ("4live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("5live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("6live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
@@ -37,6 +38,7 @@ struct DefaultStations {
                        ("23live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("24live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("25live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+             */
             
             
         ]
@@ -60,6 +62,7 @@ struct DefaultStations {
             ("1live.top-media.al/tar1", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("2live.top-media.al/tar2", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("3live.top-media.al/tar25", "Top Albania Radio", "https://live.top-media.al/tar"),
+            /*
                       ("4live.top-media.al/tar3", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("5live.top-media.al/tar4", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("6live.top-media.al/tar5", "Top Albania Radio", "https://live.top-media.al/tar"),
@@ -82,6 +85,7 @@ struct DefaultStations {
                       ("23live.top-media.al/tar22", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("24live.top-media.al/tar23", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("25live.top-media.al/tar24", "Top Albania Radio", "https://live.top-media.al/tar"),
+             */
             
         ]
         
@@ -104,6 +108,7 @@ struct DefaultStations {
             ("1live.top-media.al1/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("2live.top-media.al2/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("3live.top-media.al3/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            /*
                        ("4live.top-media.al4/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("5live.top-media.al5/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("6live.top-media.al6/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
@@ -127,7 +132,7 @@ struct DefaultStations {
                        ("24live.top-media.al24/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                        ("25live.top-media.al/25tar", "Top Albania Radio", "https://live.top-media.al/tar"),
 
-            
+            */
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Australia" }.map { $0.id })
@@ -149,6 +154,7 @@ struct DefaultStations {
             ("1live.top1-media.al/tar", "Top1 Albania Radio", "https://live.top-media.al/tar"),
                       ("2live.to2p-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("3live.to3p-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+            /*
                       ("4live.top4-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("5live.top5-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("6live.top6-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
@@ -171,6 +177,7 @@ struct DefaultStations {
                       ("23live.top-23media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("24live.top-24media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
                       ("25live.top25-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
+             */
 
         ]
         let existingStations = Set(viewModel.stations.filter { $0.country == "Argentina" }.map { $0.id })
