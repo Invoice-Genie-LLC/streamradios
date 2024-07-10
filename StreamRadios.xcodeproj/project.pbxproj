@@ -601,7 +601,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StreamRadios uses the microphone to identify songs through Shazam, enhancing your ability to discover and interact with music playing around you.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to select custom icons for your radio stations.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "StreamRadios requires access to your photo library to select custom icons for your radio stations.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
@@ -639,7 +639,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StreamRadios uses the microphone to identify songs through Shazam, enhancing your ability to discover and interact with music playing around you.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "This app requires access to your photo library to select custom icons for your radio stations.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "StreamRadios requires access to your photo library to select custom icons for your radio stations.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
