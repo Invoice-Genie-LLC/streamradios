@@ -233,7 +233,7 @@ struct PlayerSheetView: View {
                 }
                 
                 Button(action: {
-                    if PurchaseManager.shared.hasPurchasedPremium {
+                   // if PurchaseManager.shared.hasPurchasedPremium {
                         showingLyrics.toggle()
                         if shazamViewModel.shazamMedia.lyrics == nil {
                             lyricsLoading = true
@@ -252,9 +252,9 @@ struct PlayerSheetView: View {
                                 }
                             }
                         }
-                    } else {
-                        showingPurchaseView = true
-                    }
+                    //} else {
+                      //  showingPurchaseView = true
+                   // }
                 }) {
                     Text("Show Lyrics")
                         .font(.headline)
@@ -262,9 +262,9 @@ struct PlayerSheetView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
                 }
-                .sheet(isPresented: $showingPurchaseView) {
-                    PurchaseView(isPresented: $showingPurchaseView)
-                }
+               // .sheet(isPresented: $showingPurchaseView) {
+                  //  PurchaseView(isPresented: $showingPurchaseView)
+               // }
                 
             }
             .padding(.top, 5)

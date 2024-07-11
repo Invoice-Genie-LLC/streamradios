@@ -67,7 +67,7 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     private func setupAudioEngine() {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
+        inputNode.installTap(onBus: 0, bufferSize: 512, format: recordingFormat) { [weak self] (buffer, when) in
             self?.session.matchStreamingBuffer(buffer, at: when)
         }
 
@@ -79,7 +79,7 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         } catch {
             print("Error starting audio engine: \(error)")
             DispatchQueue.main.async {
-                // Handle UI or state updates on errors
+                self.isRecording = false
             }
         }
     }
@@ -93,7 +93,6 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             // Once stopping is done, update any UI elements on the main thread
             DispatchQueue.main.async {
                 self.isRecording = false
-                // Any other UI updates related to stopping the recording
             }
         }
     }
@@ -136,12 +135,18 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                                 lyrics: nil)
         if let artist = media.artistName, let title = media.title {
             fetchLyrics(for: artist, song: title) { result in
-                switch result {
-                case .success(let lyrics):
-                    media.lyrics = lyrics
-                case .failure:
-                    media.lyrics = "Lyrics not available"
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let lyrics):
+                        media.lyrics = lyrics
+                    case .failure:
+                        media.lyrics = "Lyrics not available"
+                    }
+                    self.shazamMedia = media
                 }
+            }
+        } else {
+            DispatchQueue.main.async {
                 self.shazamMedia = media
             }
         }
@@ -159,12 +164,23 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         
         isFetchingLyrics = true
         
-        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+        let sessionConfig = URLSessionConfiguration.default
+        sessionConfig.timeoutIntervalForRequest = 10.0 // 10 seconds timeout
+        let session = URLSession(configuration: sessionConfig)
+        
+        let task = session.dataTask(with: url) { data, response, error in
             defer { DispatchQueue.main.async { self.isFetchingLyrics = false } }
             
-            guard let data = data, error == nil else {
-                print("Error fetching lyrics: \(error?.localizedDescription ?? "Unknown error")")
-                completion(.failure(error ?? NSError(domain: "Unknown error", code: 0, userInfo: nil)))
+            if let error = error {
+                print("Error fetching lyrics: \(error.localizedDescription)")
+                completion(.failure(error))
+                return
+            }
+            
+            guard let data = data else {
+                let error = NSError(domain: "No data received", code: 0, userInfo: nil)
+                print("Error fetching lyrics: \(error.localizedDescription)")
+                completion(.failure(error))
                 return
             }
             
@@ -174,13 +190,16 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                         completion(.success(lyrics))
                     }
                 } else {
+                    let error = NSError(domain: "Lyrics not found", code: 0, userInfo: nil)
                     DispatchQueue.main.async {
-                        completion(.failure(NSError(domain: "Lyrics not found", code: 0, userInfo: nil)))
+                        completion(.failure(error))
                     }
                 }
             } catch {
                 print("Error parsing lyrics data: \(error)")
-                completion(.failure(error))
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
             }
         }
         task.resume()
