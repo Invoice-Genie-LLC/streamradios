@@ -53,6 +53,7 @@ class RadioStationViewModel: ObservableObject {
         Country(name: "Zimbabwe", flag: "ZW"),
         Country(name: "Unknown Region", flag: "")  // ToDo: Handle Unknown Region without a flag
     ]
+    @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
@@ -60,15 +61,33 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
+    enum ActiveSheet: Identifiable {
+        case editStation, purchase
+        var id: Int {
+            self.hashValue
+        }
+    }
+    
     private func saveSelectedCountry() {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
     }
     
-    var filteredStations: [RadioStation] {
-        return stations.filter { $0.country == selectedCountry }
-    }
+    var isPremiumUser: Bool {
+            return PurchaseManager.shared.hasPurchasedPremium
+        }
+
+        var filteredStations: [RadioStation] {
+            let filtered = stations.filter { $0.country == selectedCountry }
+            if isPremiumUser {
+                print("User is premium, showing all stations for \(selectedCountry).")
+                return filtered
+            } else {
+                print("User is not premium, limiting to 5 stations for \(selectedCountry).")
+                return Array(filtered.prefix(2000))
+            }
+        }
     
-    @State var showingPurchaseView = false
+    @Published var showingPurchaseView = false
     
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
@@ -168,11 +187,11 @@ class RadioStationViewModel: ObservableObject {
     }
     
     func addStation(name: String, url: String, iconData: String?, country: String) {
-        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country)
-        stations.append(newStation)
-        saveStationToCloudKit(station: newStation)
-        saveStationsToCoreData()
-    }
+            let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country)
+            stations.append(newStation)
+            saveStationToCloudKit(station: newStation)
+            saveStationsToCoreData()
+        }
     
     func saveStationsToCloudKit() {
         DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
@@ -200,27 +219,16 @@ class RadioStationViewModel: ObservableObject {
     }
     
     func deleteStation(at index: Int) {
+        guard isPremiumUser else { return } // Early return if not a premium user
+
         let stationToDelete = stations[index]
-        
-        // Delete from CloudKit
         DataStore.shared.deleteStationFromCloudKit(station: stationToDelete) { [weak self] success in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if success {
-                    // Remove station from the local list
                     self.stations.remove(at: index)
-                    
-                    // Directly delete the station from CoreData
                     self.deleteStationFromCoreData(stationToDelete)
-                    
-                    // If no stations left, delete the local CoreData file
-                    //if self.stations.isEmpty {
-                    // self.deleteLocalFile()
-                    // }
-                    
-                    // Update the radio player index if needed
                     self.updateRadioPlayerAfterDeletion(deletedIndex: index)
-                    
                     print("Station successfully deleted from CloudKit and local.")
                 } else {
                     print("Failed to delete station from CloudKit: \(stationToDelete.name)")
@@ -228,6 +236,7 @@ class RadioStationViewModel: ObservableObject {
             }
         }
     }
+
     
     func deleteStationFromCoreData(_ station: RadioStation) {
         let context = CoreDataStack.shared.persistentContainer.viewContext

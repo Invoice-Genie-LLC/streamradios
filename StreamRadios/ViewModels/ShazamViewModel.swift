@@ -65,24 +65,24 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     }
 
     private func setupAudioEngine() {
-        let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 512, format: recordingFormat) { [weak self] (buffer, when) in
-            self?.session.matchStreamingBuffer(buffer, at: when)
-        }
+           let inputNode = audioEngine.inputNode
+           let recordingFormat = inputNode.outputFormat(forBus: 0)
+           inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
+               self?.session.matchStreamingBuffer(buffer, at: when)
+           }
 
-        do {
-            try audioEngine.start()
-            DispatchQueue.main.async {
-                self.isRecording = true
-            }
-        } catch {
-            print("Error starting audio engine: \(error)")
-            DispatchQueue.main.async {
-                self.isRecording = false
-            }
-        }
-    }
+           do {
+               try audioEngine.start()
+               DispatchQueue.main.async {
+                   self.isRecording = true
+               }
+           } catch {
+               print("Error starting audio engine: \(error)")
+               DispatchQueue.main.async {
+                   // Handle UI or state updates on errors
+               }
+           }
+       }
 
     func stopListening() {
         // Perform the audio stopping logic in the background if needed
