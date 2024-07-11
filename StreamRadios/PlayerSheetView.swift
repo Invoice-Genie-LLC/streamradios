@@ -279,8 +279,10 @@ struct PlayerSheetView: View {
                     onClose: { showingLyrics = false },
                     getCurrentPlaybackTime: {
                         radioPlayer.getCurrentTime()
-                    }
+                    },
+                    isSongAvailable: shazamViewModel.shazamMedia.title != nil && radioPlayer.isPlaying 
                 )
+
             } else if lyricsLoading {
                 Text("Fetching lyrics...")
                     .font(.title)

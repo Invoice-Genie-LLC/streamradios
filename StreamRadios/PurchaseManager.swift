@@ -78,6 +78,7 @@ class PurchaseManager: NSObject, ObservableObject, SKProductsRequestDelegate, SK
                 DispatchQueue.main.async {
                     self.purchaseInProgress = false
                     self.restorationInProgress = false
+                    print("Transaction restored: \(transaction.transactionIdentifier ?? "")")
                     self.transactionState = transaction.transactionState
                 }
             case .failed:
@@ -102,6 +103,7 @@ class PurchaseManager: NSObject, ObservableObject, SKProductsRequestDelegate, SK
         DispatchQueue.main.async {
             self.restorationInProgress = false
             self.transactionState = .restored
+            print("Restoration completed.")
         }
     }
 
@@ -109,6 +111,7 @@ class PurchaseManager: NSObject, ObservableObject, SKProductsRequestDelegate, SK
         DispatchQueue.main.async {
             self.restorationInProgress = false
             self.restorationError = error.localizedDescription
+            print("Restoration failed: \(error.localizedDescription)")
             self.transactionState = .failed
         }
     }

@@ -42,13 +42,22 @@ struct RadioStationListView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .sheet(isPresented: $isEditingStation, onDismiss: handleDismiss) {
-            if let selectedStation = selectedStationForEdit {
-                AddStationView(station: selectedStation, isPresented: $isEditingStation)
-                    .environmentObject(viewModel)
-            } else {
-                AddStationView(isPresented: $isEditingStation)
-                    .environmentObject(viewModel)
+        .sheet(item: $viewModel.activeSheet) { item in
+            switch item {
+            case .editStation:
+                if let selectedStation = selectedStationForEdit {
+                    AddStationView(station: selectedStation, isPresented: $isEditingStation)
+                        .environmentObject(viewModel)
+                } else {
+                    AddStationView(isPresented: $isEditingStation)
+                        .environmentObject(viewModel)
+                }
+            case .purchase:
+                PurchaseView(isPresented: Binding<Bool>(
+                    get: { viewModel.activeSheet == .purchase },
+                    set: { _ in viewModel.activeSheet = nil }
+                ))
+                .environmentObject(PurchaseManager.shared)
             }
         }
         .onAppear(perform: setup)
@@ -78,6 +87,14 @@ struct RadioStationListView: View {
             LazyVStack {
                 ForEach(filteredStations) { station in
                     stationRow(for: station)
+                }
+                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 2000 {
+                    Button("Show More") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            viewModel.activeSheet = .purchase
+                        }
+                    }
+                    .padding()
                 }
             }
             .padding(.top, 10)
@@ -117,7 +134,7 @@ struct RadioStationListView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            if !isEditing {
+            if !isEditing && viewModel.isPremiumUser { // Check for premium status
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -131,7 +148,7 @@ struct RadioStationListView: View {
         .padding(.horizontal)
         .padding(.vertical, 4)
         .contextMenu {
-            if !isEditing {
+            if !isEditing && viewModel.isPremiumUser { // Check for premium status
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -142,11 +159,15 @@ struct RadioStationListView: View {
             }
         }
         .onDrag {
-            UIDevice.playHapticFeedback()
-            self.draggingStation = station
-            self.originalMetadata = radioPlayer.metadata
-            radioPlayer.metadata = nil
-            return NSItemProvider(object: String(station.id) as NSString)
+            if viewModel.isPremiumUser {
+                UIDevice.playHapticFeedback()
+                self.draggingStation = station
+                self.originalMetadata = radioPlayer.metadata
+                radioPlayer.metadata = nil
+                return NSItemProvider(object: String(station.id) as NSString)
+            } else {
+                return NSItemProvider(contentsOf: URL(string: "about:blank")!)!
+            }
         }
         .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
     }
@@ -234,13 +255,22 @@ struct RadioStationListView: View {
     }
     
     private var filteredStations: [RadioStation] {
+        let allStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
         switch selectedTab {
         case .recent:
             return viewModel.recentStations()
         case .favorites:
             return viewModel.favoriteStations()
         case .all:
-            return viewModel.stations.filter { $0.country == viewModel.selectedCountry }
+            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(2000))
+        }
+    }
+
+    private func limitedStations(stations: [RadioStation]) -> [RadioStation] {
+        if PurchaseManager.shared.hasPurchasedPremium {
+            return stations
+        } else {
+            return Array(stations.prefix(5))
         }
     }
     
