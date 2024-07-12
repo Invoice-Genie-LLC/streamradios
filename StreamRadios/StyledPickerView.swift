@@ -11,14 +11,12 @@ import FlagKit
 struct StyledPickerView: View {
     @Binding var selectedCountry: String
     var countries: [Country]
-    var onCountrySelected: (String) -> Void
     
     var body: some View {
         Menu {
             ForEach(countries) { country in
                 Button(action: {
                     selectedCountry = country.name
-                    onCountrySelected(country.name)
                 }) {
                     CountryPickerRow(country: country)
                 }
@@ -74,18 +72,14 @@ struct CountryPickerRow: View {
 
 struct StyledPickerView_Previews: PreviewProvider {
     static var previews: some View {
-        StyledPickerView(
-            selectedCountry: .constant("Select Country"),
-            countries: [
-                Country(name: "Select Country", flag: ""),
-                Country(name: "USA", flag: "US"),
-                Country(name: "Canada", flag: "CA"),
-                Country(name: "Mexico", flag: "MX")
-            ],
-            onCountrySelected: { _ in
-            }
-        )
+        StyledPickerView(selectedCountry: .constant("Select Country"), countries: [
+            Country(name: "Select Country", flag: ""),
+            Country(name: "USA", flag: "US"),
+            Country(name: "Canada", flag: "CA"),
+            Country(name: "Mexico", flag: "MX")
+        ])
         .previewLayout(.sizeThatFits)
         .padding()
     }
 }
+

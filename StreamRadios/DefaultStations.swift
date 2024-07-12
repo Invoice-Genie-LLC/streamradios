@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 
 struct DefaultStations {
+    /*
     // Albania
     static func addDefaultStationsForAlbania(to viewModel: RadioStationViewModel) {
         let defaultStations = [
@@ -51,38 +52,7 @@ struct DefaultStations {
             newStations.append(newStation)
         }
     }
-    
-    // Kosovo
-    static func addDefaultStationsForKosovo(to viewModel: RadioStationViewModel) {
-        let defaultStations = [
-            ("cfm.albaservers.com:8010/", "Capital 92.1 FM", "http://cfm.albaservers.com:8010/"),
-            ("s4.radio.co/sd1d1904dc/listen.m3u", "Klan Kosova FM", "http://s4.radio.co/sd1d1904dc/listen.m3u"),
-            ("studio28.radiolize.com/radio/8100/radio.", "Kolektiv Radio", "https://studio28.radiolize.com/radio/8100/radio.mp3"),
-            ("fm.radiokfor.com:8080/", "Radio K4 Shqip", "http://fm.radiokfor.com:8080/;"),
-            ("quasar.shoutca.st:8018/", "Radio Kosova e Lire", "http://quasar.shoutca.st:8018/"),
-            ("radio.1dhe1.com:8090/listen.pls", "Zëri i Shtimes", "http://radio.1dhe1.com:8090/listen.pls"),
-            ("dreamsiteradiocp2.com:8124/stream", "Radio Maria", "http://dreamsiteradiocp2.com:8124/stream"),
-            ("s6.voscast.com:8824/stream.", "Radio Dukagjini", "http://s6.voscast.com:8824/;stream.mp3"),
-            ("cast2.my-control-panel.com/proxy/radiopl1/stream", "Radio Plus Kosova", "https://cast2.my-control-panel.com/proxy/radiopl1/stream"),
-            ("82.114.72.2:8088/.", "RTK Kosova 1", "http://82.114.72.2:8088/;.mp3"),
-            ("82.114.72.2:8098/stream.", "RTK Kosova 2", "http://82.114.72.2:8098/;stream.mp3"),
-            ("stream.glamradio.fm:8443/glamradio", "Glam Radio", "https://stream.glamradio.fm:8443/glamradio"),
-        ]
-        
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Kosovo" }.map { $0.id })
-        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
-        
-        var newStations = [RadioStation]()
-        
-        for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.1)
-            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Kosovo");
-            viewModel.stations.append(newStation)
-            newStations.append(newStation)
-        }
-    }
-    
-    /*
+    */
     
     // Angola
     static func addDefaultStationsForAngola(to viewModel: RadioStationViewModel) {
@@ -95,12 +65,12 @@ struct DefaultStations {
             ("radios.vpn.sapo.pt/AO/radio4.", "Radio Romantica", "https://radios.vpn.sapo.pt/AO/radio4.mp3"),
             ("canli.arabeskinmerkezi.com/9180/stream", "Angola FM", "https://canli.arabeskinmerkezi.com/9180/stream"),
             ("08.stmip.net:10028/", "Ebnézer Rádio", "http://08.stmip.net:10028/;;"),
-            ("centova87.instainternet.com/proxy/mfm?mp=/stream", "Rádio MFM Angola", "https://centova87.instainternet.com/proxy/mfm?mp=/stream"),
+            ("centova87.instainternet.com/proxy/mfm?mp=/stream", "Radio MFM Angola", "https://centova87.instainternet.com/proxy/mfm?mp=/stream"),
             ("radios.vpn.sapo.pt/AO/radio12.", "Radio N'Gola Yetu", "https://radios.vpn.sapo.pt/AO/radio12.mp3"),
-            ("stream.zeno.fm/gsndh1xvczetv", "Rádio Fé", "http://stream.zeno.fm/gsndh1xvczetv"),
-            ("playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.", " EXA FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.aac"),
+            ("stream.zeno.fm/gsndh1xvczetv", "Radio Fe", "http://stream.zeno.fm/gsndh1xvczetv"),
+            ("playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.", "EXA FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.aac"),
             ("strm112.1.fm/acountry_mobile_", "Absolute Country", "http://strm112.1.fm/acountry_mobile_mp3"),
-            ("stream1.dimusic.club:11496/live?type=.", "DIMusic Club Angola ", "http://stream1.dimusic.club:11496/live?type=.aac"),
+            ("stream1.dimusic.club:11496/live?type=.", "DIMusic Club Angola", "http://stream1.dimusic.club:11496/live?type=.aac"),
             
         ]
         
@@ -116,7 +86,7 @@ struct DefaultStations {
             newStations.append(newStation)
         }
     }
-    
+    /*
     // Australia
     static func addDefaultStationsForAustralia(to viewModel: RadioStationViewModel) {
         let defaultStations = [
@@ -509,8 +479,18 @@ struct DefaultStations {
      // Kosovo
      static func addDefaultStationsForKosovo(to viewModel: RadioStationViewModel) {
          let defaultStations = [
-             ("16live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
-             
+             ("cfm.albaservers.com:8010/", "Capital 92.1 FM", "http://cfm.albaservers.com:8010/"),
+             ("s4.radio.co/sd1d1904dc/listen.m3u", "Klan Kosova FM", "http://s4.radio.co/sd1d1904dc/listen.m3u"),
+             ("studio28.radiolize.com/radio/8100/radio.", "Kolektiv Radio", "https://studio28.radiolize.com/radio/8100/radio.mp3"),
+             ("fm.radiokfor.com:8080/", "Radio K4 Shqip", "http://fm.radiokfor.com:8080/;"),
+             ("quasar.shoutca.st:8018/", "Radio Kosova e Lire", "http://quasar.shoutca.st:8018/"),
+             ("radio.1dhe1.com:8090/listen.pls", "Zëri i Shtimes", "http://radio.1dhe1.com:8090/listen.pls"),
+             ("dreamsiteradiocp2.com:8124/stream", "Radio Maria", "http://dreamsiteradiocp2.com:8124/stream"),
+             ("s6.voscast.com:8824/stream.", "Radio Dukagjini", "http://s6.voscast.com:8824/;stream.mp3"),
+             ("cast2.my-control-panel.com/proxy/radiopl1/stream", "Radio Plus Kosova", "https://cast2.my-control-panel.com/proxy/radiopl1/stream"),
+             ("82.114.72.2:8088/.", "RTK Kosova 1", "http://82.114.72.2:8088/;.mp3"),
+             ("82.114.72.2:8098/stream.", "RTK Kosova 2", "http://82.114.72.2:8098/;stream.mp3"),
+             ("stream.glamradio.fm:8443/glamradio", "Glam Radio", "https://stream.glamradio.fm:8443/glamradio"),
          ]
          
          let existingStations = Set(viewModel.stations.filter { $0.country == "Kosovo" }.map { $0.id })
@@ -969,10 +949,11 @@ struct DefaultStations {
 
     @StateObject private var viewModel = RadioStationViewModel()
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
-        addDefaultStationsForAlbania(to: viewModel)
-        addDefaultStationsForKosovo(to: viewModel)
         
+        addDefaultStationsForAngola(to: viewModel)
+
         /*
+        addDefaultStationsForAlbania(to: viewModel)
         addDefaultStationsForAngola(to: viewModel)
         addDefaultStationsForArgentina(to: viewModel)
         addDefaultStationsForAustralia(to: viewModel)
@@ -992,6 +973,7 @@ struct DefaultStations {
         addDefaultStationsForIndonesia(to: viewModel)
         addDefaultStationsForItaly(to: viewModel)
         addDefaultStationsForJapan(to: viewModel)
+         addDefaultStationsForKosovo(to: viewModel)
         addDefaultStationsForMacedonia(to: viewModel)
         addDefaultStationsForMalaysia(to: viewModel)
         addDefaultStationsForMexico(to: viewModel)

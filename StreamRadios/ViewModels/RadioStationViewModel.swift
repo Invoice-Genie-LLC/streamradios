@@ -79,7 +79,20 @@ class RadioStationViewModel: ObservableObject {
     var isPremiumUser: Bool {
             return PurchaseManager.shared.hasPurchasedPremium
         }
-
+    
+    var filteredStations: [RadioStation] {
+        switch selectedTab {
+        case .recent:
+            return recentStations().filter { $0.country == selectedCountry }
+        case .favorites:
+            let favoriteStations = favoriteStations().filter { $0.country == selectedCountry }
+            return favoriteStations.isEmpty ? [] : favoriteStations
+        case .all:
+            return PurchaseManager.shared.hasPurchasedPremium ? stations.filter { $0.country == selectedCountry } : Array(stations.filter { $0.country == selectedCountry }.prefix(2000))
+        }
+    }
+    
+/*
         var filteredStations: [RadioStation] {
             let filtered = stations.filter { $0.country == selectedCountry }
             if isPremiumUser {
@@ -90,6 +103,7 @@ class RadioStationViewModel: ObservableObject {
                 return Array(filtered.prefix(2000))
             }
         }
+ */
     
     @Published var showingPurchaseView = false
     
