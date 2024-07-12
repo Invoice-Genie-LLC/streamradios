@@ -62,6 +62,9 @@ class RadioStationViewModel: ObservableObject {
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
+            if selectedCountry != "Select Country" {
+                            NotificationCenter.default.post(name: .countrySelected, object: nil)
+                        }
         }
     }
     
@@ -417,4 +420,8 @@ extension RadioStationViewModel {
             print("Failed to load stations from CoreData: \(error)")
         }
     }
+}
+
+extension Notification.Name {
+    static let countrySelected = Notification.Name("countrySelected")
 }

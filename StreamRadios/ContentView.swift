@@ -251,6 +251,9 @@ struct ContentView: View {
         .onAppear {
             UIApplication.shared.addTapGestureRecognizer()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
+                    selectedTab = .all
+                }
     }
 }
 
