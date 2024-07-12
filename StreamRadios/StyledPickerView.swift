@@ -11,12 +11,14 @@ import FlagKit
 struct StyledPickerView: View {
     @Binding var selectedCountry: String
     var countries: [Country]
+    var onCountrySelected: (String) -> Void
     
     var body: some View {
         Menu {
             ForEach(countries) { country in
                 Button(action: {
                     selectedCountry = country.name
+                    onCountrySelected(country.name)
                 }) {
                     CountryPickerRow(country: country)
                 }
@@ -29,7 +31,7 @@ struct StyledPickerView: View {
                         .frame(width: 24, height: 18)
                 }
                 Text(selectedCountry.isEmpty ? "Select Country" : selectedCountry)
-                    .font(.headline)  
+                    .font(.headline)
                     .foregroundColor(.primary)
                 Spacer()
                 Image(systemName: "chevron.down")
@@ -72,14 +74,18 @@ struct CountryPickerRow: View {
 
 struct StyledPickerView_Previews: PreviewProvider {
     static var previews: some View {
-        StyledPickerView(selectedCountry: .constant("Select Country"), countries: [
-            Country(name: "Select Country", flag: ""),
-            Country(name: "USA", flag: "US"),
-            Country(name: "Canada", flag: "CA"),
-            Country(name: "Mexico", flag: "MX")
-        ])
+        StyledPickerView(
+            selectedCountry: .constant("Select Country"),
+            countries: [
+                Country(name: "Select Country", flag: ""),
+                Country(name: "USA", flag: "US"),
+                Country(name: "Canada", flag: "CA"),
+                Country(name: "Mexico", flag: "MX")
+            ],
+            onCountrySelected: { _ in
+            }
+        )
         .previewLayout(.sizeThatFits)
         .padding()
     }
 }
-

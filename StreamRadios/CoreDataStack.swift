@@ -41,3 +41,70 @@ class CoreDataStack {
         }
     }
 }
+
+extension CoreDataStack {
+    
+    func syncStationsFromCloudKit(completion: @escaping (Error?) -> Void) {
+        DataStore.shared.fetchRadioStations { [weak self] stations, error in
+            guard let self = self else { return }
+            if let error = error {
+                print("Error fetching stations from CloudKit:", error.localizedDescription)
+                completion(error)
+                return
+            }
+            
+            guard let stations = stations else {
+                print("No stations fetched from CloudKit.")
+                completion(nil)
+                return
+            }
+            
+            self.updateCoreData(with: stations, completion: completion)
+        }
+    }
+    
+    private func updateCoreData(with stations: [RadioStation], completion: @escaping (Error?) -> Void) {
+        let context = self.context
+        context.perform {
+            for station in stations {
+                let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@", station.id)
+                
+                do {
+                    let results = try context.fetch(request)
+                    if let existingStation = results.first {
+                        // Update existing station
+                        existingStation.name = station.name
+                        existingStation.url = station.url
+                        existingStation.iconData = station.iconData
+                        existingStation.country = station.country
+                        existingStation.isFavorite = station.isFavorite
+                    } else {
+                        // Insert new station
+                        let newStation = CDStation(context: context)
+                        newStation.id = station.id
+                        newStation.name = station.name
+                        newStation.url = station.url
+                        newStation.iconData = station.iconData
+                        newStation.country = station.country
+                        newStation.isFavorite = station.isFavorite
+                    }
+                } catch {
+                    print("Failed to fetch or save station:", error.localizedDescription)
+                    completion(error)
+                    return
+                }
+            }
+            
+            // Save changes to CoreData
+            do {
+                try context.save()
+                print("CoreData sync complete.")
+                completion(nil)
+            } catch {
+                print("Error saving CoreData context:", error.localizedDescription)
+                completion(error)
+            }
+        }
+    }
+}

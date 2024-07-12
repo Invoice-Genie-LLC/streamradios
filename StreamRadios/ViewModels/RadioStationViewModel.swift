@@ -32,6 +32,7 @@ class RadioStationViewModel: ObservableObject {
         Country(name: "Indonesia", flag: "ID"),
         Country(name: "Italy", flag: "IT"),
         Country(name: "Japan", flag: "JP"),
+        Country(name: "Kosovo", flag: "XK"),
         Country(name: "Macedonia", flag: "MK"),
         Country(name: "Malaysia", flag: "MY"),
         Country(name: "Mexico", flag: "MX"),
@@ -55,6 +56,7 @@ class RadioStationViewModel: ObservableObject {
         Country(name: "Zimbabwe", flag: "ZW"),
         Country(name: "Unknown Region", flag: "")  // ToDo: Handle Unknown Region without a flag
     ]
+    @Published var selectedTab: Tab = .all
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
@@ -93,10 +95,32 @@ class RadioStationViewModel: ObservableObject {
     
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
-        if stations.isEmpty {
-            initializeStationsForFirstTime()
+            loadStationsFromCoreData()
+
+            let userDefaults = UserDefaults.standard
+            let hasLaunchedBeforeKey = "HasLaunchedBefore"
+
+            if !userDefaults.bool(forKey: hasLaunchedBeforeKey) {
+                print("First time setup, initializing default stations and saving to local and CloudKit.")
+                initializeStationsForFirstTime()
+            } else {
+                print("App relaunch detected.")
+                syncStationsWithCloudKit()  // This method will ensure data consistency with CloudKit
+            }
+    }
+
+    
+    func syncStationsWithCloudKit() {
+        CoreDataStack.shared.syncStationsFromCloudKit { [weak self] error in
+            if let error = error {
+                print("Error syncing with CloudKit: \(error.localizedDescription)")
+            } else {
+                print("Stations successfully synchronized with CloudKit.")
+                DispatchQueue.main.async {
+                    self?.loadStationsFromCoreData() // Reload stations from CoreData after sync
+                }
+            }
         }
-        loadStationsFromCoreData()
     }
     
     private func initializeStationsForFirstTime() {
@@ -220,26 +244,6 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
-    func deleteStation(at index: Int) {
-        guard isPremiumUser else { return } // Early return if not a premium user
-
-        let stationToDelete = stations[index]
-        DataStore.shared.deleteStationFromCloudKit(station: stationToDelete) { [weak self] success in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if success {
-                    self.stations.remove(at: index)
-                    self.deleteStationFromCoreData(stationToDelete)
-                    self.updateRadioPlayerAfterDeletion(deletedIndex: index)
-                    print("Station successfully deleted from CloudKit and local.")
-                } else {
-                    print("Failed to delete station from CloudKit: \(stationToDelete.name)")
-                }
-            }
-        }
-    }
-
-    
     func deleteStationFromCoreData(_ station: RadioStation) {
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
@@ -297,20 +301,6 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
-    private func updateRadioPlayerAfterDeletion(deletedIndex: Int) {
-        guard let currentIndex = RadioPlayer.shared.currentStationIndex else { return }
-        
-        if currentIndex == deletedIndex {
-            RadioPlayer.shared.currentStationIndex = nil
-            RadioPlayer.shared.isPlaying = false
-            RadioPlayer.shared.player?.pause()
-            print("Stopped playing as the current station was deleted.")
-        } else if currentIndex > deletedIndex {
-            RadioPlayer.shared.currentStationIndex! -= 1
-            print("Adjusted player index after deletion.")
-        }
-    }
-    
     
     func updateStation(_ existingStation: RadioStation, name: String, url: String, iconData: String?, country: String) {
         if let index = stations.firstIndex(where: { $0.id == existingStation.id }) {
@@ -347,36 +337,40 @@ class RadioStationViewModel: ObservableObject {
 extension RadioStationViewModel {
     func saveStationsToCoreData() {
         let context = CoreDataStack.shared.persistentContainer.viewContext
-        
-        // Delete all existing records to ensure synchronization
+
+        // First, delete all existing records to ensure synchronization
         let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
         do {
             try context.execute(deleteRequest)
             print("All existing stations deleted from CoreData.")
-            
-            // Only create new records if there are stations to save
-            if !stations.isEmpty {
-                for (index, station) in stations.enumerated() {
-                    let cdStation = CDStation(context: context)
-                    cdStation.id = station.id
-                    cdStation.name = station.name
-                    cdStation.url = station.url
-                    cdStation.iconData = station.iconData
-                    cdStation.country = station.country
-                    cdStation.isFavorite = station.isFavorite
-                    cdStation.order = Int16(index)  // Set the order attribute
-                    cdStation.lastPlayed = station.lastPlayed  // Add this line
-                }
-                print("New stations are being saved to CoreData.")
-            } else {
-                print("No stations available to save to CoreData.")
+        } catch {
+            print("Error deleting existing stations from CoreData: \(error)")
+        }
+
+        // Then, add new records from the current list of stations
+        if !stations.isEmpty {
+            for (index, station) in stations.enumerated() {
+                let cdStation = CDStation(context: context)
+                cdStation.id = station.id
+                cdStation.name = station.name
+                cdStation.url = station.url
+                cdStation.iconData = station.iconData
+                cdStation.country = station.country
+                cdStation.isFavorite = station.isFavorite
+                cdStation.order = Int16(index)  // Set the order attribute
+                cdStation.lastPlayed = station.lastPlayed  // Add this line
             }
-            
-            // Attempt to save context changes
+            print("New stations are being saved to CoreData.")
+        } else {
+            print("No stations available to save to CoreData.")
+        }
+
+        // Finally, attempt to save context changes
+        do {
             try context.save()
             print("CoreData context saved successfully.")
         } catch {
-            print("Failed to save to CoreData or delete records: \(error)")
+            print("Failed to save stations to CoreData: \(error)")
         }
     }
     
