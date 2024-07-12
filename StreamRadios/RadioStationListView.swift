@@ -109,14 +109,19 @@ struct RadioStationListView: View {
                 .frame(width: 50, height: 50)
                 .cornerRadius(8)
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 stationInfo(for: station)
+                    .font(.headline)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
                 stationMetadata(for: station)
+                    .font(.subheadline)
             }
             .padding(.leading, 10)
-            
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             Spacer()
-            
+
             if isEditing {
                 editControls(for: station)
             } else {
@@ -134,7 +139,7 @@ struct RadioStationListView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            if !isEditing && viewModel.isPremiumUser { // Check for premium status
+            //if !isEditing && viewModel.isPremiumUser { // Check for premium status
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -142,13 +147,13 @@ struct RadioStationListView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
-            }
+           // }
         }
         .buttonStyle(PlainButtonStyle())
         .padding(.horizontal)
         .padding(.vertical, 4)
         .contextMenu {
-            if !isEditing && viewModel.isPremiumUser { // Check for premium status
+           // if !isEditing && viewModel.isPremiumUser { // Check for premium status
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -156,7 +161,7 @@ struct RadioStationListView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
-            }
+           // }
         }
         .onDrag {
             if viewModel.isPremiumUser {

@@ -78,8 +78,10 @@ struct ContentView: View {
                         HStack {
                             StyledPickerView(
                                 selectedCountry: $viewModel.selectedCountry,
-                                countries: viewModel.countries
-                            )
+                                        countries: viewModel.countries,
+                                        onCountrySelected: { _ in
+                                            selectedTab = .all
+                                        })
                         }
                         .frame(width: isIPhone15ProMax ? 270 : isIPhone15 ? 250 : isIPadMini ? 300 : isIPad ? 400 : 350)
                         .padding(.bottom, 5)
@@ -135,7 +137,7 @@ struct ContentView: View {
                         RadioStationListView(isEditing: $isEditingMode,
                                              isEditingStation: $isEditingStation,
                                              selectedStationForEdit: $selectedStationForEdit,
-                                             selectedTab: $selectedTab,
+                                             selectedTab: $viewModel.selectedTab,
                                              searchText: $searchText)
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)

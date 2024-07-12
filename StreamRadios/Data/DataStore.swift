@@ -105,30 +105,48 @@ class DataStore {
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)
         let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
-
+        
         privateDatabase.perform(query, inZoneWith: nil) { records, error in
             DispatchQueue.main.async {
                 if let error = error {
                     print("Error fetching radio stations: \(error.localizedDescription)")
                     completion(nil, error)
-                } else {
-                    let stations = records?.compactMap { record -> RadioStation? in
-                        guard let name = record["name"] as? String,
-                              let url = record["url"] as? String else {
-                            return nil
-                        }
-                        let iconData = self.decodeIconData(record: record)
-                        let isFavorite = (record["isFavorite"] as? String) == "true"  // Convert to Bool
-                        let country = record["country"] as? String ?? "Unknown Region"  // Retrieve country
-                        let id = record.recordID.recordName
-                        return RadioStation(id: id, name: name, url: url, iconData: iconData, country: country, isFavorite: isFavorite)
-                    }
-                    completion(stations, nil)
+                    return
                 }
+
+                guard let records = records else {
+                    print("No records found in CloudKit.")
+                    completion([], nil)
+                    return
+                }
+
+                let stations = records.compactMap { record -> RadioStation? in
+                    guard let name = record["name"] as? String,
+                          let url = record["url"] as? String,
+                          let country = record["country"] as? String else {
+                        print("Essential data missing in record; skipping...")
+                        return nil
+                    }
+
+                    let iconData = self.decodeIconData(record: record)
+                    let isFavorite = (record["isFavorite"] as? String)?.lowercased() == "true"
+                    let id = record.recordID.recordName
+
+                    return RadioStation(
+                        id: id,
+                        name: name,
+                        url: url,
+                        iconData: iconData,
+                        country: country,
+                        isFavorite: isFavorite
+                    )
+                }
+                print("Fetched \(stations.count) stations from CloudKit.")
+                completion(stations, nil)
             }
         }
     }
-
+    
     private func decodeIconData(record: CKRecord) -> String? {
         if let asset = record["iconData"] as? CKAsset, let data = try? Data(contentsOf: asset.fileURL.unsafelyUnwrapped) {
             return data.base64EncodedString()
