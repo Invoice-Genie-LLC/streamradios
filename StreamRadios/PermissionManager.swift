@@ -21,25 +21,30 @@ class PermissionManager: ObservableObject {
     func checkPhotoLibraryPermission(completion: @escaping () -> Void) {
         switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
         case .authorized, .limited:
-            completion()
+            DispatchQueue.main.async {
+                completion()
+            }
         case .notDetermined:
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
                 DispatchQueue.main.async {
                     if status == .authorized || status == .limited {
                         completion()
                     } else {
-                        self.isPermissionAlertPresented = true
                         self.alertMessage = "Access to the photo library was denied. You can enable access in Settings."
+                        self.isPermissionAlertPresented = true
                     }
                 }
             }
         case .denied, .restricted:
             DispatchQueue.main.async {
-                self.isPermissionAlertPresented = true
                 self.alertMessage = "Access to the photo library is restricted or was denied. You can enable access in Settings."
+                self.isPermissionAlertPresented = true
             }
         @unknown default:
-            break
+            DispatchQueue.main.async {
+                self.alertMessage = "An unknown error occurred. Please check your settings."
+                self.isPermissionAlertPresented = true
+            }
         }
     }
     

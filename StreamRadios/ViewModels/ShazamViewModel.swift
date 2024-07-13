@@ -79,7 +79,7 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
            } catch {
                print("Error starting audio engine: \(error)")
                DispatchQueue.main.async {
-                   // Handle UI or state updates on errors
+                   self.isRecording = false
                }
            }
        }
