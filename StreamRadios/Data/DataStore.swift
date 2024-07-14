@@ -12,10 +12,9 @@ class DataStore {
     
     func deleteAllRecords(ofType recordType: String, completion: @escaping (Bool, Error?) -> Void) {
         var recordIDsToDelete = [CKRecord.ID]()
-        let query = CKQuery(recordType: recordType, predicate: NSPredicate(value: true))
 
         func fetchRecords(cursor: CKQueryOperation.Cursor?) {
-            let queryOperation = cursor == nil ? CKQueryOperation(query: query) : CKQueryOperation(cursor: cursor!)
+            let queryOperation = cursor != nil ? CKQueryOperation(cursor: cursor!) : CKQueryOperation(query: CKQuery(recordType: recordType, predicate: NSPredicate(value: true)))
 
             queryOperation.recordFetchedBlock = { record in
                 recordIDsToDelete.append(record.recordID)
@@ -28,32 +27,52 @@ class DataStore {
                         completion(false, error)
                     }
                 } else if let newCursor = newCursor {
+                    // Continue fetching the next batch of records
                     fetchRecords(cursor: newCursor)
                 } else {
-                    self.deleteRecords(recordIDs: recordIDsToDelete, completion: completion)
+                    // No more records to fetch, begin deleting
+                    self.deleteRecordsInBatches(recordIDs: recordIDsToDelete, completion: completion)
                 }
             }
             privateDatabase.add(queryOperation)
         }
 
-        fetchRecords(cursor: nil)
+        fetchRecords(cursor: nil) // Start the recursive fetch with no initial cursor
     }
 
+    private func deleteRecordsInBatches(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
+        let maxBatchSize = 400
+        var currentBatchIndex = 0
 
-    private func deleteRecords(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
-        let deleteOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: recordIDs)
-        deleteOperation.modifyRecordsCompletionBlock = { savedRecords, deletedRecordIDs, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("Error deleting records: \(error.localizedDescription)")
-                    completion(false, error)
-                } else {
-                    print("Successfully deleted records.")
-                    completion(true, nil)
+        func processNextBatch() {
+            if currentBatchIndex * maxBatchSize >= recordIDs.count {
+                DispatchQueue.main.async {
+                    completion(true, nil) // All batches processed
+                }
+                return
+            }
+
+            let batchStartIndex = currentBatchIndex * maxBatchSize
+            let batchEndIndex = min(batchStartIndex + maxBatchSize, recordIDs.count)
+            let batch = Array(recordIDs[batchStartIndex..<batchEndIndex])
+            currentBatchIndex += 1
+
+            let deleteOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
+            deleteOperation.modifyRecordsCompletionBlock = { _, deletedRecordIDs, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("Error deleting batch of records: \(error.localizedDescription)")
+                        completion(false, error)
+                    } else {
+                        print("Successfully deleted batch of \(deletedRecordIDs?.count ?? 0) records.")
+                        processNextBatch() // Continue with the next batch
+                    }
                 }
             }
+            privateDatabase.add(deleteOperation)
         }
-        privateDatabase.add(deleteOperation)
+
+        processNextBatch() // Start the batch deletion process
     }
 
     func saveImageToFileSystem(image: UIImage) -> String? {

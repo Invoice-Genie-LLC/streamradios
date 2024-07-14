@@ -127,7 +127,33 @@ class RadioStationViewModel: ObservableObject {
             }
     }
 
-    
+    func deleteAllData() {
+        // Delete all stations from CloudKit
+        DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { success, error in
+            DispatchQueue.main.async {
+                if success {
+                    print("All records were successfully deleted from CloudKit.")
+                } else if let error = error {
+                    print("Failed to delete records from CloudKit: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Delete all stations from CoreData
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+        do {
+            try context.execute(deleteRequest)
+            try context.save()
+            print("All stations deleted from CoreData.")
+            DispatchQueue.main.async {
+                self.stations.removeAll()
+            }
+        } catch {
+            print("Error deleting stations from CoreData: \(error)")
+        }
+    }
+
     func syncStationsWithCloudKit() {
         CoreDataStack.shared.syncStationsFromCloudKit { [weak self] error in
             if let error = error {

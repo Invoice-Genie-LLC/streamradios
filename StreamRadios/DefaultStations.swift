@@ -1961,6 +1961,7 @@ struct DefaultStations {
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
         addDefaultStationsForAlbania(to: viewModel)
         addDefaultStationsForAngola(to: viewModel)
+    
         addDefaultStationsForArgentina(to: viewModel)
         addDefaultStationsForAustralia(to: viewModel)
         addDefaultStationsForBangladesh(to: viewModel)
@@ -2003,6 +2004,7 @@ struct DefaultStations {
         addDefaultStationsForUSA(to: viewModel)
         addDefaultStationsForZimbabwe(to: viewModel)
         addDefaultStationsForUnknownRegion(to: viewModel)
+         
     }
 }
 
