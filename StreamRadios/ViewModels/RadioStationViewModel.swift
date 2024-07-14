@@ -21,6 +21,7 @@ class RadioStationViewModel: ObservableObject {
         Country(name: "Brazil", flag: "BR"),
         Country(name: "Bulgaria", flag: "BG"),
         Country(name: "Canada", flag: "CA"),
+        Country(name: "China", flag: "CN"),
         Country(name: "Costa Rica", flag: "CR"),
         Country(name: "Czech Republic", flag: "CZ"),
         Country(name: "France", flag: "FR"),

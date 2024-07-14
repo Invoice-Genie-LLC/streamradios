@@ -105,22 +105,26 @@ struct RadioStationListView: View {
     @ViewBuilder
     private func stationRow(for station: RadioStation) -> some View {
         HStack {
-            imageForStation(station)
-                .frame(width: 50, height: 50)
-                .cornerRadius(8)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                stationInfo(for: station)
-                    .font(.headline)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                stationMetadata(for: station)
-                    .font(.subheadline)
-            }
-            .padding(.leading, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+                imageForStation(station)
+                    .frame(width: 50, height: 50)
+                    .cornerRadius(8)
+                
+                VStack(alignment: .leading, spacing: 5) {
+                    stationInfo(for: station)
+                                   .font(.headline)
+                                   .foregroundColor(.primary)
+                                   .lineLimit(1)
+                                   .truncationMode(.tail)
 
-            Spacer()
+                    stationMetadata(for: station)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.leading, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+        
+           // Spacer()
 
             if isEditing {
                 editControls(for: station)
@@ -128,7 +132,7 @@ struct RadioStationListView: View {
                 playbackControls(for: station)
             }
         }
-        .padding()
+        .padding(.all, 10)
         .background(self.draggingStation?.id == station.id ? Color.gray.opacity(0.2) : Color(UIColor.systemGray5))
         .cornerRadius(10)
         .shadow(radius: 4)

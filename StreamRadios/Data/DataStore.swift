@@ -9,6 +9,52 @@ import CloudKit
 class DataStore {
     static let shared = DataStore()
     private let privateDatabase = CKContainer.default().privateCloudDatabase
+    
+    func deleteAllRecords(ofType recordType: String, completion: @escaping (Bool, Error?) -> Void) {
+        var recordIDsToDelete = [CKRecord.ID]()
+        let query = CKQuery(recordType: recordType, predicate: NSPredicate(value: true))
+
+        func fetchRecords(cursor: CKQueryOperation.Cursor?) {
+            let queryOperation = cursor == nil ? CKQueryOperation(query: query) : CKQueryOperation(cursor: cursor!)
+
+            queryOperation.recordFetchedBlock = { record in
+                recordIDsToDelete.append(record.recordID)
+            }
+
+            queryOperation.queryCompletionBlock = { newCursor, error in
+                if let error = error {
+                    DispatchQueue.main.async {
+                        print("Failed to fetch records for deletion: \(error.localizedDescription)")
+                        completion(false, error)
+                    }
+                } else if let newCursor = newCursor {
+                    fetchRecords(cursor: newCursor)
+                } else {
+                    self.deleteRecords(recordIDs: recordIDsToDelete, completion: completion)
+                }
+            }
+            privateDatabase.add(queryOperation)
+        }
+
+        fetchRecords(cursor: nil)
+    }
+
+
+    private func deleteRecords(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
+        let deleteOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: recordIDs)
+        deleteOperation.modifyRecordsCompletionBlock = { savedRecords, deletedRecordIDs, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("Error deleting records: \(error.localizedDescription)")
+                    completion(false, error)
+                } else {
+                    print("Successfully deleted records.")
+                    completion(true, nil)
+                }
+            }
+        }
+        privateDatabase.add(deleteOperation)
+    }
 
     func saveImageToFileSystem(image: UIImage) -> String? {
             guard let data = image.jpegData(compressionQuality: 0.5) else { return nil }
@@ -88,20 +134,39 @@ class DataStore {
             recordsToSave.append(record)
         }
 
-        let modifyOperation = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: nil)
-        modifyOperation.savePolicy = .allKeys
-        modifyOperation.modifyRecordsCompletionBlock = { savedRecords, deletedRecordIDs, error in
-            if let error = error {
-                print("Error saving records to CloudKit: \(error.localizedDescription)")
-                completion(false, nil)
-            } else {
-                let savedRecordIDs = savedRecords?.map { $0.recordID.recordName }
-                completion(true, savedRecordIDs)
+        let maxBatchSize = 400
+        var start = 0
+        var end = min(maxBatchSize, recordsToSave.count)
+        var allSavedRecordIDs = [String]()
+        var hasErrorOccurred = false
+
+        while start < recordsToSave.count && !hasErrorOccurred {
+            let batch = Array(recordsToSave[start..<end])
+            let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
+            modifyOperation.savePolicy = .allKeys
+            modifyOperation.modifyRecordsCompletionBlock = { [weak self] savedRecords, deletedRecordIDs, error in
+                if let error = error {
+                    print("Error saving records to CloudKit: \(error.localizedDescription)")
+                    hasErrorOccurred = true
+                    completion(false, nil)
+                } else {
+                    if let savedRecordIDs = savedRecords?.map({ $0.recordID.recordName }) {
+                        allSavedRecordIDs.append(contentsOf: savedRecordIDs)
+                    }
+
+                    if end == recordsToSave.count {
+                        completion(true, allSavedRecordIDs)
+                    }
+                }
             }
+            CKContainer.default().privateCloudDatabase.add(modifyOperation)
+
+            start = end
+            end = min(end + maxBatchSize, recordsToSave.count)
         }
-        CKContainer.default().privateCloudDatabase.add(modifyOperation)
     }
 
+    
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)
         let query = CKQuery(recordType: "streamingRadios", predicate: predicate)

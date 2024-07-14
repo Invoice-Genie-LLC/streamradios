@@ -139,7 +139,7 @@ struct ContentView: View {
                                              searchText: $searchText)
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
-                            .frame(width: sizeClass == .regular ? 615 : 380)
+                            .frame(width: sizeClass == .regular ? 615 : 385)
                             .background(Color(UIColor.secondarySystemBackground))
                             .cornerRadius(16)
                             .modifier(NeumorphicShadow())
