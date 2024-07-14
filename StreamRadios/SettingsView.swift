@@ -14,6 +14,8 @@ struct SettingsView: View {
     @State private var isImportExportViewPresented = false
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false // State to track deletion progress
+    @EnvironmentObject var viewModel: RadioStationViewModel
+
 
     var body: some View {
         Form {
@@ -53,7 +55,7 @@ struct SettingsView: View {
                         .progressViewStyle(CircularProgressViewStyle())
                 }
 
-                Text("Caution: Deleting your data is irreversible and will result in loss of all stored information.")
+                Text("Warning: Deleting your data is permanent and will erase all stored stations and their associated data. Please keep the app open and remain on this screen until the deletion is fully completed. The duration of this operation may vary, but it could take up to 10 minutes depending on the number of stations configured.")
                     .font(.caption)
                     .foregroundColor(.gray)
             }
