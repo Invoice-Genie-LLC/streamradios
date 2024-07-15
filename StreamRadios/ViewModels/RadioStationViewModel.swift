@@ -61,10 +61,13 @@ class RadioStationViewModel: ObservableObject {
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
     @Published var isCloudKitOperationRunning = false
+    var operationStarted = false
+    var operationCompleted = false
     var startNotificationSent = false
     var backgroundNotificationSent = false
     private var completionNotificationSent = false
-
+    private var operationStartedNotified = false
+        private var operationCompletedNotified = false
 
     @Published var isDeletingData = false
     @Published var deletionComplete = false
@@ -78,6 +81,7 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     static let shared = RadioStationViewModel()
+
     
     enum ActiveSheet: Identifiable {
         case editStation, purchase
@@ -120,19 +124,25 @@ class RadioStationViewModel: ObservableObject {
  */
     
     init() {
-        selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
-        loadStationsFromCoreData()
-        BackgroundTaskManager.shared.registerLocalNotifications()
-        
-        let userDefaults = UserDefaults.standard
-        let hasLaunchedBeforeKey = "HasLaunchedBefore"
+            selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
+            loadStationsFromCoreData()
 
-        if !userDefaults.bool(forKey: hasLaunchedBeforeKey) {
-            print("First time setup, initializing default stations and saving to local and CloudKit.")
-            initializeStationsForFirstTime()
-            userDefaults.set(true, forKey: hasLaunchedBeforeKey)
+            let userDefaults = UserDefaults.standard
+            let hasLaunchedBeforeKey = "HasLaunchedBefore"
+
+            if !userDefaults.bool(forKey: hasLaunchedBeforeKey) {
+                print("First time setup, initializing default stations and saving to local and CloudKit.")
+                initializeStationsForFirstTime()
+                userDefaults.set(true, forKey: hasLaunchedBeforeKey)
+                syncStationsWithCloudKit { success in
+                    if success {
+                        print("Stations successfully synchronized with CloudKit on first launch.")
+                    } else {
+                        print("Failed to synchronize stations with CloudKit on first launch.")
+                    }
+                }
+            }
         }
-    }
 
     func appDidBecomeActive() {
         // This method could be called by the AppDelegate when the app becomes active
@@ -188,19 +198,25 @@ class RadioStationViewModel: ObservableObject {
         }
     
     private func notifyUser(title: String, message: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = message
-        content.sound = UNNotificationSound.default
-        
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("Error scheduling notification: \(error.localizedDescription)")
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = message
+            content.sound = UNNotificationSound.default
+
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("Error scheduling notification: \(error.localizedDescription)")
+                }
             }
         }
-    }
+
+    
+    private func resetNotificationFlags() {
+            operationStartedNotified = false
+            operationCompletedNotified = false
+        }
 
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
             isDeletingData = true
@@ -237,25 +253,27 @@ class RadioStationViewModel: ObservableObject {
         }
 
     func syncStationsWithCloudKit(completion: @escaping (Bool) -> Void) {
-            guard !startNotificationSent else { return }
-            
-            self.isCloudKitOperationRunning = true
-            startNotificationSent = true
-            notifyUser(title: "CloudKit Sync", message: "Syncing data with CloudKit...")
+        guard !operationStartedNotified else { return }
 
-            // Simulate a network operation
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-                DispatchQueue.main.async {
-                    self.isCloudKitOperationRunning = false
-                    completion(true)
-                    if !self.completionNotificationSent {
-                        self.notifyUser(title: "Sync Complete", message: "Data has been successfully synced with CloudKit.")
-                        self.completionNotificationSent = true
-                    }
-                    self.resetNotifications()
+        self.isCloudKitOperationRunning = true
+        operationStartedNotified = true
+        NotificationManager.shared.notifyUser(title: "Sync Started", message: "Uploading data to CloudKit...")
+
+        // Simulate a CloudKit operation
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { // Simulate network delay
+            DispatchQueue.main.async {
+                self.isCloudKitOperationRunning = false
+                completion(true)
+                if !self.operationCompletedNotified {
+                    NotificationManager.shared.notifyUser(title: "Sync Complete", message: "Data has been successfully uploaded to CloudKit.")
+                    self.operationCompletedNotified = true
                 }
+                self.resetNotificationFlags()
             }
         }
+    }
+
+
 
     
     private func initializeStationsForFirstTime() {
@@ -355,16 +373,36 @@ class RadioStationViewModel: ObservableObject {
         }
     
     func saveStationsToCloudKit() {
-        DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
+        if !operationStarted {
+            NotificationManager.shared.notifyUser(title: "Sync Started", message: "Uploading data to CloudKit...")
+            operationStarted = true
+        }
+
+        DataStore.shared.saveStationsToCloudKit(stations: stations) { [weak self] success, recordIDs in
             DispatchQueue.main.async {
                 if success {
                     print("Successfully saved stations to CloudKit.")
+                    if !(self?.operationCompleted ?? true) {
+                        NotificationManager.shared.notifyUser(title: "Sync Complete", message: "Data has been successfully uploaded to CloudKit.")
+                        self?.operationCompleted = true
+                    }
                 } else {
                     print("Failed to save stations to CloudKit.")
+                    if !(self?.operationCompleted ?? true) {
+                        NotificationManager.shared.notifyUser(title: "Sync Failed", message: "Failed to upload data to CloudKit.")
+                        self?.operationCompleted = true // Ensure we set this to avoid multiple failed notifications.
+                    }
                 }
+                self?.resetOperationFlags()
             }
         }
     }
+
+    private func resetOperationFlags() {
+        operationStarted = false
+        operationCompleted = false
+    }
+
     
     func saveStationToCloudKit(station: RadioStation) {
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))

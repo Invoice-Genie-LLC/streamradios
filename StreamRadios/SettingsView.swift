@@ -17,10 +17,12 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            
             playbackSettingsSection
             displaySettingsSection
             premiumFeaturesSection
             dataManagementSection
+            notificationSettingsSection
         }
         .navigationTitle("Settings")
         .navigationBarBackButtonHidden(true)
@@ -36,6 +38,14 @@ struct SettingsView: View {
             PurchaseView(isPresented: $showingPurchase)
         }
     }
+    
+    private var notificationSettingsSection: some View {
+            Section(header: Text("Notification Settings")) {
+                Button("Enable Notifications") {
+                    NotificationManager.shared.requestAuthorization()
+                }
+            }
+        }
 
     private var playbackSettingsSection: some View {
         Section(header: Text("Playback Settings")) {
@@ -63,6 +73,7 @@ struct SettingsView: View {
         Section(header: Text("Data Management")) {
             Button("Delete All Data") {
                 showingDeleteAlert = true
+                
             }
             Button("Test Notification") {
                         NotificationManager.shared.scheduleTestNotification()
