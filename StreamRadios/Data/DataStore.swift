@@ -170,13 +170,12 @@ class DataStore {
     
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
         var recordsToSave = [CKRecord]()
-
         for station in stations {
-            let record = CKRecord(recordType: "streamingRadios", recordID:  CKRecord.ID(recordName: station.id))
+            let record = CKRecord(recordType: "StreamingRadios", recordID: CKRecord.ID(recordName: station.id))
             record["name"] = station.name
             record["url"] = station.url
             record["country"] = station.country
-            record["isFavorite"] = station.isFavorite ? "true" : "false"  // Save as string
+            record["isFavorite"] = station.isFavorite ? "true" : "false"
 
             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                 if let asset = createAsset(from: image) {
@@ -187,36 +186,28 @@ class DataStore {
         }
 
         let maxBatchSize = 400
-        var start = 0
-        var end = min(maxBatchSize, recordsToSave.count)
-        var allSavedRecordIDs = [String]()
-        var hasErrorOccurred = false
+        processBatch(records: recordsToSave, maxBatchSize: maxBatchSize, completion: completion)
+    }
 
-        while start < recordsToSave.count && !hasErrorOccurred {
-            let batch = Array(recordsToSave[start..<end])
-            let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
-            modifyOperation.savePolicy = .allKeys
-            modifyOperation.modifyRecordsCompletionBlock = { [weak self] savedRecords, deletedRecordIDs, error in
-                if let error = error {
-                    print("Error saving records to CloudKit: \(error.localizedDescription)")
-                    hasErrorOccurred = true
-                    completion(false, nil)
+    private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
+        let end = min(start + maxBatchSize, records.count)
+        let batch = Array(records[start..<end])
+        let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
+
+        modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
+            if let error = error {
+                completion(false, nil)
+            } else {
+                if end >= records.count {
+                    completion(true, savedRecords?.map { $0.recordID.recordName })
                 } else {
-                    if let savedRecordIDs = savedRecords?.map({ $0.recordID.recordName }) {
-                        allSavedRecordIDs.append(contentsOf: savedRecordIDs)
-                    }
-
-                    if end == recordsToSave.count {
-                        completion(true, allSavedRecordIDs)
-                    }
+                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
                 }
             }
-            CKContainer.default().privateCloudDatabase.add(modifyOperation)
-
-            start = end
-            end = min(end + maxBatchSize, recordsToSave.count)
         }
+        CKContainer.default().privateCloudDatabase.add(modifyOperation)
     }
+
 
     
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
