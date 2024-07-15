@@ -10,16 +10,49 @@ class DataStore {
     static let shared = DataStore()
     private let privateDatabase = CKContainer.default().privateCloudDatabase
     
+    
+    // Send a notification about the operation's start
+    private func notifyStartOfOperation(message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "CloudKit Operation Started"
+        content.body = message
+        content.sound = UNNotificationSound.default
+        
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error scheduling operation start notification: \(error)")
+            }
+        }
+    }
+    
+    // Send a notification about the operation's completion
+    private func notifyCompletionOfOperation(message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "CloudKit Operation Completed"
+        content.body = message
+        content.sound = UNNotificationSound.default
+        
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error scheduling operation completion notification: \(error)")
+            }
+        }
+    }
+    
+    // Example usage in a CloudKit operation
     func deleteAllRecords(ofType recordType: String, completion: @escaping (Bool, Error?) -> Void) {
+        notifyStartOfOperation(message: "Starting to delete all records of type \(recordType).")
         var recordIDsToDelete = [CKRecord.ID]()
-
+        
         func fetchRecords(cursor: CKQueryOperation.Cursor?) {
             let queryOperation = cursor != nil ? CKQueryOperation(cursor: cursor!) : CKQueryOperation(query: CKQuery(recordType: recordType, predicate: NSPredicate(value: true)))
-
             queryOperation.recordFetchedBlock = { record in
                 recordIDsToDelete.append(record.recordID)
             }
-
             queryOperation.queryCompletionBlock = { newCursor, error in
                 if let error = error {
                     DispatchQueue.main.async {
@@ -27,52 +60,52 @@ class DataStore {
                         completion(false, error)
                     }
                 } else if let newCursor = newCursor {
-                    // Continue fetching the next batch of records
                     fetchRecords(cursor: newCursor)
                 } else {
-                    // No more records to fetch, begin deleting
                     self.deleteRecordsInBatches(recordIDs: recordIDsToDelete, completion: completion)
                 }
             }
             privateDatabase.add(queryOperation)
         }
-
-        fetchRecords(cursor: nil) // Start the recursive fetch with no initial cursor
+        
+        fetchRecords(cursor: nil)
     }
-
+    
     private func deleteRecordsInBatches(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
         let maxBatchSize = 400
         var currentBatchIndex = 0
-
+        
         func processNextBatch() {
             if currentBatchIndex * maxBatchSize >= recordIDs.count {
                 DispatchQueue.main.async {
-                    completion(true, nil) // All batches processed
+                    self.notifyCompletionOfOperation(message: "All records deleted successfully.")
+                    completion(true, nil)
                 }
                 return
             }
-
+            
             let batchStartIndex = currentBatchIndex * maxBatchSize
             let batchEndIndex = min(batchStartIndex + maxBatchSize, recordIDs.count)
             let batch = Array(recordIDs[batchStartIndex..<batchEndIndex])
             currentBatchIndex += 1
-
+            
             let deleteOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
             deleteOperation.modifyRecordsCompletionBlock = { _, deletedRecordIDs, error in
-                DispatchQueue.main.async {
-                    if let error = error {
+                if let error = error {
+                    DispatchQueue.main.async {
                         print("Error deleting batch of records: \(error.localizedDescription)")
+                        self.notifyCompletionOfOperation(message: "Error deleting records: \(error.localizedDescription)")
                         completion(false, error)
-                    } else {
-                        print("Successfully deleted batch of \(deletedRecordIDs?.count ?? 0) records.")
-                        processNextBatch() // Continue with the next batch
                     }
+                } else {
+                    print("Successfully deleted batch of \(deletedRecordIDs?.count ?? 0) records.")
+                    processNextBatch()
                 }
             }
             privateDatabase.add(deleteOperation)
         }
-
-        processNextBatch() // Start the batch deletion process
+        
+        processNextBatch()
     }
 
     func saveImageToFileSystem(image: UIImage) -> String? {
