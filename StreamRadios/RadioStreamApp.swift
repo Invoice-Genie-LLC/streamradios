@@ -14,9 +14,9 @@ struct RadioStreamApp: App {
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var purchaseManager = PurchaseManager.shared
-    
+    @Environment(\.scenePhase) var scenePhase
     var radioPlayer = RadioPlayer.shared
-    var viewModel = RadioStationViewModel()
+    var viewModel = RadioStationViewModel.shared
     
     init() {
         radioPlayer.setViewModel(viewModel)
@@ -48,9 +48,20 @@ struct RadioStreamApp: App {
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
+                .environmentObject(RadioStationViewModel.shared)
+                .onChange(of: scenePhase) { newPhase in
+                    if newPhase == .active {
+                        viewModel.resetNotifications()  // Reset flags when the app comes to the foreground
+                    } else if newPhase == .background {
+                        viewModel.notifyBackground()  // Notify if going to background
+                    }
+                }
+
+            
         }
     }
 }
+
 
 func updateWidget() {
     let radioPlayer = RadioPlayer.shared
