@@ -76,7 +76,7 @@ struct SettingsView: View {
             .alert(isPresented: $showingDeleteAlert) {
                 Alert(
                     title: Text("Delete All Data"),
-                    message: Text("This action will permanently delete all your data from CloudKit. This action cannot be undone. Are you sure you want to proceed?"),
+                    message: Text("Important: You're about to delete all station data. This will remove all your saved stations from both iCloud and your device's local storage. This action is permanent and cannot be reversed"),
                     primaryButton: .destructive(Text("Delete")) {
                         initiateDataDeletion()
                     },
@@ -100,7 +100,13 @@ struct SettingsView: View {
             .fontWeight(.bold)
             .foregroundColor(.red)
             .font(.footnote) +
-        Text("Deleting your data is permanent and will erase all stored stations and their associated data from iCloud and your phone local storage. Please keep the app open and remain on this screen until the deletion is fully completed. The duration of this operation may vary, but it could take up to 10 minutes depending on the number of stations configured.")
+        Text("Deleting your data will permanently erase all stored stations and their associated information from both iCloud and your device's local storage. While you can restore default stations by reinstalling the app from the App Store, any custom stations you've configured will be lost permanently.")
+            .font(.footnote)
+            .foregroundColor(.gray)
+        +
+        Text("\n\n") // This adds two line breaks for paragraph separation
+        +
+        Text("Please keep the app running in the background. You can use other apps, but do not force close this one. We'll notify you when the deletion is fully completed. The duration of this operation may vary, but it could take up to 5 minutes depending on the number of custom stations configured. This action cannot be undone.")
             .font(.footnote)
             .foregroundColor(.gray)
     }
