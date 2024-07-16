@@ -328,7 +328,7 @@ class RadioStationViewModel: ObservableObject {
     
     func saveStationsToCloudKit() {
            isUploadingToCloudKit = true
-           NotificationManager.shared.notifyUser(title: "Upload Started", message: "Saving stations to CloudKit has begun.")
+           NotificationManager.shared.notifyUser(title: "Upload Started", message: "Saving stations to iCloud has begun.")
            
            setupBackgroundObserver()
 
@@ -338,10 +338,10 @@ class RadioStationViewModel: ObservableObject {
                    self?.removeBackgroundObserver()
 
                    if success {
-                       NotificationManager.shared.notifyUser(title: "Upload Complete", message: "All stations have been successfully saved to CloudKit.")
+                       NotificationManager.shared.notifyUser(title: "Upload Complete", message: "All stations have been successfully saved to iCloud.")
                        print("Successfully saved all stations to CloudKit.")
                    } else {
-                       NotificationManager.shared.notifyUser(title: "Upload Incomplete", message: "Some stations failed to save to CloudKit.")
+                       NotificationManager.shared.notifyUser(title: "Upload Incomplete", message: "Some stations failed to save to iCloud.")
                        print("Failed to save some or all stations to CloudKit.")
                        if let recordIDs = recordIDs {
                            let failedStations = self?.stations.filter { !recordIDs.contains($0.id) } ?? []
@@ -364,7 +364,7 @@ class RadioStationViewModel: ObservableObject {
                if self?.isDeletionInProgress == true {
                    NotificationManager.shared.notifyUser(title: "Deletion in Progress", message: "Please keep the app open until the deletion process is complete.")
                } else if self?.isUploadingToCloudKit == true {
-                   NotificationManager.shared.notifyUser(title: "Upload in Progress", message: "Data is uploading to CloudKit. Please keep the app open and do not close it.")
+                   NotificationManager.shared.notifyUser(title: "Initial iCloud Sync in Progress", message: "iCloud sync in progress. May take 5 mins. Keep app in background. We'll notify when done.")
                }
            }
        }
