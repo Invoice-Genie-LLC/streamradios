@@ -66,6 +66,8 @@ class RadioStationViewModel: ObservableObject {
     private var notificationManager = NotificationManager.shared
     private var backgroundObserver: NSObjectProtocol?
     @Published var isDeletionInProgress = false
+    @Published var isUploadingToCloudKit = false
+
 
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
@@ -175,24 +177,14 @@ class RadioStationViewModel: ObservableObject {
             }
         }
 
-        private func setupBackgroundObserver() {
-            backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                if self?.isDeletionInProgress == true {
-                    NotificationManager.shared.notifyUser(title: "Deletion in Progress", message: "Please keep the app open until the deletion process is complete.")
-                }
-            }
-        }
-
         private func cleanupAfterDeletion(success: Bool, error: Error?, backgroundTaskID: UIBackgroundTaskIdentifier, completion: @escaping (Bool, Error?) -> Void) {
             isDeletingData = false
             isCloudKitOperationRunning = false
             isDeletionInProgress = false
             deletionComplete = success
-
+            
             // Remove the background observer
-            if let observer = backgroundObserver {
-                NotificationCenter.default.removeObserver(observer)
-            }
+            removeBackgroundObserver()
 
             UIApplication.shared.endBackgroundTask(backgroundTaskID)
             completion(success, error)
@@ -335,25 +327,54 @@ class RadioStationViewModel: ObservableObject {
         }
     
     func saveStationsToCloudKit() {
-        DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
-            DispatchQueue.main.async {
-                if success {
-                    print("Successfully saved all stations to CloudKit.")
-                } else {
-                    print("Failed to save some or all stations to CloudKit.")
-                    // Assuming `recordIDs` contains the IDs of successfully saved records
-                    if let recordIDs = recordIDs {
-                        let failedStations = self.stations.filter { !recordIDs.contains($0.id) }
-                        for station in failedStations {
-                            print("Failed to save station: \(station.name)")
-                        }
-                    } else {
-                        print("No stations were saved successfully.")
-                    }
-                }
+           isUploadingToCloudKit = true
+           NotificationManager.shared.notifyUser(title: "Upload Started", message: "Saving stations to CloudKit has begun.")
+           
+           setupBackgroundObserver()
+
+           DataStore.shared.saveStationsToCloudKit(stations: stations) { [weak self] success, recordIDs in
+               DispatchQueue.main.async {
+                   self?.isUploadingToCloudKit = false
+                   self?.removeBackgroundObserver()
+
+                   if success {
+                       NotificationManager.shared.notifyUser(title: "Upload Complete", message: "All stations have been successfully saved to CloudKit.")
+                       print("Successfully saved all stations to CloudKit.")
+                   } else {
+                       NotificationManager.shared.notifyUser(title: "Upload Incomplete", message: "Some stations failed to save to CloudKit.")
+                       print("Failed to save some or all stations to CloudKit.")
+                       if let recordIDs = recordIDs {
+                           let failedStations = self?.stations.filter { !recordIDs.contains($0.id) } ?? []
+                           for station in failedStations {
+                               print("Failed to save station: \(station.name)")
+                           }
+                       } else {
+                           print("No stations were saved successfully.")
+                       }
+                   }
+               }
+           }
+       }
+
+    private func setupBackgroundObserver() {
+           // Remove any existing observer before adding a new one
+           removeBackgroundObserver()
+           
+           backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+               if self?.isDeletionInProgress == true {
+                   NotificationManager.shared.notifyUser(title: "Deletion in Progress", message: "Please keep the app open until the deletion process is complete.")
+               } else if self?.isUploadingToCloudKit == true {
+                   NotificationManager.shared.notifyUser(title: "Upload in Progress", message: "Data is uploading to CloudKit. Please keep the app open and do not close it.")
+               }
+           }
+       }
+
+        private func removeBackgroundObserver() {
+            if let observer = backgroundObserver {
+                NotificationCenter.default.removeObserver(observer)
+                backgroundObserver = nil
             }
         }
-    }
 
     
     func saveStationToCloudKit(station: RadioStation) {
