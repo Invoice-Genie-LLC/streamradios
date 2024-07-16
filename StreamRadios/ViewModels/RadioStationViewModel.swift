@@ -362,7 +362,7 @@ class RadioStationViewModel: ObservableObject {
            
            backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
                if self?.isDeletionInProgress == true {
-                   NotificationManager.shared.notifyUser(title: "Deletion in Progress", message: "Please keep the app open until the deletion process is complete.")
+                   NotificationManager.shared.notifyUser(title: "Deletion in Progress", message: "Please keep the app open in the background until the deletion process is complete.")
                } else if self?.isUploadingToCloudKit == true {
                    NotificationManager.shared.notifyUser(title: "Initial iCloud Sync in Progress", message: "iCloud sync in progress. May take 5 mins. Keep app in background. We'll notify when done.")
                }
