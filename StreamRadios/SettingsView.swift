@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var isDeleting = false
     @State private var deletionComplete = false
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @StateObject private var notificationManager = NotificationManager.shared
 
     var body: some View {
         Form {
@@ -36,6 +37,12 @@ struct SettingsView: View {
         .sheet(isPresented: $showingPurchase) {
             PurchaseView(isPresented: $showingPurchase)
         }
+        .onAppear {
+                    if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
+                        notificationManager.requestAuthorization()
+                        UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+                    }
+                }
     }
 
     private var playbackSettingsSection: some View {
@@ -118,20 +125,22 @@ struct SettingsView: View {
     }
 
     private func initiateDataDeletion() {
-        if viewModel.isCloudKitOperationRunning {
-            // Notify user to wait if CloudKit operation is in progress
-            BackgroundTaskManager.shared.scheduleCompletionNotification(message: "CloudKit operation in progress. Please wait before deleting data.")
-        } else {
-            viewModel.deleteAllData { success, error in
-                if success {
-                    print("Deletion was successful.")
-                    self.deletionComplete = true
-                } else if let error = error {
-                    print("Deletion failed: \(error.localizedDescription)")
+            if viewModel.isCloudKitOperationRunning {
+                notificationManager.notifyUser(title: "Operation in Progress", message: "CloudKit operation in progress. Please wait before deleting data.")
+            } else {
+                notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from CloudKit and CoreData has started.")
+                viewModel.deleteAllData { success, error in
+                    if success {
+                        print("Deletion was successful.")
+                        self.deletionComplete = true
+                        notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from CloudKit and CoreData.")
+                    } else if let error = error {
+                        print("Deletion failed: \(error.localizedDescription)")
+                        notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting data. Please try again.")
+                    }
                 }
             }
         }
-    }
 }
 
 struct SettingsView_Previews: PreviewProvider {
