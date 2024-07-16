@@ -243,11 +243,6 @@ struct ContentView: View {
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                 self.bitrateMessage = newBitrateMessage
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-                       if viewModel.isCloudKitOperationRunning {
-                           NotificationManager.shared.notifyUser(title: "Operation in Progress", message: "Please keep the app open until the operation completes.")
-                       }
-                   }
         }
         .sheet(isPresented: $viewModel.showingPurchaseView) {
             PurchaseView(isPresented: $viewModel.showingPurchaseView)

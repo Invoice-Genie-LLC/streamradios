@@ -30,7 +30,7 @@ class BackgroundTaskManager {
         task.expirationHandler = {
             task.setTaskCompleted(success: false)
         }
-        
+        /*
         // Perform the CloudKit sync operation
         RadioStationViewModel.shared.syncStationsWithCloudKit { success in
             task.setTaskCompleted(success: success)
@@ -38,6 +38,7 @@ class BackgroundTaskManager {
                 self.scheduleCompletionNotification(message: "CloudKit sync completed.")
             }
         }
+         */
     }
     
     func scheduleAppRefresh() {
