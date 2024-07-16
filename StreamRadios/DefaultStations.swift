@@ -42,7 +42,8 @@ struct DefaultStations {
             ("cp1.sednastream.com/proxy/alporadio/stream", "Alpo Radio 94.1 MHZ", "https://cp1.sednastream.com/proxy/alporadio/stream"),
             ("live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
             ("radioeurostar.al:9000/stream", "Eurostar Radio", "http://radioeurostar.al:9000/stream"),
-            ("live.tiranajazzradio.com:8000/stream", "Tirana Jazz Radio", "https://live.tiranajazzradio.com:8443/stream"),
+            ("1live.tiranajazzradio.com:8000/stream", "Tirana Jazz Radio", "https://live.tiranajazzradio.com:8443/stream"),
+           
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.id })

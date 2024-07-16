@@ -126,14 +126,14 @@ struct SettingsView: View {
 
     private func initiateDataDeletion() {
             if viewModel.isCloudKitOperationRunning {
-                notificationManager.notifyUser(title: "Operation in Progress", message: "CloudKit operation in progress. Please wait before deleting data.")
+                notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
             } else {
-                notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from CloudKit and CoreData has started.")
+                notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from iCloud and local storage has started.")
                 viewModel.deleteAllData { success, error in
                     if success {
                         print("Deletion was successful.")
                         self.deletionComplete = true
-                        notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from CloudKit and CoreData.")
+                        notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from iCloud and local storage.")
                     } else if let error = error {
                         print("Deletion failed: \(error.localizedDescription)")
                         notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting data. Please try again.")
