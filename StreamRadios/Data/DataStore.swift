@@ -168,7 +168,38 @@ class DataStore {
         }
     }
     
+    // Add a method to fetch existing station IDs from CloudKit
+    func fetchExistingStationIDs(completion: @escaping (Set<String>, Error?) -> Void) {
+        let query = CKQuery(recordType: "StreamingRadios", predicate: NSPredicate(value: true))
+        privateDatabase.perform(query, inZoneWith: nil) { records, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("Failed to fetch existing station IDs: \(error.localizedDescription)")
+                    completion([], error)
+                } else {
+                    let ids = Set(records?.map { $0.recordID.recordName } ?? [])
+                    completion(ids, nil)
+                }
+            }
+        }
+    }
+
+    // Modify the saveStationsToCloudKit method to only save new stations
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        // First, fetch the existing station IDs
+        fetchExistingStationIDs { existingIDs, error in
+            guard let error = error else {
+                let newStations = stations.filter { !existingIDs.contains($0.id) }
+                self.processNewStations(newStations, completion: completion)
+                return
+            }
+            print("Error fetching existing station IDs: \(error.localizedDescription)")
+            completion(false, nil)
+        }
+    }
+
+    // Method to process and save new stations
+    private func processNewStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
         var recordsToSave = [CKRecord]()
         for station in stations {
             let record = CKRecord(recordType: "StreamingRadios", recordID: CKRecord.ID(recordName: station.id))
@@ -176,7 +207,6 @@ class DataStore {
             record["url"] = station.url
             record["country"] = station.country
             record["isFavorite"] = station.isFavorite ? "true" : "false"
-
             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                 if let asset = createAsset(from: image) {
                     record["iconData"] = asset
@@ -185,9 +215,16 @@ class DataStore {
             recordsToSave.append(record)
         }
 
+        if recordsToSave.isEmpty {
+            print("No new stations to save to CloudKit.")
+            completion(true, [])
+            return
+        }
+
         let maxBatchSize = 400
         processBatch(records: recordsToSave, maxBatchSize: maxBatchSize, completion: completion)
     }
+
 
     private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
         let end = min(start + maxBatchSize, records.count)

@@ -60,6 +60,10 @@ class RadioStationViewModel: ObservableObject {
     @Published var selectedTab: Tab = .all
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
+    @Published var isDeletingData = false
+    @Published var deletionComplete = false
+    @Published var isCloudKitOperationRunning = false
+
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
@@ -127,32 +131,39 @@ class RadioStationViewModel: ObservableObject {
             }
     }
 
-    func deleteAllData() {
-        // Delete all stations from CloudKit
-        DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    print("All records were successfully deleted from CloudKit.")
-                } else if let error = error {
-                    print("Failed to delete records from CloudKit: \(error.localizedDescription)")
-                }
-            }
-        }
+    func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
+               isDeletingData = true
+               deletionComplete = false  // Reset completion flag at the start of deletion
 
-        // Delete all stations from CoreData
-        let context = CoreDataStack.shared.persistentContainer.viewContext
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
-        do {
-            try context.execute(deleteRequest)
-            try context.save()
-            print("All stations deleted from CoreData.")
-            DispatchQueue.main.async {
-                self.stations.removeAll()
-            }
-        } catch {
-            print("Error deleting stations from CoreData: \(error)")
-        }
-    }
+               // Delete all stations from CloudKit
+               DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { [weak self] success, error in
+                   DispatchQueue.main.async {
+                       guard let self = self else { return }
+                       if success {
+                           // Proceed with deleting data from CoreData if CloudKit deletion is successful
+                           let context = CoreDataStack.shared.persistentContainer.viewContext
+                           let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+                           
+                           do {
+                               try context.execute(deleteRequest)
+                               try context.save()
+                               self.stations.removeAll()
+                               self.isDeletingData = false
+                               self.deletionComplete = true  // Set completion flag to true on successful deletion
+                               completion(true, nil)
+                           } catch {
+                               print("Error deleting stations from CoreData: \(error.localizedDescription)")
+                               self.isDeletingData = false
+                               completion(false, error)
+                           }
+                       } else if let error = error {
+                           print("Failed to delete records from CloudKit: \(error.localizedDescription)")
+                           self.isDeletingData = false
+                           completion(false, error)
+                       }
+                   }
+               }
+           }
 
     func syncStationsWithCloudKit() {
         CoreDataStack.shared.syncStationsFromCloudKit { [weak self] error in
@@ -267,13 +278,23 @@ class RadioStationViewModel: ObservableObject {
         DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
             DispatchQueue.main.async {
                 if success {
-                    print("Successfully saved stations to CloudKit.")
+                    print("Successfully saved all stations to CloudKit.")
                 } else {
-                    print("Failed to save stations to CloudKit.")
+                    print("Failed to save some or all stations to CloudKit.")
+                    // Assuming `recordIDs` contains the IDs of successfully saved records
+                    if let recordIDs = recordIDs {
+                        let failedStations = self.stations.filter { !recordIDs.contains($0.id) }
+                        for station in failedStations {
+                            print("Failed to save station: \(station.name)")
+                        }
+                    } else {
+                        print("No stations were saved successfully.")
+                    }
                 }
             }
         }
     }
+
     
     func saveStationToCloudKit(station: RadioStation) {
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
