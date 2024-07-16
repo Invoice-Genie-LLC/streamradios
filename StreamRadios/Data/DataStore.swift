@@ -10,6 +10,87 @@ class DataStore {
     static let shared = DataStore()
     private let privateDatabase = CKContainer.default().privateCloudDatabase
     
+    func deleteRecordsInBatches(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
+           let maxBatchSize = 400
+           var index = 0
+           
+           // Recursive function to handle batch deletion
+           func deleteNextBatch() {
+               if index >= recordIDs.count {
+                   completion(true, nil)  // All batches processed successfully
+                   return
+               }
+               
+               let nextBatchLimit = min(index + maxBatchSize, recordIDs.count)
+               let batch = Array(recordIDs[index..<nextBatchLimit])
+               let modifyOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
+               
+               modifyOperation.modifyRecordsCompletionBlock = { _, deletedRecordIDs, error in
+                   guard error == nil else {
+                       completion(false, error)  // Stop and return on first error
+                       return
+                   }
+                   
+                   index += maxBatchSize
+                   deleteNextBatch()  // Process the next batch
+               }
+               
+               modifyOperation.savePolicy = .allKeys
+               self.privateDatabase.add(modifyOperation)
+           }
+           
+           deleteNextBatch()  // Start the first batch
+       }
+    
+    func fetchAllRecordIDs(ofType recordType: String, completion: @escaping ([CKRecord.ID]?, Error?) -> Void) {
+        let predicate = NSPredicate(value: true)
+        let query = CKQuery(recordType: recordType, predicate: predicate)
+        var recordIDs: [CKRecord.ID] = []
+        
+        let queryOperation = CKQueryOperation(query: query)
+        queryOperation.recordFetchedBlock = { record in
+            recordIDs.append(record.recordID)
+        }
+        
+        queryOperation.queryCompletionBlock = { cursor, error in
+            if let error = error {
+                completion(nil, error)
+            } else if let cursor = cursor {
+                // If there's more data to fetch, continue fetching
+                self.continueFetchingRecordIDs(cursor: cursor, currentRecordIDs: recordIDs, completion: completion)
+            } else {
+                // All data has been fetched
+                completion(recordIDs, nil)
+            }
+        }
+        
+        self.privateDatabase.add(queryOperation)
+    }
+
+    private func continueFetchingRecordIDs(cursor: CKQueryOperation.Cursor, currentRecordIDs: [CKRecord.ID], completion: @escaping ([CKRecord.ID]?, Error?) -> Void) {
+        let continuedOperation = CKQueryOperation(cursor: cursor)
+        var newRecordIDs = currentRecordIDs // Copy current IDs to a new variable
+        
+        continuedOperation.recordFetchedBlock = { record in
+            newRecordIDs.append(record.recordID) // Append to the new variable
+        }
+        
+        continuedOperation.queryCompletionBlock = { cursor, error in
+            if let error = error {
+                completion(nil, error)
+            } else if let cursor = cursor {
+                // Continue fetching if there are more records
+                self.continueFetchingRecordIDs(cursor: cursor, currentRecordIDs: newRecordIDs, completion: completion)
+            } else {
+                // All records have been fetched
+                completion(newRecordIDs, nil)
+            }
+        }
+        
+        self.privateDatabase.add(continuedOperation)
+    }
+
+
     
     // Send a notification about the operation's start
     private func notifyStartOfOperation(message: String) {
@@ -71,42 +152,7 @@ class DataStore {
         fetchRecords(cursor: nil)
     }
     
-    private func deleteRecordsInBatches(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
-        let maxBatchSize = 400
-        var currentBatchIndex = 0
-        
-        func processNextBatch() {
-            if currentBatchIndex * maxBatchSize >= recordIDs.count {
-                DispatchQueue.main.async {
-                    self.notifyCompletionOfOperation(message: "All records deleted successfully.")
-                    completion(true, nil)
-                }
-                return
-            }
-            
-            let batchStartIndex = currentBatchIndex * maxBatchSize
-            let batchEndIndex = min(batchStartIndex + maxBatchSize, recordIDs.count)
-            let batch = Array(recordIDs[batchStartIndex..<batchEndIndex])
-            currentBatchIndex += 1
-            
-            let deleteOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
-            deleteOperation.modifyRecordsCompletionBlock = { _, deletedRecordIDs, error in
-                if let error = error {
-                    DispatchQueue.main.async {
-                        print("Error deleting batch of records: \(error.localizedDescription)")
-                        self.notifyCompletionOfOperation(message: "Error deleting records: \(error.localizedDescription)")
-                        completion(false, error)
-                    }
-                } else {
-                    print("Successfully deleted batch of \(deletedRecordIDs?.count ?? 0) records.")
-                    processNextBatch()
-                }
-            }
-            privateDatabase.add(deleteOperation)
-        }
-        
-        processNextBatch()
-    }
+   
 
     func saveImageToFileSystem(image: UIImage) -> String? {
             guard let data = image.jpegData(compressionQuality: 0.5) else { return nil }
