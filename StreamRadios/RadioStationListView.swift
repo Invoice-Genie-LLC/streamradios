@@ -32,7 +32,7 @@ struct RadioStationListView: View {
                 VStack {
                     ProgressView("Loading stations...")
                         .progressViewStyle(CircularProgressViewStyle())
-                        .scaleEffect(1.5)  // Make the spinner larger
+                        .scaleEffect(1.5)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.stations.isEmpty {
@@ -42,6 +42,15 @@ struct RadioStationListView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .sheet(isPresented: $isEditingStation) {
+            if let selectedStation = selectedStationForEdit {
+                AddStationView(station: selectedStation, isPresented: $isEditingStation)
+                    .environmentObject(viewModel)
+            } else {
+                AddStationView(isPresented: $isEditingStation)
+                    .environmentObject(viewModel)
+            }
+        }
         .sheet(item: $viewModel.activeSheet) { item in
             switch item {
             case .editStation:
@@ -71,7 +80,8 @@ struct RadioStationListView: View {
                 .foregroundColor(.gray)
                 .padding(.bottom, 15)
             Button(action: {
-                isEditingStation = true
+                self.selectedStationForEdit = nil  // Ensure no station is selected for editing
+                self.isEditingStation = true  // Trigger the sheet to open
             }) {
                 Image(systemName: "plus.circle")
                     .font(.largeTitle)
@@ -81,6 +91,7 @@ struct RadioStationListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.scale)
     }
+
     
     private var stationsListView: some View {
         ScrollView {
