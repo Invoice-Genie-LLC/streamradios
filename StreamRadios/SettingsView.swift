@@ -22,7 +22,6 @@ struct SettingsView: View {
             displaySettingsSection
             premiumFeaturesSection
             dataManagementSection
-            notificationSettingsSection
         }
         .navigationTitle("Settings")
         .navigationBarBackButtonHidden(true)
@@ -38,14 +37,6 @@ struct SettingsView: View {
             PurchaseView(isPresented: $showingPurchase)
         }
     }
-    
-    private var notificationSettingsSection: some View {
-            Section(header: Text("Notification Settings")) {
-                Button("Enable Notifications") {
-                    NotificationManager.shared.requestAuthorization()
-                }
-            }
-        }
 
     private var playbackSettingsSection: some View {
         Section(header: Text("Playback Settings")) {
@@ -75,10 +66,6 @@ struct SettingsView: View {
                 showingDeleteAlert = true
                 
             }
-            Button("Test Notification") {
-                        NotificationManager.shared.scheduleTestNotification()
-                    }
-            .foregroundColor(.red)
             .alert(isPresented: $showingDeleteAlert) {
                 Alert(
                     title: Text("Delete All Data"),
@@ -106,7 +93,7 @@ struct SettingsView: View {
             .fontWeight(.bold)
             .foregroundColor(.red)
             .font(.footnote) +
-        Text("Deleting your data is permanent and will erase all stored stations and their associated data. Please keep the app open and remain on this screen until the deletion is fully completed. The duration of this operation may vary, but it could take up to 10 minutes depending on the number of stations configured.")
+        Text("Deleting your data is permanent and will erase all stored stations and their associated data from iCloud and your phone local storage. Please keep the app open and remain on this screen until the deletion is fully completed. The duration of this operation may vary, but it could take up to 10 minutes depending on the number of stations configured.")
             .font(.footnote)
             .foregroundColor(.gray)
     }

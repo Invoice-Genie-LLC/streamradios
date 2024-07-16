@@ -132,38 +132,40 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
-               isDeletingData = true
-               deletionComplete = false  // Reset completion flag at the start of deletion
+        isDeletingData = true
+        deletionComplete = false  // Reset completion flag at the start of deletion
 
-               // Delete all stations from CloudKit
-               DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { [weak self] success, error in
-                   DispatchQueue.main.async {
-                       guard let self = self else { return }
-                       if success {
-                           // Proceed with deleting data from CoreData if CloudKit deletion is successful
-                           let context = CoreDataStack.shared.persistentContainer.viewContext
-                           let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
-                           
-                           do {
-                               try context.execute(deleteRequest)
-                               try context.save()
-                               self.stations.removeAll()
-                               self.isDeletingData = false
-                               self.deletionComplete = true  // Set completion flag to true on successful deletion
-                               completion(true, nil)
-                           } catch {
-                               print("Error deleting stations from CoreData: \(error.localizedDescription)")
-                               self.isDeletingData = false
-                               completion(false, error)
-                           }
-                       } else if let error = error {
-                           print("Failed to delete records from CloudKit: \(error.localizedDescription)")
-                           self.isDeletingData = false
-                           completion(false, error)
-                       }
-                   }
-               }
-           }
+        // Delete all stations from CloudKit
+        DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { [weak self] success, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if success {
+                    // Proceed with deleting data from CoreData if CloudKit deletion is successful
+                    let context = CoreDataStack.shared.persistentContainer.viewContext
+                    let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+
+                    context.perform {
+                        do {
+                            try context.execute(deleteRequest)
+                            try context.save()
+                            self.stations.removeAll()
+                            self.isDeletingData = false
+                            self.deletionComplete = true  // Set completion flag to true on successful deletion
+                            completion(true, nil)
+                        } catch {
+                            print("Error deleting stations from CoreData: \(error.localizedDescription)")
+                            self.isDeletingData = false
+                            completion(false, error)
+                        }
+                    }
+                } else if let error = error {
+                    print("Failed to delete records from CloudKit: \(error.localizedDescription)")
+                    self.isDeletingData = false
+                    completion(false, error)
+                }
+            }
+        }
+    }
 
     func syncStationsWithCloudKit() {
         CoreDataStack.shared.syncStationsFromCloudKit { [weak self] error in
