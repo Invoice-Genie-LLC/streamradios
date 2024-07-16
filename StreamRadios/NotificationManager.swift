@@ -19,17 +19,17 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
 
     func requestAuthorization() {
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-                if granted {
-                    print("Notification permissions granted.")
-                    DispatchQueue.main.async {
-                        UIApplication.shared.registerForRemoteNotifications()
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    if granted {
+                        print("Notification permissions granted.")
+                        DispatchQueue.main.async {
+                            UIApplication.shared.registerForRemoteNotifications()
+                        }
+                    } else {
+                        print("Notification permission denied by user.")
                     }
-                } else {
-                    print("Notification permission denied by user.")
                 }
             }
-        }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
             completionHandler([.alert, .sound])
