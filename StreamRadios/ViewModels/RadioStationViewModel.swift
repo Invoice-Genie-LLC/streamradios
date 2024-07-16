@@ -60,18 +60,6 @@ class RadioStationViewModel: ObservableObject {
     @Published var selectedTab: Tab = .all
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
-    @Published var isCloudKitOperationRunning = false
-    var operationStarted = false
-    var operationCompleted = false
-    var startNotificationSent = false
-    var backgroundNotificationSent = false
-    private var completionNotificationSent = false
-    private var operationStartedNotified = false
-        private var operationCompletedNotified = false
-
-    @Published var isDeletingData = false
-    @Published var deletionComplete = false
-    @Published var showingPurchaseView = false
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
@@ -80,8 +68,6 @@ class RadioStationViewModel: ObservableObject {
                         }
         }
     }
-    static let shared = RadioStationViewModel()
-
     
     enum ActiveSheet: Identifiable {
         case editStation, purchase
@@ -123,8 +109,10 @@ class RadioStationViewModel: ObservableObject {
         }
  */
     
+    @Published var showingPurchaseView = false
+    
     init() {
-            selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
+        selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
             loadStationsFromCoreData()
 
             let userDefaults = UserDefaults.standard
@@ -133,148 +121,51 @@ class RadioStationViewModel: ObservableObject {
             if !userDefaults.bool(forKey: hasLaunchedBeforeKey) {
                 print("First time setup, initializing default stations and saving to local and CloudKit.")
                 initializeStationsForFirstTime()
-                userDefaults.set(true, forKey: hasLaunchedBeforeKey)
-                syncStationsWithCloudKit { success in
-                    if success {
-                        print("Stations successfully synchronized with CloudKit on first launch.")
-                    } else {
-                        print("Failed to synchronize stations with CloudKit on first launch.")
-                    }
-                }
-            }
-        }
-
-    func appDidBecomeActive() {
-        // This method could be called by the AppDelegate when the app becomes active
-        syncStationsWithCloudKit { success in
-            if success {
-                print("Stations successfully synchronized with CloudKit on app relaunch.")
             } else {
-                print("Failed to synchronize stations with CloudKit on app relaunch.")
+                print("App relaunch detected.")
+                syncStationsWithCloudKit()  // This method will ensure data consistency with CloudKit
             }
-        }
-        BackgroundTaskManager.shared.scheduleAppRefresh()  // Consider whether this needs to be here or can be moved
     }
-    
-    func startCloudKitOperation() {
-            isCloudKitOperationRunning = true
-            startNotificationSent = false
-            backgroundNotificationSent = false
-            // Start the operation
-            notifyStartOfOperation()  // Call this where the operation starts
-        }
 
-        func endCloudKitOperation() {
-            isCloudKitOperationRunning = false
-            notifyEndOfOperation()  // Call this when the operation ends
-            startNotificationSent = false
-            backgroundNotificationSent = false
-        }
-
-        private func notifyStartOfOperation() {
-            if !startNotificationSent {
-                BackgroundTaskManager.shared.scheduleCompletionNotification(message: "CloudKit operation started. Please keep the app open.")
-                startNotificationSent = true
-            }
-        }
-    
-    private func notifyEndOfOperation() {
-            if startNotificationSent && !backgroundNotificationSent {
-                BackgroundTaskManager.shared.scheduleCompletionNotification(message: "CloudKit operation completed successfully.")
-                startNotificationSent = false
-            }
-        }
-
-    func notifyBackground() {
-            if isCloudKitOperationRunning && !backgroundNotificationSent {
-                BackgroundTaskManager.shared.scheduleCompletionNotification(message: "CloudKit operation in progress. Return to the app.")
-                backgroundNotificationSent = true  // Set this flag to prevent multiple notifications
-            }
-        }
-    
-    func resetNotifications() {
-            startNotificationSent = false
-            completionNotificationSent = false
-        }
-    
-    private func notifyUser(title: String, message: String) {
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = message
-            content.sound = UNNotificationSound.default
-
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
-            UNUserNotificationCenter.current().add(request) { error in
-                if let error = error {
-                    print("Error scheduling notification: \(error.localizedDescription)")
-                }
-            }
-        }
-
-    
-    private func resetNotificationFlags() {
-            operationStartedNotified = false
-            operationCompletedNotified = false
-        }
-
-    func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
-            isDeletingData = true
-            deletionComplete = false  // Reset completion flag at the start of deletion
-
-            // Delete all stations from CloudKit
-            DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { [weak self] success, error in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    if success {
-                        // Proceed with deleting data from CoreData if CloudKit deletion is successful
-                        let context = CoreDataStack.shared.persistentContainer.viewContext
-                        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
-                        
-                        do {
-                            try context.execute(deleteRequest)
-                            try context.save()
-                            self.stations.removeAll()
-                            self.isDeletingData = false
-                            self.deletionComplete = true  // Set completion flag to true on successful deletion
-                            completion(true, nil)
-                        } catch {
-                            print("Error deleting stations from CoreData: \(error.localizedDescription)")
-                            self.isDeletingData = false
-                            completion(false, error)
-                        }
-                    } else if let error = error {
-                        print("Failed to delete records from CloudKit: \(error.localizedDescription)")
-                        self.isDeletingData = false
-                        completion(false, error)
-                    }
-                }
-            }
-        }
-
-    func syncStationsWithCloudKit(completion: @escaping (Bool) -> Void) {
-        guard !operationStartedNotified else { return }
-
-        self.isCloudKitOperationRunning = true
-        operationStartedNotified = true
-        NotificationManager.shared.notifyUser(title: "Sync Started", message: "Uploading data to CloudKit...")
-
-        // Simulate a CloudKit operation
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { // Simulate network delay
+    func deleteAllData() {
+        // Delete all stations from CloudKit
+        DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { success, error in
             DispatchQueue.main.async {
-                self.isCloudKitOperationRunning = false
-                completion(true)
-                if !self.operationCompletedNotified {
-                    NotificationManager.shared.notifyUser(title: "Sync Complete", message: "Data has been successfully uploaded to CloudKit.")
-                    self.operationCompletedNotified = true
+                if success {
+                    print("All records were successfully deleted from CloudKit.")
+                } else if let error = error {
+                    print("Failed to delete records from CloudKit: \(error.localizedDescription)")
                 }
-                self.resetNotificationFlags()
             }
+        }
+
+        // Delete all stations from CoreData
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+        do {
+            try context.execute(deleteRequest)
+            try context.save()
+            print("All stations deleted from CoreData.")
+            DispatchQueue.main.async {
+                self.stations.removeAll()
+            }
+        } catch {
+            print("Error deleting stations from CoreData: \(error)")
         }
     }
 
-
-
+    func syncStationsWithCloudKit() {
+        CoreDataStack.shared.syncStationsFromCloudKit { [weak self] error in
+            if let error = error {
+                print("Error syncing with CloudKit: \(error.localizedDescription)")
+            } else {
+                print("Stations successfully synchronized with CloudKit.")
+                DispatchQueue.main.async {
+                    self?.loadStationsFromCoreData() // Reload stations from CoreData after sync
+                }
+            }
+        }
+    }
     
     private func initializeStationsForFirstTime() {
         let userDefaults = UserDefaults.standard
@@ -373,36 +264,16 @@ class RadioStationViewModel: ObservableObject {
         }
     
     func saveStationsToCloudKit() {
-        if !operationStarted {
-            NotificationManager.shared.notifyUser(title: "Sync Started", message: "Uploading data to CloudKit...")
-            operationStarted = true
-        }
-
-        DataStore.shared.saveStationsToCloudKit(stations: stations) { [weak self] success, recordIDs in
+        DataStore.shared.saveStationsToCloudKit(stations: stations) { success, recordIDs in
             DispatchQueue.main.async {
                 if success {
                     print("Successfully saved stations to CloudKit.")
-                    if !(self?.operationCompleted ?? true) {
-                        NotificationManager.shared.notifyUser(title: "Sync Complete", message: "Data has been successfully uploaded to CloudKit.")
-                        self?.operationCompleted = true
-                    }
                 } else {
                     print("Failed to save stations to CloudKit.")
-                    if !(self?.operationCompleted ?? true) {
-                        NotificationManager.shared.notifyUser(title: "Sync Failed", message: "Failed to upload data to CloudKit.")
-                        self?.operationCompleted = true // Ensure we set this to avoid multiple failed notifications.
-                    }
                 }
-                self?.resetOperationFlags()
             }
         }
     }
-
-    private func resetOperationFlags() {
-        operationStarted = false
-        operationCompleted = false
-    }
-
     
     func saveStationToCloudKit(station: RadioStation) {
         let iconImage = station.iconData.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
