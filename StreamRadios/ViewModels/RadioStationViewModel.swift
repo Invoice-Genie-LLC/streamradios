@@ -133,36 +133,53 @@ class RadioStationViewModel: ObservableObject {
 
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
         isDeletingData = true
-        deletionComplete = false  // Reset completion flag at the start of deletion
+        deletionComplete = false
 
-        // Delete all stations from CloudKit
-        DataStore.shared.deleteAllRecords(ofType: "streamingRadios") { [weak self] success, error in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if success {
-                    // Proceed with deleting data from CoreData if CloudKit deletion is successful
-                    let context = CoreDataStack.shared.persistentContainer.viewContext
-                    let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
-
-                    context.perform {
-                        do {
-                            try context.execute(deleteRequest)
-                            try context.save()
-                            self.stations.removeAll()
-                            self.isDeletingData = false
-                            self.deletionComplete = true  // Set completion flag to true on successful deletion
-                            completion(true, nil)
-                        } catch {
-                            print("Error deleting stations from CoreData: \(error.localizedDescription)")
-                            self.isDeletingData = false
-                            completion(false, error)
-                        }
-                    }
-                } else if let error = error {
-                    print("Failed to delete records from CloudKit: \(error.localizedDescription)")
-                    self.isDeletingData = false
-                    completion(false, error)
+        // Fetch all record IDs for 'streamingRadios' from CloudKit
+        DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { [weak self] recordIDs, error in
+            // Ensure 'self' is available and 'recordIDs' are fetched successfully
+            guard let self = self, let recordIDs = recordIDs else {
+                DispatchQueue.main.async {
+                    // Use 'self?' here because we're in a closure and self could be nil
+                    self?.isDeletingData = false
+                    // If recordIDs fetching fails, call completion with error or a custom NSError
+                    completion(false, error ?? NSError(domain: "FetchError", code: -1, userInfo: nil))
                 }
+                return
+            }
+
+            // Proceed with batch deletion of records
+            DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        // Continue to delete data from CoreData
+                        self.clearCoreData(completion: completion)
+                    } else {
+                        print("Failed to delete records from CloudKit: \(error?.localizedDescription ?? "Unknown error")")
+                        self.isDeletingData = false
+                        completion(false, error)
+                    }
+                }
+            }
+        }
+    }
+
+    func clearCoreData(completion: @escaping (Bool, Error?) -> Void) {
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+
+        context.perform {
+            do {
+                try context.execute(deleteRequest)
+                try context.save()
+                self.stations.removeAll()
+                self.isDeletingData = false
+                self.deletionComplete = true
+                completion(true, nil)
+            } catch {
+                print("Error deleting stations from CoreData: \(error.localizedDescription)")
+                self.isDeletingData = false
+                completion(false, error)
             }
         }
     }
