@@ -14,7 +14,8 @@ struct RadioStreamApp: App {
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var purchaseManager = PurchaseManager.shared
-    
+    @StateObject private var notificationManager = NotificationManager.shared
+
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel()
     
@@ -47,7 +48,14 @@ struct RadioStreamApp: App {
                 .environmentObject(purchaseManager)
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)
+                .environmentObject(notificationManager)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
+                .onAppear {
+                    if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
+                        notificationManager.requestAuthorization()
+                        UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+                    }
+                }
         }
     }
 }

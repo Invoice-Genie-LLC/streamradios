@@ -1959,9 +1959,9 @@ struct DefaultStations {
     
     @StateObject private var viewModel = RadioStationViewModel()
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
-        /*
+        
         addDefaultStationsForAlbania(to: viewModel)
-    
+    /*
         addDefaultStationsForAngola(to: viewModel)
     
         addDefaultStationsForArgentina(to: viewModel)

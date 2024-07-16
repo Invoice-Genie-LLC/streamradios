@@ -63,6 +63,9 @@ class RadioStationViewModel: ObservableObject {
     @Published var isDeletingData = false
     @Published var deletionComplete = false
     @Published var isCloudKitOperationRunning = false
+    private var notificationManager = NotificationManager.shared
+    private var backgroundObserver: NSObjectProtocol?
+    @Published var isDeletionInProgress = false
 
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
@@ -132,38 +135,76 @@ class RadioStationViewModel: ObservableObject {
     }
 
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
-        isDeletingData = true
-        deletionComplete = false
+            isDeletingData = true
+            deletionComplete = false
+            isCloudKitOperationRunning = true
+            isDeletionInProgress = true
 
-        // Fetch all record IDs for 'streamingRadios' from CloudKit
-        DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { [weak self] recordIDs, error in
-            // Ensure 'self' is available and 'recordIDs' are fetched successfully
-            guard let self = self, let recordIDs = recordIDs else {
-                DispatchQueue.main.async {
-                    // Use 'self?' here because we're in a closure and self could be nil
-                    self?.isDeletingData = false
-                    // If recordIDs fetching fails, call completion with error or a custom NSError
-                    completion(false, error ?? NSError(domain: "FetchError", code: -1, userInfo: nil))
-                }
-                return
+            // Set up background task
+            var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+            backgroundTaskID = UIApplication.shared.beginBackgroundTask {
+                // Task expired
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
             }
 
-            // Proceed with batch deletion of records
-            DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
-                DispatchQueue.main.async {
-                    if success {
-                        // Continue to delete data from CoreData
-                        self.clearCoreData(completion: completion)
-                    } else {
-                        print("Failed to delete records from CloudKit: \(error?.localizedDescription ?? "Unknown error")")
-                        self.isDeletingData = false
-                        completion(false, error)
+            // Set up observer for app entering background
+            setupBackgroundObserver()
+
+            // Fetch all record IDs for 'streamingRadios' from CloudKit
+            DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { [weak self] recordIDs, error in
+                guard let self = self, let recordIDs = recordIDs else {
+                    DispatchQueue.main.async {
+                        self?.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
+                    }
+                    return
+                }
+
+                // Proceed with batch deletion of records
+                DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
+                    DispatchQueue.main.async {
+                        if success {
+                            self.clearCoreData { coreDataSuccess, coreDataError in
+                                self.cleanupAfterDeletion(success: coreDataSuccess, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
+                            }
+                        } else {
+                            self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
+                        }
                     }
                 }
             }
         }
-    }
 
+        private func setupBackgroundObserver() {
+            backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                if self?.isDeletionInProgress == true {
+                    NotificationManager.shared.notifyUser(title: "Deletion in Progress", message: "Please keep the app open until the deletion process is complete.")
+                }
+            }
+        }
+
+        private func cleanupAfterDeletion(success: Bool, error: Error?, backgroundTaskID: UIBackgroundTaskIdentifier, completion: @escaping (Bool, Error?) -> Void) {
+            isDeletingData = false
+            isCloudKitOperationRunning = false
+            isDeletionInProgress = false
+            deletionComplete = success
+
+            // Remove the background observer
+            if let observer = backgroundObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            completion(success, error)
+
+            if success {
+                // NotificationManager.shared.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted.")
+            } else if let error = error {
+                NotificationManager.shared.notifyUser(title: "Deletion Failed", message: "An error occurred: \(error.localizedDescription)")
+            }
+        }
+    
+    
     func clearCoreData(completion: @escaping (Bool, Error?) -> Void) {
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
