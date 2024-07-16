@@ -55,7 +55,7 @@ class RadioStationViewModel: ObservableObject {
         Country(name: "UK", flag: "GB"),
         Country(name: "USA", flag: "US"),
         Country(name: "Zimbabwe", flag: "ZW"),
-        Country(name: "Unknown Region", flag: "")  // ToDo: Handle Unknown Region without a flag
+        Country(name: "Unknown Region", flag: "")
     ]
     @Published var selectedTab: Tab = .all
     @Published var activeSheet: ActiveSheet? = nil
@@ -63,12 +63,9 @@ class RadioStationViewModel: ObservableObject {
     @Published var isDeletingData = false
     @Published var deletionComplete = false
     @Published var isCloudKitOperationRunning = false
-    private var notificationManager = NotificationManager.shared
-    private var backgroundObserver: NSObjectProtocol?
     @Published var isDeletionInProgress = false
     @Published var isUploadingToCloudKit = false
-
-
+    @Published var showingPurchaseView = false
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
@@ -77,17 +74,8 @@ class RadioStationViewModel: ObservableObject {
                         }
         }
     }
-    
-    enum ActiveSheet: Identifiable {
-        case editStation, purchase
-        var id: Int {
-            self.hashValue
-        }
-    }
-    
-    private func saveSelectedCountry() {
-        UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
-    }
+    private var notificationManager = NotificationManager.shared
+    private var backgroundObserver: NSObjectProtocol?
     
     var isPremiumUser: Bool {
             return PurchaseManager.shared.hasPurchasedPremium
@@ -105,21 +93,17 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
-/*
-        var filteredStations: [RadioStation] {
-            let filtered = stations.filter { $0.country == selectedCountry }
-            if isPremiumUser {
-                print("User is premium, showing all stations for \(selectedCountry).")
-                return filtered
-            } else {
-                print("User is not premium, limiting to 5 stations for \(selectedCountry).")
-                return Array(filtered.prefix(2000))
-            }
+    enum ActiveSheet: Identifiable {
+        case editStation, purchase
+        var id: Int {
+            self.hashValue
         }
- */
+    }
     
-    @Published var showingPurchaseView = false
-    
+    private func saveSelectedCountry() {
+        UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
+    }
+        
     init() {
         selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
             loadStationsFromCoreData()
@@ -190,7 +174,7 @@ class RadioStationViewModel: ObservableObject {
             completion(success, error)
 
             if success {
-                // NotificationManager.shared.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted.")
+                // No success message here, it gets triggered in saveStationsToCloudKit function
             } else if let error = error {
                 NotificationManager.shared.notifyUser(title: "Deletion Failed", message: "An error occurred: \(error.localizedDescription)")
             }
