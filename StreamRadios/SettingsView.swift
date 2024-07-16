@@ -65,8 +65,6 @@ struct SettingsView: View {
         }
     }
     
-    
-
     private var dataManagementSection: some View {
         Section(header: Text("Data Management")) {
             Button("Delete All Data") {
@@ -104,7 +102,7 @@ struct SettingsView: View {
             .font(.footnote)
             .foregroundColor(.gray)
         +
-        Text("\n\n") // This adds two line breaks for paragraph separation
+        Text("\n\n")
         +
         Text("Please keep the app running in the background. You can use other apps, but do not force close this one. We'll notify you when the deletion is fully completed. The duration of this operation may vary, but it could take up to 5 minutes depending on the number of custom stations configured. This action cannot be undone.")
             .font(.footnote)
