@@ -79,7 +79,7 @@ class RadioStationViewModel: ObservableObject {
     private var notificationManager = NotificationManager.shared
     private var backgroundObserver: NSObjectProtocol?
     let defaultStationsVersionKey = "defaultStationsVersion"
-    let currentDefaultStationsVersion = 4
+    let currentDefaultStationsVersion = 1
     
     var isPremiumUser: Bool {
             return PurchaseManager.shared.hasPurchasedPremium
