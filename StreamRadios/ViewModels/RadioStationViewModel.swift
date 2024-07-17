@@ -78,6 +78,8 @@ class RadioStationViewModel: ObservableObject {
     }
     private var notificationManager = NotificationManager.shared
     private var backgroundObserver: NSObjectProtocol?
+    let defaultStationsVersionKey = "defaultStationsVersion"
+    let currentDefaultStationsVersion = 4
     
     var isPremiumUser: Bool {
             return PurchaseManager.shared.hasPurchasedPremium
@@ -107,20 +109,23 @@ class RadioStationViewModel: ObservableObject {
     }
         
     init() {
-        selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
+            selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
             loadStationsFromCoreData()
 
             let userDefaults = UserDefaults.standard
             let hasLaunchedBeforeKey = "HasLaunchedBefore"
-
-            if !userDefaults.bool(forKey: hasLaunchedBeforeKey) {
-                print("First time setup, initializing default stations and saving to local and CloudKit.")
+            let lastDefaultStationsVersion = userDefaults.integer(forKey: defaultStationsVersionKey)
+            
+            if !userDefaults.bool(forKey: hasLaunchedBeforeKey) || lastDefaultStationsVersion < currentDefaultStationsVersion {
+                print("First time setup or new default stations detected, initializing default stations and saving to local and CloudKit.")
                 initializeStationsForFirstTime()
+                userDefaults.set(currentDefaultStationsVersion, forKey: defaultStationsVersionKey)
             } else {
                 print("App relaunch detected.")
-                syncStationsWithCloudKit()  // This method will ensure data consistency with CloudKit
+                syncStationsWithCloudKit() // This method will ensure data consistency with CloudKit
             }
-    }
+        }
+    
 
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
             isDeletingData = true
@@ -217,25 +222,22 @@ class RadioStationViewModel: ObservableObject {
     }
     
     private func initializeStationsForFirstTime() {
-        let userDefaults = UserDefaults.standard
-        let hasLaunchedBeforeKey = "HasLaunchedBefore"
-        
-        // Check if the app has been launched before
-        if userDefaults.bool(forKey: hasLaunchedBeforeKey) == false {
-            print("Initializing default stations for first time setup.")
-            
-            // Add default stations
-            DefaultStations.addAllDefaults(to: self)
-            
-            // Save stations to CloudKit and CoreData
-            saveStationsToCloudKit()
-            saveStationsToCoreData()
-            
-            // Set the flag to indicate that the app has been launched before
-            userDefaults.set(true, forKey: hasLaunchedBeforeKey)
-            userDefaults.synchronize() // Ensure the flag is saved immediately
+            let userDefaults = UserDefaults.standard
+            let hasLaunchedBeforeKey = "HasLaunchedBefore"
+
+            if userDefaults.bool(forKey: hasLaunchedBeforeKey) == false || userDefaults.integer(forKey: defaultStationsVersionKey) < currentDefaultStationsVersion {
+                print("Initializing default stations for first time setup or new default stations detected.")
+                
+                DefaultStations.addAllDefaults(to: self)
+                
+                saveStationsToCloudKit()
+                saveStationsToCoreData()
+                
+                userDefaults.set(true, forKey: hasLaunchedBeforeKey)
+                userDefaults.set(currentDefaultStationsVersion, forKey: defaultStationsVersionKey)
+                userDefaults.synchronize() // Ensure the flag is saved immediately
+            }
         }
-    }
     
     var currentlyPlayingStation: RadioStation? {
         guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
@@ -313,34 +315,34 @@ class RadioStationViewModel: ObservableObject {
         }
     
     func saveStationsToCloudKit() {
-           isUploadingToCloudKit = true
-           NotificationManager.shared.notifyUser(title: "Upload Started", message: "Saving stations to iCloud has begun.")
+            isUploadingToCloudKit = true
+            NotificationManager.shared.notifyUser(title: "Upload Started", message: "Saving stations to iCloud has begun.")
            
-           setupBackgroundObserver()
+            setupBackgroundObserver()
 
-           DataStore.shared.saveStationsToCloudKit(stations: stations) { [weak self] success, recordIDs in
-               DispatchQueue.main.async {
-                   self?.isUploadingToCloudKit = false
-                   self?.removeBackgroundObserver()
+            DataStore.shared.saveStationsToCloudKit(stations: stations) { [weak self] success, recordIDs in
+                DispatchQueue.main.async {
+                    self?.isUploadingToCloudKit = false
+                    self?.removeBackgroundObserver()
 
-                   if success {
-                       NotificationManager.shared.notifyUser(title: "Upload Complete", message: "All stations have been successfully saved to iCloud.")
-                       print("Successfully saved all stations to CloudKit.")
-                   } else {
-                       NotificationManager.shared.notifyUser(title: "Upload Incomplete", message: "Some stations failed to save to iCloud.")
-                       print("Failed to save some or all stations to CloudKit.")
-                       if let recordIDs = recordIDs {
-                           let failedStations = self?.stations.filter { !recordIDs.contains($0.id) } ?? []
-                           for station in failedStations {
-                               print("Failed to save station: \(station.name)")
-                           }
-                       } else {
-                           print("No stations were saved successfully.")
-                       }
-                   }
-               }
-           }
-       }
+                    if success {
+                        NotificationManager.shared.notifyUser(title: "Upload Complete", message: "All stations have been successfully saved to iCloud.")
+                        print("Successfully saved all stations to CloudKit.")
+                    } else {
+                        NotificationManager.shared.notifyUser(title: "Upload Incomplete", message: "Some stations failed to save to iCloud.")
+                        print("Failed to save some or all stations to CloudKit.")
+                        if let recordIDs = recordIDs {
+                            let failedStations = self?.stations.filter { !recordIDs.contains($0.id) } ?? []
+                            for station in failedStations {
+                                print("Failed to save station: \(station.name)")
+                            }
+                        } else {
+                            print("No stations were saved successfully.")
+                        }
+                    }
+                }
+            }
+        }
 
     private func setupBackgroundObserver() {
            // Remove any existing observer before adding a new one
@@ -468,43 +470,43 @@ class RadioStationViewModel: ObservableObject {
 
 extension RadioStationViewModel {
     func saveStationsToCoreData() {
-        let context = CoreDataStack.shared.persistentContainer.viewContext
+            let context = CoreDataStack.shared.persistentContainer.viewContext
 
-        // First, delete all existing records to ensure synchronization
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
-        do {
-            try context.execute(deleteRequest)
-            print("All existing stations deleted from CoreData.")
-        } catch {
-            print("Error deleting existing stations from CoreData: \(error)")
-        }
-
-        // Then, add new records from the current list of stations
-        if !stations.isEmpty {
-            for (index, station) in stations.enumerated() {
-                let cdStation = CDStation(context: context)
-                cdStation.id = station.id
-                cdStation.name = station.name
-                cdStation.url = station.url
-                cdStation.iconData = station.iconData
-                cdStation.country = station.country
-                cdStation.isFavorite = station.isFavorite
-                cdStation.order = Int16(index)  // Set the order attribute
-                cdStation.lastPlayed = station.lastPlayed  // Add this line
+            // First, delete all existing records to ensure synchronization
+            let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+            do {
+                try context.execute(deleteRequest)
+                print("All existing stations deleted from CoreData.")
+            } catch {
+                print("Error deleting existing stations from CoreData: \(error)")
             }
-            print("New stations are being saved to CoreData.")
-        } else {
-            print("No stations available to save to CoreData.")
-        }
 
-        // Finally, attempt to save context changes
-        do {
-            try context.save()
-            print("CoreData context saved successfully.")
-        } catch {
-            print("Failed to save stations to CoreData: \(error)")
+            // Then, add new records from the current list of stations
+            if !stations.isEmpty {
+                for (index, station) in stations.enumerated() {
+                    let cdStation = CDStation(context: context)
+                    cdStation.id = station.id
+                    cdStation.name = station.name
+                    cdStation.url = station.url
+                    cdStation.iconData = station.iconData
+                    cdStation.country = station.country
+                    cdStation.isFavorite = station.isFavorite
+                    cdStation.order = Int16(index)  // Set the order attribute
+                    cdStation.lastPlayed = station.lastPlayed  // Add this line
+                }
+                print("New stations are being saved to CoreData.")
+            } else {
+                print("No stations available to save to CoreData.")
+            }
+
+            // Finally, attempt to save context changes
+            do {
+                try context.save()
+                print("CoreData context saved successfully.")
+            } catch {
+                print("Failed to save stations to CoreData: \(error)")
+            }
         }
-    }
     
     func loadStationsFromCoreData() {
         let context = CoreDataStack.shared.persistentContainer.viewContext

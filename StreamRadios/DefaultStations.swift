@@ -1468,20 +1468,25 @@ struct DefaultStations {
             ("37.251.146.169:8024/stream", "Radio Clasic Chopin", "http://37.251.146.169:8024/stream"),
             ("89.39.189.52:8000/", "Gherla FM", "http://89.39.189.52:8000/;"),
             ("stream2.srr.ro:8016/", "Radio România Cultural", "http://stream2.srr.ro:8016/"),
-            ("stream2.srr.ro:8026/", "Radio România Muzical", "http://stream2.srr.ro:8026/"),
+          //  ("1stream2.srr.ro:8026/", "Radio România Muzical", "http://stream2.srr.ro:8026/"),
         ]
         
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Romania" }.map { $0.id })
-        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
-        
-        var newStations = [RadioStation]()
-        
-        for station in missingStations {
-            let iconData = viewModel.loadImageData(named: station.1)
-            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Romania");
-            viewModel.stations.append(newStation)
-            newStations.append(newStation)
-        }
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.id })
+                let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
+
+                var newStations = [RadioStation]()
+                
+                for station in missingStations {
+                    let iconData = viewModel.loadImageData(named: station.1)
+                    let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Romania")
+                    viewModel.stations.append(newStation)
+                    newStations.append(newStation)
+                }
+
+                viewModel.saveStationsToCoreData()
+                for station in newStations {
+                    viewModel.saveStationToCloudKit(station: station)
+                }
     }
     
     // Russia
@@ -2046,6 +2051,9 @@ struct DefaultStations {
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
         
         addDefaultStationsForAlbania(to: viewModel)
+        // addDefaultStationsForRomania(to: viewModel)
+        // addDefaultStationsForPanama(to: viewModel)
+
     /*
         addDefaultStationsForAngola(to: viewModel)
     

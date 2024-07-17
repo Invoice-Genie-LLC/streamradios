@@ -189,7 +189,7 @@ class DataStore {
 
     func saveNewStationToCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
         let iconFileName = iconImage.flatMap { saveImageToFileSystem(image: $0) }
-        let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
+        let record = CKRecord(recordType: "StreamingRadios", recordID: CKRecord.ID(recordName: station.id))
         record.setValue(station.name, forKey: "name")
         record.setValue(station.url, forKey: "url")
         record.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
@@ -215,34 +215,41 @@ class DataStore {
     }
     
     // Add a method to fetch existing station IDs from CloudKit
-    func fetchExistingStationIDs(completion: @escaping (Set<String>, Error?) -> Void) {
-        let query = CKQuery(recordType: "StreamingRadios", predicate: NSPredicate(value: true))
-        privateDatabase.perform(query, inZoneWith: nil) { records, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("Failed to fetch existing station IDs: \(error.localizedDescription)")
-                    completion([], error)
-                } else {
-                    let ids = Set(records?.map { $0.recordID.recordName } ?? [])
-                    completion(ids, nil)
+    private func fetchExistingStationIDs(completion: @escaping (Set<String>, Error?) -> Void) {
+            let query = CKQuery(recordType: "StreamingRadios", predicate: NSPredicate(value: true))
+            privateDatabase.perform(query, inZoneWith: nil) { records, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("Failed to fetch existing station IDs: \(error.localizedDescription)")
+                        completion([], error)
+                    } else {
+                        let ids = Set(records?.map { $0.recordID.recordName } ?? [])
+                        completion(ids, nil)
+                    }
                 }
             }
         }
-    }
 
     // Modify the saveStationsToCloudKit method to only save new stations
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
-        // First, fetch the existing station IDs
         fetchExistingStationIDs { existingIDs, error in
-            guard let error = error else {
-                let newStations = stations.filter { !existingIDs.contains($0.id) }
-                self.processNewStations(newStations, completion: completion)
+            guard error == nil else {
+                print("Error fetching existing station IDs: \(error?.localizedDescription ?? "Unknown error")")
+                completion(false, nil)
                 return
             }
-            print("Error fetching existing station IDs: \(error.localizedDescription)")
-            completion(false, nil)
+
+            let newStations = stations.filter { !existingIDs.contains($0.id) }
+            if newStations.isEmpty {
+                print("No new stations to save; all stations already exist in CloudKit.")
+                completion(true, [])
+                return
+            }
+
+            self.processNewStations(newStations, completion: completion)
         }
     }
+
 
     // Method to process and save new stations
     private func processNewStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
@@ -261,41 +268,87 @@ class DataStore {
             recordsToSave.append(record)
         }
 
-        if recordsToSave.isEmpty {
-            print("No new stations to save to CloudKit.")
-            completion(true, [])
-            return
-        }
-
-        let maxBatchSize = 400
-        processBatch(records: recordsToSave, maxBatchSize: maxBatchSize, completion: completion)
-    }
-
-
-    private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
-        let end = min(start + maxBatchSize, records.count)
-        let batch = Array(records[start..<end])
-        let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
-
+        let modifyOperation = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: nil)
+        modifyOperation.savePolicy = .ifServerRecordUnchanged // Use this policy to avoid overwriting changes
         modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
             if let error = error {
+                print("Error during CloudKit batch save: \(error.localizedDescription)")
                 completion(false, nil)
             } else {
-                if end >= records.count {
-                    completion(true, savedRecords?.map { $0.recordID.recordName })
-                } else {
-                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
-                }
+                print("Successfully saved all new stations to CloudKit.")
+                completion(true, savedRecords?.map { $0.recordID.recordName })
             }
         }
         CKContainer.default().privateCloudDatabase.add(modifyOperation)
     }
 
 
+
+    private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
+            let end = min(start + maxBatchSize, records.count)
+            let batch = Array(records[start..<end])
+            let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
+
+            modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
+                if let error = error {
+                    print("Error during CloudKit batch save: \(error.localizedDescription)")
+                    completion(false, nil)
+                } else {
+                    if end >= records.count {
+                        print("Successfully saved final batch to CloudKit.")
+                        completion(true, savedRecords?.map { $0.recordID.recordName })
+                    } else {
+                        print("Processing next batch for CloudKit save.")
+                        self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
+                    }
+                }
+            }
+
+            modifyOperation.perRecordCompletionBlock = { record, error in
+                if let error = error {
+                    print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
+                    self.updateExistingRecord(recordID: record.recordID, with: record) { success in
+                        if success {
+                            print("Successfully updated existing record \(record.recordID.recordName) in CloudKit.")
+                        } else {
+                            print("Failed to update existing record \(record.recordID.recordName) in CloudKit.")
+                        }
+                    }
+                } else {
+                    print("Successfully saved record \(record.recordID.recordName) to CloudKit.")
+                }
+            }
+            CKContainer.default().privateCloudDatabase.add(modifyOperation)
+        }
+    
+    private func updateExistingRecord(recordID: CKRecord.ID, with record: CKRecord, completion: @escaping (Bool) -> Void) {
+            privateDatabase.fetch(withRecordID: recordID) { fetchedRecord, error in
+                if let fetchedRecord = fetchedRecord {
+                    fetchedRecord["name"] = record["name"]
+                    fetchedRecord["url"] = record["url"]
+                    fetchedRecord["country"] = record["country"]
+                    fetchedRecord["isFavorite"] = record["isFavorite"]
+                    if let iconAsset = record["iconData"] as? CKAsset {
+                        fetchedRecord["iconData"] = iconAsset
+                    }
+                    self.privateDatabase.save(fetchedRecord) { savedRecord, error in
+                        if let error = error {
+                            print("Error updating record in CloudKit: \(error.localizedDescription)")
+                            completion(false)
+                        } else {
+                            completion(true)
+                        }
+                    }
+                } else {
+                    completion(false)
+                }
+            }
+        }
+
     
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)
-        let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
+        let query = CKQuery(recordType: "StreamingRadios", predicate: predicate)
         
         privateDatabase.perform(query, inZoneWith: nil) { records, error in
             DispatchQueue.main.async {
