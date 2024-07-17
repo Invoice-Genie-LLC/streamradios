@@ -1465,7 +1465,7 @@ struct DefaultStations {
             ("37.251.146.169:8024/stream", "Radio Clasic Chopin", "http://37.251.146.169:8024/stream"),
             ("89.39.189.52:8000/", "Gherla FM", "http://89.39.189.52:8000/;"),
             ("stream2.srr.ro:8016/", "Radio România Cultural", "http://stream2.srr.ro:8016/"),
-            //  ("1stream2.srr.ro:8026/", "Radio România Muzical", "http://stream2.srr.ro:8026/"),
+            ("1stream2.srr.ro:8026/", "Radio România Muzical", "http://stream2.srr.ro:8026/"),
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Romania" }.map { $0.id })
@@ -2041,7 +2041,9 @@ struct DefaultStations {
     
     @StateObject private var viewModel = RadioStationViewModel()
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
-        
+        addDefaultStationsForZimbabwe(to: viewModel)
+
+        /*
         addDefaultStationsForAlbania(to: viewModel)
         addDefaultStationsForRomania(to: viewModel)
         addDefaultStationsForPanama(to: viewModel)
@@ -2090,6 +2092,7 @@ struct DefaultStations {
         addDefaultStationsForUSA(to: viewModel)
         addDefaultStationsForZimbabwe(to: viewModel)
         addDefaultStationsForUnknownRegion(to: viewModel)
+         */
     }
 }
 
