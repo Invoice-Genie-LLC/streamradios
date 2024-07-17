@@ -268,58 +268,39 @@ class DataStore {
             recordsToSave.append(record)
         }
 
-        let modifyOperation = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: nil)
-        modifyOperation.savePolicy = .ifServerRecordUnchanged // Use this policy to avoid overwriting changes
+        // Process batches
+        processBatch(records: recordsToSave, maxBatchSize: 400, completion: completion)
+    }
+
+    private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
+        let end = min(start + maxBatchSize, records.count)
+        let batch = Array(records[start..<end])
+        let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
+
         modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
             if let error = error {
                 print("Error during CloudKit batch save: \(error.localizedDescription)")
                 completion(false, nil)
             } else {
-                print("Successfully saved all new stations to CloudKit.")
-                completion(true, savedRecords?.map { $0.recordID.recordName })
+                if end >= records.count {
+                    print("Successfully saved all batches to CloudKit.")
+                    completion(true, savedRecords?.map { $0.recordID.recordName })
+                } else {
+                    print("Processing next batch for CloudKit save.")
+                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
+                }
+            }
+        }
+
+        modifyOperation.perRecordCompletionBlock = { record, error in
+            if let error = error {
+                print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
+            } else {
+                print("Successfully saved record \(record.recordID.recordName) to CloudKit.")
             }
         }
         CKContainer.default().privateCloudDatabase.add(modifyOperation)
     }
-
-
-
-    private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
-            let end = min(start + maxBatchSize, records.count)
-            let batch = Array(records[start..<end])
-            let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
-
-            modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
-                if let error = error {
-                    print("Error during CloudKit batch save: \(error.localizedDescription)")
-                    completion(false, nil)
-                } else {
-                    if end >= records.count {
-                        print("Successfully saved final batch to CloudKit.")
-                        completion(true, savedRecords?.map { $0.recordID.recordName })
-                    } else {
-                        print("Processing next batch for CloudKit save.")
-                        self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
-                    }
-                }
-            }
-
-            modifyOperation.perRecordCompletionBlock = { record, error in
-                if let error = error {
-                    print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
-                    self.updateExistingRecord(recordID: record.recordID, with: record) { success in
-                        if success {
-                            print("Successfully updated existing record \(record.recordID.recordName) in CloudKit.")
-                        } else {
-                            print("Failed to update existing record \(record.recordID.recordName) in CloudKit.")
-                        }
-                    }
-                } else {
-                    print("Successfully saved record \(record.recordID.recordName) to CloudKit.")
-                }
-            }
-            CKContainer.default().privateCloudDatabase.add(modifyOperation)
-        }
     
     private func updateExistingRecord(recordID: CKRecord.ID, with record: CKRecord, completion: @escaping (Bool) -> Void) {
             privateDatabase.fetch(withRecordID: recordID) { fetchedRecord, error in

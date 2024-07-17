@@ -43,7 +43,7 @@ struct DefaultStations {
             ("live.top-media.al/tar", "Top Albania Radio", "https://live.top-media.al/tar"),
             ("radioeurostar.al:9000/stream", "Eurostar Radio", "http://radioeurostar.al:9000/stream"),
             ("1live.tiranajazzradio.com:8000/stream", "Tirana Jazz Radio", "https://live.tiranajazzradio.com:8443/stream"),
-           
+            
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.id })
@@ -73,9 +73,7 @@ struct DefaultStations {
             ("centova87.instainternet.com/proxy/mfm?mp=/stream", "Radio MFM Angola", "https://centova87.instainternet.com/proxy/mfm?mp=/stream"),
             ("radios.vpn.sapo.pt/AO/radio12.", "Radio N'Gola Yetu", "https://radios.vpn.sapo.pt/AO/radio12.mp3"),
             ("stream.zeno.fm/gsndh1xvczetv", "Radio Fe", "http://stream.zeno.fm/gsndh1xvczetv"),
-            ("playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.", "EXA FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.aac"),
             ("stream1.dimusic.club:11496/live?typeAngloa=.", "DIMusic Club Angola", "http://stream1.dimusic.club:11496/live?type=.aac"),
-            
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Angola" }.map { $0.id })
@@ -131,7 +129,7 @@ struct DefaultStations {
         
         for station in missingStations {
             let iconData = viewModel.loadImageData(named: station.1)
-            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Australia")
+            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Australia");
             viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
@@ -1266,7 +1264,6 @@ struct DefaultStations {
             ("dreamsiteradiocp.com:8082/stream", "Radio Maria Panama", "http://dreamsiteradiocp.com:8082/stream"),
             ("rosetta.shoutca.st:9264/stream", "AM Original 1180 Veraguas", "http://rosetta.shoutca.st:9264/stream"),
             ("provisioning.streamtheworld.com/pls/COOLFMAAC.pls", "Cool FM 89.3 Panama City", "http://provisioning.streamtheworld.com/pls/COOLFMAAC.pls"),
-            ("playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.", "Exa FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.aac"),
             ("rosetta.shoutca.st:8931/", "Original Stereo 90.7 FM", "http://rosetta.shoutca.st:8931/;"),
             ("stm1.tropicalmoonmedia.com:7006/stream", "Cool Jazz FM (Tropical Moon)", "https://stm1.tropicalmoonmedia.com:7006/stream"),
             ("stream.mixesurbanospty.com:8020/blasturbana.", "Blast panama", "https://stream.mixesurbanospty.com:8020/blasturbana.mp3"),
@@ -1468,25 +1465,20 @@ struct DefaultStations {
             ("37.251.146.169:8024/stream", "Radio Clasic Chopin", "http://37.251.146.169:8024/stream"),
             ("89.39.189.52:8000/", "Gherla FM", "http://89.39.189.52:8000/;"),
             ("stream2.srr.ro:8016/", "Radio România Cultural", "http://stream2.srr.ro:8016/"),
-          //  ("1stream2.srr.ro:8026/", "Radio România Muzical", "http://stream2.srr.ro:8026/"),
+            //  ("1stream2.srr.ro:8026/", "Radio România Muzical", "http://stream2.srr.ro:8026/"),
         ]
         
-        let existingStations = Set(viewModel.stations.filter { $0.country == "Albania" }.map { $0.id })
-                let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
-
-                var newStations = [RadioStation]()
-                
-                for station in missingStations {
-                    let iconData = viewModel.loadImageData(named: station.1)
-                    let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Romania")
-                    viewModel.stations.append(newStation)
-                    newStations.append(newStation)
-                }
-
-                viewModel.saveStationsToCoreData()
-                for station in newStations {
-                    viewModel.saveStationToCloudKit(station: station)
-                }
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Romania" }.map { $0.id })
+        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
+        
+        var newStations = [RadioStation]()
+        
+        for station in missingStations {
+            let iconData = viewModel.loadImageData(named: station.1)
+            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Romania");
+            viewModel.stations.append(newStation)
+            newStations.append(newStation)
+        }
     }
     
     // Russia
@@ -2051,12 +2043,9 @@ struct DefaultStations {
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
         
         addDefaultStationsForAlbania(to: viewModel)
-        // addDefaultStationsForRomania(to: viewModel)
-        // addDefaultStationsForPanama(to: viewModel)
-
-    /*
+        addDefaultStationsForRomania(to: viewModel)
+        addDefaultStationsForPanama(to: viewModel)
         addDefaultStationsForAngola(to: viewModel)
-    
         addDefaultStationsForArgentina(to: viewModel)
         addDefaultStationsForAustralia(to: viewModel)
         addDefaultStationsForBangladesh(to: viewModel)
@@ -2101,7 +2090,6 @@ struct DefaultStations {
         addDefaultStationsForUSA(to: viewModel)
         addDefaultStationsForZimbabwe(to: viewModel)
         addDefaultStationsForUnknownRegion(to: viewModel)
-        */
     }
 }
 
