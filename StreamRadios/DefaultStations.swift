@@ -1258,6 +1258,42 @@ struct DefaultStations {
         }
     }
     
+    // Panama
+    static func addDefaultStationsForPanama(to viewModel: RadioStationViewModel) {
+        let defaultStations = [
+            ("provisioning.streamtheworld.com/pls/LOS40_PAN.pls", "Los 40 Principales Panamá", "http://provisioning.streamtheworld.com/pls/LOS40_PAN.pls"),
+            ("ic.streann.com:8000/disneypanama", "Radio Disney Panamá", "http://ic.streann.com:8000/disneypanama"),
+            ("dreamsiteradiocp.com:8082/stream", "Radio Maria Panama", "http://dreamsiteradiocp.com:8082/stream"),
+            ("rosetta.shoutca.st:9264/stream", "AM Original 1180 Veraguas", "http://rosetta.shoutca.st:9264/stream"),
+            ("provisioning.streamtheworld.com/pls/COOLFMAAC.pls", "Cool FM 89.3 Panama City", "http://provisioning.streamtheworld.com/pls/COOLFMAAC.pls"),
+            ("playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.", "Exa FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/XHPSFMAAC.aac"),
+            ("rosetta.shoutca.st:8931/", "Original Stereo 90.7 FM", "http://rosetta.shoutca.st:8931/;"),
+            ("stm1.tropicalmoonmedia.com:7006/stream", "Cool Jazz FM (Tropical Moon)", "https://stm1.tropicalmoonmedia.com:7006/stream"),
+            ("stream.mixesurbanospty.com:8020/blasturbana.", "Blast panama", "https://stream.mixesurbanospty.com:8020/blasturbana.mp3"),
+            ("playerservices.streamtheworld.com/api/livestream-redirect/ANT8AAC.", "Antena 8 100.1 FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/ANT8AAC.aac"),
+            ("streaming507.net:8020/stream", "LIKE 105 FM", "https://www.streaming507.net:8020/stream"),
+            ("cloudstream2036.conectarhosting.com/8018/stream", "Bendicion Radio 1380 AM", "https://cloudstream2036.conectarhosting.com/8018/stream"),
+            ("laradiossl.online:10355/stream.nsv", "Rumba FM", "https://laradiossl.online:10355/;stream.nsv"),
+            ("sp2.servidorrprivado.com/8094/stream", "CPR LA PRIMERA 101.1 FM", "https://sp2.servidorrprivado.com/8094/stream"),
+            ("radios.host-pa.com:8046/", "CHT FM 107.7", "https://radios.host-pa.com:8046/;"),
+            ("dallas.myautodj.com:2199/proxy/toneflame/stream", "ToneFlame Urban Radio", "https://dallas.myautodj.com:2199/proxy/toneflame/stream"),
+            ("pcbrothers.net/8002/stream", "Crisol FM", "https://pcbrothers.net/8002/stream"),
+            
+        ]
+        
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Panama" }.map { $0.id })
+        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
+        
+        var newStations = [RadioStation]()
+        
+        for station in missingStations {
+            let iconData = viewModel.loadImageData(named: station.1)
+            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Panama");
+            viewModel.stations.append(newStation)
+            newStations.append(newStation)
+        }
+    }
+    
     // Peru
     static func addDefaultStationsForPeru(to viewModel: RadioStationViewModel) {
         let defaultStations = [
@@ -1395,6 +1431,54 @@ struct DefaultStations {
         for station in missingStations {
             let iconData = viewModel.loadImageData(named: station.1)
             let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Portugal");
+            viewModel.stations.append(newStation)
+            newStations.append(newStation)
+        }
+    }
+    
+    // Romania
+    static func addDefaultStationsForRomania(to viewModel: RadioStationViewModel) {
+        let defaultStations = [
+            ("89.238.227.6:8006/", "Radio Romania Actualități", "http://89.238.227.6:8006/;"),
+            ("live.magicfm.ro:9128/magicfm.p", "Magic FM", "http://live.magicfm.ro:9128/magicfm.aacp"),
+            ("edge126.rdsnet.ro:84/profm/dancefm.", "Dance FM 89.5 Bucharest", "http://edge126.rdsnet.ro:84/profm/dancefm.mp3"),
+            ("live.dancemusic.ro:7000/listen.pls?sid=1", "Deep House Radio - Bucharest Romania", "http://live.dancemusic.ro:7000/listen.pls?sid=1"),
+            ("astreaming.europafm.ro:8000/europafm_p48k", "Europa FM", "http://astreaming.europafm.ro:8000/europafm_aacp48k"),
+            ("a.fmradiomanele.ro:8054/", "Radio Manele FM", "http://a.fmradiomanele.ro:8054/;"),
+            ("edge76.rdsnet.ro:84/digifm/digifm.", "DIGI FM", "http://edge76.rdsnet.ro:84/digifm/digifm.mp3"),
+            ("live.rockfm.ro:9128/rockfm.p", "Rock FM Romania", "http://live.rockfm.ro:9128/rockfm.aacp"),
+            ("edge126.rdsnet.ro:84/profm/profm.", "Pro FM", "http://edge126.rdsnet.ro:84/profm/profm.mp3"),
+            ("kissfm.ro/listen.pls", "Kiss Fm Ro", "https://www.kissfm.ro/listen.pls"),
+            ("live.guerrillaradio.ro:8010/guerrilla.", "Radio Guerrilla", "http://live.guerrillaradio.ro:8010/guerrilla.aac"),
+            ("live.playradio.org:9090/90HD", "Play 90's", "http://live.playradio.org:9090/90HD"),
+            ("live.radiocafe.ro:8048/live.", "Radio Cafe Romania", "http://live.radiocafe.ro:8048/live.aac"),
+            ("80.86.106.110:8002/", "GoldFM", "http://80.86.106.110:8002/"),
+            ("live.radiolautaru.ro:9000/stream.nsv", "Lautaru Populara", "http://live.radiolautaru.ro:9000/;stream.nsv"),
+            ("virginradio.ro/VirginRadioRomania-live.m3u", "Virgin Radio Romania", "http://virginradio.ro/VirginRadioRomania-live.m3u"),
+            ("zuicast.digitalag.ro:9420/zu", "Radio Zu", "http://zuicast.digitalag.ro:9420/zu"),
+            ("stream2.srr.ro:8012/", "Radio România Cultural", "http://stream2.srr.ro:8012/"),
+            ("37.251.146.169:8300/stream", "Radio Clasic Mozart", "http://37.251.146.169:8300/stream"),
+            ("89.238.227.6:8042/", "Antena satelor", "http://89.238.227.6:8042/"),
+            ("zuicast.digitalag.ro:9420/romanticfm", "Romantic FM", "http://zuicast.digitalag.ro:9420/romanticfm"),
+            ("37.251.146.169:8204/stream", "Radio Clasic 100% Romanesc", "http://37.251.146.169:8204/stream"),
+            ("stream2.srr.ro:8078/eteatru.", "Eteatru", "http://stream2.srr.ro:8078/eteatru.mp3"),
+            ("asculta.rfi.ro:9128/live.", "RFI Romania", "http://asculta.rfi.ro:9128/live.aac"),
+            ("81.196.25.70:8000/", "Radio Trinitas", "http://81.196.25.70:8000/"),
+            ("37.251.146.169:7200/stream", "Radio Clasic Beethoven", "http://37.251.146.169:7200/stream"),
+            ("37.251.146.169:8024/stream", "Radio Clasic Chopin", "http://37.251.146.169:8024/stream"),
+            ("89.39.189.52:8000/", "Gherla FM", "http://89.39.189.52:8000/;"),
+            ("stream2.srr.ro:8016/", "Radio România Cultural", "http://stream2.srr.ro:8016/"),
+            ("stream2.srr.ro:8026/", "Radio România Muzical", "http://stream2.srr.ro:8026/"),
+        ]
+        
+        let existingStations = Set(viewModel.stations.filter { $0.country == "Romania" }.map { $0.id })
+        let missingStations = defaultStations.filter { !existingStations.contains($0.0) }
+        
+        var newStations = [RadioStation]()
+        
+        for station in missingStations {
+            let iconData = viewModel.loadImageData(named: station.1)
+            let newStation = RadioStation(id: station.0, name: station.1, url: station.2, iconData: iconData, country: "Romania");
             viewModel.stations.append(newStation)
             newStations.append(newStation)
         }
@@ -1991,9 +2075,11 @@ struct DefaultStations {
         addDefaultStationsForMontenegro(to: viewModel)
         addDefaultStationsForNetherlands(to: viewModel)
         addDefaultStationsForNewZealand(to: viewModel)
+        addDefaultStationsForPanama(to: viewModel)
         addDefaultStationsForPeru(to: viewModel)
         addDefaultStationsForPoland(to: viewModel)
         addDefaultStationsForPortugal(to: viewModel)
+        addDefaultStationsForRomania(to: viewModel)
         addDefaultStationsForRussia(to: viewModel)
         addDefaultStationsForSerbia(to: viewModel)
         addDefaultStationsForSlovakia(to: viewModel)
