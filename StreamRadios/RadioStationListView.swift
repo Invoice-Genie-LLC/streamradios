@@ -99,7 +99,7 @@ struct RadioStationListView: View {
                 ForEach(filteredStations) { station in
                     stationRow(for: station)
                 }
-                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 2000 {
+                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 5 {
                     Button("Show More") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             viewModel.activeSheet = .purchase
@@ -154,7 +154,7 @@ struct RadioStationListView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            //if !isEditing && viewModel.isPremiumUser { // Check for premium status
+            if !isEditing && viewModel.isPremiumUser { // Check for premium status
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -162,13 +162,13 @@ struct RadioStationListView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
-           // }
+            }
         }
         .buttonStyle(PlainButtonStyle())
         .padding(.horizontal)
         .padding(.vertical, 4)
         .contextMenu {
-           // if !isEditing && viewModel.isPremiumUser { // Check for premium status
+            if !isEditing && viewModel.isPremiumUser { // Check for premium status
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -176,18 +176,14 @@ struct RadioStationListView: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
-           // }
+           }
         }
         .onDrag {
-            if viewModel.isPremiumUser {
                 UIDevice.playHapticFeedback()
                 self.draggingStation = station
                 self.originalMetadata = radioPlayer.metadata
                 radioPlayer.metadata = nil
                 return NSItemProvider(object: String(station.id) as NSString)
-            } else {
-                return NSItemProvider(contentsOf: URL(string: "about:blank")!)!
-            }
         }
         .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
     }
@@ -282,7 +278,7 @@ struct RadioStationListView: View {
         case .favorites:
             return viewModel.favoriteStations()
         case .all:
-            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(2000))
+            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(5))
         }
     }
 

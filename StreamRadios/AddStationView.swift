@@ -149,11 +149,10 @@ struct AddStationView: View {
                 }
                 .navigationBarHidden(true) // Hide the default navigation bar
             }
-            /*
+            
             .sheet(isPresented: $showingPurchaseView) {
-                           PurchaseView(isPresented: $showingPurchaseView)
-                       }
-             */
+                PurchaseView(isPresented: $showingPurchaseView)
+            }
             
             if showAlert {
                 Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
@@ -183,15 +182,15 @@ struct AddStationView: View {
             showAlert = true
             return
         }
-       // if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
-                  // showingPurchaseView = true
-       // } else {
+        if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
+            showingPurchaseView = true
+        } else {
             let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
             viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
             viewModel.saveStationsToCoreData()
             isPresented = false
         }
-   // }
+    }
 }
 
 struct AddStationView_Previews: PreviewProvider {
