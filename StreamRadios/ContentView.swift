@@ -23,7 +23,6 @@ struct ContentView: View {
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
     @State private var selectedTab: Tab = .favorites
-    @State private var searchText = ""
     private var cancellables = Set<AnyCancellable>()
     @State private var bitrateMessage = "Loading bitrate information..."
 
@@ -135,8 +134,7 @@ struct ContentView: View {
                         RadioStationListView(isEditing: $isEditingMode,
                                              isEditingStation: $isEditingStation,
                                              selectedStationForEdit: $selectedStationForEdit,
-                                             selectedTab: $selectedTab,
-                                             searchText: $searchText)
+                                             selectedTab: $selectedTab)
                             .environmentObject(viewModel)
                             .environmentObject(radioPlayer)
                             .frame(width: sizeClass == .regular ? 615 : 385)

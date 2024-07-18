@@ -81,7 +81,7 @@ class RadioStationViewModel: ObservableObject {
     let defaultStationsVersionKey = "defaultStationsVersion"
     
     // Increment this number when adding new stations to push updates only for those stations to users
-    let currentDefaultStationsVersion = 2
+    let currentDefaultStationsVersion = 1
     
     var isPremiumUser: Bool {
         return PurchaseManager.shared.hasPurchasedPremium

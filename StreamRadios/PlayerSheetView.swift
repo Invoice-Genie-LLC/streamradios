@@ -234,7 +234,7 @@ struct PlayerSheetView: View {
                 
                 Button(action: {
                     // Check if the user is not a premium user and if the station count is 5 or more
-                    if viewModel.stations.count > 2000 && !viewModel.isPremiumUser {
+                    if viewModel.stations.count > 5 && !viewModel.isPremiumUser {
                         // Show purchase view if user is not premium and has 5 or more stations
                         showingPurchaseView = true
                     } else {
