@@ -2004,19 +2004,6 @@ struct DefaultStations {
         let defaultStations = [
             ("edge.iono.fm/xice/162_medium.", "Capitalk 100.4FM Harare", "https://edge.iono.fm/xice/162_medium.aac"),
             ("edge.iono.fm/xice/159_medium.", "Star FM 89.7", "https://edge.iono.fm/xice/159_medium.aac"),
-            
-            
-            ("tv.balkanweb.com:8081/news24/livestream/playlist.m3u8", "Radio News 24", "http://tv.balkanweb.com:8081/news24/livestream/playlist.m3u8"),
-            ("streaming.ihost.al", "Beatfm.al", "http://streaming.ihost.al:8010"),
-            ("eu8.fastcast4u.com/proxy/chillradio?mp=/1", "Chill Radio", "https://eu8.fastcast4u.com/proxy/chillradio?mp=/1"),
-            ("cp1.sednastream.com/proxy/clubfm", "Club FM Radio", "https://cp1.sednastream.com/proxy/clubfm?mp=/stream"),
-            ("cp1.sednastream.com/proxy/cityradio", "City Radio", "https://cp1.sednastream.com/proxy/cityradio?mp=%2Fstream"),
-            ("84.20.83.24:88/broadwavehigh.?src=1", "Radio Kontakt", "http://84.20.83.24:88/broadwavehigh.mp3?src=1"),
-            ("klanradio.tvklan.al/live/klanmusicradio1", "Klan Radio", "https://klanradio.tvklan.al/live/klanmusicradio1/playlist.m3u8"),
-            ("live.topgold.al/topgold", "Top Gold Radio", "https://live.topgold.al/topgold"),
-            ("live.top-media.al/mmr", "My Music Radio", "https://live.top-media.al/mmr"),
-            ("radio.oranews.tv", "OraNews", "https://radio.oranews.tv:8443/stream"),
-            
         ]
         
         let existingStations = Set(viewModel.stations.filter { $0.country == "Zimbabwe" }.map { $0.id })
@@ -2053,9 +2040,8 @@ struct DefaultStations {
     
     @StateObject private var viewModel = RadioStationViewModel()
     static func addAllDefaults(to viewModel: RadioStationViewModel) {
-        addDefaultStationsForZimbabwe(to: viewModel)
-
-        /*
+        addDefaultStationsForAlbania(to: viewModel)
+        addDefaultStationsForRomania(to: viewModel)
         addDefaultStationsForAlbania(to: viewModel)
         addDefaultStationsForRomania(to: viewModel)
         addDefaultStationsForPanama(to: viewModel)
@@ -2104,7 +2090,6 @@ struct DefaultStations {
         addDefaultStationsForUSA(to: viewModel)
         addDefaultStationsForZimbabwe(to: viewModel)
         addDefaultStationsForUnknownRegion(to: viewModel)
-         */
     }
 }
 

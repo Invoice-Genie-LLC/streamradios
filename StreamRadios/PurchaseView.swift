@@ -61,6 +61,7 @@ struct PurchaseView: View {
     
     private var featureList: some View {
         VStack(alignment: .leading, spacing: 10) {
+            FeatureItem(text: "Enable access to view all available stations.")
             FeatureItem(text: "Add Unlimited Stations: Break free from limits and add as many stations as you desire.")
             FeatureItem(text: "Real-Time Lyrics: Enjoy the ability to view lyrics for many songs identified via Shazam.")
         }

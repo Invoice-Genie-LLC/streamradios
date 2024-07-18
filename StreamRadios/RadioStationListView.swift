@@ -21,7 +21,6 @@ struct RadioStationListView: View {
     @Binding var isEditingStation: Bool
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
-    @Binding var searchText: String
     
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
@@ -99,7 +98,7 @@ struct RadioStationListView: View {
                 ForEach(filteredStations) { station in
                     stationRow(for: station)
                 }
-                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 2000 {
+                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 5 {
                     Button("Show More") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             viewModel.activeSheet = .purchase
@@ -154,7 +153,9 @@ struct RadioStationListView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            if !isEditing && viewModel.isPremiumUser { // Check for premium status
+            // Modify values in this line do disable edit if user is not premium:
+            //  viewModel.isPremiumUser
+            if !isEditing && viewModel.isPremiumUser {
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -168,7 +169,9 @@ struct RadioStationListView: View {
         .padding(.horizontal)
         .padding(.vertical, 4)
         .contextMenu {
-            if !isEditing && viewModel.isPremiumUser { // Check for premium status
+            // Modify values in this line do disable edit if user is not premium:
+            //  viewModel.isPremiumUser
+            if !isEditing && viewModel.isPremiumUser {
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -278,15 +281,7 @@ struct RadioStationListView: View {
         case .favorites:
             return viewModel.favoriteStations()
         case .all:
-            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(2000))
-        }
-    }
-
-    private func limitedStations(stations: [RadioStation]) -> [RadioStation] {
-        if PurchaseManager.shared.hasPurchasedPremium {
-            return stations
-        } else {
-            return Array(stations.prefix(5))
+            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(5))
         }
     }
     
@@ -401,7 +396,7 @@ struct RadioStationListView_Previews: PreviewProvider {
     
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false),
-                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent), searchText: .constant(""))
+                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent))
         .environmentObject(viewModel)
         .environmentObject(radioPlayer)
     }
