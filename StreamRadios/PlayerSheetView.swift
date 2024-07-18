@@ -233,7 +233,12 @@ struct PlayerSheetView: View {
                 }
                 
                 Button(action: {
-                    if PurchaseManager.shared.hasPurchasedPremium {
+                    // Check if the user is not a premium user and if the station count is 5 or more
+                    if viewModel.stations.count > 2000 && !viewModel.isPremiumUser {
+                        // Show purchase view if user is not premium and has 5 or more stations
+                        showingPurchaseView = true
+                    } else {
+                        // Otherwise, proceed with showing lyrics as usual
                         showingLyrics.toggle()
                         if shazamViewModel.shazamMedia.lyrics == nil {
                             lyricsLoading = true
@@ -248,12 +253,9 @@ struct PlayerSheetView: View {
                                         }
                                         lyricsLoading = false
                                     }
-                                    lyricsLoading = false
                                 }
                             }
                         }
-                    } else {
-                        showingPurchaseView = true
                     }
                 }) {
                     Text("Show Lyrics")
@@ -280,9 +282,9 @@ struct PlayerSheetView: View {
                     getCurrentPlaybackTime: {
                         radioPlayer.getCurrentTime()
                     },
-                    isSongAvailable: shazamViewModel.shazamMedia.title != nil && radioPlayer.isPlaying
+                    isSongAvailable: shazamViewModel.shazamMedia.title != nil && radioPlayer.isPlaying 
                 )
-                
+
             } else if lyricsLoading {
                 Text("Fetching lyrics...")
                     .font(.title)

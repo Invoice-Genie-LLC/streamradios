@@ -182,7 +182,7 @@ struct AddStationView: View {
             showAlert = true
             return
         }
-        if viewModel.stations.count >= 5 && !PurchaseManager.shared.hasPurchasedPremium {
+        if viewModel.stations.count > 2000 && !PurchaseManager.shared.hasPurchasedPremium {
             showingPurchaseView = true
         } else {
             let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()

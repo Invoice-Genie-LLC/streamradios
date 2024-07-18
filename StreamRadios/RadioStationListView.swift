@@ -99,7 +99,7 @@ struct RadioStationListView: View {
                 ForEach(filteredStations) { station in
                     stationRow(for: station)
                 }
-                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 5 {
+                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 2000 {
                     Button("Show More") {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             viewModel.activeSheet = .purchase
@@ -278,7 +278,7 @@ struct RadioStationListView: View {
         case .favorites:
             return viewModel.favoriteStations()
         case .all:
-            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(5))
+            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(2000))
         }
     }
 
