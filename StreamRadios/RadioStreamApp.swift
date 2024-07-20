@@ -13,9 +13,8 @@ import UIKit
 struct RadioStreamApp: App {
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var purchaseManager = PurchaseManager.shared
     @StateObject private var notificationManager = NotificationManager.shared
-
+    
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel()
     
@@ -45,7 +44,6 @@ struct RadioStreamApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(PermissionManager())
-                .environmentObject(purchaseManager)
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)
                 .environmentObject(notificationManager)

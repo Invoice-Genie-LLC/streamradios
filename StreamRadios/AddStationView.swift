@@ -17,7 +17,6 @@ struct AddStationView: View {
     @EnvironmentObject var permissionManager: PermissionManager
     @Binding var isPresented: Bool
     @Binding var isEditingStation: RadioStation?
-    @State private var showingPurchaseView = false
     var station: RadioStation?
     
     init(station: RadioStation? = nil, isPresented: Binding<Bool>? = nil, isEditingStation: Binding<RadioStation?>? = nil) {
@@ -149,11 +148,6 @@ struct AddStationView: View {
                 }
                 .navigationBarHidden(true) // Hide the default navigation bar
             }
-            
-            .sheet(isPresented: $showingPurchaseView) {
-                PurchaseView(isPresented: $showingPurchaseView)
-            }
-            
             if showAlert {
                 Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
                 CustomAlertView(title: "Validation Error", message: alertMessage, buttonText: "OK") {
@@ -182,14 +176,10 @@ struct AddStationView: View {
             showAlert = true
             return
         }
-        if viewModel.stations.count > 5 && !PurchaseManager.shared.hasPurchasedPremium {
-            showingPurchaseView = true
-        } else {
-            let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-            viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
-            viewModel.saveStationsToCoreData()
-            isPresented = false
-        }
+        let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
+        viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
+        viewModel.saveStationsToCoreData()
+        isPresented = false
     }
 }
 

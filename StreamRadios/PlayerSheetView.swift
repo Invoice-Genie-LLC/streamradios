@@ -29,7 +29,6 @@ struct PlayerSheetView: View {
     @State private var showingLyrics = false
     @State private var lyricsLoading = false
     @State private var pulse = false
-    @State private var showingPurchaseView = false
     
     var body: some View {
         NavigationView {
@@ -233,29 +232,23 @@ struct PlayerSheetView: View {
                 }
                 
                 Button(action: {
-                    // Check if the user is not a premium user and if the station count is 5 or more
-                    if viewModel.stations.count > 5 && !viewModel.isPremiumUser {
-                        // Show purchase view if user is not premium and has 5 or more stations
-                        showingPurchaseView = true
-                    } else {
-                        // Otherwise, proceed with showing lyrics as usual
-                        showingLyrics.toggle()
-                        if shazamViewModel.shazamMedia.lyrics == nil {
-                            lyricsLoading = true
-                            if let artist = shazamViewModel.shazamMedia.artistName, let title = shazamViewModel.shazamMedia.title {
-                                shazamViewModel.fetchLyrics(for: artist, song: title) { result in
-                                    DispatchQueue.main.async { // Ensure UI updates are on the main thread
-                                        switch result {
-                                        case .success(let lyrics):
-                                            shazamViewModel.shazamMedia.lyrics = lyrics
-                                        case .failure:
-                                            shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
-                                        }
-                                        lyricsLoading = false
+                    showingLyrics.toggle()
+                    if shazamViewModel.shazamMedia.lyrics == nil {
+                        lyricsLoading = true
+                        if let artist = shazamViewModel.shazamMedia.artistName, let title = shazamViewModel.shazamMedia.title {
+                            shazamViewModel.fetchLyrics(for: artist, song: title) { result in
+                                DispatchQueue.main.async { // Ensure UI updates are on the main thread
+                                    switch result {
+                                    case .success(let lyrics):
+                                        shazamViewModel.shazamMedia.lyrics = lyrics
+                                    case .failure:
+                                        shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
                                     }
+                                    lyricsLoading = false
                                 }
                             }
                         }
+                        
                     }
                 }) {
                     Text("Show Lyrics")
@@ -263,9 +256,6 @@ struct PlayerSheetView: View {
                         .foregroundColor(Color.primary)
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
-                }
-                .sheet(isPresented: $showingPurchaseView) {
-                    PurchaseView(isPresented: $showingPurchaseView)
                 }
                 
             }
@@ -284,7 +274,7 @@ struct PlayerSheetView: View {
                     },
                     isSongAvailable: shazamViewModel.shazamMedia.title != nil && radioPlayer.isPlaying 
                 )
-
+                
             } else if lyricsLoading {
                 Text("Fetching lyrics...")
                     .font(.title)

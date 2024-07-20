@@ -8,7 +8,6 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
-    @State private var showingPurchase = false
     @Environment(\.presentationMode) var presentationMode
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
@@ -21,7 +20,6 @@ struct SettingsView: View {
             
             playbackSettingsSection
             displaySettingsSection
-            premiumFeaturesSection
             dataManagementSection
         }
         .navigationTitle("Settings")
@@ -33,9 +31,6 @@ struct SettingsView: View {
         }
         .onChange(of: isDarkMode) { newValue in
             updateDarkMode(to: newValue)
-        }
-        .sheet(isPresented: $showingPurchase) {
-            PurchaseView(isPresented: $showingPurchase)
         }
         .onAppear {
                     if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
@@ -54,14 +49,6 @@ struct SettingsView: View {
     private var displaySettingsSection: some View {
         Section(header: Text("Display Settings")) {
             Toggle("Dark Mode", isOn: $isDarkMode)
-        }
-    }
-
-    private var premiumFeaturesSection: some View {
-        Section(header: Text("Premium Features")) {
-            Button("Enable Premium Features") {
-                showingPurchase = true
-            }
         }
     }
     
