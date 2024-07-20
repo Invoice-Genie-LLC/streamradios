@@ -242,9 +242,6 @@ struct ContentView: View {
                 self.bitrateMessage = newBitrateMessage
             }
         }
-        .sheet(isPresented: $viewModel.showingPurchaseView) {
-            PurchaseView(isPresented: $viewModel.showingPurchaseView)
-        }
         .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
             UIApplication.shared.addTapGestureRecognizer()

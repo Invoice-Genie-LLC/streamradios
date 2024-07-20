@@ -67,7 +67,6 @@ class RadioStationViewModel: ObservableObject {
     @Published var isCloudKitOperationRunning = false
     @Published var isDeletionInProgress = false
     @Published var isUploadingToCloudKit = false
-    @Published var showingPurchaseView = false
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
@@ -83,12 +82,8 @@ class RadioStationViewModel: ObservableObject {
     // Increment this number when adding new stations to push updates only for those stations to users
     let currentDefaultStationsVersion = 1
     
-    var isPremiumUser: Bool {
-        return PurchaseManager.shared.hasPurchasedPremium
-    }
-    
     enum ActiveSheet: Identifiable {
-        case editStation, purchase
+        case editStation
         var id: Int {
             self.hashValue
         }

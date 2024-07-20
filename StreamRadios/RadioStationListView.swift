@@ -60,12 +60,6 @@ struct RadioStationListView: View {
                     AddStationView(isPresented: $isEditingStation)
                         .environmentObject(viewModel)
                 }
-            case .purchase:
-                PurchaseView(isPresented: Binding<Bool>(
-                    get: { viewModel.activeSheet == .purchase },
-                    set: { _ in viewModel.activeSheet = nil }
-                ))
-                .environmentObject(PurchaseManager.shared)
             }
         }
         .onAppear(perform: setup)
@@ -90,21 +84,13 @@ struct RadioStationListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.scale)
     }
-
+    
     
     private var stationsListView: some View {
         ScrollView {
             LazyVStack {
                 ForEach(filteredStations) { station in
                     stationRow(for: station)
-                }
-                if selectedTab == .all && !PurchaseManager.shared.hasPurchasedPremium && viewModel.stations.filter({ $0.country == viewModel.selectedCountry }).count > 5 {
-                    Button("Show More") {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            viewModel.activeSheet = .purchase
-                        }
-                    }
-                    .padding()
                 }
             }
             .padding(.top, 10)
@@ -115,27 +101,27 @@ struct RadioStationListView: View {
     @ViewBuilder
     private func stationRow(for station: RadioStation) -> some View {
         HStack {
-                imageForStation(station)
-                    .frame(width: 50, height: 50)
-                    .cornerRadius(8)
-                
-                VStack(alignment: .leading, spacing: 5) {
-                    stationInfo(for: station)
-                                   .font(.headline)
-                                   .foregroundColor(.primary)
-                                   .lineLimit(1)
-                                   .truncationMode(.tail)
-
-                    stationMetadata(for: station)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.leading, 5)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            imageForStation(station)
+                .frame(width: 50, height: 50)
+                .cornerRadius(8)
             
-        
-           // Spacer()
-
+            VStack(alignment: .leading, spacing: 5) {
+                stationInfo(for: station)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                
+                stationMetadata(for: station)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.leading, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            
+            // Spacer()
+            
             if isEditing {
                 editControls(for: station)
             } else {
@@ -153,9 +139,19 @@ struct RadioStationListView: View {
             }
         }
         .swipeActions(edge: .trailing) {
-            // Modify values in this line do disable edit if user is not premium:
-            //  viewModel.isPremiumUser
-            if !isEditing && viewModel.isPremiumUser {
+            Button(role: .destructive) {
+                withAnimation {
+                    deleteStation(station)
+                }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(.horizontal)
+        .padding(.vertical, 4)
+        .contextMenu {
+            if !isEditing  {
                 Button(role: .destructive) {
                     withAnimation {
                         deleteStation(station)
@@ -165,28 +161,12 @@ struct RadioStationListView: View {
                 }
             }
         }
-        .buttonStyle(PlainButtonStyle())
-        .padding(.horizontal)
-        .padding(.vertical, 4)
-        .contextMenu {
-            // Modify values in this line do disable edit if user is not premium:
-            //  viewModel.isPremiumUser
-            if !isEditing && viewModel.isPremiumUser {
-                Button(role: .destructive) {
-                    withAnimation {
-                        deleteStation(station)
-                    }
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-           }
-        }
         .onDrag {
-                UIDevice.playHapticFeedback()
-                self.draggingStation = station
-                self.originalMetadata = radioPlayer.metadata
-                radioPlayer.metadata = nil
-                return NSItemProvider(object: String(station.id) as NSString)
+            UIDevice.playHapticFeedback()
+            self.draggingStation = station
+            self.originalMetadata = radioPlayer.metadata
+            radioPlayer.metadata = nil
+            return NSItemProvider(object: String(station.id) as NSString)
         }
         .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
     }
@@ -281,7 +261,7 @@ struct RadioStationListView: View {
         case .favorites:
             return viewModel.favoriteStations()
         case .all:
-            return PurchaseManager.shared.hasPurchasedPremium ? allStations : Array(allStations.prefix(5))
+            return allStations
         }
     }
     
