@@ -26,8 +26,6 @@ struct PlayerSheetView: View {
     @Environment(\.presentationMode) var presentationMode
     @StateObject private var shazamViewModel = ShazamViewModel()
     @State private var isShazaming = false
-    @State private var showingLyrics = false
-    @State private var lyricsLoading = false
     @State private var pulse = false
     
     var body: some View {
@@ -231,58 +229,6 @@ struct PlayerSheetView: View {
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
                 }
                 
-                Button(action: {
-                    showingLyrics.toggle()
-                    if shazamViewModel.shazamMedia.lyrics == nil {
-                        lyricsLoading = true
-                        if let artist = shazamViewModel.shazamMedia.artistName, let title = shazamViewModel.shazamMedia.title {
-                            shazamViewModel.fetchLyrics(for: artist, song: title) { result in
-                                DispatchQueue.main.async { // Ensure UI updates are on the main thread
-                                    switch result {
-                                    case .success(let lyrics):
-                                        shazamViewModel.shazamMedia.lyrics = lyrics
-                                    case .failure:
-                                        shazamViewModel.shazamMedia.lyrics = "Lyrics not available"
-                                    }
-                                    lyricsLoading = false
-                                }
-                            }
-                        }
-                        
-                    }
-                }) {
-                    Text("Show Lyrics")
-                        .font(.headline)
-                        .foregroundColor(Color.primary)
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
-                }
-                
-            }
-            .padding(.top, 5)
-            .padding(.bottom, 5)
-        }
-        .fullScreenCover(isPresented: $showingLyrics) {
-            if let lyrics = shazamViewModel.shazamMedia.lyrics, !lyrics.isEmpty {
-                LyricsView(
-                    lyrics: lyrics,
-                    title: shazamViewModel.shazamMedia.title ?? "Title",
-                    artistName: shazamViewModel.shazamMedia.artistName ?? "Artist Name",
-                    onClose: { showingLyrics = false },
-                    getCurrentPlaybackTime: {
-                        radioPlayer.getCurrentTime()
-                    },
-                    isSongAvailable: shazamViewModel.shazamMedia.title != nil && radioPlayer.isPlaying 
-                )
-                
-            } else if lyricsLoading {
-                Text("Fetching lyrics...")
-                    .font(.title)
-                    .padding()
-            } else {
-                Text("Lyrics not available")
-                    .font(.title)
-                    .padding()
             }
         }
     }

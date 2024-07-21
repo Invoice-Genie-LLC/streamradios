@@ -79,10 +79,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     private var notificationManager = NotificationManager.shared
     private var backgroundObserver: NSObjectProtocol?
-    let defaultStationsVersionKey = "defaultStationsVersion"
-    
-    // Increment this number when adding new stations to push updates only for those stations to users
-    let currentDefaultStationsVersion = 1
     
     enum ActiveSheet: Identifiable {
         case editStation
@@ -103,12 +99,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             let userDefaults = UserDefaults.standard
             let hasLaunchedBeforeKey = "HasLaunchedBefore"
-            let lastDefaultStationsVersion = userDefaults.integer(forKey: defaultStationsVersionKey)
             
-            if !userDefaults.bool(forKey: hasLaunchedBeforeKey) || lastDefaultStationsVersion < currentDefaultStationsVersion {
+            if !userDefaults.bool(forKey: hasLaunchedBeforeKey) {
                 print("First time setup or new default stations detected, initializing default stations and saving to local and CloudKit.")
                 initializeStationsForFirstTime()
-                userDefaults.set(currentDefaultStationsVersion, forKey: defaultStationsVersionKey)
             } else {
                 print("App relaunch detected.")
                 syncStationsWithCloudKit() // This method will ensure data consistency with CloudKit
@@ -237,7 +231,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
-    
     func clearCoreData(completion: @escaping (Bool, Error?) -> Void) {
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
@@ -275,16 +268,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
         let userDefaults = UserDefaults.standard
         let hasLaunchedBeforeKey = "HasLaunchedBefore"
         
-        if userDefaults.bool(forKey: hasLaunchedBeforeKey) == false || userDefaults.integer(forKey: defaultStationsVersionKey) < currentDefaultStationsVersion {
+        if userDefaults.bool(forKey: hasLaunchedBeforeKey) == false {
             print("Initializing default stations for first time setup or new default stations detected.")
-            
-            DefaultStations.addAllDefaults(to: self)
-            
+                        
             saveStationsToCloudKit()
             saveStationsToCoreData()
             
             userDefaults.set(true, forKey: hasLaunchedBeforeKey)
-            userDefaults.set(currentDefaultStationsVersion, forKey: defaultStationsVersionKey)
             userDefaults.synchronize() // Ensure the flag is saved immediately
         }
     }
