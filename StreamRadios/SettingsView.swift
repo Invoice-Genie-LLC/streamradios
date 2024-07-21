@@ -14,12 +14,16 @@ struct SettingsView: View {
     @State private var deletionComplete = false
     @EnvironmentObject var viewModel: RadioStationViewModel
     @StateObject private var notificationManager = NotificationManager.shared
+    @State private var showDocumentPicker = false
+    @State private var showAlertForCountrySelection = false
+    @State private var isImporting = false
+    @State private var importProgress: Double = 0.0  // State variable to track import progress
 
     var body: some View {
         Form {
-            
             playbackSettingsSection
             displaySettingsSection
+            streamFileUploadSection
             dataManagementSection
         }
         .navigationTitle("Settings")
@@ -33,11 +37,17 @@ struct SettingsView: View {
             updateDarkMode(to: newValue)
         }
         .onAppear {
-                    if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
-                        notificationManager.requestAuthorization()
-                        UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
-                    }
-                }
+            if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
+                notificationManager.requestAuthorization()
+                UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
+            if viewModel.selectedCountry != "Select Country" {
+                showAlertForCountrySelection = false
+            }
+        }
+        Spacer()
     }
 
     private var playbackSettingsSection: some View {
@@ -51,12 +61,98 @@ struct SettingsView: View {
             Toggle("Dark Mode", isOn: $isDarkMode)
         }
     }
-    
+
+    private var streamFileUploadSection: some View {
+        Section(header: Text("Stream File Upload").font(.headline).padding(.top)) {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading) {
+                    Text("Select Country")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    StyledPickerView(selectedCountry: $viewModel.selectedCountry, countries: viewModel.countries)
+                        .padding()
+                        .background(Color(.systemGray5))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                }
+                
+                VStack(alignment: .leading) {
+                    Text("File Import")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Button(action: {
+                        if viewModel.selectedCountry == "Select Country" {
+                            showAlertForCountrySelection = true
+                        } else {
+                            showDocumentPicker = true
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "doc.text.fill")
+                                .font(.title2)
+                                .foregroundColor(.blue)
+                            Text("Import Stations File")
+                                .font(.headline)
+                                .foregroundColor(.blue)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    }
+                    .alert(isPresented: $showAlertForCountrySelection) {
+                        Alert(
+                            title: Text("Select a Country"),
+                            message: Text("Please select a country from the country selector in the app before importing stations."),
+                            dismissButton: .default(Text("OK"))
+                        )
+                    }
+                    .sheet(isPresented: $showDocumentPicker) {
+                        DocumentPicker { url in
+                            isImporting = true  // Set import status to true
+                            importProgress = 0.0  // Reset progress
+
+                            viewModel.importStationsFromFile(url: url) { progress in
+                                DispatchQueue.main.async {
+                                    importProgress = progress
+                                }
+                            } completion: {
+                                isImporting = false  // Set import status to false after import
+                            }
+                        }
+                    }
+                    
+                    if isImporting {
+                        VStack {
+                            ProgressView(value: importProgress, total: 1.0) {
+                                Text("Importing stations...")
+                            }
+                            .progressViewStyle(LinearProgressViewStyle())
+                            .padding()
+                            .background(Color(.systemGray5))
+                            .cornerRadius(12)
+                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        }
+                        .padding(.top, 10)
+                    }
+                }
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .listRowBackground(Color.clear)
+    }
+
     private var dataManagementSection: some View {
         Section(header: Text("Data Management")) {
             Button("Delete All Data") {
                 showingDeleteAlert = true
-                
             }
             .alert(isPresented: $showingDeleteAlert) {
                 Alert(
@@ -116,22 +212,22 @@ struct SettingsView: View {
     }
 
     private func initiateDataDeletion() {
-            if viewModel.isCloudKitOperationRunning {
-                notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
-            } else {
-                notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from iCloud and local storage has started.")
-                viewModel.deleteAllData { success, error in
-                    if success {
-                        print("Deletion was successful.")
-                        self.deletionComplete = true
-                        notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from iCloud and local storage.")
-                    } else if let error = error {
-                        print("Deletion failed: \(error.localizedDescription)")
-                        notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting data. Please try again.")
-                    }
+        if viewModel.isCloudKitOperationRunning {
+            notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
+        } else {
+            notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from iCloud and local storage has started.")
+            viewModel.deleteAllData { success, error in
+                if success {
+                    print("Deletion was successful.")
+                    self.deletionComplete = true
+                    notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from iCloud and local storage.")
+                } else if let error = error {
+                    print("Deletion failed: \(error.localizedDescription)")
+                    notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting data. Please try again.")
                 }
             }
         }
+    }
 }
 
 struct SettingsView_Previews: PreviewProvider {

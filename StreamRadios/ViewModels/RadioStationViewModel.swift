@@ -70,9 +70,9 @@ class RadioStationViewModel: ObservableObject {
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
-            if selectedCountry != "Select Country" {
+           // if selectedCountry != "Select Country" {
                 NotificationCenter.default.post(name: .countrySelected, object: nil)
-            }
+           // }
         }
     }
     private var notificationManager = NotificationManager.shared
@@ -111,6 +111,40 @@ class RadioStationViewModel: ObservableObject {
         }
     }
     
+    func importStationsFromFile(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+            do {
+                let data = try Data(contentsOf: url)
+                let jsonDecoder = JSONDecoder()
+                let stationsFromJson = try jsonDecoder.decode([RadioStation].self, from: data)
+
+                let totalStations = Double(stationsFromJson.count)
+                var importedStations = 0.0
+
+                DispatchQueue.main.async {
+                    for station in stationsFromJson {
+                        self.stations.append(station)
+                        importedStations += 1
+                        progressHandler(importedStations / totalStations)
+                    }
+
+                    print("Imported \(stationsFromJson.count) stations.")
+
+                    // Save these to CoreData
+                    self.saveStationsToCoreData()
+
+                    // Save to CloudKit
+                    self.saveStationsToCloudKit()
+
+                    // Optionally, if there is a need to notify or refresh the UI, do it here
+                    NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                    completion() // Call the completion handler
+                }
+            } catch {
+                print("Failed to import stations: \(error)")
+                completion() // Call the completion handler even in case of failure
+            }
+        }
+
     
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
         isDeletingData = true
@@ -526,4 +560,5 @@ extension RadioStationViewModel {
 
 extension Notification.Name {
     static let countrySelected = Notification.Name("countrySelected")
+    static let stationsUpdated = Notification.Name("stationsUpdated")
 }

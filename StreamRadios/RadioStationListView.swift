@@ -64,6 +64,9 @@ struct RadioStationListView: View {
         }
         .onAppear(perform: setup)
         .onDisappear(perform: cleanup)
+        .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
+                    viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
+                }
     }
     
     private var emptyStateView: some View {
@@ -169,6 +172,7 @@ struct RadioStationListView: View {
             return NSItemProvider(object: String(station.id) as NSString)
         }
         .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
+        
     }
     
     @ViewBuilder

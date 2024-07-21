@@ -14,7 +14,7 @@ struct RadioStation: Identifiable, Codable, Equatable {
     var country: String = "Unknown Region"
     var isFavorite: Bool = false
     var lastPlayed: Date?
-    var isRecent: Bool = false
+    var isRecent: Bool? = false
     
     enum CodingKeys: String, CodingKey {
         case id, name, url, iconData, country, isFavorite, lastPlayed, isRecent
