@@ -17,7 +17,14 @@ struct RadioStation: Identifiable, Codable, Equatable {
     var isRecent: Bool? = false
     
     enum CodingKeys: String, CodingKey {
-        case id, name, url, iconData, country, isFavorite, lastPlayed, isRecent
+        case id
+        case name
+        case url
+        case country
+        case isFavorite
+        case iconData
+        case lastPlayed
+        case isRecent
     }
 }
 

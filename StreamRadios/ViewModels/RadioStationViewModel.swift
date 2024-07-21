@@ -7,8 +7,10 @@
 import SwiftUI
 import Combine
 import CoreData
+import UniformTypeIdentifiers
 
-class RadioStationViewModel: ObservableObject {
+
+class RadioStationViewModel: NSObject, ObservableObject {
     @Published var stations: [RadioStation] = []
     @Published var countries: [Country] = [
         Country(name: "Select Country", flag: ""),
@@ -93,23 +95,25 @@ class RadioStationViewModel: ObservableObject {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
     }
     
-    init() {
-        selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
-        loadStationsFromCoreData()
-        
-        let userDefaults = UserDefaults.standard
-        let hasLaunchedBeforeKey = "HasLaunchedBefore"
-        let lastDefaultStationsVersion = userDefaults.integer(forKey: defaultStationsVersionKey)
-        
-        if !userDefaults.bool(forKey: hasLaunchedBeforeKey) || lastDefaultStationsVersion < currentDefaultStationsVersion {
-            print("First time setup or new default stations detected, initializing default stations and saving to local and CloudKit.")
-            initializeStationsForFirstTime()
-            userDefaults.set(currentDefaultStationsVersion, forKey: defaultStationsVersionKey)
-        } else {
-            print("App relaunch detected.")
-            syncStationsWithCloudKit() // This method will ensure data consistency with CloudKit
+    override init() {
+            super.init()
+            
+            selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
+            loadStationsFromCoreData()
+            
+            let userDefaults = UserDefaults.standard
+            let hasLaunchedBeforeKey = "HasLaunchedBefore"
+            let lastDefaultStationsVersion = userDefaults.integer(forKey: defaultStationsVersionKey)
+            
+            if !userDefaults.bool(forKey: hasLaunchedBeforeKey) || lastDefaultStationsVersion < currentDefaultStationsVersion {
+                print("First time setup or new default stations detected, initializing default stations and saving to local and CloudKit.")
+                initializeStationsForFirstTime()
+                userDefaults.set(currentDefaultStationsVersion, forKey: defaultStationsVersionKey)
+            } else {
+                print("App relaunch detected.")
+                syncStationsWithCloudKit() // This method will ensure data consistency with CloudKit
+            }
         }
-    }
     
     func importStationsFromFile(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
             do {
@@ -144,6 +148,33 @@ class RadioStationViewModel: ObservableObject {
                 completion() // Call the completion handler even in case of failure
             }
         }
+    
+    func exportStationsToFile(completion: @escaping (URL?) -> Void) {
+        let filteredStations = self.stations.filter { $0.country == self.selectedCountry || self.selectedCountry == "Select Country" }
+                                            .map(ExportStation.init)
+
+        // Create JSON string manually for each station and join them in an array format
+        let jsonStrings = filteredStations.map { $0.jsonString }
+        let jsonArrayString = "[\n" + jsonStrings.joined(separator: ",\n") + "\n]"
+
+        let fileName = "stations_export.json"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+        do {
+            try jsonArrayString.write(to: fileURL, atomically: true, encoding: .utf8)
+            DispatchQueue.main.async {
+                completion(fileURL)
+            }
+        } catch {
+            print("Failed to export stations: \(error)")
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+        }
+    }
+
+
+
 
     
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
@@ -327,11 +358,13 @@ class RadioStationViewModel: ObservableObject {
     }
     
     func addStation(name: String, url: String, iconData: String?, country: String) {
-        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country)
+        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: false)
         stations.append(newStation)
-        saveStationToCloudKit(station: newStation)
+        print("Added new station: \(newStation)")
         saveStationsToCoreData()
+        saveStationToCloudKit(station: newStation)
     }
+
     
     func saveStationsToCloudKit() {
         isUploadingToCloudKit = true
@@ -561,4 +594,15 @@ extension RadioStationViewModel {
 extension Notification.Name {
     static let countrySelected = Notification.Name("countrySelected")
     static let stationsUpdated = Notification.Name("stationsUpdated")
+}
+
+// Conform to UIDocumentPickerDelegate to handle document picker events
+extension RadioStationViewModel: UIDocumentPickerDelegate {
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        // Handle the document picker result if needed
+    }
+    
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        // Handle the document picker cancellation if needed
+    }
 }
