@@ -17,6 +17,7 @@
 		7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA692C156FDA006D5EBB /* RadioStationListView.swift */; };
 		77130BF82C307D5F00D4711A /* EndEditing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77130BF72C307D5F00D4711A /* EndEditing.swift */; };
 		771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715539F2C19E6C800BE43FA /* AppDelegate.swift */; };
+		7715BD962C4C3AD700FA7CB1 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */; };
 		771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */; };
 		77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */; };
 		77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */; };
@@ -91,6 +92,7 @@
 		7707DA692C156FDA006D5EBB /* RadioStationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStationListView.swift; sourceTree = "<group>"; };
 		77130BF72C307D5F00D4711A /* EndEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndEditing.swift; sourceTree = "<group>"; };
 		7715539F2C19E6C800BE43FA /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
 		771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeumorphicShadow.swift; sourceTree = "<group>"; };
 		77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStore.swift; sourceTree = "<group>"; };
 		77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
@@ -188,6 +190,7 @@
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
+				7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				77EAD07D2C37B04F0095AF2F /* DefaultStations.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
@@ -411,6 +414,7 @@
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
+				7715BD962C4C3AD700FA7CB1 /* DocumentPicker.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
