@@ -22,6 +22,7 @@ struct RadioStationListView: View {
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
     @Binding var activeSheet: ActiveSheet?
+    @State private var showAlertForCountryBeforeAddingStation = false
     
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
@@ -78,18 +79,28 @@ struct RadioStationListView: View {
                 .foregroundColor(.gray)
                 .padding(.bottom, 15)
             Button(action: {
-                self.selectedStationForEdit = nil  // Ensure no station is selected for editing
-                self.isEditingStation = true  // Trigger the sheet to open
-            }) {
+                if viewModel.selectedCountry == "Select Country" {
+                    showAlertForCountryBeforeAddingStation = true
+                } else {
+                    self.selectedStationForEdit = nil  // Ensure no station is selected for editing
+                    self.activeSheet = .addStation   // Trigger the sheet to open
+                }}) {
                 Image(systemName: "plus.circle")
                     .font(.largeTitle)
                     .foregroundColor(.primary)
             }
         }
+        .alert(isPresented: $showAlertForCountryBeforeAddingStation) { // Add this alert
+                Alert(
+                    title: Text("Select a Country"),
+                    message: Text("Please select a country before creating a new station."),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.scale)
     }
-    
+        
     
     private var stationsListView: some View {
         ScrollView {
