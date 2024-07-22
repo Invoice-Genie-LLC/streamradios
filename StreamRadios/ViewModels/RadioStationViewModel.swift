@@ -64,8 +64,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var selectedTab: Tab = .all
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
-    @Published var isDeletingData = false
-    @Published var deletionComplete = false
+    @Published var isDeletingData: Bool = false
+    @Published var deletionComplete: Bool = false
     @Published var isCloudKitOperationRunning = false
     @Published var isDeletionInProgress = false
     @Published var isUploadingToCloudKit = false
@@ -166,16 +166,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
         }
     }
-
-
-
-
     
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
-        isDeletingData = true
-        deletionComplete = false
-        isCloudKitOperationRunning = true
-        isDeletionInProgress = true
+        DispatchQueue.main.async {
+            self.isDeletingData = true
+            self.deletionComplete = false
+            self.isCloudKitOperationRunning = true
+            self.isDeletionInProgress = true
+        }
         
         // Set up background task
         var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
@@ -202,6 +200,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     if success {
                         self.clearCoreData { coreDataSuccess, coreDataError in
+                            if coreDataSuccess {
+                                self.stations.removeAll()
+                            }
                             self.cleanupAfterDeletion(success: coreDataSuccess, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
                         }
                     } else {
@@ -211,23 +212,24 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
         }
     }
-    
+
     private func cleanupAfterDeletion(success: Bool, error: Error?, backgroundTaskID: UIBackgroundTaskIdentifier, completion: @escaping (Bool, Error?) -> Void) {
-        isDeletingData = false
-        isCloudKitOperationRunning = false
-        isDeletionInProgress = false
-        deletionComplete = success
-        
-        // Remove the background observer
-        removeBackgroundObserver()
-        
-        UIApplication.shared.endBackgroundTask(backgroundTaskID)
-        completion(success, error)
-        
-        if success {
-            // No success message here, it gets triggered in saveStationsToCloudKit function
-        } else if let error = error {
-            NotificationManager.shared.notifyUser(title: "Deletion Failed", message: "An error occurred: \(error.localizedDescription)")
+        DispatchQueue.main.async {
+            self.isDeletingData = false
+            self.isCloudKitOperationRunning = false
+            self.isDeletionInProgress = false
+            self.deletionComplete = success
+            
+            // Remove the background observer
+            self.removeBackgroundObserver()
+            
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            completion(success, error)
+            
+            if success {
+            } else if let error = error {
+                NotificationManager.shared.notifyUser(title: "Deletion Failed", message: "An error occurred: \(error.localizedDescription)")
+            }
         }
     }
     

@@ -26,7 +26,8 @@ struct ContentView: View {
     @State private var showAlertForCountryBeforeAddingStation = false
     @State private var activeSheet: ActiveSheet?
     @State private var selectedTab: Tab
-    
+    @EnvironmentObject var alertManager: AlertManager
+
     init() {
         if let savedTab = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
            let tab = Tab(rawValue: savedTab) {
@@ -58,7 +59,6 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                SideMenuView(showSideMenu: $showSideMenu)
                 // Background color
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
@@ -75,7 +75,7 @@ struct ContentView: View {
                                     .font(.title)
                                     .foregroundColor(.primary)
                                     .padding(.leading, 15)
-                                    .padding(.trailing, 2)  // Added padding on the right side
+                                    .padding(.trailing, 2)
                             }
                             Spacer()
                         }
@@ -114,7 +114,7 @@ struct ContentView: View {
                         HStack {
                             Button(action: {
                                 if viewModel.selectedCountry == "Select Country" {
-                                    showAlertForCountryBeforeAddingStation = true
+                                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
                                 } else {
                                     activeSheet = .addStation
                                 }
@@ -123,39 +123,10 @@ struct ContentView: View {
                                     .font(.title)
                                     .foregroundColor(.primary)
                                     .padding(.trailing, 10)
-                                
-                            }
-                            .sheet(item: $activeSheet, onDismiss: {
-                                activeSheet = nil // Ensure that dismissing the sheet resets the active sheet
-                            }) { item in
-                                switch item {
-                                case .addStation:
-                                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) {
-                                        selectedTab = .all
-                                    }
-                                    .environmentObject(viewModel)
-                                case .editStation:
-                                    if let station = selectedStationForEdit {
-                                        EditStationView(station: station, isPresented: $selectedStationForEdit)
-                                            .environmentObject(viewModel)
-                                    }
-                                case .playerSheet:
-                                    PlayerSheetView()
-                                        .environmentObject(radioPlayer)
-                                        .environmentObject(viewModel)
-                                }
-                            }
-                            .alert(isPresented: $showAlertForCountryBeforeAddingStation) {
-                                Alert(
-                                    title: Text("Select a Country"),
-                                    message: Text("Please select a country before creating a new station."),
-                                    dismissButton: .default(Text("OK"))
-                                )
                             }
                         }
                         .padding(.bottom, 5)
                         .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPadMini ? 50 : isIPad ? 50 : 50)
-                        
                     }
                     
                     HStack {
@@ -187,7 +158,6 @@ struct ContentView: View {
                         .modifier(NeumorphicShadow())
                         .padding(.top, 10)
                     }
-                    
                     .padding(.bottom, 35)
                     .padding(.bottom, sizeClass == .regular ? 5 : 0)
                     
@@ -268,6 +238,56 @@ struct ContentView: View {
                         showSideMenu.toggle()
                     }
                 }
+                
+                // Custom Alert
+                if alertManager.showCustomAlert {
+                    GeometryReader { geometry in
+                        Color.black.opacity(0.4)
+                            .edgesIgnoringSafeArea(.all)
+                            .onTapGesture {
+                                alertManager.dismissAlert()
+                            }
+                        
+                        CustomAlertView(
+                            title: alertManager.customAlertTitle,
+                            message: alertManager.customAlertMessage,
+                            buttonText: alertManager.customAlertPrimaryButtonText,
+                            buttonAction: {
+                                alertManager.dismissAlert()
+                                alertManager.customAlertPrimaryAction?()
+                            },
+                            secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                            secondaryButtonAction: {
+                                alertManager.dismissAlert()
+                                alertManager.customAlertSecondaryAction?()
+                            }
+                        )
+                        .frame(width: 300)
+                        .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                    }
+                    .transition(.opacity)
+                    .zIndex(2)
+                }
+            }
+            .sheet(item: $activeSheet, onDismiss: {
+                activeSheet = nil
+            }) { item in
+                switch item {
+                case .addStation:
+                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) {
+                        selectedTab = .all
+                    }
+                    .environmentObject(viewModel)
+                case .editStation:
+                    if let station = selectedStationForEdit {
+                        EditStationView(station: station, isPresented: $selectedStationForEdit)
+                            .environmentObject(viewModel)
+                    }
+                case .playerSheet:
+                    PlayerSheetView()
+                        .environmentObject(radioPlayer)
+                        .environmentObject(viewModel)
+                }
             }
             .sheet(item: $selectedStationForEdit) { station in
                 EditStationView(station: station, isPresented: $selectedStationForEdit)
@@ -289,7 +309,6 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
             selectedTab = .all
         }
-        
     }
     
     private func saveSelectedTab(_ tab: Tab) {
@@ -301,5 +320,6 @@ struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
             .preferredColorScheme(.dark)
+            .environmentObject(AlertManager())
     }
 }
