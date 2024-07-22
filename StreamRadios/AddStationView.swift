@@ -18,22 +18,24 @@ struct AddStationView: View {
        @Binding var isEditingStation: RadioStation?
        @Binding var activeSheet: ActiveSheet?
        var station: RadioStation?
+    var onSave: (() -> Void)?
     
-    init(station: RadioStation? = nil, activeSheet: Binding<ActiveSheet?>, selectedCountry: String, isEditingStation: Binding<RadioStation?>? = nil) {
-        self.station = station
-        _activeSheet = activeSheet
-        _selectedCountry = State(initialValue: selectedCountry)
-        
-        if let isEditingStation = isEditingStation {
-            _isEditingStation = isEditingStation
-        } else {
-            _isEditingStation = .constant(nil) // Provide a default binding if none is provided
+    init(station: RadioStation? = nil, activeSheet: Binding<ActiveSheet?>, selectedCountry: String, isEditingStation: Binding<RadioStation?>? = nil, onSave: (() -> Void)? = nil) {
+            self.station = station
+            _activeSheet = activeSheet
+            _selectedCountry = State(initialValue: selectedCountry)
+            self.onSave = onSave // Assign the completion handler
+
+            if let isEditingStation = isEditingStation {
+                _isEditingStation = isEditingStation
+            } else {
+                _isEditingStation = .constant(nil) // Provide a default binding if none is provided
+            }
+
+            if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                _iconImage = State(initialValue: image)
+            }
         }
-        
-        if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-            _iconImage = State(initialValue: image)
-        }
-    }
     
     var body: some View {
         ZStack {
@@ -186,6 +188,7 @@ struct AddStationView: View {
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
         viewModel.saveStationsToCoreData()
         activeSheet = nil
+        onSave?() 
     }
 }
 
