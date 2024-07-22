@@ -8,9 +8,15 @@
 import Foundation
 
 enum AlertType: Identifiable {
-    case exportWithoutCountry, importWithoutCountry, deleteAllData
-
+    case exportWithoutCountry
+    case importWithoutCountry
+    case deleteAllData
+    
     var id: Int {
-        hashValue
+        switch self {
+        case .exportWithoutCountry: return 0
+        case .importWithoutCountry: return 1
+        case .deleteAllData: return 2
+        }
     }
 }

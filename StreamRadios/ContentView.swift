@@ -22,7 +22,6 @@ struct ContentView: View {
     @State private var isEditingMode = false
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
-    // @State private var selectedTab: Tab = .all
     @State private var bitrateMessage = "Loading bitrate information..."
     @State private var showAlertForCountryBeforeAddingStation = false
     @State private var activeSheet: ActiveSheet?
@@ -134,7 +133,7 @@ struct ContentView: View {
                                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) {
                                         selectedTab = .all
                                     }
-                                        .environmentObject(viewModel)
+                                    .environmentObject(viewModel)
                                 case .editStation:
                                     if let station = selectedStationForEdit {
                                         EditStationView(station: station, isPresented: $selectedStationForEdit)
@@ -167,8 +166,8 @@ struct ContentView: View {
                         }
                         .pickerStyle(SegmentedPickerStyle())
                         .onChange(of: selectedTab) { newValue in
-                                            saveSelectedTab(newValue)
-                                        }
+                            saveSelectedTab(newValue)
+                        }
                         .padding(.horizontal)
                     }
                     .frame(width: sizeClass == .regular ? 650 : 410)
@@ -294,8 +293,8 @@ struct ContentView: View {
     }
     
     private func saveSelectedTab(_ tab: Tab) {
-            UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
-        }
+        UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
+    }
 }
 
 struct ContentView_Previews: PreviewProvider {
