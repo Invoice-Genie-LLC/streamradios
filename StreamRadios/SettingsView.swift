@@ -22,14 +22,8 @@ struct SettingsView: View {
     @State private var showAlertForExportWithoutCountry = false
     @State private var currentAlert: AlertType?
     @State private var activeAlert: AlertType?
-    
-    @State private var showCustomAlert = false
-    @State private var customAlertTitle = ""
-    @State private var customAlertMessage = ""
-    @State private var customAlertPrimaryButtonText = ""
-    @State private var customAlertPrimaryAction: (() -> Void)?
-    @State private var customAlertSecondaryButtonText: String?
-    @State private var customAlertSecondaryAction: (() -> Void)?
+    @EnvironmentObject var alertManager: AlertManager
+
     
     var body: some View {
         ZStack {
@@ -71,24 +65,25 @@ struct SettingsView: View {
                 handleImport(url: url)
             }
             
-            if showCustomAlert {
-                Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
-                CustomAlertView(
-                    title: customAlertTitle,
-                    message: customAlertMessage,
-                    buttonText: customAlertPrimaryButtonText,
-                    buttonAction: {
-                        showCustomAlert = false
-                        customAlertPrimaryAction?()
-                    },
-                    secondaryButtonText: customAlertSecondaryButtonText,
-                    secondaryButtonAction: {
-                        showCustomAlert = false
-                        customAlertSecondaryAction?()
+            if alertManager.showCustomAlert {
+                        Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                        CustomAlertView(
+                            title: alertManager.customAlertTitle,
+                            message: alertManager.customAlertMessage,
+                            buttonText: alertManager.customAlertPrimaryButtonText,
+                            buttonAction: {
+                                alertManager.dismissAlert()
+                                alertManager.customAlertPrimaryAction?()
+                            },
+                            secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                            secondaryButtonAction: {
+                                alertManager.dismissAlert()
+                                alertManager.customAlertSecondaryAction?()
+                            }
+                        )
+                        .transition(.opacity)
                     }
-                )
-                .transition(.opacity)
-            }
+                
         }
     }
     
@@ -266,6 +261,8 @@ struct SettingsView: View {
                     .stroke(Color.gray.opacity(0.2), lineWidth: 1)
             )
         }
+        .animation(.default, value: viewModel.isDeletingData)
+        .animation(.default, value: viewModel.deletionComplete)
     }
     
     private var deletionWarningText: some View {
@@ -304,34 +301,7 @@ struct SettingsView: View {
     }
     
     private func showAlert(for alertType: AlertType) {
-        switch alertType {
-        case .exportWithoutCountry:
-            customAlertTitle = "Select a Country"
-            customAlertMessage = "Please select a country from the country selector in the app before exporting stations."
-            customAlertPrimaryButtonText = "OK"
-            customAlertPrimaryAction = nil
-            customAlertSecondaryButtonText = nil
-            customAlertSecondaryAction = nil
-        case .importWithoutCountry:
-            customAlertTitle = "Select a Country"
-            customAlertMessage = "Please select a country from the country selector in the app before importing stations."
-            customAlertPrimaryButtonText = "OK"
-            customAlertPrimaryAction = nil
-            customAlertSecondaryButtonText = nil
-            customAlertSecondaryAction = nil
-        case .deleteAllData:
-            customAlertTitle = "Delete All Data"
-            customAlertMessage = "Important: You're about to delete all station playlist data. This will remove all your saved playlists from both iCloud and your device's local storage. This action is permanent and cannot be reversed."
-            customAlertPrimaryButtonText = "Delete"
-            customAlertPrimaryAction = {
-                initiateDataDeletion()
-            }
-            customAlertSecondaryButtonText = "Cancel"
-            customAlertSecondaryAction = {
-                // This will be called when Cancel is tapped
-            }
-        }
-        showCustomAlert = true
+        alertManager.showCustomAlert(for: alertType, deleteAction: alertType == .deleteAllData ? initiateDataDeletion : nil)
     }
     
     private func initiateDataDeletion() {
@@ -339,14 +309,23 @@ struct SettingsView: View {
             notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
         } else {
             notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from iCloud and local storage has started.")
+            
+            DispatchQueue.main.async {
+                viewModel.isDeletingData = true
+                viewModel.deletionComplete = false
+            }
+            
             viewModel.deleteAllData { success, error in
-                if success {
-                    print("Deletion was successful.")
-                    self.deletionComplete = true
-                    notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from iCloud and local storage.")
-                } else if let error = error {
-                    print("Deletion failed: \(error.localizedDescription)")
-                    notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting data. Please try again.")
+                DispatchQueue.main.async {
+                    viewModel.isDeletingData = false
+                    if success {
+                        print("Deletion was successful.")
+                        viewModel.deletionComplete = true
+                        notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from iCloud and local storage.")
+                    } else if let error = error {
+                        print("Deletion failed: \(error.localizedDescription)")
+                        notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting data. Please try again.")
+                    }
                 }
             }
         }
@@ -389,6 +368,8 @@ struct SettingsView: View {
 
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
-        SettingsView().environmentObject(RadioStationViewModel())
+        SettingsView()
+            .environmentObject(RadioStationViewModel())
+            .environmentObject(AlertManager())
     }
 }

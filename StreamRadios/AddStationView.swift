@@ -17,6 +17,7 @@ struct AddStationView: View {
     @EnvironmentObject var permissionManager: PermissionManager
     @Binding var isEditingStation: RadioStation?
     @Binding var activeSheet: ActiveSheet?
+
     var station: RadioStation?
     var onSave: (() -> Void)?
     

@@ -20,8 +20,8 @@
 		7715BD962C4C3AD700FA7CB1 /* DocumentPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */; };
 		7715BD982C4C9D8300FA7CB1 /* ExportStation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD972C4C9D8300FA7CB1 /* ExportStation.swift */; };
 		7715BD9A2C4CA97300FA7CB1 /* ExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */; };
-		7715BD9C2C4E61D200FA7CB1 /* AlertType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9B2C4E61D200FA7CB1 /* AlertType.swift */; };
 		7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */; };
+		7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */; };
 		771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */; };
 		77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */; };
 		77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */; };
@@ -98,8 +98,8 @@
 		7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
 		7715BD972C4C9D8300FA7CB1 /* ExportStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportStation.swift; sourceTree = "<group>"; };
 		7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheet.swift; sourceTree = "<group>"; };
-		7715BD9B2C4E61D200FA7CB1 /* AlertType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertType.swift; sourceTree = "<group>"; };
 		7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveSheet.swift; sourceTree = "<group>"; };
+		7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertManager.swift; sourceTree = "<group>"; };
 		771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeumorphicShadow.swift; sourceTree = "<group>"; };
 		77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStore.swift; sourceTree = "<group>"; };
 		77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
@@ -195,6 +195,7 @@
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
+				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
 				7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
@@ -296,7 +297,6 @@
 			isa = PBXGroup;
 			children = (
 				775B55562C30E8C100ECDBF0 /* Tabs.swift */,
-				7715BD9B2C4E61D200FA7CB1 /* AlertType.swift */,
 				7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */,
 			);
 			path = Enums;
@@ -447,6 +447,7 @@
 				77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
+				7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */,
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,
@@ -454,7 +455,6 @@
 				77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */,
 				77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */,
 				7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */,
-				7715BD9C2C4E61D200FA7CB1 /* AlertType.swift in Sources */,
 				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
