@@ -22,10 +22,11 @@ struct RadioStationListView: View {
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
     @Binding var activeSheet: ActiveSheet?
-    @State private var showAlertForCountryBeforeAddingStation = false
     
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
+    @StateObject private var alertManager = AlertManager()
+
     
     var body: some View {
         GeometryReader { geometry in
@@ -70,6 +71,30 @@ struct RadioStationListView: View {
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
                     viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
                 }
+        .overlay(
+            Group {
+                if alertManager.showCustomAlert {
+                    Color.black.opacity(0.4)
+                        .edgesIgnoringSafeArea(.all)
+                        .overlay(
+                            CustomAlertView(
+                                title: alertManager.customAlertTitle,
+                                message: alertManager.customAlertMessage,
+                                buttonText: alertManager.customAlertPrimaryButtonText,
+                                buttonAction: {
+                                    alertManager.customAlertPrimaryAction?()
+                                    alertManager.dismissAlert()
+                                },
+                                secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                                secondaryButtonAction: {
+                                    alertManager.customAlertSecondaryAction?()
+                                    alertManager.dismissAlert()
+                                }
+                            )
+                        )
+                }
+            }
+        )
     }
     
     private var emptyStateView: some View {
@@ -80,7 +105,7 @@ struct RadioStationListView: View {
                 .padding(.bottom, 15)
             Button(action: {
                 if viewModel.selectedCountry == "Select Country" {
-                    showAlertForCountryBeforeAddingStation = true
+                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
                 } else {
                     self.selectedStationForEdit = nil  // Ensure no station is selected for editing
                     self.activeSheet = .addStation   // Trigger the sheet to open
@@ -90,13 +115,7 @@ struct RadioStationListView: View {
                     .foregroundColor(.primary)
             }
         }
-        .alert(isPresented: $showAlertForCountryBeforeAddingStation) { // Add this alert
-                Alert(
-                    title: Text("Select a Country"),
-                    message: Text("Please select a country before creating a new station."),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
+       
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.scale)
     }
