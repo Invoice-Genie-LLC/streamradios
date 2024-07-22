@@ -22,18 +22,7 @@ struct SettingsView: View {
     @State private var showAlertForExportWithoutCountry = false
     @State private var currentAlert: AlertType?
     @State private var activeAlert: AlertType?
-
-
     
-    enum AlertType: Identifiable {
-        case exportWithoutCountry, importWithoutCountry, deleteAllData
-
-        var id: Int {
-            hashValue
-        }
-    }
-
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -88,10 +77,11 @@ struct SettingsView: View {
                     }),
                     secondaryButton: .cancel()
                 )
+                
             }
         }
     }
-
+    
     private var playbackSettingsSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Playback Settings")
@@ -114,7 +104,7 @@ struct SettingsView: View {
             )
         }
     }
-
+    
     private var displaySettingsSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Display Settings")
@@ -137,7 +127,7 @@ struct SettingsView: View {
             )
         }
     }
-
+    
     private var streamFileUploadSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Station Playlist Export/Import")
@@ -165,7 +155,7 @@ struct SettingsView: View {
             handleImport(url: url)
         }
     }
-
+    
     private var countrySelectionView: some View {
         VStack(alignment: .leading) {
             Text("Select Country")
@@ -178,7 +168,7 @@ struct SettingsView: View {
                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
         }
     }
-
+    
     private var fileExportView: some View {
         VStack(alignment: .leading) {
             Text("Playlist Export")
@@ -201,7 +191,7 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private var fileImportView: some View {
         VStack(alignment: .leading) {
             Text("Playlist Import")
@@ -237,7 +227,7 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private var dataManagementSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Data Management")
@@ -246,7 +236,7 @@ struct SettingsView: View {
             
             VStack(alignment: .leading, spacing: 15) {
                 Button("Delete All Data") {
-                    activeAlert = .deleteAllData 
+                    activeAlert = .deleteAllData
                 }
                 .padding()
                 .frame(maxWidth: .infinity)
@@ -254,7 +244,7 @@ struct SettingsView: View {
                 .cornerRadius(12)
                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                 
-
+                
                 if viewModel.isDeletingData {
                     ProgressView("Deleting data...")
                         .padding()
@@ -263,7 +253,7 @@ struct SettingsView: View {
                         .foregroundColor(.green)
                         .padding()
                 }
-
+                
                 deletionWarningText
             }
             .padding()
@@ -276,7 +266,7 @@ struct SettingsView: View {
         }
         
     }
-
+    
     private var deletionWarningText: some View {
         Text("Warning: ")
             .fontWeight(.bold)
@@ -292,7 +282,7 @@ struct SettingsView: View {
             .font(.footnote)
             .foregroundColor(.gray)
     }
-
+    
     private var backButton: some View {
         Button(action: {
             presentationMode.wrappedValue.dismiss()
@@ -304,14 +294,14 @@ struct SettingsView: View {
             .foregroundColor(.primary)
         }
     }
-
+    
     private func updateDarkMode(to newValue: Bool) {
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
             windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .light
         }
         UserDefaults.standard.set(true, forKey: "isDarkModeSet")
     }
-
+    
     private func initiateDataDeletion() {
         if viewModel.isCloudKitOperationRunning {
             notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
@@ -329,40 +319,40 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private func exportAction() {
-            if viewModel.selectedCountry == "Select Country" {
-                activeAlert = .exportWithoutCountry
-            } else {
-                viewModel.exportStationsToFile { fileURL in
-                    guard let fileURL = fileURL else { return }
-                    let documentPicker = UIDocumentPickerViewController(forExporting: [fileURL])
-                    UIApplication.shared.windows.first?.rootViewController?.present(documentPicker, animated: true, completion: nil)
-                }
+        if viewModel.selectedCountry == "Select Country" {
+            activeAlert = .exportWithoutCountry
+        } else {
+            viewModel.exportStationsToFile { fileURL in
+                guard let fileURL = fileURL else { return }
+                let documentPicker = UIDocumentPickerViewController(forExporting: [fileURL])
+                UIApplication.shared.windows.first?.rootViewController?.present(documentPicker, animated: true, completion: nil)
             }
         }
-
+    }
+    
     private func importAction() {
-            if viewModel.selectedCountry == "Select Country" {
-                activeAlert = .importWithoutCountry
-            } else {
-                showDocumentPicker = true
-            }
+        if viewModel.selectedCountry == "Select Country" {
+            activeAlert = .importWithoutCountry
+        } else {
+            showDocumentPicker = true
         }
-
+    }
+    
     private func handleImport(url: URL) {
-           isImporting = true
-           importProgress = 0.0
-
-           viewModel.importStationsFromFile(url: url) { progress in
-               DispatchQueue.main.async {
-                   importProgress = progress
-               }
-           } completion: {
-               isImporting = false
-               importURL = nil
-           }
-       }
+        isImporting = true
+        importProgress = 0.0
+        
+        viewModel.importStationsFromFile(url: url) { progress in
+            DispatchQueue.main.async {
+                importProgress = progress
+            }
+        } completion: {
+            isImporting = false
+            importURL = nil
+        }
+    }
 }
 
 struct SettingsView_Previews: PreviewProvider {

@@ -7,22 +7,28 @@ import SwiftUI
 
 struct AddStationView: View {
     @State private var name: String = ""
-    @State private var urlString: String = ""
-    @State private var selectedCountry: String = "Select Country"
-    @State private var showAlert = false
-    @State private var alertMessage: String = ""
-    @State private var iconImage: UIImage? = nil
-    @State private var showImagePicker = false
-    @EnvironmentObject var viewModel: RadioStationViewModel
-    @EnvironmentObject var permissionManager: PermissionManager
-    @Binding var isPresented: Bool
-    @Binding var isEditingStation: RadioStation?
-    var station: RadioStation?
+       @State private var urlString: String = ""
+       @State private var selectedCountry: String = "Select Country"
+       @State private var showAlert = false
+       @State private var alertMessage: String = ""
+       @State private var iconImage: UIImage? = nil
+       @State private var showImagePicker = false
+       @EnvironmentObject var viewModel: RadioStationViewModel
+       @EnvironmentObject var permissionManager: PermissionManager
+       @Binding var isEditingStation: RadioStation?
+       @Binding var activeSheet: ActiveSheet?
+       var station: RadioStation?
     
-    init(station: RadioStation? = nil, isPresented: Binding<Bool>? = nil, isEditingStation: Binding<RadioStation?>? = nil) {
+    init(station: RadioStation? = nil, activeSheet: Binding<ActiveSheet?>, selectedCountry: String, isEditingStation: Binding<RadioStation?>? = nil) {
         self.station = station
-        _isPresented = isPresented ?? .constant(false)
-        _isEditingStation = isEditingStation ?? .constant(nil)
+        _activeSheet = activeSheet
+        _selectedCountry = State(initialValue: selectedCountry)
+        
+        if let isEditingStation = isEditingStation {
+            _isEditingStation = isEditingStation
+        } else {
+            _isEditingStation = .constant(nil) // Provide a default binding if none is provided
+        }
         
         if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             _iconImage = State(initialValue: image)
@@ -36,7 +42,7 @@ struct AddStationView: View {
                     // Custom toolbar with title and cancel button
                     HStack {
                         Button(action: {
-                            isPresented = false
+                            activeSheet = nil
                         }) {
                             Text("Cancel")
                                 .foregroundColor(.primary)
@@ -179,13 +185,16 @@ struct AddStationView: View {
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
         viewModel.saveStationsToCoreData()
-        isPresented = false
+        activeSheet = nil
     }
 }
 
 struct AddStationView_Previews: PreviewProvider {
+    @State static var activeSheet: ActiveSheet? = .addStation
+    
     static var previews: some View {
-        AddStationView(isPresented: .constant(true), isEditingStation: .constant(nil))
+        AddStationView(activeSheet: $activeSheet, selectedCountry: "Unknown")
             .environmentObject(RadioStationViewModel())
     }
 }
+
