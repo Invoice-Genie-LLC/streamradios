@@ -26,7 +26,7 @@ struct RadioStationListView: View {
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
     @StateObject private var alertManager = AlertManager()
-
+    
     
     var body: some View {
         GeometryReader { geometry in
@@ -53,7 +53,7 @@ struct RadioStationListView: View {
                     .environmentObject(viewModel)
             }
         }
-
+        
         .sheet(item: $viewModel.activeSheet) { item in
             switch item {
             case .editStation:
@@ -69,8 +69,8 @@ struct RadioStationListView: View {
         .onAppear(perform: setup)
         .onDisappear(perform: cleanup)
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
-                    viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
-                }
+            viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
+        }
         .overlay(
             Group {
                 if alertManager.showCustomAlert {
@@ -110,16 +110,16 @@ struct RadioStationListView: View {
                     self.selectedStationForEdit = nil  // Ensure no station is selected for editing
                     self.activeSheet = .addStation   // Trigger the sheet to open
                 }}) {
-                Image(systemName: "plus.circle")
-                    .font(.largeTitle)
-                    .foregroundColor(.primary)
-            }
+                    Image(systemName: "plus.circle")
+                        .font(.largeTitle)
+                        .foregroundColor(.primary)
+                }
         }
-       
+        
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.scale)
     }
-        
+    
     
     private var stationsListView: some View {
         ScrollView {
@@ -410,7 +410,7 @@ struct RadioStationListView_Previews: PreviewProvider {
     @StateObject static var viewModel = RadioStationViewModel()
     @StateObject static var radioPlayer = RadioPlayer()
     @State static var activeSheet: ActiveSheet? = nil  // Create a state to pass as a binding
-
+    
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false),
                              selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent),
