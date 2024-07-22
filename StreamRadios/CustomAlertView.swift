@@ -12,6 +12,8 @@ struct CustomAlertView: View {
     var message: String
     var buttonText: String
     var buttonAction: () -> Void
+    var secondaryButtonText: String?
+    var secondaryButtonAction: (() -> Void)?
     
     var body: some View {
         VStack {
@@ -36,7 +38,22 @@ struct CustomAlertView: View {
                     .cornerRadius(10)
                     .padding([.leading, .trailing], 20)
             }
-            .padding(.bottom, 20)
+            
+            if let secondaryButtonText = secondaryButtonText,
+               let secondaryButtonAction = secondaryButtonAction {
+                Button(action: secondaryButtonAction) {
+                    Text(secondaryButtonText)
+                        .fontWeight(.medium)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.secondary.opacity(0.1))
+                        .foregroundColor(.primary)
+                        .cornerRadius(10)
+                        .padding([.leading, .trailing], 20)
+                }
+            }
+            
+            Spacer().frame(height: 20)
         }
         .frame(width: 300)
         .background(Color(UIColor.systemBackground))
@@ -53,11 +70,23 @@ struct CustomAlertView: View {
 struct CustomAlertView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            CustomAlertView(title: "Error", message: "This is an error message.", buttonText: "OK", buttonAction: {})
-                .preferredColorScheme(.light)
+            CustomAlertView(
+                title: "Error",
+                message: "This is an error message.",
+                buttonText: "OK",
+                buttonAction: {},
+                secondaryButtonText: "Cancel",
+                secondaryButtonAction: {}
+            )
+            .preferredColorScheme(.light)
             
-            CustomAlertView(title: "Error", message: "This is an error message.", buttonText: "OK", buttonAction: {})
-                .preferredColorScheme(.dark)
+            CustomAlertView(
+                title: "Error",
+                message: "This is an error message.",
+                buttonText: "OK",
+                buttonAction: {}
+            )
+            .preferredColorScheme(.dark)
         }
     }
 }

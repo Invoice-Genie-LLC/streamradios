@@ -9,7 +9,7 @@ import Foundation
 
 enum ActiveSheet: Identifiable {
     case addStation, editStation, playerSheet
-
+    
     var id: Int {
         hashValue
     }

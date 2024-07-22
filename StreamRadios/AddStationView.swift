@@ -7,41 +7,40 @@ import SwiftUI
 
 struct AddStationView: View {
     @State private var name: String = ""
-       @State private var urlString: String = ""
-       @State private var selectedCountry: String = "Select Country"
-       @State private var showAlert = false
-       @State private var alertMessage: String = ""
-       @State private var iconImage: UIImage? = nil
-       @State private var showImagePicker = false
-       @EnvironmentObject var viewModel: RadioStationViewModel
-       @EnvironmentObject var permissionManager: PermissionManager
-       @Binding var isEditingStation: RadioStation?
-       @Binding var activeSheet: ActiveSheet?
-       var station: RadioStation?
+    @State private var urlString: String = ""
+    @State private var selectedCountry: String = "Select Country"
+    @State private var showAlert = false
+    @State private var alertMessage: String = ""
+    @State private var iconImage: UIImage? = nil
+    @State private var showImagePicker = false
+    @EnvironmentObject var viewModel: RadioStationViewModel
+    @EnvironmentObject var permissionManager: PermissionManager
+    @Binding var isEditingStation: RadioStation?
+    @Binding var activeSheet: ActiveSheet?
+    var station: RadioStation?
     var onSave: (() -> Void)?
     
     init(station: RadioStation? = nil, activeSheet: Binding<ActiveSheet?>, selectedCountry: String, isEditingStation: Binding<RadioStation?>? = nil, onSave: (() -> Void)? = nil) {
-            self.station = station
-            _activeSheet = activeSheet
-            _selectedCountry = State(initialValue: selectedCountry)
-            self.onSave = onSave // Assign the completion handler
-
-            if let isEditingStation = isEditingStation {
-                _isEditingStation = isEditingStation
-            } else {
-                _isEditingStation = .constant(nil) // Provide a default binding if none is provided
-            }
-
-            if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                _iconImage = State(initialValue: image)
-            }
+        self.station = station
+        _activeSheet = activeSheet
+        _selectedCountry = State(initialValue: selectedCountry)
+        self.onSave = onSave // Assign the completion handler
+        
+        if let isEditingStation = isEditingStation {
+            _isEditingStation = isEditingStation
+        } else {
+            _isEditingStation = .constant(nil)
         }
+        
+        if let station = station, let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+            _iconImage = State(initialValue: image)
+        }
+    }
     
     var body: some View {
         ZStack {
             NavigationView {
                 VStack {
-                    // Custom toolbar with title and cancel button
                     HStack {
                         Button(action: {
                             activeSheet = nil
@@ -188,7 +187,7 @@ struct AddStationView: View {
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
         viewModel.saveStationsToCoreData()
         activeSheet = nil
-        onSave?() 
+        onSave?()
     }
 }
 

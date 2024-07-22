@@ -23,61 +23,71 @@ struct SettingsView: View {
     @State private var currentAlert: AlertType?
     @State private var activeAlert: AlertType?
     
+    @State private var showCustomAlert = false
+    @State private var customAlertTitle = ""
+    @State private var customAlertMessage = ""
+    @State private var customAlertPrimaryButtonText = ""
+    @State private var customAlertPrimaryAction: (() -> Void)?
+    @State private var customAlertSecondaryButtonText: String?
+    @State private var customAlertSecondaryAction: (() -> Void)?
+    
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                playbackSettingsSection
-                displaySettingsSection
-                streamFileUploadSection
-                dataManagementSection
+        ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    playbackSettingsSection
+                    displaySettingsSection
+                    streamFileUploadSection
+                    dataManagementSection
+                }
+                .padding()
             }
-            .padding()
-        }
-        .navigationTitle("Settings")
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                backButton
+            .navigationTitle("Settings")
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    backButton
+                }
             }
-        }
-        .onChange(of: isDarkMode) { newValue in
-            updateDarkMode(to: newValue)
-        }
-        .onAppear {
-            if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
-                notificationManager.requestAuthorization()
-                UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+            .onChange(of: isDarkMode) { newValue in
+                updateDarkMode(to: newValue)
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
-            if viewModel.selectedCountry != "Select Country" {
-                showAlertForCountrySelection = false
+            .onAppear {
+                if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
+                    notificationManager.requestAuthorization()
+                    UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+                }
             }
-        }
-        .alert(item: $activeAlert) { alertType -> Alert in
-            switch alertType {
-            case .exportWithoutCountry:
-                return Alert(
-                    title: Text("Select a Country"),
-                    message: Text("Please select a country from the country selector in the app before exporting stations."),
-                    dismissButton: .default(Text("OK"))
+            .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
+                if viewModel.selectedCountry != "Select Country" {
+                    showAlertForCountrySelection = false
+                }
+            }
+            .sheet(isPresented: $showDocumentPicker) {
+                DocumentPicker(url: $importURL)
+            }
+            .onChange(of: importURL) { url in
+                guard let url = url else { return }
+                handleImport(url: url)
+            }
+            
+            if showCustomAlert {
+                Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                CustomAlertView(
+                    title: customAlertTitle,
+                    message: customAlertMessage,
+                    buttonText: customAlertPrimaryButtonText,
+                    buttonAction: {
+                        showCustomAlert = false
+                        customAlertPrimaryAction?()
+                    },
+                    secondaryButtonText: customAlertSecondaryButtonText,
+                    secondaryButtonAction: {
+                        showCustomAlert = false
+                        customAlertSecondaryAction?()
+                    }
                 )
-            case .importWithoutCountry:
-                return Alert(
-                    title: Text("Select a Country"),
-                    message: Text("Please select a country from the country selector in the app before importing stations."),
-                    dismissButton: .default(Text("OK"))
-                )
-            case .deleteAllData:
-                return Alert(
-                    title: Text("Delete All Data"),
-                    message: Text("Important: You're about to delete all station playlist data. This will remove all your saved playlists from both iCloud and your device's local storage. This action is permanent and cannot be reversed"),
-                    primaryButton: .destructive(Text("Delete"), action: {
-                        initiateDataDeletion()
-                    }),
-                    secondaryButton: .cancel()
-                )
-                
+                .transition(.opacity)
             }
         }
     }
@@ -146,13 +156,6 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color.gray.opacity(0.2), lineWidth: 1)
             )
-        }
-        .sheet(isPresented: $showDocumentPicker) {
-            DocumentPicker(url: $importURL)
-        }
-        .onChange(of: importURL) { url in
-            guard let url = url else { return }
-            handleImport(url: url)
         }
     }
     
@@ -236,14 +239,13 @@ struct SettingsView: View {
             
             VStack(alignment: .leading, spacing: 15) {
                 Button("Delete All Data") {
-                    activeAlert = .deleteAllData
+                    showAlert(for: .deleteAllData)
                 }
                 .padding()
                 .frame(maxWidth: .infinity)
                 .background(Color(.systemBackground))
                 .cornerRadius(12)
                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                
                 
                 if viewModel.isDeletingData {
                     ProgressView("Deleting data...")
@@ -264,7 +266,6 @@ struct SettingsView: View {
                     .stroke(Color.gray.opacity(0.2), lineWidth: 1)
             )
         }
-        
     }
     
     private var deletionWarningText: some View {
@@ -302,6 +303,37 @@ struct SettingsView: View {
         UserDefaults.standard.set(true, forKey: "isDarkModeSet")
     }
     
+    private func showAlert(for alertType: AlertType) {
+        switch alertType {
+        case .exportWithoutCountry:
+            customAlertTitle = "Select a Country"
+            customAlertMessage = "Please select a country from the country selector in the app before exporting stations."
+            customAlertPrimaryButtonText = "OK"
+            customAlertPrimaryAction = nil
+            customAlertSecondaryButtonText = nil
+            customAlertSecondaryAction = nil
+        case .importWithoutCountry:
+            customAlertTitle = "Select a Country"
+            customAlertMessage = "Please select a country from the country selector in the app before importing stations."
+            customAlertPrimaryButtonText = "OK"
+            customAlertPrimaryAction = nil
+            customAlertSecondaryButtonText = nil
+            customAlertSecondaryAction = nil
+        case .deleteAllData:
+            customAlertTitle = "Delete All Data"
+            customAlertMessage = "Important: You're about to delete all station playlist data. This will remove all your saved playlists from both iCloud and your device's local storage. This action is permanent and cannot be reversed."
+            customAlertPrimaryButtonText = "Delete"
+            customAlertPrimaryAction = {
+                initiateDataDeletion()
+            }
+            customAlertSecondaryButtonText = "Cancel"
+            customAlertSecondaryAction = {
+                // This will be called when Cancel is tapped
+            }
+        }
+        showCustomAlert = true
+    }
+    
     private func initiateDataDeletion() {
         if viewModel.isCloudKitOperationRunning {
             notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
@@ -322,7 +354,7 @@ struct SettingsView: View {
     
     private func exportAction() {
         if viewModel.selectedCountry == "Select Country" {
-            activeAlert = .exportWithoutCountry
+            showAlert(for: .exportWithoutCountry)
         } else {
             viewModel.exportStationsToFile { fileURL in
                 guard let fileURL = fileURL else { return }
@@ -334,7 +366,7 @@ struct SettingsView: View {
     
     private func importAction() {
         if viewModel.selectedCountry == "Select Country" {
-            activeAlert = .importWithoutCountry
+            showAlert(for: .importWithoutCountry)
         } else {
             showDocumentPicker = true
         }
