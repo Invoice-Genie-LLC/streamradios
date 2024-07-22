@@ -21,6 +21,7 @@ struct RadioStationListView: View {
     @Binding var isEditingStation: Bool
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
+    @Binding var activeSheet: ActiveSheet?
     
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
@@ -43,21 +44,22 @@ struct RadioStationListView: View {
         .frame(maxWidth: .infinity)
         .sheet(isPresented: $isEditingStation) {
             if let selectedStation = selectedStationForEdit {
-                AddStationView(station: selectedStation, isPresented: $isEditingStation)
+                AddStationView(station: selectedStation, activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
                     .environmentObject(viewModel)
             } else {
-                AddStationView(isPresented: $isEditingStation)
+                AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
                     .environmentObject(viewModel)
             }
         }
+
         .sheet(item: $viewModel.activeSheet) { item in
             switch item {
             case .editStation:
                 if let selectedStation = selectedStationForEdit {
-                    AddStationView(station: selectedStation, isPresented: $isEditingStation)
+                    AddStationView(station: selectedStation, activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
                         .environmentObject(viewModel)
                 } else {
-                    AddStationView(isPresented: $isEditingStation)
+                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
                         .environmentObject(viewModel)
                 }
             }
@@ -377,10 +379,12 @@ struct StationDropDelegate: DropDelegate {
 struct RadioStationListView_Previews: PreviewProvider {
     @StateObject static var viewModel = RadioStationViewModel()
     @StateObject static var radioPlayer = RadioPlayer()
-    
+    @State static var activeSheet: ActiveSheet? = nil  // Create a state to pass as a binding
+
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false),
-                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent))
+                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent),
+                             activeSheet: $activeSheet)  // Pass the binding to the preview
         .environmentObject(viewModel)
         .environmentObject(radioPlayer)
     }

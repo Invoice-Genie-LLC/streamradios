@@ -22,29 +22,30 @@ struct ContentView: View {
     @State private var isEditingMode = false
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
-    @State private var selectedTab: Tab = .favorites
-    private var cancellables = Set<AnyCancellable>()
+    @State private var selectedTab: Tab = .all
     @State private var bitrateMessage = "Loading bitrate information..."
-
+    @State private var showAlertForCountryBeforeAddingStation = false
+    @State private var activeSheet: ActiveSheet?
+    
     @Environment(\.horizontalSizeClass) var sizeClass
-
+    
     // Variables to detect specific devices
     private var isIPhone15: Bool {
         UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2556
     }
-
+    
     private var isIPhone15ProMax: Bool {
         UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2796
     }
-
+    
     private var isIPadMini: Bool {
         UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.nativeBounds.height == 2266
     }
-
+    
     private var isIPad: Bool {
         UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.nativeBounds.height == 2732
     }
-
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -52,24 +53,24 @@ struct ContentView: View {
                 // Background color
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
-
+                
                 // Main content
                 VStack {
                     HStack(spacing: 8) {
                         // Main Menu
                         HStack {
-                                    Button(action: {
-                                        showSideMenu.toggle()
-                                    }) {
-                                        Image(systemName: "line.horizontal.3")
-                                            .font(.title)
-                                            .foregroundColor(.primary)
-                                            .padding(.leading, 15)
-                                            .padding(.trailing, 2)  // Added padding on the right side
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.leading, 20)
+                            Button(action: {
+                                showSideMenu.toggle()
+                            }) {
+                                Image(systemName: "line.horizontal.3")
+                                    .font(.title)
+                                    .foregroundColor(.primary)
+                                    .padding(.leading, 15)
+                                    .padding(.trailing, 2)  // Added padding on the right side
+                            }
+                            Spacer()
+                        }
+                        .padding(.leading, 20)
                         .frame(width: isIPhone15ProMax ? 30 : isIPhone15 ? 30 : isIPadMini ? 30 : isIPad ? 30 : 30)
                         .padding(.bottom, 5)
                         
@@ -103,18 +104,47 @@ struct ContentView: View {
                         
                         HStack {
                             Button(action: {
-                                isAddStationViewPresented.toggle()
+                                if viewModel.selectedCountry == "Select Country" {
+                                    showAlertForCountryBeforeAddingStation = true
+                                } else {
+                                    activeSheet = .addStation
+                                }
                             }) {
                                 Image(systemName: "plus.circle.fill")
                                     .font(.title)
                                     .foregroundColor(.primary)
                                     .padding(.trailing, 10)
-                                    
+                                
+                            }
+                            .sheet(item: $activeSheet, onDismiss: {
+                                activeSheet = nil // Ensure that dismissing the sheet resets the active sheet
+                            }) { item in
+                                switch item {
+                                case .addStation:
+                                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
+                                        .environmentObject(viewModel)
+                                case .editStation:
+                                    if let station = selectedStationForEdit {
+                                        EditStationView(station: station, isPresented: $selectedStationForEdit)
+                                            .environmentObject(viewModel)
+                                    }
+                                case .playerSheet:
+                                    PlayerSheetView()
+                                        .environmentObject(radioPlayer)
+                                        .environmentObject(viewModel)
+                                }
+                            }
+                            .alert(isPresented: $showAlertForCountryBeforeAddingStation) {
+                                Alert(
+                                    title: Text("Select a Country"),
+                                    message: Text("Please select a country before creating a new station."),
+                                    dismissButton: .default(Text("OK"))
+                                )
                             }
                         }
                         .padding(.bottom, 5)
                         .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPadMini ? 50 : isIPad ? 50 : 50)
-
+                        
                     }
                     
                     HStack {
@@ -134,14 +164,14 @@ struct ContentView: View {
                         RadioStationListView(isEditing: $isEditingMode,
                                              isEditingStation: $isEditingStation,
                                              selectedStationForEdit: $selectedStationForEdit,
-                                             selectedTab: $selectedTab)
-                            .environmentObject(viewModel)
-                            .environmentObject(radioPlayer)
-                            .frame(width: sizeClass == .regular ? 615 : 385)
-                            .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(16)
-                            .modifier(NeumorphicShadow())
-                            .padding(.top, 10)
+                                             selectedTab: $selectedTab, activeSheet: $activeSheet)
+                        .environmentObject(viewModel)
+                        .environmentObject(radioPlayer)
+                        .frame(width: sizeClass == .regular ? 615 : 385)
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(16)
+                        .modifier(NeumorphicShadow())
+                        .padding(.top, 10)
                     }
                     
                     .padding(.bottom, 35)
@@ -207,14 +237,14 @@ struct ContentView: View {
                         .first ?? 0)
                 }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
-
+                
                 // Side Menu
                 GeometryReader { geometry in
                     HStack {
                         SideMenuView(showSideMenu: $showSideMenu)
                             .frame(width: geometry.size.width / 2)
                             .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-
+                        
                         Spacer()
                     }
                 }
@@ -224,10 +254,6 @@ struct ContentView: View {
                         showSideMenu.toggle()
                     }
                 }
-            }
-            .sheet(isPresented: $isAddStationViewPresented) {
-                AddStationView(isPresented: $isAddStationViewPresented)
-                    .environmentObject(viewModel)
             }
             .sheet(item: $selectedStationForEdit) { station in
                 EditStationView(station: station, isPresented: $selectedStationForEdit)
@@ -247,8 +273,8 @@ struct ContentView: View {
             UIApplication.shared.addTapGestureRecognizer()
         }
         .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
-                    selectedTab = .all
-                }
+            selectedTab = .all
+        }
     }
 }
 
