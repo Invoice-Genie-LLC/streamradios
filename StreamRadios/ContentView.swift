@@ -22,10 +22,20 @@ struct ContentView: View {
     @State private var isEditingMode = false
     @State private var isEditingStation = false
     @State private var selectedStationForEdit: RadioStation?
-    @State private var selectedTab: Tab = .all
+    // @State private var selectedTab: Tab = .all
     @State private var bitrateMessage = "Loading bitrate information..."
     @State private var showAlertForCountryBeforeAddingStation = false
     @State private var activeSheet: ActiveSheet?
+    @State private var selectedTab: Tab
+    
+    init() {
+        if let savedTab = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
+           let tab = Tab(rawValue: savedTab) {
+            _selectedTab = State(initialValue: tab)
+        } else {
+            _selectedTab = State(initialValue: .all)
+        }
+    }
     
     @Environment(\.horizontalSizeClass) var sizeClass
     
@@ -121,7 +131,9 @@ struct ContentView: View {
                             }) { item in
                                 switch item {
                                 case .addStation:
-                                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
+                                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) {
+                                        selectedTab = .all
+                                    }
                                         .environmentObject(viewModel)
                                 case .editStation:
                                     if let station = selectedStationForEdit {
@@ -154,6 +166,9 @@ struct ContentView: View {
                             Text("All").tag(Tab.all)
                         }
                         .pickerStyle(SegmentedPickerStyle())
+                        .onChange(of: selectedTab) { newValue in
+                                            saveSelectedTab(newValue)
+                                        }
                         .padding(.horizontal)
                     }
                     .frame(width: sizeClass == .regular ? 650 : 410)
@@ -275,7 +290,12 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
             selectedTab = .all
         }
+        
     }
+    
+    private func saveSelectedTab(_ tab: Tab) {
+            UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
+        }
 }
 
 struct ContentView_Previews: PreviewProvider {

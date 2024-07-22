@@ -7,6 +7,8 @@
 
 import Foundation
 
-enum Tab {
-    case recent, favorites, all
+enum Tab: Int {
+    case recent = 0
+    case favorites = 1
+    case all = 2
 }
