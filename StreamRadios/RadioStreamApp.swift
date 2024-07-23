@@ -15,32 +15,9 @@ struct RadioStreamApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var alertManager = AlertManager()
-    
-    var radioPlayer = RadioPlayer.shared
-    var viewModel = RadioStationViewModel()
-    
-    init() {
-        radioPlayer.setViewModel(viewModel)
-        
-        // Fetch stations from CloudKit on new installations
-        if UserDefaults.standard.bool(forKey: "HasLaunchedBefore") == false {
-            DataStore.shared.fetchRadioStations { [weak viewModel] stations, error in
-                DispatchQueue.main.async {
-                    if let stations = stations {
-                        viewModel?.stations = stations
-                        print("Fetched \(stations.count) stations from CloudKit and populated the list.")
-                    } else if let error = error {
-                        print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
-                    }
-                }
-            }
-            UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
-        }
-        
-        UIApplication.shared.beginReceivingRemoteControlEvents()
-        radioPlayer.setupRemoteCommandCenter()
-    }
-    
+    @StateObject private var viewModel = RadioStationViewModel()
+    @StateObject private var radioPlayer = RadioPlayer.shared
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -51,20 +28,53 @@ struct RadioStreamApp: App {
                 .environmentObject(alertManager)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
                 .onAppear {
-                    if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
-                        notificationManager.requestAuthorization()
-                        UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
-                    }
+                    setupApp()
                 }
+        }
+    }
+
+    private func setupApp() {
+        // Set up the remote command center
+        radioPlayer.setupRemoteCommandCenter()
+
+        // Set the ViewModel for RadioPlayer
+        radioPlayer.setViewModel(viewModel)
+
+        if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
+            notificationManager.requestAuthorization()
+            UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+        }
+
+        // Handle the fetched stations if needed
+        if viewModel.stations.isEmpty {
+            if UserDefaults.standard.bool(forKey: "HasLaunchedBefore") == false {
+                fetchStationsFromCloudKit()
+            } else {
+                viewModel.loadStationsFromCoreData()
+            }
+        }
+    }
+
+    private func fetchStationsFromCloudKit() {
+        DataStore.shared.fetchRadioStations { [weak viewModel] stations, error in
+            if let stations = stations {
+                DispatchQueue.main.async {
+                    viewModel?.stations = stations
+                    viewModel?.saveStationsToCoreData()
+                    print("Fetched and populated \(stations.count) stations from CloudKit.")
+                }
+            } else if let error = error {
+                print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
+            }
+            UserDefaults.standard.set(true, forKey: "HasLaunchedBefore")
         }
     }
 }
 
 func updateWidget() {
     let radioPlayer = RadioPlayer.shared
-    let viewModel = RadioStationViewModel()
-    
-    guard let currentStationIndex = radioPlayer.currentStationIndex,
+    guard let viewModel = radioPlayer.viewModel,
+          let currentStationIndex = radioPlayer.currentStationIndex,
           currentStationIndex < viewModel.stations.count else {
         print("No current station found or index out of bounds.")
         return
@@ -79,5 +89,5 @@ func updateWidget() {
     sharedDefaults?.set(metadata, forKey: "stationMetadata")
     
     WidgetCenter.shared.reloadAllTimelines()
-    print("Widget updated with station: \(currentStation.name), metadata: \(String(describing: metadata))")
+    print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
 }

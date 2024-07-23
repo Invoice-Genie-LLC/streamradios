@@ -72,9 +72,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
-           // if selectedCountry != "Select Country" {
                 NotificationCenter.default.post(name: .countrySelected, object: nil)
-           // }
+                NotificationCenter.default.post(name: .countryChanged, object: nil)
         }
     }
     private var notificationManager = NotificationManager.shared
@@ -92,9 +91,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     override init() {
-            super.init()
-            
+        super.init()
+        
             selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
+    
             loadStationsFromCoreData()
             
             let userDefaults = UserDefaults.standard
@@ -586,6 +586,7 @@ extension RadioStationViewModel {
 extension Notification.Name {
     static let countrySelected = Notification.Name("countrySelected")
     static let stationsUpdated = Notification.Name("stationsUpdated")
+    static let countryChanged = Notification.Name("countryChanged")
 }
 
 // Conform to UIDocumentPickerDelegate to handle document picker events

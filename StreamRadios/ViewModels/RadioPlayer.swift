@@ -42,7 +42,7 @@ class RadioPlayer: NSObject, ObservableObject {
         return UserDefaults(suiteName: userDefaultsSuiteName)
     }
     
-    private var viewModel: RadioStationViewModel?
+    var viewModel: RadioStationViewModel?
     private var cancellables = Set<AnyCancellable>()
     
     override init() {
