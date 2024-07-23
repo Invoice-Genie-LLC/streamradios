@@ -23,6 +23,7 @@ struct SettingsView: View {
     @State private var currentAlert: AlertType?
     @State private var activeAlert: AlertType?
     @EnvironmentObject var alertManager: AlertManager
+    var onImportComplete: ((String) -> Void)?
 
     
     var body: some View {
@@ -357,18 +358,21 @@ struct SettingsView: View {
     }
     
     private func handleImport(url: URL) {
-        isImporting = true
-        importProgress = 0.0
-        
-        viewModel.importStationsFromFile(url: url) { progress in
-            DispatchQueue.main.async {
-                importProgress = progress
+            isImporting = true
+            importProgress = 0.0
+            
+            viewModel.importStationsFromFile(url: url) { progress in
+                DispatchQueue.main.async {
+                    importProgress = progress
+                }
+            } completion: {
+                DispatchQueue.main.async {
+                    isImporting = false
+                    importURL = nil
+                    onImportComplete?(viewModel.selectedCountry)
+                }
             }
-        } completion: {
-            isImporting = false
-            importURL = nil
         }
-    }
 }
 
 struct SettingsView_Previews: PreviewProvider {
