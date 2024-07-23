@@ -15,7 +15,7 @@ extension UIApplication {
 
 struct ContentView: View {
     @StateObject private var radioPlayer = RadioPlayer.shared
-    @StateObject private var viewModel = RadioStationViewModel()
+    @EnvironmentObject var viewModel: RadioStationViewModel
     @State private var isAddStationViewPresented = false
     @State private var isPlayerSheetPresented = false
     @State private var showSideMenu = false
@@ -309,6 +309,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
             selectedTab = .all
         }
+        .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
+                    self.viewModel.objectWillChange.send()
+                }
     }
     
     private func saveSelectedTab(_ tab: Tab) {
