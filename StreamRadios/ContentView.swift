@@ -25,7 +25,7 @@ struct ContentView: View {
     @State private var bitrateMessage = "Loading bitrate information..."
     @State private var showAlertForCountryBeforeAddingStation = false
     @State private var activeSheet: ActiveSheet?
-    @State private var selectedTab: Tab
+    @State private var selectedTab: Tab = .all
     @EnvironmentObject var alertManager: AlertManager
 
     init() {
@@ -274,8 +274,9 @@ struct ContentView: View {
             }) { item in
                 switch item {
                 case .addStation:
-                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) {
-                        selectedTab = .all
+                    AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
+                        viewModel.selectedCountry = savedCountry
+                                    selectedTab = .all
                     }
                     .environmentObject(viewModel)
                 case .editStation:

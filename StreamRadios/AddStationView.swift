@@ -19,9 +19,9 @@ struct AddStationView: View {
     @Binding var activeSheet: ActiveSheet?
 
     var station: RadioStation?
-    var onSave: (() -> Void)?
+    var onSave: ((String) -> Void)?
     
-    init(station: RadioStation? = nil, activeSheet: Binding<ActiveSheet?>, selectedCountry: String, isEditingStation: Binding<RadioStation?>? = nil, onSave: (() -> Void)? = nil) {
+    init(station: RadioStation? = nil, activeSheet: Binding<ActiveSheet?>, selectedCountry: String, isEditingStation: Binding<RadioStation?>? = nil, onSave: ((String) -> Void)? = nil) {
         self.station = station
         _activeSheet = activeSheet
         _selectedCountry = State(initialValue: selectedCountry)
@@ -188,7 +188,7 @@ struct AddStationView: View {
         viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
         viewModel.saveStationsToCoreData()
         activeSheet = nil
-        onSave?()
+        onSave?(selectedCountry)
     }
 }
 
