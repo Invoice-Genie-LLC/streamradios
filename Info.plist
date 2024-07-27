@@ -12,10 +12,24 @@
 	<array>
 		<string>com.radio.streamradios.backgroundfetch</string>
 	</array>
+	<key>CFBundleGetInfoString</key>
+	<string></string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>music</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>NSExceptionAllowsInsecureHTTPLoads</key>
+			<true/>
+			<key>NSIncludesSubdomains</key>
+			<true/>
+		</dict>
+	</dict>
 	<key>NSDocumentTypes</key>
 	<array>
 		<string>public.text</string>
