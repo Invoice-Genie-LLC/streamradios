@@ -13,17 +13,18 @@ import MediaPlayer
 import BackgroundTasks
 import SwiftUI
 import Reachability
+import SystemConfiguration
 
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
     @objc var player: AVPlayer?
+    private var playerItem: AVPlayerItem?
     private var statusCancellable: AnyCancellable?
     private var retryTimer: Timer?
     private var retryCount = 0
     private let monitor = NWPathMonitor()
     private var isNetworkAvailable = true
     private var wasPlayingBeforeNetworkLoss = false
-    var audioPlayer: AVPlayer?
     @Published var isBuffering = false
     @Published var isPlaying = false
     @Published var currentStationIndex: Int?
@@ -31,8 +32,8 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
     @Published var metadata: String?
-    @Published var currentBitrate: Int? = nil
     private var reachability: Reachability?
+    private var isOnCellularNetwork = false
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
@@ -48,14 +49,14 @@ class RadioPlayer: NSObject, ObservableObject {
     override init() {
         super.init()
         configureAudioSession()
-        startNetworkMonitoring()
-        addObservers()
+        addInterruptionObserver()
         autoPlayLastStationSetup()
-        
-        // Register background task
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.radio.refresh", using: nil) { task in
-            self.handleAppRefresh(task: task as! BGAppRefreshTask)
+        monitor.pathUpdateHandler = { path in
+            self.isOnCellularNetwork = path.isExpensive
+            self.adjustForNetworkConditions()
         }
+        let queue = DispatchQueue(label: "NetworkMonitor")
+        monitor.start(queue: queue)
     }
     
     private func autoPlayLastStationSetup() {
@@ -66,10 +67,6 @@ class RadioPlayer: NSObject, ObservableObject {
                 self.play()
             }
         }
-    }
-    
-    func getCurrentTime() -> TimeInterval {
-        return audioPlayer?.currentTime().seconds ?? 0
     }
     
     func setViewModel(_ viewModel: RadioStationViewModel) {
@@ -84,84 +81,64 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private func configureAudioSession() {
-        let audioSession = AVAudioSession.sharedInstance()
         do {
-            try audioSession.setCategory(.playback, mode: .default, options: [])
-            try audioSession.setActive(true)
+            let audioSession = AVAudioSession.sharedInstance()
+            
+            // Set the audio session category to playback
+            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .interruptSpokenAudioAndMixWithOthers])
+            
+            // Override the output audio port to speaker
+            try audioSession.overrideOutputAudioPort(.speaker)
+            
+            // Activate the audio session
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            
+            // Set the preferred IO buffer duration
+            try audioSession.setPreferredIOBufferDuration(0.005)
+            
         } catch {
             print("Failed to set up audio session: \(error)")
         }
     }
     
-    private func startNetworkMonitoring() {
-        monitor.pathUpdateHandler = { [weak self] path in
-            guard let self = self else { return }
-
-            // Log the network status and type
-            if path.status == .satisfied {
-                print("Network connected")
-                self.isNetworkAvailable = true
-                NotificationCenter.default.post(name: .NetworkReconnectNotification, object: nil)
-                if self.wasPlayingBeforeNetworkLoss {
-                    self.retryStream()
-                }
-            } else {
-                print("Network disconnected")
-                self.isNetworkAvailable = false
-                self.wasPlayingBeforeNetworkLoss = self.isPlaying
-                if self.isPlaying {
-                    self.pause()
-                }
-            }
-
-            // Log detailed network properties
-            print("Interface types: \(path.availableInterfaces.map { $0.type })")
-            print("Is constrained: \(path.isConstrained)")
-            print("Is expensive: \(path.isExpensive)")
-
-            // Update bitrate based on network type and conditions
-            self.updateBitrateBasedOnNetwork()
-        }
-        let queue = DispatchQueue(label: "NetworkMonitor")
-        monitor.start(queue: queue)
-    }
-
-    private func startBuffering() {
-        isBuffering = true
-        retryStream()
+    func addInterruptionObserver() {
+        NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
     }
     
-    private func addObservers() {
-        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidStall), name: .AVPlayerItemPlaybackStalled, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFailToPlayToEnd), name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
-        
-        // Add KVO observers for buffering and playing state
-        addObserver(self, forKeyPath: #keyPath(player.currentItem.isPlaybackBufferEmpty), options: [.new, .old], context: nil)
-        addObserver(self, forKeyPath: #keyPath(player.currentItem.isPlaybackLikelyToKeepUp), options: [.new, .old], context: nil)
-    }
-    
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
-        if keyPath == #keyPath(player.currentItem.isPlaybackBufferEmpty) {
-            if let isEmpty = change?[.newKey] as? Bool {
-                isBuffering = isEmpty
-                updateNowPlayingInfo()
-            }
-        } else if keyPath == #keyPath(player.currentItem.isPlaybackLikelyToKeepUp) {
-            if let isLikelyToKeepUp = change?[.newKey] as? Bool {
-                isBuffering = !isLikelyToKeepUp
-                updateNowPlayingInfo()
-            }
+    private func adjustForNetworkConditions() {
+        if isOnCellularNetwork {
+            player?.currentItem?.preferredForwardBufferDuration = 20
+            player?.currentItem?.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         } else {
-            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+            player?.currentItem?.preferredForwardBufferDuration = 5
+            player?.currentItem?.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         }
     }
     
-    @objc private func playerItemDidStall(notification: Notification) {
-        retryStream()
-    }
-    
-    @objc private func playerItemDidFailToPlayToEnd(notification: Notification) {
-        retryStream()
+    @objc private func handleInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+        
+        if type == .began {
+            // Interruption began, pause the player
+            player?.pause()
+        } else if type == .ended {
+            // Interruption ended, reactivate the audio session
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if options.contains(.shouldResume) {
+                    // Resume playback if it should resume
+                    player?.play()
+                }
+            } catch {
+                print("Failed to reactivate audio session: \(error)")
+            }
+        }
     }
     
     @objc private func checkNetworkAndRetry() {
@@ -177,19 +154,10 @@ class RadioPlayer: NSObject, ObservableObject {
         let currentTime = currentPlayerItem.currentTime()
         let newPlayerItem = AVPlayerItem(url: asset.url)
         newPlayerItem.preferredPeakBitRate = currentPlayerItem.preferredPeakBitRate
-
+        
         player?.replaceCurrentItem(with: newPlayerItem)
         player?.seek(to: currentTime)
         player?.play()
-    }
-    
-    private func refreshStream() {
-        guard let lastStationURL = userDefaults?.url(forKey: "lastStationURL") else { return }
-        setStationURL(lastStationURL)
-        player?.seek(to: .zero)
-        player?.play()
-        resetRetryCount()
-        print("Stream refreshed")
     }
     
     private func resetRetryCount() {
@@ -208,10 +176,10 @@ class RadioPlayer: NSObject, ObservableObject {
         player = AVPlayer(playerItem: playerItem)
         player?.automaticallyWaitsToMinimizeStalling = true
         userDefaults?.set(url, forKey: "lastStationURL")
-
+        
         // Cancel previous observer if it exists
         statusCancellable?.cancel()
-
+        
         // Set up observers
         statusCancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
@@ -228,13 +196,13 @@ class RadioPlayer: NSObject, ObservableObject {
     
     private func updateBitrateBasedOnNetwork() {
         let path = monitor.currentPath
-
+        
         DispatchQueue.main.async {
             print("Network status: \(path.status == .satisfied ? "Connected" : "Disconnected")")
-
+            
             if path.usesInterfaceType(.cellular) {
                 print("Network type: Cellular")
-
+                
                 self.performReachabilityCheck { isReachable in
                     if !isReachable {
                         print("Cellular network is not reachable. Setting bitrate to 64 kbps.")
@@ -274,35 +242,35 @@ class RadioPlayer: NSObject, ObservableObject {
         } else {
             print("Bitrate remains unchanged at \(bitrate)")
         }
-
+        
         // Ensure metadata output is added
         addMetadataOutput()
     }
     
-        private func performReachabilityCheck(completion: @escaping (Bool) -> Void) {
-            reachability = try? Reachability()
-
-            reachability?.whenReachable = { reachability in
-                DispatchQueue.main.async {
-                    completion(true)
-                }
-                reachability.stopNotifier()
+    private func performReachabilityCheck(completion: @escaping (Bool) -> Void) {
+        reachability = try? Reachability()
+        
+        reachability?.whenReachable = { reachability in
+            DispatchQueue.main.async {
+                completion(true)
             }
-
-            reachability?.whenUnreachable = { _ in
-                DispatchQueue.main.async {
-                    completion(false)
-                }
-                self.reachability.unsafelyUnwrapped.stopNotifier()
-            }
-
-            do {
-                try reachability?.startNotifier()
-            } catch {
+            reachability.stopNotifier()
+        }
+        
+        reachability?.whenUnreachable = { _ in
+            DispatchQueue.main.async {
                 completion(false)
             }
+            self.reachability.unsafelyUnwrapped.stopNotifier()
         }
-
+        
+        do {
+            try reachability?.startNotifier()
+        } catch {
+            completion(false)
+        }
+    }
+    
     private func addMetadataOutput() {
         guard let currentItem = player?.currentItem else {
             print("No current item found in player.")
@@ -530,3 +498,4 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
 extension Notification.Name {
     static let NetworkReconnectNotification = Notification.Name("NetworkReconnectNotification")
 }
+
