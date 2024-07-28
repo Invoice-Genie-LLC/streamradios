@@ -66,6 +66,7 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
+            self?.applyGain(to: buffer)
             self?.session.matchStreamingBuffer(buffer, at: when)
         }
         
@@ -82,13 +83,23 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         }
     }
     
+    private func applyGain(to buffer: AVAudioPCMBuffer) {
+        let gain: Float = 2.0 // Adjust the gain value as needed
+        let frameLength = Int(buffer.frameLength)
+        let channels = UnsafeBufferPointer(start: buffer.floatChannelData, count: Int(buffer.format.channelCount))
+        
+        for channel in channels {
+            for frame in 0..<frameLength {
+                channel[frame] *= gain
+            }
+        }
+    }
+    
     func stopListening() {
-        // Perform the audio stopping logic in the background if needed
         DispatchQueue.global(qos: .userInitiated).async {
             self.audioEngine.stop()
             self.audioEngine.inputNode.removeTap(onBus: 0)
             
-            // Once stopping is done, update any UI elements on the main thread
             DispatchQueue.main.async {
                 self.isRecording = false
             }
@@ -131,7 +142,6 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                                 albumArtURL: item.artworkURL,
                                 genres: item.genres)
         if let artist = media.artistName, let title = media.title {
-            
             DispatchQueue.main.async {
                 self.shazamMedia = media
             }
