@@ -40,6 +40,14 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) var sizeClass
     
     // Variables to detect specific devices
+    private var isIPhoneSE: Bool {
+        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1134
+    }
+    
+    private var isIPhoneSE2: Bool {
+          UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1334
+      }
+    
     private var isIPhone11: Bool {
            UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1792
        }
@@ -88,7 +96,7 @@ struct ContentView: View {
                             Spacer()
                         }
                         .padding(.leading, 20)
-                        .frame(width: isIPhone15ProMax ? 30 : isIPhone15 ? 30 : isIPhone11 ? 20 : isIPhone14Plus ? 30 : isIPadMini ? 30 : isIPad ? 30 : 30)
+                        .frame(width: isIPhone15ProMax ? 30 : isIPhone15 ? 30 : isIPhoneSE || isIPhoneSE2 ? 30 : isIPhone11 ? 20 : isIPhone14Plus ? 30 : isIPadMini ? 30 : isIPad ? 30 : 30)
                         .padding(.bottom, 5)
                         
                         // Country Picker
@@ -98,7 +106,7 @@ struct ContentView: View {
                                 countries: viewModel.countries
                             )
                         }
-                        .frame(width: isIPhone15ProMax ? 270 : isIPhone15 ? 250 : isIPhone11 ? 220 : isIPhone14Plus ? 250 : isIPadMini ? 300 : isIPad ? 400 : 350)
+                        .frame(width: isIPhone15ProMax ? 270 : isIPhone15 ? 250 : isIPhone11 ? 220 : isIPhoneSE || isIPhoneSE2 ? 220 : isIPhone14Plus ? 250 : isIPadMini ? 300 : isIPad ? 400 : 350)
                         .padding(.bottom, 5)
                         
                         // Done and Edit Buttons
@@ -116,7 +124,7 @@ struct ContentView: View {
                                     .foregroundColor(.primary)
                             }
                         }
-                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPhone14Plus ? 50 : isIPhone11 ? 40 : isIPadMini ? 100 : isIPad ? 150 : 50)
+                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPhone14Plus ? 50 : isIPhone11 ? 50 : isIPhoneSE || isIPhoneSE2 ? 50 : isIPadMini ? 100 : isIPad ? 150 : 50)
                         .padding(.bottom, 5)
                         
                         HStack {
@@ -134,7 +142,7 @@ struct ContentView: View {
                             }
                         }
                         .padding(.bottom, 5)
-                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPhone14Plus ? 30 : isIPhone11 ? 30 : isIPadMini ? 50 : isIPad ? 50 : 50)
+                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPhone14Plus ? 50 : isIPhone11 ? 40 : isIPhoneSE || isIPhoneSE2 ? 40 : isIPadMini ? 50 : isIPad ? 50 : 50)
                     }
                     
                     HStack {
@@ -155,19 +163,19 @@ struct ContentView: View {
                     
                     VStack {
                         RadioStationListView(isEditing: $isEditingMode,
-                                             isEditingStation: $isEditingStation,
-                                             selectedStationForEdit: $selectedStationForEdit,
-                                             selectedTab: $selectedTab, activeSheet: $activeSheet)
-                        .environmentObject(viewModel)
-                        .environmentObject(radioPlayer)
-                        .frame(width: sizeClass == .regular ? 615 : 385)
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(16)
-                        .modifier(NeumorphicShadow())
-                        .padding(.top, 10)
-                    }
-                    .padding(.bottom, 35)
-                    .padding(.bottom, sizeClass == .regular ? 5 : 0)
+                                                 isEditingStation: $isEditingStation,
+                                                 selectedStationForEdit: $selectedStationForEdit,
+                                                 selectedTab: $selectedTab, activeSheet: $activeSheet)
+                            .environmentObject(viewModel)
+                            .environmentObject(radioPlayer)
+                            .frame(width: sizeClass == .regular ? 615 : isIPhoneSE || isIPhoneSE2 ? 350 : 385)
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(16)
+                            .modifier(NeumorphicShadow())
+                            .padding(.top, isIPhoneSE || isIPhoneSE2 ? 5 : 10)
+                        }
+                        .padding(.bottom, isIPhoneSE || isIPhoneSE2 ? 20 : 35)
+                        .padding(.bottom, sizeClass == .regular ? 5 : 0)
                     
                     Spacer()
                     
@@ -213,7 +221,7 @@ struct ContentView: View {
                             .environmentObject(viewModel)
                             .padding(.top, 8)
                     }
-                    .frame(width: sizeClass == .regular ? 565 : 355)
+                    .frame(width: sizeClass == .regular ? 565 : isIPhone15ProMax ? 350 : isIPhone11 ? 340 : isIPhone14Plus ? 340 : isIPhone15 ? 350 : isIPhoneSE || isIPhoneSE2 ? 320 : 385)
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(12)
