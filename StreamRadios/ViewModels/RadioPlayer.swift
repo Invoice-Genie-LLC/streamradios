@@ -330,6 +330,7 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         updateNowPlayingInfo()
         updateWidget()
+        updateLastPlayed(station)  // Add this line
     }
     
     func playStationForAlarm(station: RadioStation) {
@@ -363,15 +364,21 @@ class RadioPlayer: NSObject, ObservableObject {
     
     func nextStation(from stations: [RadioStation]) {
         guard let currentIndex = currentStationIndex else { return }
-        let nextIndex = (currentIndex + 1) % stations.count
-        playStation(at: nextIndex, from: stations)
+                let nextIndex = (currentIndex + 1) % stations.count
+                playStation(at: nextIndex, from: stations)
+                updateLastPlayed(stations[nextIndex])
     }
     
     func previousStation(from stations: [RadioStation]) {
         guard let currentIndex = currentStationIndex else { return }
-        let previousIndex = (currentIndex - 1 + stations.count) % stations.count
-        playStation(at: previousIndex, from: stations)
+               let previousIndex = (currentIndex - 1 + stations.count) % stations.count
+               playStation(at: previousIndex, from: stations)
+               updateLastPlayed(stations[previousIndex])
     }
+    
+    private func updateLastPlayed(_ station: RadioStation) {
+           viewModel?.updateLastPlayed(for: station)
+       }
     
     private func updateNowPlayingInfo() {
         guard let viewModel = viewModel else { return }
