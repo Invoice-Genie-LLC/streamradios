@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>streamradios</string>
+            </array>
+        </dict>
+    </array>
 	<key></key>
 	<string></string>
 	<key>AppGroup</key>
@@ -14,6 +23,8 @@
 	</array>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
+	<key>CFBundleURLSchemes</key>
+	<string>streamradios</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>music</string>
@@ -30,6 +41,8 @@
 			<true/>
 		</dict>
 	</dict>
+	<key>NSCalendarUsageDescription</key>
+	<string>This app requires access to the calendar to schedule alarms.</string>
 	<key>NSDocumentTypes</key>
 	<array>
 		<string>public.text</string>

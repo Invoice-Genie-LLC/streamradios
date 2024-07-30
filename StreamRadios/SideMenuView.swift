@@ -12,7 +12,7 @@ struct SideMenuView: View {
     
     var body: some View {
         VStack(alignment: .leading) {
-            VStack {
+            VStack(alignment: .leading) {
                 NavigationLink(destination: SettingsView().onAppear {
                     self.showSideMenu = false
                 }) {
@@ -27,7 +27,23 @@ struct SideMenuView: View {
                     .padding(.top, 20)
                     .padding(.horizontal, 20)
                 }
-            }.padding(.top, 100)
+                
+                NavigationLink(destination: AlarmConfigurationView().onAppear {
+                    self.showSideMenu = false
+                }) {
+                    HStack {
+                        Image(systemName: "alarm")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("Set Wake-Up Alarm")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                    }
+                    .padding(.top, 20)
+                    .padding(.horizontal, 20)
+                }
+            }
+            .padding(.top, 100)
             Spacer()
 
             // Footer
