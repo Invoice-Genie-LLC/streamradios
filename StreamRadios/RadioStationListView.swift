@@ -22,7 +22,7 @@ struct RadioStationListView: View {
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
     @Binding var activeSheet: ActiveSheet?
-    
+
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
     @StateObject private var alertManager = AlertManager()
@@ -67,6 +67,10 @@ struct RadioStationListView: View {
             }
         }
         .onAppear(perform: setup)
+        .onAppear {
+                   setup()
+                   playFavoriteStation()
+               }
         .onDisappear(perform: cleanup)
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
             viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
@@ -132,6 +136,15 @@ struct RadioStationListView: View {
             .padding(.vertical, 10)
         }
     }
+    
+    private func playFavoriteStation() {
+            if let favoriteStation = viewModel.stations.first(where: { $0.name == "Favorite Station" }) {
+                if let index = viewModel.stations.firstIndex(where: { $0.id == favoriteStation.id }) {
+                    viewModel.updateLastPlayed(for: viewModel.stations[index])
+                    radioPlayer.playStation(at: index, from: viewModel.stations)
+                }
+            }
+        }
     
     @ViewBuilder
     private func stationRow(for station: RadioStation) -> some View {

@@ -69,6 +69,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var isCloudKitOperationRunning = false
     @Published var isDeletionInProgress = false
     @Published var isUploadingToCloudKit = false
+    
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             saveSelectedCountry()
@@ -78,6 +79,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     private var notificationManager = NotificationManager.shared
     private var backgroundObserver: NSObjectProtocol?
+    static let shared = RadioStationViewModel()
+    
+    var currentlyPlayingStation: RadioStation? {
+            guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
+                  stations.indices.contains(currentStationIndex) else {
+                return nil
+            }
+            return stations[currentStationIndex]
+        }
     
     enum ActiveSheet: Identifiable {
         case editStation
@@ -281,14 +291,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
-    var currentlyPlayingStation: RadioStation? {
-        guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
-              stations.indices.contains(currentStationIndex) else {
-            return nil
-        }
-        return stations[currentStationIndex]
-    }
-    
     func isStationPlaying(_ station: RadioStation) -> Bool {
         guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
               currentStationIndex < stations.count,
@@ -319,11 +321,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func playStation(_ station: RadioStation) {
-        if let index = stations.firstIndex(of: station) {
-            RadioPlayer.shared.playStation(at: index, from: stations)
-            updateLastPlayed(for: station)
+            if let index = stations.firstIndex(of: station) {
+                RadioPlayer.shared.playStation(at: index, from: stations)
+                updateLastPlayed(for: station)
+            }
         }
-    }
     
     func updateLastPlayed(for station: RadioStation) {
         if let index = stations.firstIndex(of: station) {

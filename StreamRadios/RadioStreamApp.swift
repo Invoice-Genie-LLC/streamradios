@@ -15,8 +15,9 @@ struct RadioStreamApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var alertManager = AlertManager()
-    @StateObject private var viewModel = RadioStationViewModel()
-    @StateObject private var radioPlayer = RadioPlayer.shared
+  //  @StateObject private var viewModel = RadioStationViewModel()
+    var radioPlayer = RadioPlayer.shared
+        var viewModel = RadioStationViewModel.shared
 
     var body: some Scene {
         WindowGroup {
@@ -24,6 +25,8 @@ struct RadioStreamApp: App {
                 .environmentObject(PermissionManager())
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)
+                .environmentObject(RadioPlayer.shared)
+                .environmentObject(RadioStationViewModel.shared)
                 .environmentObject(notificationManager)
                 .environmentObject(alertManager)
                 .preferredColorScheme(isDarkMode ? .dark : .light)

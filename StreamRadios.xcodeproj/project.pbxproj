@@ -49,6 +49,8 @@
 		7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9702C3F2110009CCF6F /* CustomAlertView.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
+		77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */; };
+		77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */; };
 		77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */; };
@@ -128,6 +130,8 @@
 		7780E9702C3F2110009CCF6F /* CustomAlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomAlertView.swift; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
+		77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmConfigurationView.swift; sourceTree = "<group>"; };
+		77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTriggeredView.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
@@ -197,12 +201,14 @@
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
+				77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */,
 				7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
+				77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */,
 				7780E9702C3F2110009CCF6F /* CustomAlertView.swift */,
 				7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
@@ -444,12 +450,14 @@
 				7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */,
 				77130BF82C307D5F00D4711A /* EndEditing.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
+				77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */,
 				77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */,
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
+				77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,
 				7780E96F2C3E2C05009CCF6F /* Country.swift in Sources */,
 				77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */,

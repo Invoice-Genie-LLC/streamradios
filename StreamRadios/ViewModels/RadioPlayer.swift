@@ -32,6 +32,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
     @Published var metadata: String?
+    @Published var currentlyPlayingStation: RadioStation?
     private var reachability: Reachability?
     private var isOnCellularNetwork = false
     
@@ -331,6 +332,22 @@ class RadioPlayer: NSObject, ObservableObject {
         updateWidget()
     }
     
+    func playStationForAlarm(station: RadioStation) {
+            print("Playing station for alarm: \(station.name)")
+            guard let url = URL(string: station.url) else {
+                print("Invalid URL for station: \(station.name)")
+                return
+            }
+
+            setStationURL(url)
+            play()
+            currentlyPlayingStation = station
+            if let index = viewModel?.stations.firstIndex(where: { $0.id == station.id }) {
+                currentStationIndex = index
+            }
+        }
+    
+    
     func stop() {
         player?.pause()
         player = nil
@@ -464,6 +481,8 @@ class RadioPlayer: NSObject, ObservableObject {
         
         task.setTaskCompleted(success: true)
     }
+    
+    
 }
 
 extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
@@ -499,3 +518,18 @@ extension Notification.Name {
     static let NetworkReconnectNotification = Notification.Name("NetworkReconnectNotification")
 }
 
+extension RadioPlayer {
+    func playFavoriteStationForAlarm() {
+        print("playFavoriteStationForAlarm called")
+        
+        let viewModel = self.viewModel ?? RadioStationViewModel.shared
+        
+        if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
+           let favoriteStation = viewModel.stations.first(where: { $0.id == favoriteStationID }) {
+            print("Playing saved favorite station: \(favoriteStation.name)")
+            playStationForAlarm(station: favoriteStation)
+        } else {
+            print("Error: No valid favorite station found")
+        }
+    }
+}

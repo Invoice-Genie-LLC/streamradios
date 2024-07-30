@@ -1,21 +1,141 @@
-// AppDelegate.swift
-// RadioStreamApp
 //
-// Created by Kley Sulo on 6/9/24.
+//  AppDelegate.swift
+//  RadioStreamApp
+//
+//  Created by Kley Sulo on 6/9/24.
 //
 
 import UIKit
 import CoreData
+import UserNotifications
+import AVFoundation
+import SwiftUI
+import BackgroundTasks
 
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    
+    var window: UIWindow?
+    var radioPlayer = RadioPlayer.shared
+    var viewModel = RadioStationViewModel.shared
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         if isFirstLaunch() {
             deleteLocalCoreDataStore()
         }
+        
+        // Set up notification handling
+        UNUserNotificationCenter.current().delegate = self
+        requestNotificationAuthorization()
+        registerBackgroundTasks()
+        configureAudioSession()
+        
+        let alarmCategory = UNNotificationCategory(identifier: "ALARM_CATEGORY", actions: [], intentIdentifiers: [], options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
+        
+        application.registerForRemoteNotifications()
+        
         return true
     }
-
+    
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        if let aps = userInfo["aps"] as? [String: AnyObject] {
+            if aps["content-available"] as? Int == 1 {
+                checkAndPlayAlarm()
+                completionHandler(.newData)
+            } else {
+                completionHandler(.noData)
+            }
+        }
+    }
+    
+    func configureBackgroundTasks() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.yourapp.playalarm", using: nil) { task in
+            self.handleAlarmTask(task: task as! BGProcessingTask)
+        }
+    }
+    
+    
+    func registerBackgroundTasks() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.streamradios.playalarm", using: nil) { task in
+            self.handleAlarmTask(task: task as! BGProcessingTask)
+        }
+    }
+    
+    func handleAlarmTask(task: BGProcessingTask) {
+        task.expirationHandler = {
+            task.setTaskCompleted(success: false)
+        }
+        
+        checkAndPlayAlarm()
+        task.setTaskCompleted(success: true)
+    }
+    
+    func checkAndPlayAlarm() {
+        // Check if it's time for an alarm
+        if shouldTriggerAlarm() {
+            radioPlayer.playFavoriteStationForAlarm()
+            presentAlarmTriggeredView()
+        }
+    }
+    
+    func shouldTriggerAlarm() -> Bool {
+        // Implement logic to check if it's time for an alarm
+        // Compare current time with saved alarm times
+        return false  // Placeholder
+    }
+    
+    func openAppAndPlayStation() {
+        DispatchQueue.main.async {
+            UIApplication.shared.open(URL(string: "streamradios://openapp")!, options: [:], completionHandler: nil)
+        }
+    }
+    
+    func handleAlarmNotification(_ notification: [String: AnyObject]) {
+        // Check if it's an alarm notification and handle accordingly
+        if let alarmIdentifier = notification["alarmIdentifier"] as? String,
+           alarmIdentifier.starts(with: "wakeUpAlarm") {
+            openAppAndPlayStation()
+        }
+    }
+    
+    private func playFavoriteStation() {
+        if let favoriteStationIndex = UserDefaults.standard.value(forKey: "FavoriteStationIndex") as? Int,
+           favoriteStationIndex < viewModel.stations.count {
+            let favoriteStation = viewModel.stations[favoriteStationIndex]
+            radioPlayer.playStationForAlarm(station: favoriteStation)
+        } else {
+            print("Error: No favorite station set or invalid index")
+        }
+    }
+    
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        playFavoriteStation()
+        completionHandler([.banner, .sound])
+    }
+    
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.notification.request.identifier.starts(with: "wakeUpAlarm") {
+            print("Alarm triggered, playing favorite station")
+            RadioPlayer.shared.playFavoriteStationForAlarm()
+            // Present AlarmTriggeredView
+            presentAlarmTriggeredView()
+        }
+        completionHandler()
+    }
+    
+    func presentAlarmTriggeredView() {
+        DispatchQueue.main.async {
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first {
+                let alarmTriggeredView = AlarmTriggeredView()
+                    .environmentObject(RadioPlayer.shared)
+                    .environmentObject(RadioStationViewModel.shared)
+                let hostingController = UIHostingController(rootView: alarmTriggeredView)
+                window.rootViewController?.present(hostingController, animated: true, completion: nil)
+            }
+        }
+    }
+    
     private func isFirstLaunch() -> Bool {
         let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
         if !hasLaunchedBefore {
@@ -25,7 +145,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         return false
     }
-
+    
     private func deleteLocalCoreDataStore() {
         let coordinator = CoreDataStack.shared.persistentContainer.persistentStoreCoordinator
         if let storeURL = CoreDataStack.shared.persistentContainer.persistentStoreDescriptions.first?.url,
@@ -40,7 +160,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             }
         }
     }
-
+    
     private func recreateCoreDataStack() {
         let container = NSPersistentContainer(name: "YourModel")
         container.loadPersistentStores { storeDescription, error in
@@ -48,6 +168,52 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 fatalError("Unresolved error \(error), \(error.userInfo)")
             }
         }
-        CoreDataStack.shared.persistentContainer = container
+    }
+    
+    // Save favorite station index
+    func saveFavoriteStationIndex(_ index: Int) {
+        UserDefaults.standard.set(index, forKey: "FavoriteStationIndex")
+    }
+    
+    // Load favorite station index
+    func loadFavoriteStationIndex() -> Int? {
+        return UserDefaults.standard.value(forKey: "FavoriteStationIndex") as? Int
+    }
+    
+    // Request notification authorization
+    private func requestNotificationAuthorization() {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if granted {
+                print("Notification authorization granted.")
+            } else {
+                print("Notification authorization denied.")
+            }
+        }
+    }
+    
+    // Configure audio session
+    private func configureAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
+            try AVAudioSession.sharedInstance().setActive(true)
+            print("Audio session configured successfully.")
+        } catch {
+            print("Failed to set up audio session: \(error)")
+        }
+    }
+    
+    // Play favorite station
+    private func playFavoriteStation(at index: Int) {
+        DispatchQueue.main.async {
+            self.radioPlayer.playStation(at: index, from: self.viewModel.stations)
+        }
+    }
+}
+
+extension AppDelegate {
+    func handleAlarmTrigger() {
+        RadioPlayer.shared.playFavoriteStationForAlarm()
+        presentAlarmTriggeredView()
     }
 }

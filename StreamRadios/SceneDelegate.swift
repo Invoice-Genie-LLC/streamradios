@@ -15,6 +15,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         // Create a SwiftUI view that provides the window contents.
         let contentView = ContentView()
+        
+        if let urlContext = connectionOptions.urlContexts.first {
+                    handleIncomingURL(urlContext.url)
+                }
 
         // Use a UIHostingController as window root view controller.
         if let windowScene = scene as? UIWindowScene {
@@ -24,6 +28,31 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             window.makeKeyAndVisible()
         }
     }
+    
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+            if let url = URLContexts.first?.url {
+                handleIncomingURL(url)
+            }
+        }
+    
+    func handleIncomingURL(_ url: URL) {
+            if url.absoluteString == "streamradios://openapp" {
+                RadioPlayer.shared.playFavoriteStationForAlarm()
+                presentAlarmTriggeredView()
+            }
+        }
+    
+    func presentAlarmTriggeredView() {
+            DispatchQueue.main.async {
+                if let rootViewController = self.window?.rootViewController {
+                    let alarmTriggeredView = AlarmTriggeredView()
+                        .environmentObject(RadioPlayer.shared)
+                        .environmentObject(RadioStationViewModel.shared)
+                    let hostingController = UIHostingController(rootView: alarmTriggeredView)
+                    rootViewController.present(hostingController, animated: true, completion: nil)
+                }
+            }
+        }
 
     func sceneDidDisconnect(_ scene: UIScene) {
         // ToDo
