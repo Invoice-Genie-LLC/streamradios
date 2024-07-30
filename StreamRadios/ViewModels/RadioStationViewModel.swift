@@ -328,12 +328,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     
     func updateLastPlayed(for station: RadioStation) {
-        if let index = stations.firstIndex(of: station) {
-            stations[index].lastPlayed = Date()
-            updateStationInCloudKit(station: stations[index])
-            saveStationsToCoreData()  // Save the updated lastPlayed time to CoreData
+            if let index = stations.firstIndex(where: { $0.id == station.id }) {
+                stations[index].lastPlayed = Date()
+                updateStationInCloudKit(station: stations[index])
+                saveStationsToCoreData()
+                objectWillChange.send()  // Notify observers of the change
+            }
         }
-    }
     
     
     func loadImageData(named name: String) -> String? {
