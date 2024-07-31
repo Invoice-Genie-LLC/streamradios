@@ -19,23 +19,10 @@ struct AlarmTriggeredView: View {
                     .font(.largeTitle)
                     .padding()
                 
-                if let currentStation = radioPlayer.currentlyPlayingStation {
-                    Text("Now playing: \(currentStation.name)")
-                        .font(.title2)
-                    
-                    Text("Is Playing: \(radioPlayer.isPlaying ? "Yes" : "No")")
-                        .font(.subheadline)
-                    
-                    if let metadata = radioPlayer.metadata {
-                        Text(metadata)
-                            .font(.subheadline)
-                    } else {
-                        Text("No metadata available")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                    }
+                if let alarmStation = radioPlayer.alarmStation {
+                    stationView(for: alarmStation)
                 } else {
-                    Text("No station currently playing")
+                    Text("No alarm station set")
                         .font(.title2)
                     
                     Button("Try playing favorite station") {
@@ -46,23 +33,64 @@ struct AlarmTriggeredView: View {
                     .foregroundColor(.white)
                     .cornerRadius(10)
                 }
+                
+                Button("Stop") {
+                    radioPlayer.stop()
+                    radioPlayer.resetAlarmState()
+                }
+                .padding()
+                .background(Color.red)
+                .foregroundColor(.white)
+                .cornerRadius(10)
             }
             .navigationBarItems(trailing: closeButton)
             .navigationBarTitle("Alarm", displayMode: .inline)
         }
         .onAppear {
-            if !radioPlayer.isPlaying {
-                    radioPlayer.playFavoriteStationForAlarm()
-                }
+            radioPlayer.playFavoriteStationForAlarm()
         }
         .onReceive(radioPlayer.$metadata) { _ in
             print("Metadata updated: \(radioPlayer.metadata ?? "nil")")
         }
     }
     
+    private func stationView(for station: RadioStation) -> some View {
+        VStack(spacing: 15) {
+            if let iconData = station.iconData, let uiImage = UIImage(data: Data(base64Encoded: iconData) ?? Data()) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 200, height: 200)
+                    .cornerRadius(15)
+            } else {
+                Image(systemName: "radio")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 200, height: 200)
+                    .foregroundColor(.gray)
+            }
+            
+            Text("Now playing: \(station.name)")
+                .font(.title2)
+            
+            Text("Status: \(radioPlayer.isPlaying ? "Playing" : "Paused")")
+                .font(.subheadline)
+            
+            if let metadata = radioPlayer.metadata {
+                Text(metadata)
+                    .font(.subheadline)
+            } else {
+                Text("No metadata available")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+            }
+        }
+    }
+    
     private var closeButton: some View {
         Button(action: {
             radioPlayer.stop()
+            radioPlayer.resetAlarmState()
             presentationMode.wrappedValue.dismiss()
         }) {
             ZStack {
@@ -74,17 +102,6 @@ struct AlarmTriggeredView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.primary)
             }
-        }
-    }
-    
-    private func playFavoriteStation() {
-        if let favoriteStationIndex = UserDefaults.standard.value(forKey: "FavoriteStationIndex") as? Int,
-           favoriteStationIndex < viewModel.stations.count {
-            let favoriteStation = viewModel.stations[favoriteStationIndex]
-            print("Playing favorite station: \(favoriteStation.name)")
-            radioPlayer.playStationForAlarm(station: favoriteStation)
-        } else {
-            print("Error: No valid favorite station index found")
         }
     }
 }

@@ -39,10 +39,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
            if let launchOptions = launchOptions,
               launchOptions[UIApplication.LaunchOptionsKey.location] != nil {
                // App was launched due to an alarm, play the alarm station
-               radioPlayer.isHandlingAlarm = true
-               handleAlarmTrigger()
+               radioPlayer.playFavoriteStationForAlarm()
            } else {
-               // Normal app launch, proceed with auto-play if enabled
+               // Normal app launch, load the last played station
                radioPlayer.autoPlayLastStationSetup()
            }
         
