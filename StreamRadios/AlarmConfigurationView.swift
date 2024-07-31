@@ -12,20 +12,16 @@ import UIKit
 import BackgroundTasks
 
 struct AlarmConfigurationView: View {
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @EnvironmentObject var viewModel: RadioStationViewModel
     @AppStorage("alarmTimeString") private var alarmTimeString = ""
     @AppStorage("isAlarmEnabled") private var isAlarmEnabled = false
     @AppStorage("selectedStationIndex") private var selectedStationIndex = 0
-    @EnvironmentObject var radioPlayer: RadioPlayer
     @State private var favoriteStation: RadioStation?
     @State private var selectedFavoriteStationIndex = 0
-
-    
     @State private var alarmTime: Date
     @State private var selectedDays: [Bool] // Array of 7 booleans, one for each day
     @State private var showSavedIndicator = false
-    
-    @EnvironmentObject var viewModel: RadioStationViewModel
-    
     private let eventStore = EKEventStore()
     
     let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -64,15 +60,19 @@ struct AlarmConfigurationView: View {
                 }
                 
                 Section(header: Text("Wake Up Station")) {
-                    Picker("Favorite Station", selection: $selectedStationIndex) {
-                        ForEach(viewModel.stations.filter { $0.isFavorite }.indices, id: \.self) { index in
-                            Text(viewModel.stations.filter { $0.isFavorite }[index].name).tag(index)
+                    if isAlarmEnabled {
+                        Picker("Favorite Station", selection: $selectedStationIndex) {
+                            ForEach(viewModel.stations.filter { $0.isFavorite }.indices, id: \.self) { index in
+                                Text(viewModel.stations.filter { $0.isFavorite }[index].name).tag(index)
+                            }
                         }
+                        .onChange(of: selectedStationIndex) { _ in
+                            saveAlarm()
+                        }
+                    } else {
+                        Text("Enable alarm to select a station")
+                            .foregroundColor(.gray)
                     }
-                    .onChange(of: selectedStationIndex) { _ in
-                        saveAlarm()
-                    }
-                    .disabled(!isAlarmEnabled)
                 }
                 
                 if showSavedIndicator {
@@ -125,12 +125,12 @@ struct AlarmConfigurationView: View {
         
         // Save alarm details to UserDefaults
         let favoriteStations = viewModel.stations.filter { $0.isFavorite }
-            if selectedStationIndex < favoriteStations.count {
-                let selectedStation = favoriteStations[selectedStationIndex]
-                // Save the station's ID instead of its index
-                UserDefaults.standard.set(selectedStation.id, forKey: "FavoriteStationID")
-            }
-
+        if selectedStationIndex < favoriteStations.count {
+            let selectedStation = favoriteStations[selectedStationIndex]
+            // Save the station's ID instead of its index
+            UserDefaults.standard.set(selectedStation.id, forKey: "FavoriteStationID")
+        }
+        
         if isAlarmEnabled {
             scheduleAlarm(for: alarmDetails)
         } else {
@@ -227,6 +227,7 @@ struct AlarmConfigurationView: View {
     }
     
     private func scheduleBackgroundTask(for alarm: AlarmDetails) {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: "com.streamradios.playalarm")
         for (index, isSelected) in alarm.days.enumerated() where isSelected {
             var dateComponents = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
             dateComponents.weekday = index + 1 // weekday is 1-7
@@ -235,18 +236,34 @@ struct AlarmConfigurationView: View {
             
             let request = BGProcessingTaskRequest(identifier: "com.streamradios.playalarm")
             request.earliestBeginDate = nextAlarmDate
+            request.requiresNetworkConnectivity = false
+            request.requiresExternalPower = false
             
             do {
                 try BGTaskScheduler.shared.submit(request)
                 print("Background task scheduled for \(nextAlarmDate)")
             } catch {
-                print("Could not schedule background task: \(error)")
+                if let bgError = error as? BGTaskScheduler.Error {
+                    switch bgError.code {
+                    case .unavailable:
+                        print("Background tasks are unavailable. Ensure background fetch is enabled in capabilities.")
+                    case .tooManyPendingTaskRequests:
+                        print("Too many pending task requests. Consider consolidating tasks.")
+                    case .notPermitted:
+                        print("Background tasks are not permitted. Check if the user has disabled background refresh.")
+                    @unknown default:
+                        print("Unknown BGTaskScheduler error: \(error.localizedDescription)")
+                    }
+                } else {
+                    print("Could not schedule background task: \(error.localizedDescription)")
+                }
             }
         }
     }
     
     private func scheduleSilentPushNotification(for alarm: AlarmDetails) {
-        // This would typically involve sending a request to your server
+        // ToDo
+        // This would typically involve sending a request to the server
         // to schedule a silent push notification for the alarm time.
         // As this requires server-side implementation, we'll just print a placeholder message.
         print("Silent push notification would be scheduled for \(alarm.time)")
