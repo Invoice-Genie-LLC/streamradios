@@ -20,6 +20,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.radio.streamradios.backgroundfetch</string>
+        <string>com.streamradios.playalarm</string>
 	</array>
 	<key>CFBundleGetInfoString</key>
 	<string></string>

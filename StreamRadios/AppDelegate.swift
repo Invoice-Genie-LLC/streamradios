@@ -23,7 +23,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             deleteLocalCoreDataStore()
         }
         
-        // Set up notification handling
         UNUserNotificationCenter.current().delegate = self
         requestNotificationAuthorization()
         registerBackgroundTasks()
@@ -33,6 +32,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
         
         application.registerForRemoteNotifications()
+        
+        checkBackgroundRefreshStatus()
         
         return true
     }
@@ -47,13 +48,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             }
         }
     }
-    
-    func configureBackgroundTasks() {
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.yourapp.playalarm", using: nil) { task in
-            self.handleAlarmTask(task: task as! BGProcessingTask)
-        }
-    }
-    
     
     func registerBackgroundTasks() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.streamradios.playalarm", using: nil) { task in
@@ -71,7 +65,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func checkAndPlayAlarm() {
-        // Check if it's time for an alarm
         if shouldTriggerAlarm() {
             radioPlayer.playFavoriteStationForAlarm()
             presentAlarmTriggeredView()
@@ -91,33 +84,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func handleAlarmNotification(_ notification: [String: AnyObject]) {
-        // Check if it's an alarm notification and handle accordingly
         if let alarmIdentifier = notification["alarmIdentifier"] as? String,
            alarmIdentifier.starts(with: "wakeUpAlarm") {
             openAppAndPlayStation()
         }
     }
     
-    private func playFavoriteStation() {
-        if let favoriteStationIndex = UserDefaults.standard.value(forKey: "FavoriteStationIndex") as? Int,
-           favoriteStationIndex < viewModel.stations.count {
-            let favoriteStation = viewModel.stations[favoriteStationIndex]
-            radioPlayer.playStationForAlarm(station: favoriteStation)
-        } else {
-            print("Error: No favorite station set or invalid index")
-        }
-    }
-    
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        playFavoriteStation()
+        if notification.request.identifier.starts(with: "wakeUpAlarm") {
+            radioPlayer.playFavoriteStationForAlarm()
+        }
         completionHandler([.banner, .sound])
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         if response.notification.request.identifier.starts(with: "wakeUpAlarm") {
             print("Alarm triggered, playing favorite station")
-            RadioPlayer.shared.playFavoriteStationForAlarm()
-            // Present AlarmTriggeredView
+            radioPlayer.playFavoriteStationForAlarm()
             presentAlarmTriggeredView()
         }
         completionHandler()
@@ -128,8 +111,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                let window = windowScene.windows.first {
                 let alarmTriggeredView = AlarmTriggeredView()
-                    .environmentObject(RadioPlayer.shared)
-                    .environmentObject(RadioStationViewModel.shared)
+                    .environmentObject(self.radioPlayer)
+                    .environmentObject(self.viewModel)
                 let hostingController = UIHostingController(rootView: alarmTriggeredView)
                 window.rootViewController?.present(hostingController, animated: true, completion: nil)
             }
@@ -170,29 +153,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     }
     
-    // Save favorite station index
     func saveFavoriteStationIndex(_ index: Int) {
         UserDefaults.standard.set(index, forKey: "FavoriteStationIndex")
     }
     
-    // Load favorite station index
     func loadFavoriteStationIndex() -> Int? {
         return UserDefaults.standard.value(forKey: "FavoriteStationIndex") as? Int
     }
     
-    // Request notification authorization
     private func requestNotificationAuthorization() {
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if granted {
                 print("Notification authorization granted.")
             } else {
                 print("Notification authorization denied.")
+                if let error = error {
+                    print("Authorization error: \(error.localizedDescription)")
+                }
             }
         }
     }
     
-    // Configure audio session
     private func configureAudioSession() {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
@@ -203,10 +185,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     }
     
-    // Play favorite station
     private func playFavoriteStation(at index: Int) {
         DispatchQueue.main.async {
             self.radioPlayer.playStation(at: index, from: self.viewModel.stations)
+        }
+    }
+    
+    func checkBackgroundRefreshStatus() {
+        if UIApplication.shared.backgroundRefreshStatus == .denied {
+            print("Background refresh is disabled. Alarms may not function as expected.")
+            // Consider showing an alert to the user here
         }
     }
 }
