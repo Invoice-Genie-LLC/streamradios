@@ -34,6 +34,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var metadata: String?
     @Published var isHandlingAlarm = false
     @Published var currentlyPlayingStation: RadioStation?
+    @Published var alarmStation: RadioStation?
     private var reachability: Reachability?
     private var isOnCellularNetwork = false
     
@@ -61,14 +62,33 @@ class RadioPlayer: NSObject, ObservableObject {
         monitor.start(queue: queue)
     }
     
-     func autoPlayLastStationSetup() {
-        if autoPlayLastStation, let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+    func autoPlayLastStationSetup() {
+        if autoPlayLastStation {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 // Only auto-play if we're not currently handling an alarm
                 if !self.isHandlingAlarm {
-                    self.setStationURL(lastStationURL)
-                    self.currentStationIndex = self.userDefaults?.integer(forKey: "lastStationIndex")
-                    self.play()
+                    if let lastStationID = UserDefaults.standard.string(forKey: "LastPlayedStationID"),
+                       let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
+                        // Play the last played station
+                        self.currentlyPlayingStation = lastStation
+                        if let url = URL(string: lastStation.url) {
+                            self.setStationURL(url)
+                            if let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+                                self.currentStationIndex = index
+                                UserDefaults.standard.set(index, forKey: "lastStationIndex")
+                            }
+                            self.play()
+                        }
+                    } else if let lastStationURL = self.userDefaults?.url(forKey: "lastStationURL") {
+                        // Fall back to the old method if LastPlayedStationID is not available
+                        self.setStationURL(lastStationURL)
+                        self.currentStationIndex = self.userDefaults?.integer(forKey: "lastStationIndex")
+                        if let index = self.currentStationIndex,
+                           index < self.viewModel?.stations.count ?? 0 {
+                            self.currentlyPlayingStation = self.viewModel?.stations[index]
+                        }
+                        self.play()
+                    }
                 }
             }
         }
@@ -330,15 +350,16 @@ class RadioPlayer: NSObject, ObservableObject {
         stopCurrentStation()
         currentStationIndex = index
         metadata = nil // Clear metadata when switching stations
-        userDefaults?.set(index, forKey: "lastStationIndex")
         let station = stations[index]
+        currentlyPlayingStation = station
         if let url = URL(string: station.url) {
             setStationURL(url)
             play()
         }
         updateNowPlayingInfo()
         updateWidget()
-        updateLastPlayed(station)  // Add this line
+        updateLastPlayed(station)
+        saveLastPlayedStation()  // Add this line
     }
     
     func playStationForAlarm(station: RadioStation) {
@@ -350,10 +371,7 @@ class RadioPlayer: NSObject, ObservableObject {
 
         setStationURL(url)
         play()
-        currentlyPlayingStation = station
-        if let index = viewModel?.stations.firstIndex(where: { $0.id == station.id }) {
-            currentStationIndex = index
-        }
+        alarmStation = station
     }
     
     
@@ -389,15 +407,44 @@ class RadioPlayer: NSObject, ObservableObject {
            viewModel?.updateLastPlayed(for: station)
        }
     
+     func saveLastPlayedStation() {
+        if let currentStation = currentlyPlayingStation {
+            UserDefaults.standard.set(currentStation.id, forKey: "LastPlayedStationID")
+            if let index = viewModel?.stations.firstIndex(where: { $0.id == currentStation.id }) {
+                UserDefaults.standard.set(index, forKey: "lastStationIndex")
+            }
+        }
+    }
+
+    private func loadLastPlayedStation() {
+        if let lastStationID = UserDefaults.standard.string(forKey: "LastPlayedStationID"),
+           let lastStation = viewModel?.stations.first(where: { $0.id == lastStationID }) {
+            currentlyPlayingStation = lastStation
+            if let url = URL(string: lastStation.url) {
+                setStationURL(url)
+                play()
+            }
+        }
+    }
+    
     private func updateNowPlayingInfo() {
         guard let viewModel = viewModel else { return }
         
         var nowPlayingInfo = [String: Any]()
-        if let currentStationIndex = currentStationIndex,
-           currentStationIndex < viewModel.stations.count {
-            let currentStation = viewModel.stations[currentStationIndex]
-            nowPlayingInfo[MPMediaItemPropertyTitle] = songTitle.isEmpty ? currentStation.name : songTitle
-            nowPlayingInfo[MPMediaItemPropertyArtist] = artistName.isEmpty ? (metadata ?? currentStation.name) : artistName
+        
+        let currentStation: RadioStation?
+        if isHandlingAlarm {
+            currentStation = alarmStation
+        } else if let currentStationIndex = currentStationIndex,
+                  currentStationIndex < viewModel.stations.count {
+            currentStation = viewModel.stations[currentStationIndex]
+        } else {
+            currentStation = nil
+        }
+        
+        if let station = currentStation {
+            nowPlayingInfo[MPMediaItemPropertyTitle] = songTitle.isEmpty ? station.name : songTitle
+            nowPlayingInfo[MPMediaItemPropertyArtist] = artistName.isEmpty ? (metadata ?? station.name) : artistName
         }
         
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
@@ -408,15 +455,14 @@ class RadioPlayer: NSObject, ObservableObject {
                 return albumArt
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-        } else if let currentStationIndex = currentStationIndex,
-                  currentStationIndex < viewModel.stations.count {
-            let currentStation = viewModel.stations[currentStationIndex]
-            if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
-                    return image
-                }
-                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        } else if let station = currentStation,
+                  let iconData = station.iconData,
+                  let imageData = Data(base64Encoded: iconData),
+                  let image = UIImage(data: imageData) {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+                return image
             }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
         }
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
@@ -537,19 +583,16 @@ extension Notification.Name {
 extension RadioPlayer {
     func playFavoriteStationForAlarm() {
         print("playFavoriteStationForAlarm called")
-           isHandlingAlarm = true
-           
-           if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
-              let favoriteStation = viewModel?.stations.first(where: { $0.id == favoriteStationID }) {
-               print("Playing saved favorite station for alarm: \(favoriteStation.name)")
-               playStationForAlarm(station: favoriteStation)
-           } else {
-               print("Error: No valid favorite station found for alarm")
-               // If no favorite station is set, try to play the last station
-               if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
-                   setStationURL(lastStationURL)
-                   play()
-               }
-           }
+        isHandlingAlarm = true
+        
+        if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
+           let favoriteStation = viewModel?.stations.first(where: { $0.id == favoriteStationID }) {
+            print("Playing saved favorite station for alarm: \(favoriteStation.name)")
+            alarmStation = favoriteStation
+            playStationForAlarm(station: favoriteStation)
+        } else {
+            print("Error: No valid favorite station found for alarm")
+            alarmStation = nil
+        }
     }
 }
