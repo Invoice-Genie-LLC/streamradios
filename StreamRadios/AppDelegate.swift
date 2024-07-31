@@ -35,6 +35,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         checkBackgroundRefreshStatus()
         
+        // Check if the app was launched due to an alarm
+           if let launchOptions = launchOptions,
+              launchOptions[UIApplication.LaunchOptionsKey.location] != nil {
+               // App was launched due to an alarm, play the alarm station
+               radioPlayer.isHandlingAlarm = true
+               handleAlarmTrigger()
+           } else {
+               // Normal app launch, proceed with auto-play if enabled
+               radioPlayer.autoPlayLastStationSetup()
+           }
+        
         return true
     }
     
@@ -201,7 +212,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
 extension AppDelegate {
     func handleAlarmTrigger() {
-        RadioPlayer.shared.playFavoriteStationForAlarm()
-        presentAlarmTriggeredView()
+        DispatchQueue.main.async {
+            self.radioPlayer.playFavoriteStationForAlarm()
+            self.presentAlarmTriggeredView()
+        }
     }
+
 }
