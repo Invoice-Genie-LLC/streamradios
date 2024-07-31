@@ -32,6 +32,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
     @Published var metadata: String?
+    @Published var isHandlingAlarm = false
     @Published var currentlyPlayingStation: RadioStation?
     private var reachability: Reachability?
     private var isOnCellularNetwork = false
@@ -60,14 +61,21 @@ class RadioPlayer: NSObject, ObservableObject {
         monitor.start(queue: queue)
     }
     
-    private func autoPlayLastStationSetup() {
+     func autoPlayLastStationSetup() {
         if autoPlayLastStation, let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                self.setStationURL(lastStationURL)
-                self.currentStationIndex = self.userDefaults?.integer(forKey: "lastStationIndex")
-                self.play()
+                // Only auto-play if we're not currently handling an alarm
+                if !self.isHandlingAlarm {
+                    self.setStationURL(lastStationURL)
+                    self.currentStationIndex = self.userDefaults?.integer(forKey: "lastStationIndex")
+                    self.play()
+                }
             }
         }
+    }
+    
+    func resetAlarmState() {
+        isHandlingAlarm = false
     }
     
     func setViewModel(_ viewModel: RadioStationViewModel) {
@@ -334,19 +342,19 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func playStationForAlarm(station: RadioStation) {
-            print("Playing station for alarm: \(station.name)")
-            guard let url = URL(string: station.url) else {
-                print("Invalid URL for station: \(station.name)")
-                return
-            }
-
-            setStationURL(url)
-            play()
-            currentlyPlayingStation = station
-            if let index = viewModel?.stations.firstIndex(where: { $0.id == station.id }) {
-                currentStationIndex = index
-            }
+        print("Playing station for alarm: \(station.name)")
+        guard let url = URL(string: station.url) else {
+            print("Invalid URL for station: \(station.name)")
+            return
         }
+
+        setStationURL(url)
+        play()
+        currentlyPlayingStation = station
+        if let index = viewModel?.stations.firstIndex(where: { $0.id == station.id }) {
+            currentStationIndex = index
+        }
+    }
     
     
     func stop() {
@@ -360,6 +368,7 @@ class RadioPlayer: NSObject, ObservableObject {
         player = nil
         isPlaying = false
         updateNowPlayingInfo()
+        currentlyPlayingStation = nil
     }
     
     func nextStation(from stations: [RadioStation]) {
@@ -528,15 +537,19 @@ extension Notification.Name {
 extension RadioPlayer {
     func playFavoriteStationForAlarm() {
         print("playFavoriteStationForAlarm called")
-        
-        let viewModel = self.viewModel ?? RadioStationViewModel.shared
-        
-        if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
-           let favoriteStation = viewModel.stations.first(where: { $0.id == favoriteStationID }) {
-            print("Playing saved favorite station: \(favoriteStation.name)")
-            playStationForAlarm(station: favoriteStation)
-        } else {
-            print("Error: No valid favorite station found")
-        }
+           isHandlingAlarm = true
+           
+           if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
+              let favoriteStation = viewModel?.stations.first(where: { $0.id == favoriteStationID }) {
+               print("Playing saved favorite station for alarm: \(favoriteStation.name)")
+               playStationForAlarm(station: favoriteStation)
+           } else {
+               print("Error: No valid favorite station found for alarm")
+               // If no favorite station is set, try to play the last station
+               if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+                   setStationURL(lastStationURL)
+                   play()
+               }
+           }
     }
 }

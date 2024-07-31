@@ -15,7 +15,7 @@ struct AlarmTriggeredView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
-                Text("Wake Up!")
+                Text("Attention!")
                     .font(.largeTitle)
                     .padding()
                 
@@ -37,22 +37,23 @@ struct AlarmTriggeredView: View {
                 } else {
                     Text("No station currently playing")
                         .font(.title2)
+                    
+                    Button("Try playing favorite station") {
+                        radioPlayer.playFavoriteStationForAlarm()
+                    }
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
                 }
-                
-                Button("Stop Alarm") {
-                    radioPlayer.stop()
-                    presentationMode.wrappedValue.dismiss()
-                }
-                .padding()
-                .background(Color.red)
-                .foregroundColor(.white)
-                .cornerRadius(10)
             }
             .navigationBarItems(trailing: closeButton)
             .navigationBarTitle("Alarm", displayMode: .inline)
         }
         .onAppear {
-            radioPlayer.playFavoriteStationForAlarm()
+            if !radioPlayer.isPlaying {
+                    radioPlayer.playFavoriteStationForAlarm()
+                }
         }
         .onReceive(radioPlayer.$metadata) { _ in
             print("Metadata updated: \(radioPlayer.metadata ?? "nil")")

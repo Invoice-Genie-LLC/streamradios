@@ -42,7 +42,7 @@ struct AlarmConfigurationView: View {
                 }
                 
                 Section(header: Text("Alarm Time")) {
-                    DatePicker("Wake Up Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
+                    DatePicker("Setup Alarm Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
                         .onChange(of: alarmTime) { _ in
                             saveAlarm()
                         }
@@ -59,7 +59,7 @@ struct AlarmConfigurationView: View {
                     }
                 }
                 
-                Section(header: Text("Wake Up Station")) {
+                Section(header: Text("Setup Station")) {
                     if isAlarmEnabled {
                         Picker("Favorite Station", selection: $selectedStationIndex) {
                             ForEach(viewModel.stations.filter { $0.isFavorite }.indices, id: \.self) { index in
