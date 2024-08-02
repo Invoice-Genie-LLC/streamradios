@@ -189,7 +189,7 @@ class DataStore {
 
     func saveNewStationToCloudKit(station: RadioStation, iconImage: UIImage?, completion: @escaping (Bool, String?) -> Void) {
         let iconFileName = iconImage.flatMap { saveImageToFileSystem(image: $0) }
-        let record = CKRecord(recordType: "StreamingRadios", recordID: CKRecord.ID(recordName: station.id))
+        let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
         record.setValue(station.name, forKey: "name")
         record.setValue(station.url, forKey: "url")
         record.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
@@ -216,7 +216,7 @@ class DataStore {
     
     // Add a method to fetch existing station IDs from CloudKit
     private func fetchExistingStationIDs(completion: @escaping (Set<String>, Error?) -> Void) {
-            let query = CKQuery(recordType: "StreamingRadios", predicate: NSPredicate(value: true))
+            let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
             privateDatabase.perform(query, inZoneWith: nil) { records, error in
                 DispatchQueue.main.async {
                     if let error = error {
@@ -255,7 +255,7 @@ class DataStore {
     private func processNewStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
         var recordsToSave = [CKRecord]()
         for station in stations {
-            let record = CKRecord(recordType: "StreamingRadios", recordID: CKRecord.ID(recordName: station.id))
+            let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
             record["name"] = station.name
             record["url"] = station.url
             record["country"] = station.country
@@ -329,7 +329,7 @@ class DataStore {
     
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)
-        let query = CKQuery(recordType: "StreamingRadios", predicate: predicate)
+        let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
         
         privateDatabase.perform(query, inZoneWith: nil) { records, error in
             DispatchQueue.main.async {

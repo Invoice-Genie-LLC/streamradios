@@ -108,10 +108,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        if response.notification.request.identifier.starts(with: "wakeUpAlarm") {
-            print("Alarm triggered, playing favorite station")
-            radioPlayer.playFavoriteStationForAlarm()
-            presentAlarmTriggeredView()
+        let userInfo = response.notification.request.content.userInfo
+        if userInfo["alarmType"] as? String == "streamRadiosAlarm" {
+            // Present AlarmTriggeredView
+            DispatchQueue.main.async {
+                if let rootViewController = UIApplication.shared.windows.first?.rootViewController {
+                    let alarmTriggeredView = AlarmTriggeredView()
+                        .environmentObject(RadioPlayer.shared)
+                        .environmentObject(RadioStationViewModel.shared)
+                    let hostingController = UIHostingController(rootView: alarmTriggeredView)
+                    rootViewController.present(hostingController, animated: true, completion: nil)
+                }
+            }
         }
         completionHandler()
     }

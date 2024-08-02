@@ -12,18 +12,21 @@ import UIKit
 import BackgroundTasks
 
 struct AlarmConfigurationView: View {
-    @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @Environment(\.presentationMode) var presentationMode
     @AppStorage("alarmTimeString") private var alarmTimeString = ""
     @AppStorage("isAlarmEnabled") private var isAlarmEnabled = false
     @AppStorage("selectedStationIndex") private var selectedStationIndex = 0
-    @State private var favoriteStation: RadioStation?
-    @State private var selectedFavoriteStationIndex = 0
+    @AppStorage("showName") private var showName = ""
     @State private var alarmTime: Date
     @State private var selectedDays: [Bool] // Array of 7 booleans, one for each day
     @State private var showSavedIndicator = false
     private let eventStore = EKEventStore()
-    
+    @State private var showCalendarAccessAlert = false
+    @State private var shouldRequestCalendarAccess = false
+    @State private var calendarAccessStatus = "Not requested"
+    @AppStorage("isSingleTimeAlert") private var isSingleTimeAlert = false
+
     let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     
     init() {
@@ -31,49 +34,137 @@ struct AlarmConfigurationView: View {
         _selectedDays = State(initialValue: Self.loadSelectedDays())
     }
     
+    private var hasFavoriteStations: Bool {
+        !viewModel.stations.filter { $0.isFavorite }.isEmpty
+    }
+    
     var body: some View {
         NavigationView {
             Form {
-                Section {
-                    Toggle("Enable Alarm", isOn: $isAlarmEnabled)
-                        .onChange(of: isAlarmEnabled) { _ in
-                            saveAlarm()
+                    Section(header: Text("Setup Station")) {
+                        if isAlarmEnabled && hasFavoriteStations {
+                            let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+                            if favoriteStations.indices.contains(selectedStationIndex) {
+                                Picker("Favorite Station", selection: $selectedStationIndex) {
+                                    ForEach(favoriteStations.indices, id: \.self) { index in
+                                        Text(favoriteStations[index].name).tag(index)
+                                    }
+                                }
+                                .onChange(of: selectedStationIndex) { _ in
+                                    saveAlarm()
+                                }
+                            } else {
+                                Text("Please select a favorite station")
+                                    .foregroundColor(.red)
+                            }
+                        } else if !hasFavoriteStations {
+                            ButtonWithNonClickableText(
+                                text: "No favorite stations configured. Please add some stations as favorites in the 'Favorites' tab before scheduling an alert.",
+                                buttonText: "Go to All Stations"
+                            ) {
+                                self.presentationMode.wrappedValue.dismiss()
+                                DispatchQueue.main.async {
+                                    NotificationCenter.default.post(name: .switchToAllTab, object: nil)
+                                }
+                                
+                            }
+                           
+                        } else {
+                            Text("Enable alert to select a station")
+                                .foregroundColor(.gray)
                         }
+                    }
+                
+                Section(header: Text("Alert Type")) {
+                    Picker("Alert Type", selection: $isSingleTimeAlert) {
+                        Text("Repeating").tag(false)
+                        Text("Single Time").tag(true)
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .disabled(!isAlarmEnabled || !hasFavoriteStations)
+                    .onChange(of: isSingleTimeAlert) { newValue in
+                        saveAlarm()
+                    }
+                }
+                Section {
+                    Toggle("Enable Alert", isOn: $isAlarmEnabled)
+                        .onChange(of: isAlarmEnabled) { newValue in
+                                if newValue {
+                                    if hasFavoriteStations {
+                                        requestCalendarAccess()
+                                    } else {
+                                        isAlarmEnabled = false
+                                    }
+                                } else {
+                                    cancelAlarm()
+                                }
+                            }
+                            .disabled(!hasFavoriteStations)
+                    
                 }
                 
-                Section(header: Text("Alarm Time")) {
-                    DatePicker("Setup Alarm Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
+                Section(header: Text("Radio Program Alert Time")) {
+                    DatePicker("Setup Alert Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
                         .onChange(of: alarmTime) { _ in
                             saveAlarm()
                         }
-                        .disabled(!isAlarmEnabled)
+                        .disabled(!isAlarmEnabled || !hasFavoriteStations)
                 }
-                
-                Section(header: Text("Repeat")) {
-                    ForEach(0..<7) { index in
-                        Toggle(daysOfWeek[index], isOn: $selectedDays[index])
-                            .onChange(of: selectedDays[index]) { _ in
-                                saveAlarm()
-                            }
-                            .disabled(!isAlarmEnabled)
+                if !isSingleTimeAlert {
+                    Section(header: Text("Select day of the week to repeat alert")) {
+                        ForEach(0..<7) { index in
+                            Toggle(daysOfWeek[index], isOn: $selectedDays[index])
+                                .onChange(of: selectedDays[index]) { _ in
+                                    saveAlarm()
+                                }
+                                .disabled(!isAlarmEnabled || !hasFavoriteStations)
+                        }
                     }
                 }
                 
-                Section(header: Text("Setup Station")) {
+                Section(header: Text("Show Name")) {
                     if isAlarmEnabled {
-                        Picker("Favorite Station", selection: $selectedStationIndex) {
-                            ForEach(viewModel.stations.filter { $0.isFavorite }.indices, id: \.self) { index in
-                                Text(viewModel.stations.filter { $0.isFavorite }[index].name).tag(index)
+                        HStack {
+                            TextField("Enter Show Name", text: $showName)
+                                .padding(.trailing, 30)
+                            
+                            if !showName.isEmpty {
+                                Button(action: {
+                                    showName = ""
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.trailing, 8)
                             }
                         }
-                        .onChange(of: selectedStationIndex) { _ in
+                        .onAppear {
+                            updateSelectedStationIndex()
+                        }
+                        .onChange(of: viewModel.stations) { _ in
+                            updateSelectedStationIndex()
+                        }
+                        .onChange(of: showName) { _ in
                             saveAlarm()
                         }
+                        .onChange(of: shouldRequestCalendarAccess) { newValue in
+                            if newValue {
+                                requestCalendarAccess { granted in
+                                    if granted {
+                                        saveAlarm()
+                                    } else {
+                                        isAlarmEnabled = false
+                                    }
+                                    shouldRequestCalendarAccess = false
+                                }
+                            }
+                        }
                     } else {
-                        Text("Enable alarm to select a station")
+                        Text("Enable alert to enter show name")
                             .foregroundColor(.gray)
                     }
                 }
+                .disabled(!isAlarmEnabled || !hasFavoriteStations)
                 
                 if showSavedIndicator {
                     HStack {
@@ -84,8 +175,81 @@ struct AlarmConfigurationView: View {
                     }
                 }
             }
-            .navigationTitle("Set Alarm")
-            .opacity(isAlarmEnabled ? 1.0 : 0.5)
+            .navigationTitle("Set Program Alert")
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+        .alert(isPresented: $showCalendarAccessAlert) {
+            Alert(
+                title: Text("Calendar Access Required"),
+                message: Text("This app requires access to the calendar to schedule radio station program alerts. Please enable calendar access in Settings."),
+                primaryButton: .default(Text("Settings"), action: openSettings),
+                secondaryButton: .cancel()
+            )
+        }
+    }
+    
+    private func updateSelectedStationIndex() {
+        let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+        if !favoriteStations.indices.contains(selectedStationIndex) {
+            selectedStationIndex = favoriteStations.indices.first ?? 0
+        }
+    }
+    
+    private func handleAccessResult(granted: Bool) {
+        if granted {
+            calendarAccessStatus = "Granted"
+            saveAlarm()
+        } else {
+            calendarAccessStatus = "Denied"
+            isAlarmEnabled = false
+            showCalendarAccessAlert = true
+        }
+    }
+    
+    private func requestCalendarAccess() {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        
+        switch status {
+        case .notDetermined:
+            if #available(iOS 17.0, *) {
+                Task {
+                    do {
+                        let granted = try await eventStore.requestFullAccessToEvents()
+                        await MainActor.run {
+                            handleAccessResult(granted: granted)
+                        }
+                    } catch {
+                        await MainActor.run {
+                            calendarAccessStatus = "Error"
+                            isAlarmEnabled = false
+                            showCalendarAccessAlert = true
+                        }
+                    }
+                }
+            } else {
+                eventStore.requestAccess(to: .event) { granted, error in
+                    DispatchQueue.main.async {
+                        self.handleAccessResult(granted: granted)
+                    }
+                }
+            }
+        case .authorized, .fullAccess:
+            calendarAccessStatus = "Already Granted"
+            saveAlarm()
+        case .restricted, .denied, .writeOnly:
+            calendarAccessStatus = "Restricted or Denied"
+            isAlarmEnabled = false
+            showCalendarAccessAlert = true
+        @unknown default:
+            calendarAccessStatus = "Unknown"
+            isAlarmEnabled = false
+            showCalendarAccessAlert = true
+        }
+    }
+    
+    private func openSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
         }
     }
     
@@ -115,20 +279,24 @@ struct AlarmConfigurationView: View {
         alarmTimeString = formatter.string(from: alarmTime)
         
         UserDefaults.standard.set(selectedDays, forKey: "selectedDays")
+        UserDefaults.standard.set(showName, forKey: "showName")
+        UserDefaults.standard.set(isSingleTimeAlert, forKey: "isSingleTimeAlert")
         
         let alarmDetails = AlarmDetails(
             time: alarmTime,
             days: selectedDays,
             isEnabled: isAlarmEnabled,
-            stationIndex: selectedStationIndex
+            stationIndex: selectedStationIndex,
+            showName: showName,
+            isSingleTimeAlert: isSingleTimeAlert
         )
         
         // Save alarm details to UserDefaults
         let favoriteStations = viewModel.stations.filter { $0.isFavorite }
         if selectedStationIndex < favoriteStations.count {
             let selectedStation = favoriteStations[selectedStationIndex]
-            // Save the station's ID instead of its index
             UserDefaults.standard.set(selectedStation.id, forKey: "FavoriteStationID")
+            print("Saved FavoriteStationID: \(selectedStation.id)")
         }
         
         if isAlarmEnabled {
@@ -157,20 +325,15 @@ struct AlarmConfigurationView: View {
         case .notDetermined:
             eventStore.requestAccess(to: .event) { granted, error in
                 DispatchQueue.main.async {
-                    if granted {
-                        completion(true)
-                    } else {
-                        self.presentCalendarAccessAlert()
-                        completion(false)
-                    }
+                    completion(granted)
                 }
             }
-        case .authorized:
+        case .authorized, .fullAccess:
             completion(true)
-        case .restricted, .denied:
-            presentCalendarAccessAlert()
+        case .restricted, .denied, .writeOnly:
             completion(false)
         @unknown default:
+            print("Unknown calendar authorization status")
             completion(false)
         }
     }
@@ -193,9 +356,94 @@ struct AlarmConfigurationView: View {
     }
     
     private func scheduleAlarm(for alarm: AlarmDetails) {
-        scheduleLocalNotification(for: alarm)
+        if alarm.isSingleTimeAlert {
+            scheduleSingleTimeAlarm(for: alarm)
+        } else {
+            scheduleRepeatingAlarm(for: alarm)
+        }
         scheduleBackgroundTask(for: alarm)
         scheduleSilentPushNotification(for: alarm)
+    }
+    
+    private func scheduleRepeatingAlarm(for alarm: AlarmDetails) {
+        print("Scheduling repeating alarm for \(alarm.time)")
+
+        let center = UNUserNotificationCenter.current()
+        
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            guard granted else { return }
+            
+            // Load the favorite station using the saved station ID
+            let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+            var stationName = "your favorite station"
+            if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
+               let favoriteStation = favoriteStations.first(where: { $0.id == favoriteStationID }) {
+                stationName = favoriteStation.name
+            }
+            
+            for (index, isSelected) in alarm.days.enumerated() where isSelected {
+                var dateComponents = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
+                dateComponents.weekday = index + 1 // weekday is 1-7
+                
+                let content = UNMutableNotificationContent()
+                content.title = "Attention!"
+                if alarm.showName.isEmpty {
+                    content.body = "Time to listen to \(stationName)"
+                } else {
+                    content.body = "Time to listen to \(alarm.showName) on \(stationName)"
+                }
+                content.sound = UNNotificationSound.default
+                content.userInfo = ["stationIndex": alarm.stationIndex, "alarmType": "streamRadiosAlarm"]
+                
+                let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+                let request = UNNotificationRequest(identifier: "wakeUpAlarm\(index)", content: content, trigger: trigger)
+                
+                center.add(request) { error in
+                    if let error = error {
+                        print("Error scheduling repeating notification: \(error)")
+                    } else {
+                        print("Successfully scheduled repeating notification for day \(index + 1)")
+                    }
+                }
+            }
+        }
+    }
+    
+    private func scheduleSingleTimeAlarm(for alarm: AlarmDetails) {
+        print("Scheduling single time alarm for \(alarm.time)")
+
+        let center = UNUserNotificationCenter.current()
+        
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            guard granted else { return }
+            
+            let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+            var stationName = "your favorite station"
+            if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
+               let favoriteStation = favoriteStations.first(where: { $0.id == favoriteStationID }) {
+                stationName = favoriteStation.name
+            }
+            
+            let content = UNMutableNotificationContent()
+            content.title = "Attention!"
+            if alarm.showName.isEmpty {
+                content.body = "Time to listen to \(stationName)"
+            } else {
+                content.body = "Time to listen to \(alarm.showName) on \(stationName)"
+            }
+            content.sound = UNNotificationSound.default
+            content.userInfo = ["stationIndex": alarm.stationIndex, "alarmType": "streamRadiosAlarm"]
+            
+            let triggerDate = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: alarm.time)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: triggerDate, repeats: false)
+            let request = UNNotificationRequest(identifier: "singleTimeAlarm", content: content, trigger: trigger)
+            
+            center.add(request) { error in
+                if let error = error {
+                    print("Error scheduling single time notification: \(error)")
+                }
+            }
+        }
     }
     
     private func scheduleLocalNotification(for alarm: AlarmDetails) {
@@ -204,13 +452,25 @@ struct AlarmConfigurationView: View {
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             guard granted else { return }
             
+            // Load the favorite station using the saved station ID
+            let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+            var stationName = "your favorite station"
+            if let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID"),
+               let favoriteStation = favoriteStations.first(where: { $0.id == favoriteStationID }) {
+                stationName = favoriteStation.name
+            }
+            
             for (index, isSelected) in alarm.days.enumerated() where isSelected {
                 var dateComponents = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
                 dateComponents.weekday = index + 1 // weekday is 1-7
                 
                 let content = UNMutableNotificationContent()
-                content.title = "Wake Up!"
-                content.body = "Time to listen to your favorite station"
+                content.title = "Attention!"
+                if alarm.showName.isEmpty {
+                    content.body = "Time to listen to \(stationName)"
+                } else {
+                    content.body = "Time to listen to \(alarm.showName) on \(stationName)"
+                }
                 content.sound = UNNotificationSound.default
                 content.userInfo = ["stationIndex": alarm.stationIndex]
                 
@@ -272,7 +532,7 @@ struct AlarmConfigurationView: View {
     private func presentCalendarAccessAlert() {
         let alert = UIAlertController(
             title: "Calendar Access Required",
-            message: "This app requires access to the calendar to schedule alarms. Please enable calendar access in Settings.",
+            message: "This app requires access to the calendar to schedule radio station program alerts. Please enable calendar access in Settings.",
             preferredStyle: .alert
         )
         
@@ -291,9 +551,7 @@ struct AlarmConfigurationView: View {
     private func cancelAlarm() {
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: "com.streamradios.playalarm")
-        // You would also need to cancel any scheduled silent push notifications here
-        // This would typically involve sending a request to your server
-        print("Alarm cancelled")
+        print("All alarms cancelled")
     }
 }
 
@@ -302,11 +560,45 @@ struct AlarmDetails: Codable {
     let days: [Bool]
     let isEnabled: Bool
     let stationIndex: Int
+    let showName: String
+    let isSingleTimeAlert: Bool
 }
 
 struct AlarmConfigurationView_Previews: PreviewProvider {
     static var previews: some View {
         AlarmConfigurationView()
             .environmentObject(RadioStationViewModel())
+    }
+}
+
+extension Notification.Name {
+    static let switchToAllTab = Notification.Name("switchToAllTab")
+}
+
+struct ButtonWithNonClickableText: View {
+    let text: String
+    let buttonText: String
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(text)
+                .foregroundColor(.red)
+                .font(.callout)
+            
+            Button(action: action) {
+                HStack {
+                    Image(systemName: "list.bullet")
+                    Text(buttonText)
+                }
+                .padding(8)
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(8)
+            }
+            .buttonStyle(PlainButtonStyle()) // This ensures only the button itself is clickable
+        }
+        .contentShape(Rectangle()) // This makes the whole VStack tappable
+        .onTapGesture {} // This consumes taps on the VStack, preventing row highlight
     }
 }

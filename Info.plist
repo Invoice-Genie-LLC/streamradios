@@ -2,15 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>streamradios</string>
-            </array>
-        </dict>
-    </array>
+    <key>NSCalendarUsageDescription</key>
+    <string>This app requires access to the calendar to schedule radio station program alerts.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>This app requires full access to the calendar to schedule radio station program alerts.</string>
 	<key></key>
 	<string></string>
 	<key>AppGroup</key>
@@ -20,12 +15,21 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.radio.streamradios.backgroundfetch</string>
-        <string>com.streamradios.playalarm</string>
+		<string>com.streamradios.playalarm</string>
 	</array>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
 	<key>CFBundleURLSchemes</key>
 	<string>streamradios</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>streamradios</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>music</string>
@@ -42,8 +46,6 @@
 			<true/>
 		</dict>
 	</dict>
-	<key>NSCalendarUsageDescription</key>
-	<string>This app requires access to the calendar to schedule alarms.</string>
 	<key>NSDocumentTypes</key>
 	<array>
 		<string>public.text</string>

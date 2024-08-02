@@ -35,7 +35,7 @@ struct SideMenuView: View {
                         Image(systemName: "alarm")
                             .font(.headline)
                             .foregroundColor(.primary)
-                        Text("Setup Alarm")
+                        Text("Program Alerts")
                             .font(.headline)
                             .foregroundColor(.primary)
                     }
