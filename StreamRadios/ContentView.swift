@@ -333,6 +333,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
                     self.viewModel.objectWillChange.send()
                 }
+        .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
+            viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
+        }
     }
     
     private func saveSelectedTab(_ tab: Tab) {
