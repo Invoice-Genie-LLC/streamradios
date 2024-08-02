@@ -104,6 +104,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
         super.init()
         
             selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
+        
+            syncStationsWithCloudKit()
     
             loadStationsFromCoreData()
             
@@ -271,6 +273,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 print("Stations successfully synchronized with CloudKit.")
                 DispatchQueue.main.async {
                     self?.loadStationsFromCoreData() // Reload stations from CoreData after sync
+                    NotificationCenter.default.post(name: .stationsUpdated, object: nil)
                 }
             }
         }

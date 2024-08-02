@@ -42,7 +42,9 @@ struct RadioStreamApp: App {
 
         // Set the ViewModel for RadioPlayer
         radioPlayer.setViewModel(viewModel)
-
+        
+        fetchStationsFromCloudKit()
+        
         if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
             notificationManager.requestAuthorization()
             UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
@@ -65,6 +67,9 @@ struct RadioStreamApp: App {
                     viewModel?.stations = stations
                     viewModel?.saveStationsToCoreData()
                     print("Fetched and populated \(stations.count) stations from CloudKit.")
+                    
+                    // Notify that stations have been updated
+                    NotificationCenter.default.post(name: .stationsUpdated, object: nil)
                 }
             } else if let error = error {
                 print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
