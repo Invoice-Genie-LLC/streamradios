@@ -17,7 +17,7 @@ struct RadioStreamApp: App {
     @StateObject private var alertManager = AlertManager()
   //  @StateObject private var viewModel = RadioStationViewModel()
     var radioPlayer = RadioPlayer.shared
-        var viewModel = RadioStationViewModel.shared
+    var viewModel = RadioStationViewModel.shared
 
     var body: some Scene {
         WindowGroup {

@@ -11,6 +11,7 @@ struct AlarmTriggeredView: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Environment(\.presentationMode) var presentationMode
+    @AppStorage("isSingleTimeAlert") private var isSingleTimeAlert = false
     
     var body: some View {
         NavigationView {
@@ -22,7 +23,7 @@ struct AlarmTriggeredView: View {
                 if let alarmStation = radioPlayer.alarmStation {
                     stationView(for: alarmStation)
                 } else {
-                    Text("No alarm station set")
+                    Text("No alert station set")
                         .font(.title2)
                     
                     Button("Try playing favorite station") {
@@ -44,14 +45,23 @@ struct AlarmTriggeredView: View {
                 .cornerRadius(10)
             }
             .navigationBarItems(trailing: closeButton)
-            .navigationBarTitle("Alarm", displayMode: .inline)
+            .navigationBarTitle("Radio Program Alert", displayMode: .inline)
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
-            radioPlayer.playFavoriteStationForAlarm()
+            print("AlarmTriggeredView appeared")
+                print("Current alarm station: \(radioPlayer.alarmStation?.name ?? "None")")
+                print("Is playing: \(radioPlayer.isPlaying)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    radioPlayer.playFavoriteStationForAlarm()
+                }
         }
-        .onReceive(radioPlayer.$metadata) { _ in
-            print("Metadata updated: \(radioPlayer.metadata ?? "nil")")
-        }
+        .onReceive(radioPlayer.$isPlaying) { isPlaying in
+                   print("Is playing updated: \(isPlaying)")
+               }
+               .onReceive(radioPlayer.$metadata) { metadata in
+                   print("Metadata updated: \(metadata ?? "nil")")
+               }
     }
     
     private func stationView(for station: RadioStation) -> some View {

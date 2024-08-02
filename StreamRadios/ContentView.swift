@@ -28,6 +28,7 @@ struct ContentView: View {
     @State private var selectedTab: Tab = .all
     @EnvironmentObject var alertManager: AlertManager
 
+
     init() {
         if let savedTab = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
            let tab = Tab(rawValue: savedTab) {
@@ -317,6 +318,9 @@ struct ContentView: View {
             }
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                 self.bitrateMessage = newBitrateMessage
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .switchToAllTab)) { _ in
+                self.selectedTab = .all
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
