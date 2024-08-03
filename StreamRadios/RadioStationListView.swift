@@ -253,11 +253,15 @@ struct RadioStationListView: View {
     private func playbackControls(for station: RadioStation) -> some View {
         Button(action: {
             if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                viewModel.updateLastPlayed(for: viewModel.stations[index])
-                radioPlayer.playStation(at: index, from: viewModel.stations)
+                if isStationPlaying(station) {
+                    radioPlayer.stop()
+                } else {
+                    viewModel.updateLastPlayed(for: viewModel.stations[index])
+                    radioPlayer.playStation(at: index, from: viewModel.stations)
+                }
             }
         }) {
-            Image(systemName: "play.circle.fill")
+            Image(systemName: isStationPlaying(station) ? "pause.circle.fill" : "play.circle.fill")
                 .font(.title)
                 .foregroundColor(.primary)
                 .accessibilityIdentifier("playButton-\(station.id)")
@@ -359,6 +363,12 @@ struct RadioStationListView: View {
                 radioPlayer.playStation(at: index, from: viewModel.stations)
             }
         }
+    }
+    
+    private func isStationPlaying(_ station: RadioStation) -> Bool {
+        return radioPlayer.currentStationIndex != nil &&
+               viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) &&
+               viewModel.stations[radioPlayer.currentStationIndex!].id == station.id
     }
     
     private func cleanup() {
