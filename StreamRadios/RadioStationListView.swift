@@ -252,16 +252,16 @@ struct RadioStationListView: View {
     @ViewBuilder
     private func playbackControls(for station: RadioStation) -> some View {
         Button(action: {
-            if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                if isStationPlaying(station) {
-                    radioPlayer.stop()
-                } else {
+            if isStationPlaying(station) {
+                radioPlayer.togglePlayPause()
+            } else {
+                if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
                     viewModel.updateLastPlayed(for: viewModel.stations[index])
                     radioPlayer.playStation(at: index, from: viewModel.stations)
                 }
             }
         }) {
-            Image(systemName: isStationPlaying(station) ? "pause.circle.fill" : "play.circle.fill")
+            Image(systemName: isStationPlaying(station) ? (radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill") : "play.circle.fill")
                 .font(.title)
                 .foregroundColor(.primary)
                 .accessibilityIdentifier("playButton-\(station.id)")

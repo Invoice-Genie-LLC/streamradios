@@ -345,21 +345,41 @@ class RadioPlayer: NSObject, ObservableObject {
         updateNowPlayingInfo()
     }
     
+    func togglePlayPause() {
+            if isPlaying {
+                pause()
+            } else {
+                play()
+            }
+        }
+    
+    func stop() {
+           player?.pause()
+           player = nil
+           currentStationIndex = nil
+           isPlaying = false
+           metadata = nil
+       }
+    
     func playStation(at index: Int, from stations: [RadioStation]) {
         guard index >= 0 && index < stations.count else { return }
+        
         stopCurrentStation()
         currentStationIndex = index
         metadata = nil // Clear metadata when switching stations
         let station = stations[index]
         currentlyPlayingStation = station
+        
         if let url = URL(string: station.url) {
             setStationURL(url)
             play()
         }
+        
+        isPlaying = true  // Set isPlaying to true when starting a new station
         updateNowPlayingInfo()
         updateWidget()
         updateLastPlayed(station)
-        saveLastPlayedStation()  // Add this line
+        saveLastPlayedStation()
     }
     
     func playStationForAlarm(station: RadioStation) {
@@ -372,13 +392,6 @@ class RadioPlayer: NSObject, ObservableObject {
         setStationURL(url)
         play()
         alarmStation = station
-    }
-    
-    
-    func stop() {
-        player?.pause()
-        player = nil
-        isPlaying = false
     }
     
     func stopCurrentStation() {
