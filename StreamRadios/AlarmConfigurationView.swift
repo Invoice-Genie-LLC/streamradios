@@ -26,7 +26,7 @@ struct AlarmConfigurationView: View {
     @State private var shouldRequestCalendarAccess = false
     @State private var calendarAccessStatus = "Not requested"
     @AppStorage("isSingleTimeAlert") private var isSingleTimeAlert = false
-
+    
     let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     
     init() {
@@ -41,40 +41,55 @@ struct AlarmConfigurationView: View {
     var body: some View {
         NavigationView {
             Form {
-                    Section(header: Text("Setup Station")) {
-                        if isAlarmEnabled && hasFavoriteStations {
-                            let favoriteStations = viewModel.stations.filter { $0.isFavorite }
-                            if favoriteStations.indices.contains(selectedStationIndex) {
-                                Picker("Favorite Station", selection: $selectedStationIndex) {
-                                    ForEach(favoriteStations.indices, id: \.self) { index in
-                                        Text(favoriteStations[index].name).tag(index)
-                                    }
+                Section(header: Text("Setup Station")) {
+                    if isAlarmEnabled && hasFavoriteStations {
+                        let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+                        if favoriteStations.indices.contains(selectedStationIndex) {
+                            Picker("Favorite Station", selection: $selectedStationIndex) {
+                                ForEach(favoriteStations.indices, id: \.self) { index in
+                                    Text(favoriteStations[index].name).tag(index)
                                 }
-                                .onChange(of: selectedStationIndex) { _ in
-                                    saveAlarm()
+                            }
+                            .onChange(of: selectedStationIndex) { _ in
+                                saveAlarm()
+                            }
+                        } else {
+                            Text("Please select a favorite station")
+                                .foregroundColor(.red)
+                        }
+                    } else if !hasFavoriteStations {
+                        ButtonWithNonClickableText(
+                            text: "No favorite stations have been configured. Please add a station to your favorites in the 'Favorites' tab before scheduling an alert.",
+                            buttonText: "Go to All Stations"
+                        ) {
+                            self.presentationMode.wrappedValue.dismiss()
+                            DispatchQueue.main.async {
+                                NotificationCenter.default.post(name: .switchToAllTab, object: nil)
+                            }
+                            
+                        }
+                        
+                    } else {
+                        Text("Enable alert to select a station")
+                            .foregroundColor(.gray)
+                    }
+                }
+                Section {
+                    Toggle("Enable Alert", isOn: $isAlarmEnabled)
+                        .onChange(of: isAlarmEnabled) { newValue in
+                            if newValue {
+                                if hasFavoriteStations {
+                                    requestCalendarAccess()
+                                } else {
+                                    isAlarmEnabled = false
                                 }
                             } else {
-                                Text("Please select a favorite station")
-                                    .foregroundColor(.red)
+                                cancelAlarm()
                             }
-                        } else if !hasFavoriteStations {
-                            ButtonWithNonClickableText(
-                                text: "No favorite stations configured. Please add some stations as favorites in the 'Favorites' tab before scheduling an alert.",
-                                buttonText: "Go to All Stations"
-                            ) {
-                                self.presentationMode.wrappedValue.dismiss()
-                                DispatchQueue.main.async {
-                                    NotificationCenter.default.post(name: .switchToAllTab, object: nil)
-                                }
-                                
-                            }
-                           
-                        } else {
-                            Text("Enable alert to select a station")
-                                .foregroundColor(.gray)
                         }
-                    }
-                
+                        .disabled(!hasFavoriteStations)
+                    
+                }
                 Section(header: Text("Alert Type")) {
                     Picker("Alert Type", selection: $isSingleTimeAlert) {
                         Text("Repeating").tag(false)
@@ -86,23 +101,6 @@ struct AlarmConfigurationView: View {
                         saveAlarm()
                     }
                 }
-                Section {
-                    Toggle("Enable Alert", isOn: $isAlarmEnabled)
-                        .onChange(of: isAlarmEnabled) { newValue in
-                                if newValue {
-                                    if hasFavoriteStations {
-                                        requestCalendarAccess()
-                                    } else {
-                                        isAlarmEnabled = false
-                                    }
-                                } else {
-                                    cancelAlarm()
-                                }
-                            }
-                            .disabled(!hasFavoriteStations)
-                    
-                }
-                
                 Section(header: Text("Radio Program Alert Time")) {
                     DatePicker("Setup Alert Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
                         .onChange(of: alarmTime) { _ in
@@ -367,7 +365,7 @@ struct AlarmConfigurationView: View {
     
     private func scheduleRepeatingAlarm(for alarm: AlarmDetails) {
         print("Scheduling repeating alarm for \(alarm.time)")
-
+        
         let center = UNUserNotificationCenter.current()
         
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
@@ -411,7 +409,7 @@ struct AlarmConfigurationView: View {
     
     private func scheduleSingleTimeAlarm(for alarm: AlarmDetails) {
         print("Scheduling single time alarm for \(alarm.time)")
-
+        
         let center = UNUserNotificationCenter.current()
         
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
@@ -579,7 +577,7 @@ struct ButtonWithNonClickableText: View {
     let text: String
     let buttonText: String
     let action: () -> Void
-
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(text)
