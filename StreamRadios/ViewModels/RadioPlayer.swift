@@ -50,16 +50,25 @@ class RadioPlayer: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     override init() {
-        super.init()
-        configureAudioSession()
-        addInterruptionObserver()
-        autoPlayLastStationSetup()
-        monitor.pathUpdateHandler = { path in
-            self.isOnCellularNetwork = path.isExpensive
-            self.adjustForNetworkConditions()
+            super.init()
+            configureAudioSession()
+            addInterruptionObserver()
+            autoPlayLastStationSetup()
+            monitor.pathUpdateHandler = { [weak self] path in
+                guard let self = self else { return }
+                self.isOnCellularNetwork = path.isExpensive
+                self.adjustForNetworkConditions()
+                self.updateBitrateBasedOnNetwork(path: path)
+            }
+            let queue = DispatchQueue(label: "NetworkMonitor")
+            monitor.start(queue: queue)
         }
-        let queue = DispatchQueue(label: "NetworkMonitor")
-        monitor.start(queue: queue)
+
+    
+    private func updateBitrateText(_ bitrate: Double) {
+        let bitrateMessage = "Playing at \(Int(bitrate / 1000)) kbps"
+        bitrateSubject.send(bitrateMessage)
+        print("Bitrate text updated to: \(bitrateMessage)")
     }
     
     func autoPlayLastStationSetup() {
@@ -220,42 +229,34 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         
         // Set the bitrate and add metadata output
-        updateBitrateBasedOnNetwork()
+        updateBitrateBasedOnNetwork(path: monitor.currentPath)
     }
     
-    private func updateBitrateBasedOnNetwork() {
-        let path = monitor.currentPath
-        
-        DispatchQueue.main.async {
-            print("Network status: \(path.status == .satisfied ? "Connected" : "Disconnected")")
-            
-            if path.usesInterfaceType(.cellular) {
-                print("Network type: Cellular")
+    private func updateBitrateBasedOnNetwork(path: NWPath) {
+            DispatchQueue.main.async {
+                print("Network status: \(path.status == .satisfied ? "Connected" : "Disconnected")")
                 
-                self.performReachabilityCheck { isReachable in
-                    if !isReachable {
-                        print("Cellular network is not reachable. Setting bitrate to 64 kbps.")
-                        self.setBitrate(64000) // 64 kbps
-                    } else if path.isConstrained {
-                        print("Network is constrained. Setting bitrate to 64 kbps.")
-                        self.setBitrate(64000) // 64 kbps
+                if path.usesInterfaceType(.cellular) {
+                    print("Network type: Cellular")
+                    if path.isConstrained {
+                        print("Network is constrained. Updating bitrate text to 64 kbps.")
+                        self.updateBitrateText(64000) // 64 kbps
                     } else if path.isExpensive {
-                        print("Network is expensive. Setting bitrate to 96 kbps.")
-                        self.setBitrate(96000) // 96 kbps
+                        print("Network is expensive. Updating bitrate text to 96 kbps.")
+                        self.updateBitrateText(96000) // 96 kbps
                     } else {
-                        print("Normal cellular network. Setting bitrate to 128 kbps.")
-                        self.setBitrate(128000) // 128 kbps
+                        print("Normal cellular network. Updating bitrate text to 128 kbps.")
+                        self.updateBitrateText(128000) // 128 kbps
                     }
+                } else if path.usesInterfaceType(.wifi) {
+                    print("Network type: Wi-Fi. Updating bitrate text to 256 kbps.")
+                    self.updateBitrateText(256000) // 256 kbps
+                } else {
+                    print("Unknown network type. Updating bitrate text to 128 kbps.")
+                    self.updateBitrateText(128000) // 128 kbps
                 }
-            } else if path.usesInterfaceType(.wifi) {
-                print("Network type: Wi-Fi. Setting bitrate to 256 kbps.")
-                self.setBitrate(256000) // 256 kbps
-            } else {
-                print("Unknown network type. Setting bitrate to 128 kbps.")
-                self.setBitrate(128000) // 128 kbps
             }
         }
-    }
     
     private func setBitrate(_ bitrate: Double) {
         guard let playerItem = player?.currentItem else { return }
@@ -264,10 +265,7 @@ class RadioPlayer: NSObject, ObservableObject {
         
         if currentBitrate != bitrate {
             playerItem.preferredPeakBitRate = bitrate
-            let bitrateMessage = "Playing at \(Int(bitrate / 1000)) kbps"
-            bitrateSubject.send(bitrateMessage)
-            print("Bitrate updated to \(bitrate)")
-            self.retryStream()
+            updateBitrateText(bitrate)
         } else {
             print("Bitrate remains unchanged at \(bitrate)")
         }
