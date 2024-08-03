@@ -42,9 +42,7 @@ struct RadioStreamApp: App {
 
         // Set the ViewModel for RadioPlayer
         radioPlayer.setViewModel(viewModel)
-        
-        fetchStationsFromCloudKit()
-        
+                
         if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
             notificationManager.requestAuthorization()
             UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
