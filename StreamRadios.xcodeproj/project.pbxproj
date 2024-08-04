@@ -624,6 +624,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "StreamRadios requires access to the calendar to schedule radio station program alerts";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StreamRadios uses the microphone to identify songs through Shazam, enhancing your ability to discover and interact with music playing around you.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "StreamRadios requires access to your photo library to select custom icons for your radio stations.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -636,7 +637,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.9;
+				MARKETING_VERSION = 1.2.0;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -664,6 +665,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamRadios;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "StreamRadios requires access to the calendar to schedule radio station program alerts";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StreamRadios uses the microphone to identify songs through Shazam, enhancing your ability to discover and interact with music playing around you.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "StreamRadios requires access to your photo library to select custom icons for your radio stations.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -676,7 +678,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.9;
+				MARKETING_VERSION = 1.2.0;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
