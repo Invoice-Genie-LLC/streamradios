@@ -2,10 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>NSCalendarUsageDescription</key>
-    <string>This app requires access to the calendar to schedule radio station program alerts.</string>
-    <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>This app requires full access to the calendar to schedule radio station program alerts.</string>
 	<key></key>
 	<string></string>
 	<key>AppGroup</key>
@@ -46,6 +42,8 @@
 			<true/>
 		</dict>
 	</dict>
+	<key>NSCalendarUsageDescription</key>
+	<string>StreamRadios requires access to the calendar to schedule radio station program alerts.</string>
 	<key>NSDocumentTypes</key>
 	<array>
 		<string>public.text</string>

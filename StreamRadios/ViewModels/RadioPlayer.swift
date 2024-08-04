@@ -230,6 +230,8 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Set the bitrate and add metadata output
         updateBitrateBasedOnNetwork(path: monitor.currentPath)
+        
+        addMetadataOutput()
     }
     
     private func updateBitrateBasedOnNetwork(path: NWPath) {
