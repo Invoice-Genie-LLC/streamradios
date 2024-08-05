@@ -8,6 +8,7 @@
 import SwiftUI
 import ShazamKit
 import AVKit
+import MusicKit
 
 struct ShazamMedia: Decodable {
     let title: String?
@@ -24,6 +25,8 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                                              albumArtURL: URL(string: "https://example.com/default.jpg"),
                                              genres: ["Pop"])
     @Published var isRecording = false
+    @Published var appleMusicURL: URL?
+       @Published var appleMusicItem: MusicKit.Song?
     
     private var audioEngine = AVAudioEngine()
     private var session = SHSession()
@@ -61,6 +64,38 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             self.setupAudioEngine()
         }
     }
+    
+    func addToLibrary() async throws {
+            guard let song = appleMusicItem else {
+                throw NSError(domain: "ShazamError", code: 3, userInfo: [NSLocalizedDescriptionKey: "No Apple Music item available"])
+            }
+            
+            do {
+                try await MusicLibrary.shared.add(song)
+                print("Song added successfully")
+            } catch {
+                print("Failed to add song: \(error)")
+                throw error
+            }
+        }
+    
+    func fetchAppleMusicItem() async throws {
+            guard let songTitle = shazamMedia.title, let artistName = shazamMedia.artistName else {
+                throw NSError(domain: "ShazamError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Song information not available"])
+            }
+            
+            let searchRequest = MusicCatalogSearchRequest(term: "\(songTitle) \(artistName)", types: [Song.self])
+            let searchResponse = try await searchRequest.response()
+            
+            guard let song = searchResponse.songs.first else {
+                throw NSError(domain: "ShazamError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Song not found in Apple Music"])
+            }
+            
+            DispatchQueue.main.async {
+                self.appleMusicItem = song
+                self.appleMusicURL = song.url
+            }
+        }
     
     private func setupAudioEngine() {
         let inputNode = audioEngine.inputNode
