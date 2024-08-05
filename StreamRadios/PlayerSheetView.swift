@@ -33,6 +33,8 @@ struct PlayerSheetView: View {
     @StateObject private var musicAuthManager = MusicAuthorizationManager()
        @State private var showAlert = false
        @State private var alertMessage = ""
+    @State private var showingPlaylistPicker = false
+
     
     var body: some View {
         NavigationView {
@@ -245,6 +247,9 @@ struct PlayerSheetView: View {
                 
             }
             .confirmationDialog("Save Song", isPresented: $showingConfirmationDialog) {
+                        Button("Add to Playlist") {
+                            addToPlaylist()
+                        }
                         Button("Add to Library") {
                             addToLibrary()
                         }
@@ -255,6 +260,9 @@ struct PlayerSheetView: View {
                     }
                     .alert(isPresented: $showAlert) {
                         Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+                    }
+                    .sheet(isPresented: $showingPlaylistPicker) {
+                        PlaylistPickerView(shazamViewModel: shazamViewModel)
                     }
         }
     }
@@ -317,19 +325,35 @@ struct PlayerSheetView: View {
     
     private func addToPlaylist() {
         Task {
-            let status = await MusicAuthorization.request()
-            switch status {
-            case .authorized:
-                // Here you would typically show a view to select a playlist
-                // and then add the song to the selected playlist
-                print("Authorized to use Apple Music")
-            case .denied, .restricted, .notDetermined:
-                print("Not authorized to use Apple Music")
-            @unknown default:
-                break
+            do {
+                let status = await MusicAuthorization.request()
+                switch status {
+                case .authorized:
+                    try await shazamViewModel.fetchAppleMusicItem()
+                    try await shazamViewModel.fetchUserPlaylists()
+                    DispatchQueue.main.async {
+                        self.showingPlaylistPicker = true
+                    }
+                case .denied, .restricted:
+                    DispatchQueue.main.async {
+                        self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
+                        self.showAlert = true
+                    }
+                case .notDetermined:
+                    DispatchQueue.main.async {
+                        self.alertMessage = "Please authorize access to Apple Music and try again."
+                        self.showAlert = true
+                    }
+                @unknown default:
+                    break
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "Error: \(error.localizedDescription)"
+                    self.showAlert = true
+                }
             }
-        }
-    }
+        }}
     
     private func startOrStopShazaming() {
         if isShazaming {
@@ -488,5 +512,50 @@ struct PlayerSheetView_Previews: PreviewProvider {
         PlayerSheetView()
             .environmentObject(RadioPlayer.shared)
             .environmentObject(RadioStationViewModel())
+    }
+}
+
+struct PlaylistPickerView: View {
+    @ObservedObject var shazamViewModel: ShazamViewModel
+    @Environment(\.presentationMode) var presentationMode
+    @State private var alertMessage = ""
+    @State private var showAlert = false
+
+    var body: some View {
+        NavigationView {
+            List(shazamViewModel.userPlaylists, id: \.id) { playlist in
+                Button(action: {
+                    addToSelectedPlaylist(playlist)
+                }) {
+                    Text(playlist.name)
+                }
+            }
+            .navigationTitle("Select Playlist")
+            .navigationBarItems(trailing: Button("Cancel") {
+                presentationMode.wrappedValue.dismiss()
+            })
+        }
+        .alert(isPresented: $showAlert) {
+            Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")) {
+                presentationMode.wrappedValue.dismiss()
+            })
+        }
+    }
+
+    private func addToSelectedPlaylist(_ playlist: Playlist) {
+        Task {
+            do {
+                try await shazamViewModel.addToPlaylist(playlist)
+                DispatchQueue.main.async {
+                    self.alertMessage = "Song added to playlist successfully"
+                    self.showAlert = true
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "Error adding song to playlist: \(error.localizedDescription)"
+                    self.showAlert = true
+                }
+            }
+        }
     }
 }
