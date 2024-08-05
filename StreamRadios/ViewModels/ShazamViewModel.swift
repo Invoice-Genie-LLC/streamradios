@@ -27,7 +27,8 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     @Published var isRecording = false
     @Published var appleMusicURL: URL?
        @Published var appleMusicItem: MusicKit.Song?
-    
+    @Published var userPlaylists: MusicItemCollection<Playlist> = MusicItemCollection<Playlist>()
+
     private var audioEngine = AVAudioEngine()
     private var session = SHSession()
     
@@ -94,6 +95,29 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             DispatchQueue.main.async {
                 self.appleMusicItem = song
                 self.appleMusicURL = song.url
+            }
+        }
+    
+    func fetchUserPlaylists() async throws {
+            let request = MusicLibraryRequest<Playlist>()
+            let response = try await request.response()
+            DispatchQueue.main.async {
+                self.userPlaylists = response.items
+            }
+        }
+    
+    func addToPlaylist(_ playlist: Playlist) async throws {
+            guard let song = appleMusicItem else {
+                throw NSError(domain: "ShazamError", code: 3, userInfo: [NSLocalizedDescriptionKey: "No Apple Music item available"])
+            }
+            
+            do {
+                let library = MusicLibrary.shared
+                try await library.add(song, to: playlist)
+                print("Song added successfully to playlist")
+            } catch {
+                print("Failed to add song to playlist: \(error)")
+                throw error
             }
         }
     
