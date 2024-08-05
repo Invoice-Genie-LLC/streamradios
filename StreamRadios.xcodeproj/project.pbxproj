@@ -23,6 +23,7 @@
 		7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */; };
 		7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */; };
 		771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */; };
+		7727D7E82C616A6A004549C9 /* MusicAuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */; };
 		77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */; };
 		77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */; };
 		77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EEB2C45609E00C5D449 /* NotificationManager.swift */; };
@@ -103,6 +104,7 @@
 		7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveSheet.swift; sourceTree = "<group>"; };
 		7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertManager.swift; sourceTree = "<group>"; };
 		771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeumorphicShadow.swift; sourceTree = "<group>"; };
+		7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicAuthorizationManager.swift; sourceTree = "<group>"; };
 		77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStore.swift; sourceTree = "<group>"; };
 		77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
 		77322EEB2C45609E00C5D449 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
@@ -206,6 +208,7 @@
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
+				7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
 				77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */,
@@ -448,6 +451,7 @@
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
 				7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */,
+				7727D7E82C616A6A004549C9 /* MusicAuthorizationManager.swift in Sources */,
 				77130BF82C307D5F00D4711A /* EndEditing.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
 				77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */,

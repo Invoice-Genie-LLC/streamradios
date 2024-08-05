@@ -8,6 +8,7 @@
 import SwiftUI
 import AVKit
 import Combine
+import MusicKit
 
 // Extension to safely access indices of a collection
 extension Collection {
@@ -27,6 +28,11 @@ struct PlayerSheetView: View {
     @StateObject private var shazamViewModel = ShazamViewModel()
     @State private var isShazaming = false
     @State private var pulse = false
+    @State private var showingConfirmationDialog = false
+    @State private var shazamSongURL: URL?
+    @StateObject private var musicAuthManager = MusicAuthorizationManager()
+       @State private var showAlert = false
+       @State private var alertMessage = ""
     
     var body: some View {
         NavigationView {
@@ -198,6 +204,14 @@ struct PlayerSheetView: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(nil)
                     .padding()
+                Button(action: {
+                                   showingConfirmationDialog = true
+                                   // Here you would typically set the shazamSongURL
+                                   // shazamSongURL = URL(string: "https://music.apple.com/your-song-url")
+                               }) {
+                                   Image(systemName: "plus.circle")
+                                       .foregroundColor(.primary)
+                               }
                     .frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true)
             }.padding(.bottom, 50)
@@ -229,6 +243,90 @@ struct PlayerSheetView: View {
                         .background(RoundedRectangle(cornerRadius: 0).fill(Color(UIColor.secondarySystemBackground)))
                 }
                 
+            }
+            .confirmationDialog("Save Song", isPresented: $showingConfirmationDialog) {
+                        Button("Add to Library") {
+                            addToLibrary()
+                        }
+                        Button("Open in Apple Music") {
+                            openInAppleMusic()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    }
+                    .alert(isPresented: $showAlert) {
+                        Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+                    }
+        }
+    }
+    
+    private func addToLibrary() {
+            Task {
+                do {
+                    let status = await MusicAuthorization.request()
+                    switch status {
+                    case .authorized:
+                        try await shazamViewModel.fetchAppleMusicItem()
+                        try await shazamViewModel.addToLibrary()
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Song added to your library"
+                            self.showAlert = true
+                        }
+                    case .denied, .restricted:
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
+                            self.showAlert = true
+                        }
+                    case .notDetermined:
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Please authorize access to Apple Music and try again."
+                            self.showAlert = true
+                        }
+                    @unknown default:
+                        break
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.alertMessage = "Error: \(error.localizedDescription)"
+                        self.showAlert = true
+                    }
+                }
+            }
+        }
+
+        private func openInAppleMusic() {
+            Task {
+                do {
+                    try await shazamViewModel.fetchAppleMusicItem()
+                    if let url = shazamViewModel.appleMusicURL {
+                        await UIApplication.shared.open(url)
+                    } else {
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Couldn't open in Apple Music"
+                            self.showAlert = true
+                        }
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.alertMessage = "Error: \(error.localizedDescription)"
+                        self.showAlert = true
+                    }
+                }
+            }
+        }
+    
+    
+    private func addToPlaylist() {
+        Task {
+            let status = await MusicAuthorization.request()
+            switch status {
+            case .authorized:
+                // Here you would typically show a view to select a playlist
+                // and then add the song to the selected playlist
+                print("Authorized to use Apple Music")
+            case .denied, .restricted, .notDetermined:
+                print("Not authorized to use Apple Music")
+            @unknown default:
+                break
             }
         }
     }

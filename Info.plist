@@ -15,6 +15,8 @@
 	</array>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
+    <key>NSAppleMusicUsageDescription</key>
+        <string>We need access to your Apple Music library to add songs to your playlists.</string>
 	<key>CFBundleURLSchemes</key>
 	<string>streamradios</string>
 	<key>CFBundleURLTypes</key>
