@@ -15,7 +15,6 @@ struct RadioStreamApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var alertManager = AlertManager()
-  //  @StateObject private var viewModel = RadioStationViewModel()
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel.shared
 

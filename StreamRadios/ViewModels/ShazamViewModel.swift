@@ -98,14 +98,6 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             }
         }
     
-    func fetchUserPlaylists() async throws {
-            let request = MusicLibraryRequest<Playlist>()
-            let response = try await request.response()
-            DispatchQueue.main.async {
-                self.userPlaylists = response.items
-            }
-        }
-    
     func addToPlaylist(_ playlist: Playlist) async throws {
             guard let song = appleMusicItem else {
                 throw NSError(domain: "ShazamError", code: 3, userInfo: [NSLocalizedDescriptionKey: "No Apple Music item available"])
