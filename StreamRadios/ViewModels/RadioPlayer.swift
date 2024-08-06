@@ -260,6 +260,13 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
     
+    func resumePlayback() {
+        if let player = player, !isPlaying {
+            player.play()
+            isPlaying = true
+        }
+    }
+    
     private func setBitrate(_ bitrate: Double) {
         guard let playerItem = player?.currentItem else { return }
         let currentBitrate = playerItem.preferredPeakBitRate

@@ -39,7 +39,8 @@ struct PlayerSheetView: View {
     @State private var isRequestingMusicAuthorization = false
     @StateObject private var spotifyManager = SpotifyAuthorizationManager.shared
         @State private var showingSpotifyConfirmationDialog = false
-
+    @State private var spotifyPlaylists: [(id: String, name: String)] = []
+    @State private var showingSpotifyPlaylistPicker = false
     @State private var isAuthorizingSpotify = false
 
 
@@ -207,20 +208,22 @@ struct PlayerSheetView: View {
                 }
 
                 Button(action: {
-                            if spotifyManager.isAuthorized {
-                                showingSpotifyConfirmationDialog = true
-                            } else {
-                                isAuthorizingSpotify = true
-                                spotifyManager.authorize { success in
-                                    isAuthorizingSpotify = false
-                                    if success {
-                                        showingSpotifyConfirmationDialog = true
-                                    } else {
-                                        // Handle authorization failure
-                                        print("Failed to authorize with Spotify")
+                    if spotifyManager.isAuthorized {
+                            showingSpotifyConfirmationDialog = true
+                        } else {
+                            spotifyManager.authorize { success in
+                                if success {
+                                    DispatchQueue.main.async {
+                                        self.showingSpotifyConfirmationDialog = true
+                                    }
+                                } else {
+                                    DispatchQueue.main.async {
+                                        self.alertMessage = "Failed to authorize with Spotify"
+                                        self.showAlert = true
                                     }
                                 }
                             }
+                        }
                         }) {
                             Text("Add to Spotify")
                                 .font(.headline)
@@ -256,6 +259,21 @@ struct PlayerSheetView: View {
         .sheet(isPresented: $showingPlaylistPicker) {
             PlaylistPickerView(shazamViewModel: shazamViewModel)
         }
+        .sheet(isPresented: $showingSpotifyPlaylistPicker) {
+            SpotifyPlaylistPickerView(isPresented: $showingSpotifyPlaylistPicker, playlists: spotifyPlaylists) { playlistID in
+                spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
+                    DispatchQueue.main.async {
+                        switch result {
+                        case .success:
+                            self.alertMessage = "Song added to Spotify playlist successfully"
+                        case .failure(let error):
+                            self.alertMessage = "Failed to add song to Spotify playlist: \(error.localizedDescription)"
+                        }
+                        self.showAlert = true
+                    }
+                }
+            }
+        }
         .confirmationDialog("Save to Spotify", isPresented: $showingSpotifyConfirmationDialog) {
                 Button("Add to Playlist") {
                     addToSpotifyPlaylist()
@@ -274,19 +292,15 @@ struct PlayerSheetView: View {
     }
     
     private func addToSpotifyPlaylist() {
-        if spotifyManager.isAuthorized {
-            spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "")
-        } else {
-            spotifyManager.authorize { success in
-                if success {
-                    DispatchQueue.main.async {
-                        self.spotifyManager.addToSpotifyPlaylist(songTitle: self.shazamViewModel.shazamMedia.title ?? "", artistName: self.shazamViewModel.shazamMedia.artistName ?? "")
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        self.alertMessage = "Failed to authorize with Spotify"
-                        self.showAlert = true
-                    }
+        spotifyManager.fetchUserPlaylists { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let playlists):
+                    self.spotifyPlaylists = playlists
+                    self.showingSpotifyPlaylistPicker = true
+                case .failure(let error):
+                    self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
+                    self.showAlert = true
                 }
             }
         }
@@ -589,6 +603,29 @@ struct PlaylistPickerView: View {
                     self.showAlert = true
                 }
             }
+        }
+    }
+}
+
+struct SpotifyPlaylistPickerView: View {
+    @Binding var isPresented: Bool
+    let playlists: [(id: String, name: String)]
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        NavigationView {
+            List(playlists, id: \.id) { playlist in
+                Button(action: {
+                    onSelect(playlist.id)
+                    isPresented = false
+                }) {
+                    Text(playlist.name)
+                }
+            }
+            .navigationTitle("Select Spotify Playlist")
+            .navigationBarItems(trailing: Button("Cancel") {
+                isPresented = false
+            })
         }
     }
 }

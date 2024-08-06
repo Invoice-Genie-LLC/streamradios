@@ -28,4 +28,6 @@ class MusicAuthorizationManager: ObservableObject {
     func isAuthorized() -> Bool {
         return authorizationStatus == .authorized
     }
+    
+    
 }
