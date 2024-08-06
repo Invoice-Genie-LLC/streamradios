@@ -28,6 +28,22 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
            sessionManager = SPTSessionManager(configuration: configuration, delegate: self)
        }
     
+    func fetchUserPlaylists(completion: @escaping (Result<[(id: String, name: String)], Error>) -> Void) {
+        guard let accessToken = self.accessToken else {
+            completion(.failure(NSError(domain: "SpotifyError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No access token available"])))
+            return
+        }
+        
+        getUserPlaylists { result in
+            switch result {
+            case .success(let playlists):
+                completion(.success(playlists))
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    
     func authorize(completion: @escaping (Bool) -> Void) {
             if isAuthorized {
                 completion(true)
@@ -53,38 +69,36 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
             }
         }
     
-    func addToSpotifyPlaylist(songTitle: String, artistName: String) {
-        guard self.accessToken != nil else {
-            print("No access token available. Please authenticate with Spotify first.")
-            // You might want to trigger the authentication process here
-            // self.authorize()
+    private func saveAccessToken(_ token: String) {
+        UserDefaults.standard.set(token, forKey: "SpotifyAccessToken")
+    }
+    
+    private func loadAccessToken() -> String? {
+        return UserDefaults.standard.string(forKey: "SpotifyAccessToken")
+    }
+    
+    func addToSpotifyPlaylist(songTitle: String, artistName: String, playlistID: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard let accessToken = self.accessToken else {
+            completion(.failure(NSError(domain: "SpotifyError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No access token available"])))
             return
         }
 
         searchForTrack(songTitle: songTitle, artistName: artistName) { result in
             switch result {
             case .success(let trackID):
-                self.getUserPlaylists { result in
+                self.addTrackToPlaylist(playlistID: playlistID, trackID: trackID) { result in
                     switch result {
-                    case .success(let playlists):
-                        if let firstPlaylist = playlists.first {
-                            self.addTrackToPlaylist(playlistID: firstPlaylist.id, trackID: trackID) { result in
-                                switch result {
-                                case .success:
-                                    print("Successfully added \(songTitle) by \(artistName) to playlist: \(firstPlaylist.name)")
-                                case .failure(let error):
-                                    print("Failed to add track to playlist: \(error.localizedDescription)")
-                                }
-                            }
-                        } else {
-                            print("No playlists found")
-                        }
+                    case .success:
+                        print("Successfully added \(songTitle) by \(artistName) to playlist")
+                        completion(.success(()))
                     case .failure(let error):
-                        print("Failed to get user playlists: \(error.localizedDescription)")
+                        print("Failed to add track to playlist: \(error.localizedDescription)")
+                        completion(.failure(error))
                     }
                 }
             case .failure(let error):
                 print("Failed to find track: \(error.localizedDescription)")
+                completion(.failure(error))
             }
         }
     }
