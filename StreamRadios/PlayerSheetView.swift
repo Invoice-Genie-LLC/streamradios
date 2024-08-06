@@ -9,6 +9,7 @@ import SwiftUI
 import AVKit
 import Combine
 import MusicKit
+import SpotifyiOS
 
 // Extension to safely access indices of a collection
 extension Collection {
@@ -36,6 +37,11 @@ struct PlayerSheetView: View {
     @State private var alertMessage = ""
     @State private var showingPlaylistPicker = false
     @State private var isRequestingMusicAuthorization = false
+    @StateObject private var spotifyManager = SpotifyAuthorizationManager.shared
+        @State private var showingSpotifyConfirmationDialog = false
+
+    @State private var isAuthorizingSpotify = false
+
 
     
     var body: some View {
@@ -190,24 +196,6 @@ struct PlayerSheetView: View {
 
             HStack(spacing: 10) {
                 Button(action: {
-                    if isShazaming {
-                        shazamViewModel.stopListening()
-                        isShazaming = false
-                        pulse = false
-                    } else {
-                        shazamViewModel.startOrEndListening()
-                        isShazaming = true
-                        pulse = true
-                    }
-                }) {
-                    Text(isShazaming ? "Stop Shazaming" : "Tap to Shazam")
-                        .font(.headline)
-                        .foregroundColor(Color.primary)
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
-                }
-
-                Button(action: {
                     requestMusicAuthorization()
                     showingConfirmationDialog = true
                 }) {
@@ -217,9 +205,39 @@ struct PlayerSheetView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
                 }
+
+                Button(action: {
+                            if spotifyManager.isAuthorized {
+                                showingSpotifyConfirmationDialog = true
+                            } else {
+                                isAuthorizingSpotify = true
+                                spotifyManager.authorize { success in
+                                    isAuthorizingSpotify = false
+                                    if success {
+                                        showingSpotifyConfirmationDialog = true
+                                    } else {
+                                        // Handle authorization failure
+                                        print("Failed to authorize with Spotify")
+                                    }
+                                }
+                            }
+                        }) {
+                            Text("Add to Spotify")
+                                .font(.headline)
+                                .foregroundColor(Color.primary)
+                                .padding(12)
+                                .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                        }
+                        .disabled(isAuthorizingSpotify)
             }
             .padding(.horizontal)
         }
+        .onReceive(spotifyManager.$shouldShowConfirmationDialog) { shouldShow in
+                    if shouldShow {
+                        showingSpotifyConfirmationDialog = true
+                        spotifyManager.shouldShowConfirmationDialog = false
+                    }
+                }
         .confirmationDialog("Save Song", isPresented: $showingConfirmationDialog) {
             Button("Add to Playlist") {
                 addToPlaylist()
@@ -237,6 +255,80 @@ struct PlayerSheetView: View {
         }
         .sheet(isPresented: $showingPlaylistPicker) {
             PlaylistPickerView(shazamViewModel: shazamViewModel)
+        }
+        .confirmationDialog("Save to Spotify", isPresented: $showingSpotifyConfirmationDialog) {
+                Button("Add to Playlist") {
+                    addToSpotifyPlaylist()
+                }
+                Button("Open in Spotify") {
+                    openInSpotify()
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+            .alert(isPresented: $showAlert) {
+                Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+            }
+            .sheet(isPresented: $showingPlaylistPicker) {
+                PlaylistPickerView(shazamViewModel: shazamViewModel)
+            }
+    }
+    
+    private func addToSpotifyPlaylist() {
+        if spotifyManager.isAuthorized {
+            spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "")
+        } else {
+            spotifyManager.authorize { success in
+                if success {
+                    DispatchQueue.main.async {
+                        self.spotifyManager.addToSpotifyPlaylist(songTitle: self.shazamViewModel.shazamMedia.title ?? "", artistName: self.shazamViewModel.shazamMedia.artistName ?? "")
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.alertMessage = "Failed to authorize with Spotify"
+                        self.showAlert = true
+                    }
+                }
+            }
+        }
+    }
+    
+    private func openInSpotify() {
+        guard let songTitle = shazamViewModel.shazamMedia.title,
+              let artistName = shazamViewModel.shazamMedia.artistName else {
+            self.alertMessage = "Song information is not available"
+            self.showAlert = true
+            return
+        }
+        
+        // Encode the song title and artist name for use in a URL
+        let encodedQuery = "\(songTitle) \(artistName)"
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        
+        // First, try to open with the Spotify URI scheme
+        if let spotifyURL = URL(string: "spotify:search:\(encodedQuery)") {
+            UIApplication.shared.open(spotifyURL) { success in
+                if !success {
+                    // If the Spotify app is not installed, open in the web browser
+                    if let webURL = URL(string: "https://open.spotify.com/search/\(encodedQuery)") {
+                        UIApplication.shared.open(webURL) { success in
+                            if !success {
+                                DispatchQueue.main.async {
+                                    self.alertMessage = "Unable to open Spotify"
+                                    self.showAlert = true
+                                }
+                            }
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Unable to create Spotify search URL"
+                            self.showAlert = true
+                        }
+                    }
+                }
+            }
+        } else {
+            self.alertMessage = "Unable to create Spotify URL"
+            self.showAlert = true
         }
     }
     

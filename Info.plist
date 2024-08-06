@@ -19,15 +19,17 @@
         <string>StreamRadios needs access to your Apple Music library to add Shazam-identified songs to your playlists</string>
 	<key>CFBundleURLSchemes</key>
 	<string>streamradios</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>streamradios</string>
-			</array>
-		</dict>
-	</array>
+    <key>CFBundleURLTypes</key>
+    <array>
+      <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>streamradios</string>
+        </array>
+        <key>CFBundleURLName</key>
+        <string>com.yourdomain.StreamRadios</string>
+      </dict>
+    </array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>music</string>
