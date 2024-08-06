@@ -58,6 +58,8 @@
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
+		77F50BA82C62613700187488 /* SpotifyAuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */; };
+		77F50BAB2C62621A00187488 /* SpotifyiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BAA2C62621A00187488 /* SpotifyiOS */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -139,6 +141,7 @@
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
+		77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthorizationManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -147,6 +150,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */,
+				77F50BAB2C62621A00187488 /* SpotifyiOS in Frameworks */,
 				7780E9622C3CDEF2009CCF6F /* FlagKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -206,6 +210,7 @@
 				77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */,
 				7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
+				77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */,
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
 				7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */,
@@ -340,6 +345,7 @@
 			packageProductDependencies = (
 				77CC1EB42C2DBD8600F8FD5B /* Reachability */,
 				7780E9612C3CDEF2009CCF6F /* FlagKit */,
+				77F50BAA2C62621A00187488 /* SpotifyiOS */,
 			);
 			productName = AlbRadioStream;
 			productReference = 7707DA352C152EF2006D5EBB /* StreamRadios.app */;
@@ -392,6 +398,7 @@
 			packageReferences = (
 				77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */,
 				7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */,
+				77F50BA92C62621A00187488 /* XCRemoteSwiftPackageReference "ios-sdk" */,
 			);
 			productRefGroup = 7707DA362C152EF2006D5EBB /* Products */;
 			projectDirPath = "";
@@ -446,6 +453,7 @@
 				771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */,
 				7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */,
 				7715BD982C4C9D8300FA7CB1 /* ExportStation.swift in Sources */,
+				77F50BA82C62613700187488 /* SpotifyAuthorizationManager.swift in Sources */,
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7715BD9A2C4CA97300FA7CB1 /* ExportSheet.swift in Sources */,
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
@@ -800,6 +808,14 @@
 				kind = branch;
 			};
 		};
+		77F50BA92C62621A00187488 /* XCRemoteSwiftPackageReference "ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/spotify/ios-sdk.git";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -812,6 +828,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */;
 			productName = Reachability;
+		};
+		77F50BAA2C62621A00187488 /* SpotifyiOS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 77F50BA92C62621A00187488 /* XCRemoteSwiftPackageReference "ios-sdk" */;
+			productName = SpotifyiOS;
 		};
 /* End XCSwiftPackageProductDependency section */
 

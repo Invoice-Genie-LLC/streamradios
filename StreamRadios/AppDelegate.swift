@@ -11,6 +11,7 @@ import UserNotifications
 import AVFoundation
 import SwiftUI
 import BackgroundTasks
+import SpotifyiOS
 
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     
@@ -57,6 +58,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 completionHandler(.noData)
             }
         }
+    }
+    
+    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        if url.scheme == "streamradios" {
+            SpotifyAuthorizationManager.shared.handleAuthCallback(url: url)
+            return true
+        }
+        return false
     }
     
     func registerBackgroundTasks() {
