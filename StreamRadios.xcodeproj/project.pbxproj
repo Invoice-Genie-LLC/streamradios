@@ -60,6 +60,12 @@
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
 		77F50BA82C62613700187488 /* SpotifyAuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */; };
 		77F50BAB2C62621A00187488 /* SpotifyiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BAA2C62621A00187488 /* SpotifyiOS */; };
+		77F50BB72C63B81800187488 /* YouTubeMusicManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */; };
+		77F50BB92C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BB82C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift */; };
+		77F50BBC2C63BAEF00187488 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BBB2C63BAEE00187488 /* GoogleSignIn */; };
+		77F50BBE2C63BAEF00187488 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BBD2C63BAEF00187488 /* GoogleSignInSwift */; };
+		77F50BC12C63BBDF00187488 /* GoogleAPIClientForRESTCore in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BC02C63BBDF00187488 /* GoogleAPIClientForRESTCore */; };
+		77F50BC32C63BBDF00187488 /* GoogleAPIClientForREST_YouTube in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BC22C63BBDF00187488 /* GoogleAPIClientForREST_YouTube */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +148,8 @@
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
 		77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthorizationManager.swift; sourceTree = "<group>"; };
+		77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeMusicManager.swift; sourceTree = "<group>"; };
+		77F50BB82C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeMusicPlaylistPickerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -149,8 +157,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				77F50BBE2C63BAEF00187488 /* GoogleSignInSwift in Frameworks */,
+				77F50BC32C63BBDF00187488 /* GoogleAPIClientForREST_YouTube in Frameworks */,
 				77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */,
+				77F50BBC2C63BAEF00187488 /* GoogleSignIn in Frameworks */,
 				77F50BAB2C62621A00187488 /* SpotifyiOS in Frameworks */,
+				77F50BC12C63BBDF00187488 /* GoogleAPIClientForRESTCore in Frameworks */,
 				7780E9622C3CDEF2009CCF6F /* FlagKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -204,7 +216,9 @@
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
+				77F50BB82C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
+				77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */,
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
 				77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */,
@@ -346,6 +360,10 @@
 				77CC1EB42C2DBD8600F8FD5B /* Reachability */,
 				7780E9612C3CDEF2009CCF6F /* FlagKit */,
 				77F50BAA2C62621A00187488 /* SpotifyiOS */,
+				77F50BBB2C63BAEE00187488 /* GoogleSignIn */,
+				77F50BBD2C63BAEF00187488 /* GoogleSignInSwift */,
+				77F50BC02C63BBDF00187488 /* GoogleAPIClientForRESTCore */,
+				77F50BC22C63BBDF00187488 /* GoogleAPIClientForREST_YouTube */,
 			);
 			productName = AlbRadioStream;
 			productReference = 7707DA352C152EF2006D5EBB /* StreamRadios.app */;
@@ -399,6 +417,8 @@
 				77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */,
 				7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */,
 				77F50BA92C62621A00187488 /* XCRemoteSwiftPackageReference "ios-sdk" */,
+				77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				77F50BBF2C63BBDF00187488 /* XCRemoteSwiftPackageReference "google-api-objectivec-client-for-rest" */,
 			);
 			productRefGroup = 7707DA362C152EF2006D5EBB /* Products */;
 			projectDirPath = "";
@@ -456,7 +476,9 @@
 				77F50BA82C62613700187488 /* SpotifyAuthorizationManager.swift in Sources */,
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7715BD9A2C4CA97300FA7CB1 /* ExportSheet.swift in Sources */,
+				77F50BB72C63B81800187488 /* YouTubeMusicManager.swift in Sources */,
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
+				77F50BB92C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
 				7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */,
 				7727D7E82C616A6A004549C9 /* MusicAuthorizationManager.swift in Sources */,
@@ -816,6 +838,22 @@
 				kind = branch;
 			};
 		};
+		77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.1.0;
+			};
+		};
+		77F50BBF2C63BBDF00187488 /* XCRemoteSwiftPackageReference "google-api-objectivec-client-for-rest" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/google-api-objectivec-client-for-rest.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -833,6 +871,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 77F50BA92C62621A00187488 /* XCRemoteSwiftPackageReference "ios-sdk" */;
 			productName = SpotifyiOS;
+		};
+		77F50BBB2C63BAEE00187488 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		77F50BBD2C63BAEF00187488 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+		77F50BC02C63BBDF00187488 /* GoogleAPIClientForRESTCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 77F50BBF2C63BBDF00187488 /* XCRemoteSwiftPackageReference "google-api-objectivec-client-for-rest" */;
+			productName = GoogleAPIClientForRESTCore;
+		};
+		77F50BC22C63BBDF00187488 /* GoogleAPIClientForREST_YouTube */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 77F50BBF2C63BBDF00187488 /* XCRemoteSwiftPackageReference "google-api-objectivec-client-for-rest" */;
+			productName = GoogleAPIClientForREST_YouTube;
 		};
 /* End XCSwiftPackageProductDependency section */
 
