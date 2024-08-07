@@ -23,10 +23,14 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
 
     
     override init() {
-           super.init()
-           let configuration = SPTConfiguration(clientID: clientID, redirectURL: redirectURL)
-           sessionManager = SPTSessionManager(configuration: configuration, delegate: self)
-       }
+        super.init()
+        let configuration = SPTConfiguration(clientID: clientID, redirectURL: redirectURL)
+        sessionManager = SPTSessionManager(configuration: configuration, delegate: self)
+        if let token = loadAccessToken() {
+            self.accessToken = token
+            self.isAuthorized = true
+        }
+    }
     
     func fetchUserPlaylists(completion: @escaping (Result<[(id: String, name: String)], Error>) -> Void) {
         guard let accessToken = self.accessToken else {
@@ -50,7 +54,7 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
                 return
             }
             
-            let scopes: SPTScope = [.playlistModifyPrivate, .playlistModifyPublic, .userReadPrivate]
+            let scopes: SPTScope = [.playlistModifyPrivate, .playlistModifyPublic, .userReadPrivate, .playlistReadPrivate]
             sessionManager?.initiateSession(with: scopes, options: .default, campaign: nil)
             self.authorizationCompletion = completion
         }
@@ -72,7 +76,7 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
     private func saveAccessToken(_ token: String) {
         UserDefaults.standard.set(token, forKey: "SpotifyAccessToken")
     }
-    
+
     private func loadAccessToken() -> String? {
         return UserDefaults.standard.string(forKey: "SpotifyAccessToken")
     }
@@ -201,15 +205,15 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
         }.resume()
     }
     
-    // MARK: - SPTSessionManagerDelegate
     func sessionManager(manager: SPTSessionManager, didInitiate session: SPTSession) {
-            self.accessToken = session.accessToken
-            DispatchQueue.main.async {
-                self.isAuthorized = true
-                self.authorizationCompletion?(true)
-                self.authorizationCompletion = nil
-            }
+        self.accessToken = session.accessToken
+        self.saveAccessToken(session.accessToken)
+        DispatchQueue.main.async {
+            self.isAuthorized = true
+            self.authorizationCompletion?(true)
+            self.authorizationCompletion = nil
         }
+    }
 
         func sessionManager(manager: SPTSessionManager, didFailWith error: Error) {
             print("Spotify authorization failed: \(error.localizedDescription)")

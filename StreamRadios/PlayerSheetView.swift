@@ -44,6 +44,8 @@ struct PlayerSheetView: View {
     @State private var isAuthorizingSpotify = false
 
 
+
+
     
     var body: some View {
         NavigationView {
