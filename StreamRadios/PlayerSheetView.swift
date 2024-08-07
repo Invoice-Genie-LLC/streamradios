@@ -22,6 +22,16 @@ enum MusicAuthorizationError: Error {
     case notAuthorized
 }
 
+enum ActiveSheetPlayer: Identifiable {
+    case playlistPicker
+    case spotifyPlaylistPicker
+    case youtubeMusicPlaylistPicker
+    
+    var id: Int {
+        hashValue
+    }
+}
+
 struct PlayerSheetView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var radioPlayer: RadioPlayer
@@ -34,20 +44,17 @@ struct PlayerSheetView: View {
     @State private var showingConfirmationDialog = false
     @State private var showAlert = false
     @State private var alertMessage = ""
-    @State private var showingPlaylistPicker = false
     @StateObject private var spotifyManager = SpotifyAuthorizationManager.shared
-        @State private var showingSpotifyConfirmationDialog = false
+    @State private var showingSpotifyConfirmationDialog = false
     @State private var spotifyPlaylists: [(id: String, name: String)] = []
-    @State private var showingSpotifyPlaylistPicker = false
     @State private var isAuthorizingSpotify = false
     @StateObject private var youtubeMusicManager = YouTubeMusicManager.shared
     @State private var showingYouTubeMusicConfirmationDialog = false
-    @State private var showingYouTubeMusicPlaylistPicker = false
+    @State private var activeSheet: ActiveSheetPlayer?
 
     var body: some View {
         NavigationView {
             ZStack {
-                // Adjusted background with subtle color for light theme
                 backgroundView.edgesIgnoringSafeArea(.all)
                 
                 VStack {
@@ -84,6 +91,75 @@ struct PlayerSheetView: View {
                 secondaryButton: .cancel()
             )
         }
+        .onReceive(spotifyManager.$shouldShowConfirmationDialog) { shouldShow in
+            if shouldShow {
+                showingSpotifyConfirmationDialog = true
+                spotifyManager.shouldShowConfirmationDialog = false
+            }
+        }
+        .confirmationDialog("Save Song", isPresented: $showingConfirmationDialog) {
+            Button("Add to Playlist") {
+                addToPlaylist()
+            }
+            Button("Add to Library") {
+                addToLibrary()
+            }
+            Button("Open in Apple Music") {
+                openInAppleMusic()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert(isPresented: $showAlert) {
+            Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+        }
+        .sheet(item: $activeSheet) { item in
+            switch item {
+            case .playlistPicker:
+                PlaylistPickerView(shazamViewModel: shazamViewModel)
+            case .spotifyPlaylistPicker:
+                SpotifyPlaylistPickerView(isPresented: Binding(
+                    get: { self.activeSheet == .spotifyPlaylistPicker },
+                    set: { if !$0 { self.activeSheet = nil } }
+                ), playlists: spotifyPlaylists) { playlistID in
+                    spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
+                        DispatchQueue.main.async {
+                            switch result {
+                            case .success:
+                                self.alertMessage = "Song added to Spotify playlist successfully"
+                            case .failure(let error):
+                                self.alertMessage = "Failed to add song to Spotify playlist: \(error.localizedDescription)"
+                            }
+                            self.showAlert = true
+                        }
+                    }
+                }
+            case .youtubeMusicPlaylistPicker:
+                YouTubeMusicPlaylistPickerView(isPresented: Binding(
+                    get: { self.activeSheet == .youtubeMusicPlaylistPicker },
+                    set: { if !$0 { self.activeSheet = nil } }
+                )) { selectedPlaylistId in
+                    saveToYouTubeMusicPlaylist(playlistId: selectedPlaylistId)
+                }
+            }
+        }
+        .confirmationDialog("Save to Spotify", isPresented: $showingSpotifyConfirmationDialog) {
+            Button("Add to Playlist") {
+                addToSpotifyPlaylist()
+            }
+            Button("Open in Spotify") {
+                openInSpotify()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("YouTube Music Options", isPresented: $showingYouTubeMusicConfirmationDialog) {
+            Button("Open in YouTube Music") {
+                openInYouTubeMusic()
+            }
+            Button("Save to YouTube Music Playlist") {
+                activeSheet = .youtubeMusicPlaylistPicker
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
     
     private func startPulsing() {
@@ -119,9 +195,9 @@ struct PlayerSheetView: View {
     @ViewBuilder
     private var backgroundView: some View {
         if colorScheme == .light {
-            Color(.systemGray4) // Adjust the color as per your preference
+            Color(.systemGray4)
         } else {
-            Color.clear // Transparent background for dark mode
+            Color.clear
         }
     }
     
@@ -271,80 +347,6 @@ struct PlayerSheetView: View {
             }
             .padding(.horizontal)
         }
-        .onReceive(spotifyManager.$shouldShowConfirmationDialog) { shouldShow in
-            if shouldShow {
-                showingSpotifyConfirmationDialog = true
-                spotifyManager.shouldShowConfirmationDialog = false
-            }
-        }
-        .confirmationDialog("Save Song", isPresented: $showingConfirmationDialog) {
-            Button("Add to Playlist") {
-                addToPlaylist()
-            }
-            Button("Add to Library") {
-                addToLibrary()
-            }
-            Button("Open in Apple Music") {
-                openInAppleMusic()
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert(isPresented: $showAlert) {
-            Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
-        }
-        .sheet(isPresented: $showingPlaylistPicker) {
-            PlaylistPickerView(shazamViewModel: shazamViewModel)
-        }
-        .sheet(isPresented: $showingSpotifyPlaylistPicker) {
-            SpotifyPlaylistPickerView(isPresented: $showingSpotifyPlaylistPicker, playlists: spotifyPlaylists) { playlistID in
-                spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
-                    DispatchQueue.main.async {
-                        switch result {
-                        case .success:
-                            self.alertMessage = "Song added to Spotify playlist successfully"
-                        case .failure(let error):
-                            self.alertMessage = "Failed to add song to Spotify playlist: \(error.localizedDescription)"
-                        }
-                        self.showAlert = true
-                    }
-                }
-            }
-        }
-        .confirmationDialog("Save to Spotify", isPresented: $showingSpotifyConfirmationDialog) {
-                Button("Add to Playlist") {
-                    addToSpotifyPlaylist()
-                }
-                Button("Open in Spotify") {
-                    openInSpotify()
-                }
-                Button("Cancel", role: .cancel) {}
-            }
-            .alert(isPresented: $showAlert) {
-                Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
-            }
-            .sheet(isPresented: $showingPlaylistPicker) {
-                PlaylistPickerView(shazamViewModel: shazamViewModel)
-            }
-
-        .confirmationDialog("YouTube Music Options", isPresented: $showingYouTubeMusicConfirmationDialog) {
-            Button("Open in YouTube Music") {
-                openInYouTubeMusic()
-            }
-            Button("Save to YouTube Music Playlist") {
-                showingYouTubeMusicPlaylistPicker = true
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .sheet(isPresented: $showingYouTubeMusicPlaylistPicker) {
-            YouTubeMusicPlaylistPickerView(isPresented: $showingYouTubeMusicPlaylistPicker) { selectedPlaylistId in
-                saveToYouTubeMusicPlaylist(playlistId: selectedPlaylistId)
-            }
-        }
-    }
-    
-    private func getSelectedPlaylistId() -> String? {
-        // Implement your logic to get the selected playlist ID
-        return spotifyPlaylists.first?.id
     }
     
     private func openInYouTubeMusic() {
@@ -404,44 +406,13 @@ struct PlayerSheetView: View {
         }
     }
     
-    private func showYouTubeMusicPlaylistPicker(playlists: [(id: String, name: String)], songTitle: String, artistName: String) {
-        let alert = UIAlertController(title: "Choose a Playlist", message: nil, preferredStyle: .actionSheet)
-        
-        for playlist in playlists {
-            alert.addAction(UIAlertAction(title: playlist.name, style: .default) { _ in
-                self.youtubeMusicManager.saveToYouTubeMusicPlaylist(songTitle: songTitle, artistName: artistName, playlistId: playlist.id) { result in
-                    DispatchQueue.main.async {
-                        switch result {
-                        case .success:
-                            self.alertMessage = "Song saved to YouTube Music playlist successfully"
-                            self.showAlert = true
-                        case .failure(let error):
-                            self.alertMessage = "Failed to save song to YouTube Music playlist: \(error.localizedDescription)"
-                            self.showAlert = true
-                        }
-                    }
-                }
-            })
-        }
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
-        
-        if let presenter = alert.popoverPresentationController {
-            presenter.sourceView = UIApplication.shared.windows.first?.rootViewController?.view
-            presenter.sourceRect = CGRect(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY, width: 0, height: 0)
-            presenter.permittedArrowDirections = []
-        }
-        
-        UIApplication.shared.windows.first?.rootViewController?.present(alert, animated: true, completion: nil)
-    }
-    
-      private func addToSpotifyPlaylist() {
+    private func addToSpotifyPlaylist() {
         spotifyManager.fetchUserPlaylists { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let playlists):
                     self.spotifyPlaylists = playlists
-                    self.showingSpotifyPlaylistPicker = true
+                    self.activeSheet = .spotifyPlaylistPicker
                 case .failure(let error):
                     self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
                     self.showAlert = true
@@ -451,37 +422,37 @@ struct PlayerSheetView: View {
     }
     
     private func openInSpotify() {
-        guard let songTitle = shazamViewModel.shazamMedia.title,
-              let artistName = shazamViewModel.shazamMedia.artistName else {
-            self.alertMessage = "Song information is not available"
-            self.showAlert = true
-            return
-        }
-        
-        spotifyManager.searchForTrackURI(songTitle: songTitle, artistName: artistName) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let uri):
-                    if let spotifyURL = URL(string: uri) {
-                        UIApplication.shared.open(spotifyURL) { success in
-                            if !success {
-                                self.alertMessage = "Unable to open Spotify. Please ensure Spotify is installed on your device."
-                                self.showAlert = true
+            guard let songTitle = shazamViewModel.shazamMedia.title,
+                  let artistName = shazamViewModel.shazamMedia.artistName else {
+                self.alertMessage = "Song information is not available"
+                self.showAlert = true
+                return
+            }
+            
+            spotifyManager.searchForTrackURI(songTitle: songTitle, artistName: artistName) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let uri):
+                        if let spotifyURL = URL(string: uri) {
+                            UIApplication.shared.open(spotifyURL) { success in
+                                if !success {
+                                    self.alertMessage = "Unable to open Spotify. Please ensure Spotify is installed on your device."
+                                    self.showAlert = true
+                                }
                             }
+                        } else {
+                            self.alertMessage = "Invalid Spotify URI"
+                            self.showAlert = true
                         }
-                    } else {
-                        self.alertMessage = "Invalid Spotify URI"
+                    case .failure(let error):
+                        self.alertMessage = "Failed to find track: \(error.localizedDescription)"
                         self.showAlert = true
                     }
-                case .failure(let error):
-                    self.alertMessage = "Failed to find track: \(error.localizedDescription)"
-                    self.showAlert = true
                 }
             }
         }
-    }
-    
-    private func requestMusicAuthorization() {
+        
+        private func requestMusicAuthorization() {
             Task {
                 let status = await MusicAuthorization.request()
                 DispatchQueue.main.async {
@@ -501,76 +472,31 @@ struct PlayerSheetView: View {
                 }
             }
         }
-    
-    private func addToLibrary() {
-        Task {
-            do {
-                let status = await MusicAuthorization.request()
-                switch status {
-                case .authorized:
-                    try await shazamViewModel.fetchAppleMusicItem()
-                    try await shazamViewModel.addToLibrary()
-                    DispatchQueue.main.async {
-                        self.alertMessage = "Song added to your library"
-                        self.showAlert = true
-                    }
-                case .denied, .restricted:
-                    DispatchQueue.main.async {
-                        self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
-                        self.showAlert = true
-                    }
-                case .notDetermined:
-                    DispatchQueue.main.async {
-                        self.alertMessage = "Please authorize access to Apple Music and try again."
-                        self.showAlert = true
-                    }
-                @unknown default:
-                    break
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.alertMessage = "Error: \(error.localizedDescription)"
-                    self.showAlert = true
-                }
-            }
-        }
-    }
-    
-    private func openInAppleMusic() {
-        Task {
-            do {
-                try await shazamViewModel.fetchAppleMusicItem()
-                if let url = shazamViewModel.appleMusicURL {
-                    await UIApplication.shared.open(url)
-                } else {
-                    DispatchQueue.main.async {
-                        self.alertMessage = "Couldn't open in Apple Music"
-                        self.showAlert = true
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.alertMessage = "Error: \(error.localizedDescription)"
-                    self.showAlert = true
-                }
-            }
-        }
-    }
-
-    private func addToPlaylist() {
+        
+        private func addToLibrary() {
             Task {
                 do {
                     let status = await MusicAuthorization.request()
-                    if status == .authorized {
+                    switch status {
+                    case .authorized:
                         try await shazamViewModel.fetchAppleMusicItem()
-                        let request = MusicLibraryRequest<Playlist>()
-                        let response = try await request.response()
+                        try await shazamViewModel.addToLibrary()
                         DispatchQueue.main.async {
-                            self.shazamViewModel.userPlaylists = response.items
-                            self.showingPlaylistPicker = true
+                            self.alertMessage = "Song added to your library"
+                            self.showAlert = true
                         }
-                    } else {
-                        throw MusicAuthorizationError.notAuthorized
+                    case .denied, .restricted:
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
+                            self.showAlert = true
+                        }
+                    case .notDetermined:
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Please authorize access to Apple Music and try again."
+                            self.showAlert = true
+                        }
+                    @unknown default:
+                        break
                     }
                 } catch {
                     DispatchQueue.main.async {
@@ -580,122 +506,166 @@ struct PlayerSheetView: View {
                 }
             }
         }
-    
-    private var stationContent: some View {
-        VStack {
-            StationDetails()
-            if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
-                Button(action: {
-                    shazamViewModel.startOrEndListening()
-                    isShazaming.toggle()
-                    permissionManager.checkMicrophonePermission { granted in
-                        if granted {
-                            print("Microphone permission granted.")
-                            
-                        } else {
-                            print("Microphone permission denied or restricted.")
-                            
+        
+        private func openInAppleMusic() {
+            Task {
+                do {
+                    try await shazamViewModel.fetchAppleMusicItem()
+                    if let url = shazamViewModel.appleMusicURL {
+                        await UIApplication.shared.open(url)
+                    } else {
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Couldn't open in Apple Music"
+                            self.showAlert = true
                         }
                     }
-                    
-                    pulse.toggle()
-                }) {
-                    VStack {
-                        Image(systemName: "shazam.logo.fill")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 100, height: 100)
-                            .foregroundColor(.primary)
-                            .scaleEffect(pulse ? 1.2 : 1.0)
-                            .padding(.bottom, 10)
-                            .modifier(NeumorphicShadow())
-                        Text("Tap to Shazam")
-                            .font(.headline)
-                            .foregroundColor(Color.primary)
+                } catch {
+                    DispatchQueue.main.async {
+                        self.alertMessage = "Error: \(error.localizedDescription)"
+                        self.showAlert = true
                     }
                 }
-                .buttonStyle(PlainButtonStyle())
             }
         }
-    }
-}
 
-struct StationDetails: View {
-    @EnvironmentObject var radioPlayer: RadioPlayer
-    @EnvironmentObject var viewModel: RadioStationViewModel
-    
-    var body: some View {
-        if let currentStationIndex = radioPlayer.currentStationIndex,
-           let currentStation = viewModel.stations[safe: currentStationIndex] {
-            VStack {
-                StationImage(currentStation: currentStation)
-                Text(currentStation.name)
-                    .font(.title)
-                    .bold()
-                    .padding(.top, 4)
-                    .foregroundColor(.primary)
-                
-                if let metadata = radioPlayer.metadata {
-                    Text(metadata)
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                        .padding(.bottom, 50)
+    private func addToPlaylist() {
+        Task {
+            do {
+                let status = await MusicAuthorization.request()
+                if status == .authorized {
+                    try await shazamViewModel.fetchAppleMusicItem()
+                    let request = MusicLibraryRequest<Playlist>()
+                    let response = try await request.response()
+                    DispatchQueue.main.async {
+                        self.shazamViewModel.userPlaylists = response.items
+                        print("Fetched \(response.items.count) playlists")
+                        self.activeSheet = .playlistPicker
+                    }
                 } else {
-                    Text("No song or album title available")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                        .padding(.bottom, 50)
+                    throw MusicAuthorizationError.notAuthorized
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "Error: \(error.localizedDescription)"
+                    self.showAlert = true
+                    print("Error in addToPlaylist: \(error)")
                 }
             }
         }
     }
-}
-
-struct StationImage: View {
-    let currentStation: RadioStation
-    
-    var body: some View {
-        if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-            Image(uiImage: image)
-                .resizable()
-                .frame(width: 200, height: 200)
-                .cornerRadius(10)
-                .modifier(NeumorphicShadow())
-        } else {
-            Image(systemName: "radio")
-                .resizable()
-                .frame(width: 100, height: 100)
-                .aspectRatio(contentMode: .fit)
-                .padding(20)
-                .clipShape(Circle())
-                .foregroundColor(.gray)
-                .modifier(NeumorphicShadow())
+        
+        private var stationContent: some View {
+            VStack {
+                StationDetails()
+                if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
+                    Button(action: {
+                        shazamViewModel.startOrEndListening()
+                        isShazaming.toggle()
+                        permissionManager.checkMicrophonePermission { granted in
+                            if granted {
+                                print("Microphone permission granted.")
+                            } else {
+                                print("Microphone permission denied or restricted.")
+                            }
+                        }
+                        pulse.toggle()
+                    }) {
+                        VStack {
+                            Image(systemName: "shazam.logo.fill")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 100, height: 100)
+                                .foregroundColor(.primary)
+                                .scaleEffect(pulse ? 1.2 : 1.0)
+                                .padding(.bottom, 10)
+                                .modifier(NeumorphicShadow())
+                            Text("Tap to Shazam")
+                                .font(.headline)
+                                .foregroundColor(Color.primary)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
         }
     }
-}
 
-struct AirPlayButtonView: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let view = AVRoutePickerView()
-        view.activeTintColor = .blue
-        view.tintColor = .gray
-        return view
+    struct StationDetails: View {
+        @EnvironmentObject var radioPlayer: RadioPlayer
+        @EnvironmentObject var viewModel: RadioStationViewModel
+        
+        var body: some View {
+            if let currentStationIndex = radioPlayer.currentStationIndex,
+               let currentStation = viewModel.stations[safe: currentStationIndex] {
+                VStack {
+                    StationImage(currentStation: currentStation)
+                    Text(currentStation.name)
+                        .font(.title)
+                        .bold()
+                        .padding(.top, 4)
+                        .foregroundColor(.primary)
+                    
+                    if let metadata = radioPlayer.metadata {
+                        Text(metadata)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 2)
+                            .padding(.bottom, 50)
+                    } else {
+                        Text("No song or album title available")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 2)
+                            .padding(.bottom, 50)
+                    }
+                }
+            }
+        }
     }
-    
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
-        uiView.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
-    }
-}
 
-struct PlayerSheetView_Previews: PreviewProvider {
-    static var previews: some View {
-        PlayerSheetView()
-            .environmentObject(RadioPlayer.shared)
-            .environmentObject(RadioStationViewModel())
+    struct StationImage: View {
+        let currentStation: RadioStation
+        
+        var body: some View {
+            if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .frame(width: 200, height: 200)
+                    .cornerRadius(10)
+                    .modifier(NeumorphicShadow())
+            } else {
+                Image(systemName: "radio")
+                    .resizable()
+                    .frame(width: 100, height: 100)
+                    .aspectRatio(contentMode: .fit)
+                    .padding(20)
+                    .clipShape(Circle())
+                    .foregroundColor(.gray)
+                    .modifier(NeumorphicShadow())
+            }
+        }
     }
-}
+
+    struct AirPlayButtonView: UIViewRepresentable {
+        func makeUIView(context: Context) -> AVRoutePickerView {
+            let view = AVRoutePickerView()
+            view.activeTintColor = .blue
+            view.tintColor = .gray
+            return view
+        }
+        
+        func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+            uiView.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
+        }
+    }
+
+    struct PlayerSheetView_Previews: PreviewProvider {
+        static var previews: some View {
+            PlayerSheetView()
+                .environmentObject(RadioPlayer.shared)
+                .environmentObject(RadioStationViewModel())
+        }
+    }
 
 struct PlaylistPickerView: View {
     @ObservedObject var shazamViewModel: ShazamViewModel
@@ -707,6 +677,7 @@ struct PlaylistPickerView: View {
         NavigationView {
             List(shazamViewModel.userPlaylists, id: \.id) { playlist in
                 Button(action: {
+                    print("Selected playlist: \(playlist.name)")
                     addToSelectedPlaylist(playlist)
                 }) {
                     Text(playlist.name)
@@ -716,6 +687,9 @@ struct PlaylistPickerView: View {
             .navigationBarItems(trailing: Button("Cancel") {
                 presentationMode.wrappedValue.dismiss()
             })
+        }
+        .onAppear {
+            print("PlaylistPickerView appeared with \(shazamViewModel.userPlaylists.count) playlists")
         }
         .alert(isPresented: $showAlert) {
             Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")) {
@@ -736,6 +710,7 @@ struct PlaylistPickerView: View {
                 DispatchQueue.main.async {
                     self.alertMessage = "Error adding song to playlist: \(error.localizedDescription)"
                     self.showAlert = true
+                    print("Error in addToSelectedPlaylist: \(error)")
                 }
             }
         }
