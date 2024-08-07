@@ -40,6 +40,9 @@ struct PlayerSheetView: View {
     @State private var spotifyPlaylists: [(id: String, name: String)] = []
     @State private var showingSpotifyPlaylistPicker = false
     @State private var isAuthorizingSpotify = false
+    @StateObject private var youtubeMusicManager = YouTubeMusicManager.shared
+    @State private var showingYouTubeMusicConfirmationDialog = false
+    @State private var showingYouTubeMusicPlaylistPicker = false
 
     var body: some View {
         NavigationView {
@@ -176,67 +179,91 @@ struct PlayerSheetView: View {
                     .cornerRadius(10)
                     .modifier(NeumorphicShadow())
             }
-
+            
             Text(shazamViewModel.shazamMedia.title ?? "Title")
                 .font(.title)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .padding(.horizontal)
-
+            
             Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
                 .font(.title2)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
-
+            
             Spacer()
-
+            
             HStack(spacing: 10) {
                 Button(action: {
                     requestMusicAuthorization()
                     showingConfirmationDialog = true
                 }) {
-                    Text("Add to Apple Music")
+                    Text("Apple Music")
                         .font(.headline)
                         .foregroundColor(Color.primary)
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
                 }
-
+                
                 Button(action: {
                     if spotifyManager.isAuthorized {
-                            showingSpotifyConfirmationDialog = true
-                        } else {
-                            spotifyManager.authorize { success in
-                                if success {
-                                    DispatchQueue.main.async {
-                                        self.showingSpotifyConfirmationDialog = true
-                                    }
-                                } else {
-                                    DispatchQueue.main.async {
-                                        self.alertMessage = "Failed to authorize with Spotify"
-                                        self.showAlert = true
-                                    }
+                        showingSpotifyConfirmationDialog = true
+                    } else {
+                        spotifyManager.authorize { success in
+                            if success {
+                                DispatchQueue.main.async {
+                                    self.showingSpotifyConfirmationDialog = true
+                                }
+                            } else {
+                                DispatchQueue.main.async {
+                                    self.alertMessage = "Failed to authorize with Spotify"
+                                    self.showAlert = true
                                 }
                             }
                         }
-                        }) {
-                            Text("Add to Spotify")
-                                .font(.headline)
-                                .foregroundColor(Color.primary)
-                                .padding(12)
-                                .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                    }
+                }) {
+                    Text("Spotify")
+                        .font(.headline)
+                        .foregroundColor(Color.primary)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                }
+                .disabled(isAuthorizingSpotify)
+                Button(action: {
+                    if youtubeMusicManager.isAuthorized {
+                        showingYouTubeMusicConfirmationDialog = true
+                    } else {
+                        youtubeMusicManager.authorize { success in
+                            if success {
+                                DispatchQueue.main.async {
+                                    self.showingYouTubeMusicConfirmationDialog = true
+                                }
+                            } else {
+                                DispatchQueue.main.async {
+                                    self.alertMessage = "Failed to authorize with YouTube Music"
+                                    self.showAlert = true
+                                }
+                            }
                         }
-                        .disabled(isAuthorizingSpotify)
+                    }
+                }) {
+                    Text("YouTube")
+                        .font(.headline)
+                        .foregroundColor(Color.primary)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                }
             }
             .padding(.horizontal)
         }
         .onReceive(spotifyManager.$shouldShowConfirmationDialog) { shouldShow in
-                    if shouldShow {
-                        showingSpotifyConfirmationDialog = true
-                        spotifyManager.shouldShowConfirmationDialog = false
-                    }
-                }
+            if shouldShow {
+                showingSpotifyConfirmationDialog = true
+                spotifyManager.shouldShowConfirmationDialog = false
+            }
+        }
         .confirmationDialog("Save Song", isPresented: $showingConfirmationDialog) {
             Button("Add to Playlist") {
                 addToPlaylist()
@@ -271,31 +298,131 @@ struct PlayerSheetView: View {
             }
         }
         .confirmationDialog("Save to Spotify", isPresented: $showingSpotifyConfirmationDialog) {
-                Button("Add to Playlist") {
-                    addToSpotifyPlaylist()
+            Button("Add to Playlist") {
+                // Assuming you have a method to get the selected playlist ID
+                if let selectedPlaylistId = getSelectedPlaylistId() {
+                    addToSpotifyPlaylist(playlistId: selectedPlaylistId)
+                } else {
+                    self.alertMessage = "No playlist selected"
+                    self.showAlert = true
                 }
-                Button("Open in Spotify") {
-                    openInSpotify()
-                }
-                Button("Cancel", role: .cancel) {}
             }
-            .alert(isPresented: $showAlert) {
-                Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+            Button("Open in Spotify") {
+                openInSpotify()
             }
-            .sheet(isPresented: $showingPlaylistPicker) {
-                PlaylistPickerView(shazamViewModel: shazamViewModel)
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert(isPresented: $showAlert) {
+            Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+        }
+        .sheet(isPresented: $showingPlaylistPicker) {
+            PlaylistPickerView(shazamViewModel: shazamViewModel)
+        }
+        .confirmationDialog("YouTube Music Options", isPresented: $showingYouTubeMusicConfirmationDialog) {
+            Button("Open in YouTube Music") {
+                openInYouTubeMusic()
             }
+            Button("Save to YouTube Music Playlist") {
+                showingYouTubeMusicPlaylistPicker = true
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showingYouTubeMusicPlaylistPicker) {
+            YouTubeMusicPlaylistPickerView(isPresented: $showingYouTubeMusicPlaylistPicker) { selectedPlaylistId in
+                saveToYouTubeMusicPlaylist(playlistId: selectedPlaylistId)
+            }
+        }
     }
     
-    private func addToSpotifyPlaylist() {
+    private func getSelectedPlaylistId() -> String? {
+        // Implement your logic to get the selected playlist ID
+        return spotifyPlaylists.first?.id
+    }
+    
+    private func openInYouTubeMusic() {
+        guard let songTitle = shazamViewModel.shazamMedia.title,
+              let artistName = shazamViewModel.shazamMedia.artistName else {
+            self.alertMessage = "Song information is not available"
+            self.showAlert = true
+            return
+        }
+        
+        youtubeMusicManager.openInYouTubeMusic(songTitle: songTitle, artistName: artistName) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    // Do nothing, as the app should have opened
+                    break
+                case .failure(let error):
+                    self.alertMessage = "Failed to open YouTube Music: \(error.localizedDescription)"
+                    self.showAlert = true
+                }
+            }
+        }
+    }
+    
+    private func saveToYouTubeMusicPlaylist(playlistId: String) {
+        guard let songTitle = shazamViewModel.shazamMedia.title,
+              let artistName = shazamViewModel.shazamMedia.artistName else {
+            self.alertMessage = "Song information is not available"
+            self.showAlert = true
+            return
+        }
+        
+        youtubeMusicManager.saveToYouTubeMusicPlaylist(songTitle: songTitle, artistName: artistName, playlistId: playlistId) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self.alertMessage = "Song saved to YouTube Music playlist successfully"
+                    self.showAlert = true
+                case .failure(let error):
+                    self.alertMessage = "Failed to save song to YouTube Music playlist: \(error.localizedDescription)"
+                    self.showAlert = true
+                }
+            }
+        }
+    }
+    
+    private func showYouTubeMusicPlaylistPicker(playlists: [(id: String, name: String)], songTitle: String, artistName: String) {
+        let alert = UIAlertController(title: "Choose a Playlist", message: nil, preferredStyle: .actionSheet)
+        
+        for playlist in playlists {
+            alert.addAction(UIAlertAction(title: playlist.name, style: .default) { _ in
+                self.youtubeMusicManager.saveToYouTubeMusicPlaylist(songTitle: songTitle, artistName: artistName, playlistId: playlist.id) { result in
+                    DispatchQueue.main.async {
+                        switch result {
+                        case .success:
+                            self.alertMessage = "Song saved to YouTube Music playlist successfully"
+                            self.showAlert = true
+                        case .failure(let error):
+                            self.alertMessage = "Failed to save song to YouTube Music playlist: \(error.localizedDescription)"
+                            self.showAlert = true
+                        }
+                    }
+                }
+            })
+        }
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+        
+        if let presenter = alert.popoverPresentationController {
+            presenter.sourceView = UIApplication.shared.windows.first?.rootViewController?.view
+            presenter.sourceRect = CGRect(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY, width: 0, height: 0)
+            presenter.permittedArrowDirections = []
+        }
+        
+        UIApplication.shared.windows.first?.rootViewController?.present(alert, animated: true, completion: nil)
+    }
+    
+    private func addToSpotifyPlaylist(playlistId: String) {
         spotifyManager.fetchUserPlaylists { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let playlists):
-                    self.spotifyPlaylists = playlists
-                    self.showingSpotifyPlaylistPicker = true
+                    // Handle adding to the playlist
+                    print("Successfully fetched playlists: \(playlists)")
                 case .failure(let error):
-                    self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
+                    self.alertMessage = "Failed to fetch playlists: \(error.localizedDescription)"
                     self.showAlert = true
                 }
             }
