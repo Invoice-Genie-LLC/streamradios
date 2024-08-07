@@ -30,10 +30,12 @@
     <key>LSApplicationQueriesSchemes</key>
     <array>
         <string>music</string>
+        <string>youtubemusic</string>
         <string>ytmusic</string>
         <string>youtube</string>
         <string>googlechromes</string>
         <string>comgooglemaps</string>
+        <string>https</string>
     </array>
     <key>NSAppTransportSecurity</key>
     <dict>
