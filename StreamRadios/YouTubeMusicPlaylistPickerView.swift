@@ -24,6 +24,9 @@ struct YouTubeMusicPlaylistPickerView: View {
                 } else if let error = errorMessage {
                     Text(error)
                         .foregroundColor(.red)
+                } else if playlists.isEmpty {
+                    Text("No playlists available")
+                        .foregroundColor(.gray)
                 } else {
                     List(playlists, id: \.id) { playlist in
                         Button(action: {

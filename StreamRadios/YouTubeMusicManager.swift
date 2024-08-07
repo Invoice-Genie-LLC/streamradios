@@ -62,7 +62,7 @@ class YouTubeMusicManager: ObservableObject {
             
             print("Successfully signed in user: \(user.userID ?? "Unknown")")
             // Check if we have the required scopes
-            let grantedScopes = user.grantedScopes?.compactMap { $0 as? String } ?? []
+            let grantedScopes = user.grantedScopes ?? []
             print("Granted scopes: \(grantedScopes)")
             
             let missingScopes = Set(self.scopes).subtracting(grantedScopes)

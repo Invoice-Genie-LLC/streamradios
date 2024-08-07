@@ -298,26 +298,21 @@ struct PlayerSheetView: View {
             }
         }
         .confirmationDialog("Save to Spotify", isPresented: $showingSpotifyConfirmationDialog) {
-            Button("Add to Playlist") {
-                // Assuming you have a method to get the selected playlist ID
-                if let selectedPlaylistId = getSelectedPlaylistId() {
-                    addToSpotifyPlaylist(playlistId: selectedPlaylistId)
-                } else {
-                    self.alertMessage = "No playlist selected"
-                    self.showAlert = true
+                Button("Add to Playlist") {
+                    addToSpotifyPlaylist()
                 }
+                Button("Open in Spotify") {
+                    openInSpotify()
+                }
+                Button("Cancel", role: .cancel) {}
             }
-            Button("Open in Spotify") {
-                openInSpotify()
+            .alert(isPresented: $showAlert) {
+                Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
             }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert(isPresented: $showAlert) {
-            Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
-        }
-        .sheet(isPresented: $showingPlaylistPicker) {
-            PlaylistPickerView(shazamViewModel: shazamViewModel)
-        }
+            .sheet(isPresented: $showingPlaylistPicker) {
+                PlaylistPickerView(shazamViewModel: shazamViewModel)
+            }
+
         .confirmationDialog("YouTube Music Options", isPresented: $showingYouTubeMusicConfirmationDialog) {
             Button("Open in YouTube Music") {
                 openInYouTubeMusic()
@@ -347,16 +342,29 @@ struct PlayerSheetView: View {
             return
         }
         
-        youtubeMusicManager.openInYouTubeMusic(songTitle: songTitle, artistName: artistName) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success:
-                    // Do nothing, as the app should have opened
-                    break
-                case .failure(let error):
-                    self.alertMessage = "Failed to open YouTube Music: \(error.localizedDescription)"
+        let query = "\(songTitle) \(artistName)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "youtubemusic://search?q=\(query)"
+        
+        if let url = URL(string: urlString) {
+            if UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url, options: [:]) { success in
+                    if !success {
+                        DispatchQueue.main.async {
+                            self.alertMessage = "Failed to open YouTube Music"
+                            self.showAlert = true
+                        }
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.alertMessage = "YouTube Music app is not installed"
                     self.showAlert = true
                 }
+            }
+        } else {
+            DispatchQueue.main.async {
+                self.alertMessage = "Invalid URL"
+                self.showAlert = true
             }
         }
     }
@@ -373,10 +381,10 @@ struct PlayerSheetView: View {
             DispatchQueue.main.async {
                 switch result {
                 case .success:
-                    self.alertMessage = "Song saved to YouTube Music playlist successfully"
+                    self.alertMessage = "Song has been added to the YouTube Music playlist"
                     self.showAlert = true
                 case .failure(let error):
-                    self.alertMessage = "Failed to save song to YouTube Music playlist: \(error.localizedDescription)"
+                    self.alertMessage = "Failed to save to YouTube Music playlist: \(error.localizedDescription)"
                     self.showAlert = true
                 }
             }
@@ -414,15 +422,15 @@ struct PlayerSheetView: View {
         UIApplication.shared.windows.first?.rootViewController?.present(alert, animated: true, completion: nil)
     }
     
-    private func addToSpotifyPlaylist(playlistId: String) {
+      private func addToSpotifyPlaylist() {
         spotifyManager.fetchUserPlaylists { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let playlists):
-                    // Handle adding to the playlist
-                    print("Successfully fetched playlists: \(playlists)")
+                    self.spotifyPlaylists = playlists
+                    self.showingSpotifyPlaylistPicker = true
                 case .failure(let error):
-                    self.alertMessage = "Failed to fetch playlists: \(error.localizedDescription)"
+                    self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
                     self.showAlert = true
                 }
             }
@@ -444,7 +452,7 @@ struct PlayerSheetView: View {
                     if let spotifyURL = URL(string: uri) {
                         UIApplication.shared.open(spotifyURL) { success in
                             if !success {
-                                self.alertMessage = "Unable to open Spotify"
+                                self.alertMessage = "Unable to open Spotify. Please ensure Spotify is installed on your device."
                                 self.showAlert = true
                             }
                         }
