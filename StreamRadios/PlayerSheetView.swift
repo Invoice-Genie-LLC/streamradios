@@ -32,21 +32,15 @@ struct PlayerSheetView: View {
     @State private var isShazaming = false
     @State private var pulse = false
     @State private var showingConfirmationDialog = false
-    @State private var shazamSongURL: URL?
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var showingPlaylistPicker = false
-    @State private var isRequestingMusicAuthorization = false
     @StateObject private var spotifyManager = SpotifyAuthorizationManager.shared
         @State private var showingSpotifyConfirmationDialog = false
     @State private var spotifyPlaylists: [(id: String, name: String)] = []
     @State private var showingSpotifyPlaylistPicker = false
     @State private var isAuthorizingSpotify = false
 
-
-
-
-    
     var body: some View {
         NavigationView {
             ZStack {
@@ -316,35 +310,26 @@ struct PlayerSheetView: View {
             return
         }
         
-        // Encode the song title and artist name for use in a URL
-        let encodedQuery = "\(songTitle) \(artistName)"
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        
-        // First, try to open with the Spotify URI scheme
-        if let spotifyURL = URL(string: "spotify:search:\(encodedQuery)") {
-            UIApplication.shared.open(spotifyURL) { success in
-                if !success {
-                    // If the Spotify app is not installed, open in the web browser
-                    if let webURL = URL(string: "https://open.spotify.com/search/\(encodedQuery)") {
-                        UIApplication.shared.open(webURL) { success in
+        spotifyManager.searchForTrackURI(songTitle: songTitle, artistName: artistName) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let uri):
+                    if let spotifyURL = URL(string: uri) {
+                        UIApplication.shared.open(spotifyURL) { success in
                             if !success {
-                                DispatchQueue.main.async {
-                                    self.alertMessage = "Unable to open Spotify"
-                                    self.showAlert = true
-                                }
+                                self.alertMessage = "Unable to open Spotify"
+                                self.showAlert = true
                             }
                         }
                     } else {
-                        DispatchQueue.main.async {
-                            self.alertMessage = "Unable to create Spotify search URL"
-                            self.showAlert = true
-                        }
+                        self.alertMessage = "Invalid Spotify URI"
+                        self.showAlert = true
                     }
+                case .failure(let error):
+                    self.alertMessage = "Failed to find track: \(error.localizedDescription)"
+                    self.showAlert = true
                 }
             }
-        } else {
-            self.alertMessage = "Unable to create Spotify URL"
-            self.showAlert = true
         }
     }
     

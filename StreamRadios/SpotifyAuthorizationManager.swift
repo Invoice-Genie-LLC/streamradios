@@ -33,7 +33,7 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
     }
     
     func fetchUserPlaylists(completion: @escaping (Result<[(id: String, name: String)], Error>) -> Void) {
-        guard let accessToken = self.accessToken else {
+        guard self.accessToken != nil else {
             completion(.failure(NSError(domain: "SpotifyError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No access token available"])))
             return
         }
@@ -46,6 +46,41 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
                 completion(.failure(error))
             }
         }
+    }
+    
+    func searchForTrackURI(songTitle: String, artistName: String, completion: @escaping (Result<String, Error>) -> Void) {
+        let query = "\(songTitle) \(artistName)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "\(baseURL)/search?q=\(query)&type=track&limit=1"
+        
+        var request = URLRequest(url: URL(string: urlString)!)
+        request.httpMethod = "GET"
+        request.addValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+
+            guard let data = data else {
+                completion(.failure(NSError(domain: "No data", code: 0, userInfo: nil)))
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let tracks = json["tracks"] as? [String: Any],
+                   let items = tracks["items"] as? [[String: Any]],
+                   let firstItem = items.first,
+                   let uri = firstItem["uri"] as? String {
+                    completion(.success(uri))
+                } else {
+                    completion(.failure(NSError(domain: "No track found", code: 0, userInfo: nil)))
+                }
+            } catch {
+                completion(.failure(error))
+            }
+        }.resume()
     }
     
     func authorize(completion: @escaping (Bool) -> Void) {
@@ -82,7 +117,7 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
     }
     
     func addToSpotifyPlaylist(songTitle: String, artistName: String, playlistID: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        guard let accessToken = self.accessToken else {
+        guard self.accessToken != nil else {
             completion(.failure(NSError(domain: "SpotifyError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No access token available"])))
             return
         }
@@ -229,7 +264,7 @@ class SpotifyAuthorizationManager: NSObject, ObservableObject, SPTSessionManager
             self.accessToken = session.accessToken
         }
 
-        func sessionManager(manager: SPTSessionManager, shouldRequestAccessTokenWith scopes: SPTScope) -> Bool {
+        private func sessionManager(manager: SPTSessionManager, shouldRequestAccessTokenWith scopes: SPTScope) -> Bool {
             return true
         }
     
