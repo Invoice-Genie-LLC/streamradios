@@ -199,11 +199,15 @@ struct PlayerSheetView: View {
                     requestMusicAuthorization()
                     showingConfirmationDialog = true
                 }) {
-                    Text("Apple Music")
-                        .font(.headline)
-                        .foregroundColor(Color.primary)
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                    HStack {
+                        Image(systemName: "music.note")
+                            .font(.headline)
+                        Text("Apple Music")
+                            .font(.headline)
+                    }
+                    .foregroundColor(Color.primary)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
                 }
                 
                 Button(action: {
@@ -224,13 +228,18 @@ struct PlayerSheetView: View {
                         }
                     }
                 }) {
-                    Text("Spotify")
-                        .font(.headline)
-                        .foregroundColor(Color.primary)
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                    HStack {
+                        Image(systemName: "music.note.list")
+                            .font(.headline)
+                        Text("Spotify")
+                            .font(.headline)
+                    }
+                    .foregroundColor(Color.primary)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
                 }
                 .disabled(isAuthorizingSpotify)
+                
                 Button(action: {
                     if youtubeMusicManager.isAuthorized {
                         showingYouTubeMusicConfirmationDialog = true
@@ -249,11 +258,15 @@ struct PlayerSheetView: View {
                         }
                     }
                 }) {
-                    Text("YouTube")
-                        .font(.headline)
-                        .foregroundColor(Color.primary)
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                    HStack {
+                        Image(systemName: "play.circle")
+                            .font(.headline)
+                        Text("YouTube")
+                            .font(.headline)
+                    }
+                    .foregroundColor(Color.primary)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
                 }
             }
             .padding(.horizontal)
