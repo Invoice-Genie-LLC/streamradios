@@ -10,6 +10,104 @@ class DataStore {
     static let shared = DataStore()
     private let privateDatabase = CKContainer.default().privateCloudDatabase
     
+    func savePodcastFeedToCloudKit(_ podcastFeed: PodcastFeed, completion: @escaping (Bool, String?) -> Void) {
+            let podcastRecord = CKRecord(recordType: "PodcastFeed", recordID: CKRecord.ID(recordName: podcastFeed.id.uuidString))
+            podcastRecord["podcastTitle"] = podcastFeed.title
+            podcastRecord["podcastUrl"] = podcastFeed.url
+
+            privateDatabase.save(podcastRecord) { savedPodcastRecord, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("Error saving podcast feed to CloudKit: \(error.localizedDescription)")
+                        completion(false, nil)
+                    } else {
+                        print("CloudKit podcast feed record saved successfully")
+                        completion(true, savedPodcastRecord?.recordID.recordName)
+                    }
+                }
+            }
+        }
+
+    func fetchPodcastFeedsFromCloudKit(completion: @escaping ([PodcastFeed]?, Error?) -> Void) {
+            let podcastPredicate = NSPredicate(value: true)
+            let podcastQuery = CKQuery(recordType: "PodcastFeed", predicate: podcastPredicate)
+            
+            privateDatabase.perform(podcastQuery, inZoneWith: nil) { podcastRecords, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("Error fetching podcast feeds: \(error.localizedDescription)")
+                        completion(nil, error)
+                        return
+                    }
+
+                    guard let podcastRecords = podcastRecords else {
+                        print("No podcast feed records found in CloudKit.")
+                        completion([], nil)
+                        return
+                    }
+
+                    let podcastFeeds = podcastRecords.compactMap { podcastRecord -> PodcastFeed? in
+                        guard let podcastTitle = podcastRecord["podcastTitle"] as? String,
+                              let podcastUrl = podcastRecord["podcastUrl"] as? String else {
+                            print("Essential data missing in podcast feed record; skipping...")
+                            return nil
+                        }
+
+                        let podcastIdString = podcastRecord.recordID.recordName
+                        let podcastId = UUID(uuidString: podcastIdString) ?? UUID()
+
+                        return PodcastFeed(id: podcastId, title: podcastTitle, url: podcastUrl)
+                    }
+                    print("Fetched \(podcastFeeds.count) podcast feeds from CloudKit.")
+                    completion(podcastFeeds, nil)
+                }
+            }
+        }
+
+        func deletePodcastFeedFromCloudKit(_ podcastFeed: PodcastFeed, completion: @escaping (Bool) -> Void) {
+            let podcastRecordID = CKRecord.ID(recordName: podcastFeed.id.uuidString)
+
+            DispatchQueue.main.async {
+                self.privateDatabase.delete(withRecordID: podcastRecordID) { deletedPodcastRecordID, error in
+                    DispatchQueue.main.async {
+                        if let error = error {
+                            self.handleCloudKitError(error, operation: "delete podcast feed")
+                            completion(false)
+                        } else {
+                            print("CloudKit podcast feed record deleted successfully, Record ID: \(deletedPodcastRecordID?.recordName ?? "Unknown")")
+                            completion(true)
+                        }
+                    }
+                }
+            }
+        }
+
+        func updatePodcastFeedInCloudKit(_ podcastFeed: PodcastFeed, completion: @escaping (Bool, String?) -> Void) {
+            let podcastRecordID = CKRecord.ID(recordName: podcastFeed.id.uuidString)
+
+            privateDatabase.fetch(withRecordID: podcastRecordID) { fetchedPodcastRecord, error in
+                if let fetchedPodcastRecord = fetchedPodcastRecord {
+                    fetchedPodcastRecord["podcastTitle"] = podcastFeed.title
+                    fetchedPodcastRecord["podcastUrl"] = podcastFeed.url
+
+                    self.privateDatabase.save(fetchedPodcastRecord) { savedPodcastRecord, error in
+                        DispatchQueue.main.async {
+                            if let error = error {
+                                print("Error updating podcast feed record in CloudKit: \(error.localizedDescription)")
+                                completion(false, nil)
+                            } else {
+                                print("CloudKit podcast feed record updated successfully")
+                                completion(true, savedPodcastRecord?.recordID.recordName)
+                            }
+                        }
+                    }
+                } else {
+                    // If the record doesn't exist, create a new one
+                    self.savePodcastFeedToCloudKit(podcastFeed, completion: completion)
+                }
+            }
+        }
+    
     func deleteRecordsInBatches(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
            let maxBatchSize = 400
            var index = 0

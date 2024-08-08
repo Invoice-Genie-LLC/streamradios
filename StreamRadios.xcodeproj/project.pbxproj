@@ -66,6 +66,9 @@
 		77F50BBE2C63BAEF00187488 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BBD2C63BAEF00187488 /* GoogleSignInSwift */; };
 		77F50BC12C63BBDF00187488 /* GoogleAPIClientForRESTCore in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BC02C63BBDF00187488 /* GoogleAPIClientForRESTCore */; };
 		77F50BC32C63BBDF00187488 /* GoogleAPIClientForREST_YouTube in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BC22C63BBDF00187488 /* GoogleAPIClientForREST_YouTube */; };
+		77F50BC72C64723600187488 /* PodcastViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC62C64723600187488 /* PodcastViewModel.swift */; };
+		77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC82C64725600187488 /* AddPodcastView.swift */; };
+		77F50BCB2C647AEF00187488 /* PodcastListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BCA2C647AEF00187488 /* PodcastListView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -150,6 +153,9 @@
 		77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthorizationManager.swift; sourceTree = "<group>"; };
 		77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeMusicManager.swift; sourceTree = "<group>"; };
 		77F50BB82C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeMusicPlaylistPickerView.swift; sourceTree = "<group>"; };
+		77F50BC62C64723600187488 /* PodcastViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastViewModel.swift; sourceTree = "<group>"; };
+		77F50BC82C64725600187488 /* AddPodcastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastView.swift; sourceTree = "<group>"; };
+		77F50BCA2C647AEF00187488 /* PodcastListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastListView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -216,6 +222,7 @@
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
+				77F50BCA2C647AEF00187488 /* PodcastListView.swift */,
 				77F50BB82C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
 				77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */,
@@ -230,6 +237,7 @@
 				7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
+				77F50BC82C64725600187488 /* AddPodcastView.swift */,
 				77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */,
 				7780E9702C3F2110009CCF6F /* CustomAlertView.swift */,
 				7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */,
@@ -259,6 +267,7 @@
 			children = (
 				7707DA5A2C15524F006D5EBB /* RadioPlayer.swift */,
 				77CCE9622C1632380098EE74 /* ImagePicker.swift */,
+				77F50BC62C64723600187488 /* PodcastViewModel.swift */,
 				775D04282C287AF700E99061 /* ShazamViewModel.swift */,
 				7707DA672C156FA7006D5EBB /* RadioStationViewModel.swift */,
 			);
@@ -464,7 +473,9 @@
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
 				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
+				77F50BCB2C647AEF00187488 /* PodcastListView.swift in Sources */,
 				775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */,
+				77F50BC72C64723600187488 /* PodcastViewModel.swift in Sources */,
 				7780E9682C3D01DA009CCF6F /* CoreDataStack.swift in Sources */,
 				77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */,
 				77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */,
@@ -498,6 +509,7 @@
 				77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */,
 				7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */,
 				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
+				77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
