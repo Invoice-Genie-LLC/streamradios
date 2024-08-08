@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
 struct PodcastFeed: Identifiable {
     let id: UUID
@@ -51,7 +52,7 @@ class PodcastViewModel: ObservableObject {
         podcastFeeds.removeAll { $0.id == feed.id }
     }
     
-    func fetchEpisodes(for feed: PodcastFeed) {
+    func fetchEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
         isLoading = true
         fetchRSSFeed(for: feed) { result in
             DispatchQueue.main.async {
@@ -59,14 +60,16 @@ class PodcastViewModel: ObservableObject {
                 switch result {
                 case .success(let updatedFeed):
                     self.currentEpisodes = updatedFeed.episodes
+                    completion(.success(updatedFeed.episodes))
                 case .failure(let error):
                     self.error = error.localizedDescription
+                    completion(.failure(error))
                 }
             }
         }
     }
     
-    func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
+    private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
         guard let url = URL(string: feed.url) else {
             completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
             return

@@ -6,12 +6,16 @@
 //
 
 import SwiftUI
+import Combine
 
 struct PodcastListView: View {
     @StateObject private var viewModel = PodcastViewModel()
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @State private var selectedPodcast: PodcastFeed?
+    @State private var isPlayerPresented = false
     
     var body: some View {
         NavigationView {
@@ -35,9 +39,20 @@ struct PodcastListView: View {
                 } else {
                     List {
                         ForEach(viewModel.podcastFeeds) { feed in
-                            NavigationLink(destination: PodcastEpisodesView(viewModel: viewModel, feed: feed)) {
-                                PodcastRowView(feed: feed)
-                            }
+                            PodcastRowView(
+                                feed: feed,
+                                isPlaying: radioPlayer.currentPodcastEpisode?.feed.id == feed.id,
+                                onPlay: {
+                                    playLatestEpisode(for: feed)
+                                },
+                                onStop: {
+                                    radioPlayer.stopPodcast()
+                                },
+                                onTap: {
+                                    selectedPodcast = feed
+                                    isPlayerPresented = true
+                                }
+                            )
                         }
                         .onDelete(perform: deletePodcasts)
                     }
@@ -53,6 +68,9 @@ struct PodcastListView: View {
             }
             .sheet(isPresented: $showingAddPodcast) {
                 AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
+            }
+            .sheet(item: $selectedPodcast) { podcast in
+                PodcastPlayerView(viewModel: viewModel, feed: podcast, radioPlayer: radioPlayer)
             }
         }
     }
@@ -71,10 +89,27 @@ struct PodcastListView: View {
         newPodcastURL = ""
         showingAddPodcast = false
     }
+    
+    private func playLatestEpisode(for feed: PodcastFeed) {
+        viewModel.fetchEpisodes(for: feed) { result in
+            switch result {
+            case .success(let episodes):
+                if let latestEpisode = episodes.first {
+                    radioPlayer.playPodcastEpisode(latestEpisode)
+                }
+            case .failure(let error):
+                print("Failed to fetch episodes: \(error.localizedDescription)")
+            }
+        }
+    }
 }
 
 struct PodcastRowView: View {
     let feed: PodcastFeed
+    let isPlaying: Bool
+    let onPlay: () -> Void
+    let onStop: () -> Void
+    let onTap: () -> Void
     
     var body: some View {
         HStack {
@@ -103,51 +138,110 @@ struct PodcastRowView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
+            .onTapGesture(perform: onTap)
+            
+            Spacer()
+            
+            Button(action: isPlaying ? onStop : onPlay) {
+                Image(systemName: isPlaying ? "stop.circle.fill" : "play.circle.fill")
+                    .resizable()
+                    .frame(width: 30, height: 30)
+                    .foregroundColor(.blue)
+            }
         }
     }
 }
 
-struct PodcastEpisodesView: View {
+struct PodcastPlayerView: View {
     @ObservedObject var viewModel: PodcastViewModel
     let feed: PodcastFeed
+    @ObservedObject var radioPlayer: RadioPlayer
+    @State private var currentEpisodeIndex = 0
     
     var body: some View {
-        Group {
-            if viewModel.isLoading {
-                ProgressView()
-            } else if let error = viewModel.error {
-                Text(error)
-                    .foregroundColor(.red)
-            } else if viewModel.currentEpisodes.isEmpty {
-                Text("No episodes found")
+        VStack {
+            Text(feed.title)
+                .font(.largeTitle)
+                .padding()
+            
+            if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
+                AsyncImage(url: url) { image in
+                    image.resizable()
+                } placeholder: {
+                    Color.gray
+                }
+                .frame(width: 200, height: 200)
+                .cornerRadius(10)
+            }
+            
+            if let currentEpisode = radioPlayer.currentPodcastEpisode, currentEpisode.feed.id == feed.id {
+                Text(currentEpisode.title)
+                    .font(.headline)
+                    .padding()
+                
+                HStack {
+                    Button(action: previousEpisode) {
+                        Image(systemName: "backward.fill")
+                    }
+                    
+                    Button(action: togglePlayPause) {
+                        Image(systemName: radioPlayer.isPodcastPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .resizable()
+                            .frame(width: 50, height: 50)
+                    }
+                    
+                    Button(action: nextEpisode) {
+                        Image(systemName: "forward.fill")
+                    }
+                }
+                .padding()
             } else {
-                List(viewModel.currentEpisodes) { episode in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(episode.title)
-                            .font(.headline)
-                        Text(episode.description)
-                            .font(.subheadline)
-                            .lineLimit(2)
-                        HStack {
-                            Text(formatDate(episode.publicationDate))
-                                .font(.caption)
-                            Spacer()
-                            Text(formatDuration(episode.duration))
-                                .font(.caption)
-                        }
+                Text("No episode playing")
+                    .font(.headline)
+                    .padding()
+            }
+            
+            List(viewModel.currentEpisodes) { episode in
+                VStack(alignment: .leading) {
+                    Text(episode.title)
+                        .font(.headline)
+                    Text(formatDate(episode.publicationDate))
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 8)
-                    .onTapGesture {
-                        print("Selected episode: \(episode.title)")
-                    }
+                }
+                .onTapGesture {
+                    radioPlayer.playPodcastEpisode(episode)
                 }
             }
         }
-        .navigationTitle(feed.title)
+        .padding()
         .onAppear {
-            viewModel.fetchEpisodes(for: feed)
+            loadEpisodes()
         }
+    }
+    
+    private func loadEpisodes() {
+        viewModel.fetchEpisodes(for: feed) { _ in }
+    }
+    
+    private func togglePlayPause() {
+        if radioPlayer.isPodcastPlaying {
+            radioPlayer.pausePodcast()
+        } else {
+            radioPlayer.playPodcast()
+        }
+    }
+    
+    private func nextEpisode() {
+        guard !viewModel.currentEpisodes.isEmpty else { return }
+        currentEpisodeIndex = (currentEpisodeIndex + 1) % viewModel.currentEpisodes.count
+        radioPlayer.playPodcastEpisode(viewModel.currentEpisodes[currentEpisodeIndex])
+    }
+    
+    private func previousEpisode() {
+        guard !viewModel.currentEpisodes.isEmpty else { return }
+        currentEpisodeIndex = (currentEpisodeIndex - 1 + viewModel.currentEpisodes.count) % viewModel.currentEpisodes.count
+        radioPlayer.playPodcastEpisode(viewModel.currentEpisodes[currentEpisodeIndex])
     }
     
     private func formatDate(_ date: Date) -> String {
@@ -156,13 +250,4 @@ struct PodcastEpisodesView: View {
         formatter.timeStyle = .none
         return formatter.string(from: date)
     }
-    
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.hour, .minute]
-        formatter.unitsStyle = .abbreviated
-        return formatter.string(from: duration) ?? ""
-    }
 }
-
-
