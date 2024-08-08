@@ -40,6 +40,16 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var currentPodcastEpisode: PodcastEpisode?
         @Published var isPodcastPlaying = false
     @Published var podcastProgress: [UUID: Double] = [:]
+    @Published var currentPodcastTime: Double = 0.0
+    @Published var currentPodcastDuration: Double = 1.0
+    @Published var isSeeking: Bool = false
+
+    private var timeObserver: Any?
+
+
+    var currentPodcastProgress: Double {
+            return currentPodcastDuration > 0 ? currentPodcastTime / currentPodcastDuration : 0
+        }
 
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
@@ -67,35 +77,46 @@ class RadioPlayer: NSObject, ObservableObject {
             let queue = DispatchQueue(label: "NetworkMonitor")
             monitor.start(queue: queue)
         }
+    
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+            if keyPath == #keyPath(AVPlayerItem.status) {
+                let status: AVPlayerItem.Status
+                if let statusNumber = change?[.newKey] as? NSNumber {
+                    status = AVPlayerItem.Status(rawValue: statusNumber.intValue)!
+                } else {
+                    status = .unknown
+                }
+                
+                // Check status and update duration
+                if status == .readyToPlay {
+                    if let duration = player?.currentItem?.duration {
+                        currentPodcastDuration = CMTimeGetSeconds(duration)
+                    }
+                }
+            }
+        }
 
     func playPodcastEpisode(_ episode: PodcastEpisode) {
-            guard let url = URL(string: episode.audioUrl) else {
-                print("Invalid URL for podcast episode: \(episode.title)")
-                return
-            }
-
-            stopCurrentStation()
-
+            guard let url = URL(string: episode.audioUrl) else { return }
             let playerItem = AVPlayerItem(url: url)
-            player = AVPlayer(playerItem: playerItem)
-            player?.automaticallyWaitsToMinimizeStalling = true
-
-            statusCancellable?.cancel()
-            statusCancellable = player?.publisher(for: \.timeControlStatus)
-                .sink { [weak self] status in
-                    guard let self = self else { return }
-                    self.isPodcastPlaying = (status == .playing)
-                    self.isBuffering = (status == .waitingToPlayAtSpecifiedRate)
-                    print("Set podcast episode: isPodcastPlaying = \(self.isPodcastPlaying), isBuffering = \(self.isBuffering)")
-                    self.updateNowPlayingInfoForPodcast()
-                }
-
-            player?.play()
+            
+            if player == nil {
+                player = AVPlayer(playerItem: playerItem)
+            } else {
+                player?.replaceCurrentItem(with: playerItem)
+            }
+            
             currentPodcastEpisode = episode
+            currentPodcastTime = 0.0
+            currentPodcastDuration = 0.0 // We'll update this once the item is ready to play
+            
+            // Observe the status of the player item
+            playerItem.addObserver(self, forKeyPath: #keyPath(AVPlayerItem.status), options: [.new, .old], context: nil)
+            
+            player?.play()
             isPodcastPlaying = true
-
-            updateNowPlayingInfoForPodcast()
-            updateWidgetForPodcast()
+            
+            setupTimeObserver()
         }
     
     func playPodcast() {
@@ -128,15 +149,51 @@ class RadioPlayer: NSObject, ObservableObject {
             updateWidgetForPodcast()
         }
     
-    func updatePodcastProgress() {
-            guard let currentEpisode = currentPodcastEpisode,
-                  let currentTime = player?.currentTime(),
-                  let duration = player?.currentItem?.duration else {
-                return
+    func skipForward() {
+            seek(by: 15)
+        }
+        
+    func rewind() {
+            seek(by: -15)
+        }
+    
+    func seek(by seconds: Double) {
+            guard let player = player else { return }
+            let newTime = min(max(currentPodcastTime + seconds, 0), currentPodcastDuration)
+            player.seek(to: CMTime(seconds: newTime, preferredTimescale: 1))
+            currentPodcastTime = newTime
+        }
+    
+    func seek(to time: Double) {
+            guard let player = player else { return }
+            let newTime = min(max(time, 0), currentPodcastDuration)
+            player.seek(to: CMTime(seconds: newTime, preferredTimescale: 1))
+            currentPodcastTime = newTime
+        }
+    
+    private func updatePodcastProgress() {
+            guard let currentEpisode = currentPodcastEpisode, currentPodcastDuration > 0 else { return }
+            let progress = currentPodcastTime / currentPodcastDuration
+            podcastProgress[currentEpisode.id] = progress
+        }
+
+        // ... (other methods remain the same)
+
+        deinit {
+            if let timeObserver = timeObserver {
+                player?.removeTimeObserver(timeObserver)
             }
-            
-            let progress = currentTime.seconds / duration.seconds
-            podcastProgress[currentEpisode.feed.id] = progress
+            player?.currentItem?.removeObserver(self, forKeyPath: #keyPath(AVPlayerItem.status))
+        }
+    
+    
+    private func setupTimeObserver() {
+            let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+            timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+                guard let self = self, !self.isSeeking else { return }
+                self.currentPodcastTime = time.seconds
+                self.updatePodcastProgress()
+            }
         }
     
     private func updateNowPlayingInfoForPodcast() {
