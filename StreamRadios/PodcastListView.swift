@@ -306,10 +306,10 @@ struct PodcastPlayerView: View {
     }
     
     var body: some View {
-        VStack {
+        VStack(spacing: 20) {
             Text(feed.title)
-                .font(.largeTitle)
-                .padding()
+                .font(.title)
+                .padding(.top)
             
             if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
                 AsyncImage(url: url) { image in
@@ -324,50 +324,47 @@ struct PodcastPlayerView: View {
             if let currentEpisode = radioPlayer.currentPodcastEpisode, currentEpisode.feed.id == feed.id {
                 Text(currentEpisode.title)
                     .font(.headline)
-                    .padding()
+                    .padding(.horizontal)
+                    .multilineTextAlignment(.center)
                 
-                HStack {
-                    Button(action: radioPlayer.rewind) {
-                        Image(systemName: "gobackward.15")
-                            .resizable()
-                            .frame(width: 30, height: 30)
+                VStack(spacing: 10) {
+                    HStack(spacing: 30) {
+                        Button(action: radioPlayer.rewind) {
+                            Image(systemName: "gobackward.15")
+                                .resizable()
+                                .frame(width: 30, height: 30)
+                        }
+                        
+                        Button(action: togglePlayPause) {
+                            Image(systemName: radioPlayer.isPodcastPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                .resizable()
+                                .frame(width: 60, height: 60)
+                        }
+                        
+                        Button(action: radioPlayer.skipForward) {
+                            Image(systemName: "goforward.15")
+                                .resizable()
+                                .frame(width: 30, height: 30)
+                        }
                     }
                     
-                    Spacer()
-                    
-                    Button(action: togglePlayPause) {
-                        Image(systemName: radioPlayer.isPodcastPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .resizable()
-                            .frame(width: 50, height: 50)
+                    Slider(value: $seekPosition, in: 0...max(radioPlayer.currentPodcastDuration, 1)) { editing in
+                        if editing {
+                            radioPlayer.isSeeking = true
+                        } else {
+                            radioPlayer.isSeeking = false
+                            radioPlayer.seek(to: seekPosition)
+                        }
                     }
+                    .disabled(radioPlayer.currentPodcastDuration == 0)
                     
-                    Spacer()
-                    
-                    Button(action: radioPlayer.skipForward) {
-                        Image(systemName: "goforward.15")
-                            .resizable()
-                            .frame(width: 30, height: 30)
+                    HStack {
+                        Text(formatTime(radioPlayer.currentPodcastTime))
+                        Spacer()
+                        Text(formatTime(radioPlayer.currentPodcastDuration))
                     }
+                    .font(.caption)
                 }
-                .padding()
-                
-                Slider(value: $seekPosition, in: 0...max(radioPlayer.currentPodcastDuration, 1)) { editing in
-                    if editing {
-                        radioPlayer.isSeeking = true
-                    } else {
-                        radioPlayer.isSeeking = false
-                        radioPlayer.seek(to: seekPosition)
-                    }
-                }
-                .padding()
-                .disabled(radioPlayer.currentPodcastDuration == 0)
-                
-                HStack {
-                    Text(formatTime(radioPlayer.currentPodcastTime))
-                    Spacer()
-                    Text(formatTime(radioPlayer.currentPodcastDuration))
-                }
-                .font(.caption)
                 .padding(.horizontal)
             } else {
                 Text("No episode playing")
@@ -380,7 +377,7 @@ struct PodcastPlayerView: View {
                 Text("All").tag(1)
             }
             .pickerStyle(SegmentedPickerStyle())
-            .padding()
+            .padding(.horizontal)
             
             List(filteredEpisodes) { episode in
                 EpisodeRowView(
@@ -392,7 +389,7 @@ struct PodcastPlayerView: View {
                 )
             }
         }
-        .padding()
+        .frame(maxHeight: .infinity)
         .onAppear {
             loadEpisodes()
         }
@@ -421,7 +418,6 @@ struct PodcastPlayerView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 }
-
 
 extension PodcastViewModel {
     func refreshAllPodcasts() async {
