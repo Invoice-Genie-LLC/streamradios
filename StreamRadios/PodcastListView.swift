@@ -295,6 +295,7 @@ struct PodcastPlayerView: View {
     @ObservedObject var radioPlayer: RadioPlayer
     @State private var currentEpisodeIndex = 0
     @State private var selectedTab = 0
+    @State private var seekPosition: Double = 0
     
     var filteredEpisodes: [PodcastEpisode] {
         if selectedTab == 0 {
@@ -326,9 +327,13 @@ struct PodcastPlayerView: View {
                     .padding()
                 
                 HStack {
-                    Button(action: previousEpisode) {
-                        Image(systemName: "backward.fill")
+                    Button(action: radioPlayer.rewind) {
+                        Image(systemName: "gobackward.15")
+                            .resizable()
+                            .frame(width: 30, height: 30)
                     }
+                    
+                    Spacer()
                     
                     Button(action: togglePlayPause) {
                         Image(systemName: radioPlayer.isPodcastPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -336,11 +341,34 @@ struct PodcastPlayerView: View {
                             .frame(width: 50, height: 50)
                     }
                     
-                    Button(action: nextEpisode) {
-                        Image(systemName: "forward.fill")
+                    Spacer()
+                    
+                    Button(action: radioPlayer.skipForward) {
+                        Image(systemName: "goforward.15")
+                            .resizable()
+                            .frame(width: 30, height: 30)
                     }
                 }
                 .padding()
+                
+                Slider(value: $seekPosition, in: 0...max(radioPlayer.currentPodcastDuration, 1)) { editing in
+                    if editing {
+                        radioPlayer.isSeeking = true
+                    } else {
+                        radioPlayer.isSeeking = false
+                        radioPlayer.seek(to: seekPosition)
+                    }
+                }
+                .padding()
+                .disabled(radioPlayer.currentPodcastDuration == 0)
+                
+                HStack {
+                    Text(formatTime(radioPlayer.currentPodcastTime))
+                    Spacer()
+                    Text(formatTime(radioPlayer.currentPodcastDuration))
+                }
+                .font(.caption)
+                .padding(.horizontal)
             } else {
                 Text("No episode playing")
                     .font(.headline)
@@ -368,6 +396,11 @@ struct PodcastPlayerView: View {
         .onAppear {
             loadEpisodes()
         }
+        .onChange(of: radioPlayer.currentPodcastTime) { newValue in
+            if !radioPlayer.isSeeking {
+                seekPosition = newValue
+            }
+        }
     }
     
     private func loadEpisodes() {
@@ -382,18 +415,13 @@ struct PodcastPlayerView: View {
         }
     }
     
-    private func nextEpisode() {
-        guard !viewModel.currentEpisodes.isEmpty else { return }
-        currentEpisodeIndex = (currentEpisodeIndex + 1) % viewModel.currentEpisodes.count
-        radioPlayer.playPodcastEpisode(viewModel.currentEpisodes[currentEpisodeIndex])
-    }
-    
-    private func previousEpisode() {
-        guard !viewModel.currentEpisodes.isEmpty else { return }
-        currentEpisodeIndex = (currentEpisodeIndex - 1 + viewModel.currentEpisodes.count) % viewModel.currentEpisodes.count
-        radioPlayer.playPodcastEpisode(viewModel.currentEpisodes[currentEpisodeIndex])
+    private func formatTime(_ time: Double) -> String {
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 }
+
 
 extension PodcastViewModel {
     func refreshAllPodcasts() async {
