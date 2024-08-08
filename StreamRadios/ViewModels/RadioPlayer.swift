@@ -39,6 +39,8 @@ class RadioPlayer: NSObject, ObservableObject {
     private var isOnCellularNetwork = false
     @Published var currentPodcastEpisode: PodcastEpisode?
         @Published var isPodcastPlaying = false
+    @Published var podcastProgress: [UUID: Double] = [:]
+
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
@@ -124,6 +126,17 @@ class RadioPlayer: NSObject, ObservableObject {
             isPodcastPlaying = false
             updateNowPlayingInfoForPodcast()
             updateWidgetForPodcast()
+        }
+    
+    func updatePodcastProgress() {
+            guard let currentEpisode = currentPodcastEpisode,
+                  let currentTime = player?.currentTime(),
+                  let duration = player?.currentItem?.duration else {
+                return
+            }
+            
+            let progress = currentTime.seconds / duration.seconds
+            podcastProgress[currentEpisode.feed.id] = progress
         }
     
     private func updateNowPlayingInfoForPodcast() {
