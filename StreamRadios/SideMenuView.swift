@@ -45,7 +45,18 @@ struct SideMenuView: View {
             }
             .padding(.top, 100)
             Spacer()
-
+            NavigationLink(destination: PodcastListView().environmentObject(PodcastViewModel())) {
+                HStack {
+                    Image(systemName: "mic")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text("Podcasts")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                }
+                .padding(.top, 20)
+                .padding(.horizontal, 20)
+            }
             // Footer
             VStack(alignment: .leading) {
                 Text("Copyright StreamRadios")
