@@ -10,7 +10,7 @@ import Combine
 import SwiftUI
 
 struct PodcastFeed: Identifiable {
-    let id: UUID
+    let id: String
     var title: String
     var url: String
     var artworkUrl: String?
@@ -18,7 +18,7 @@ struct PodcastFeed: Identifiable {
 }
 
 struct PodcastEpisode: Identifiable {
-    let id: UUID
+    let id: String
     var title: String
     var description: String
     var audioUrl: String
@@ -156,23 +156,23 @@ class RSSParser: NSObject, XMLParserDelegate {
                let description = currentDescription,
                let pubDateString = currentPubDate,
                let enclosure = currentEnclosure {
-                
+
                 let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
                 let duration = TimeInterval(currentDuration ?? "0") ?? 0
-                
+
                 let episode = PodcastEpisode(
-                    id: UUID(),
+                    id: UUID().uuidString,  // Convert UUID to String
                     title: title,
                     description: description,
                     audioUrl: enclosure,
                     publicationDate: pubDate,
                     duration: duration,
-                    feed: PodcastFeed(id: UUID(), title: "", url: "") // This will be updated later
+                    feed: PodcastFeed(id: UUID().uuidString, title: "", url: "")  // Convert UUID to String
                 )
-                
+
                 episodes.append(episode)
             }
-            
+
             isParsingItem = false
         }
     }

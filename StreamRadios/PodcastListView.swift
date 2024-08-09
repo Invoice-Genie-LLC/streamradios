@@ -16,6 +16,7 @@ struct PodcastListView: View {
     @State private var newPodcastURL = ""
     @State private var selectedPodcast: PodcastFeed?
     @State private var searchText = ""
+    var podcastProgress: [String: Int] = [:]
     
     var filteredPodcasts: [PodcastFeed] {
         if searchText.isEmpty {
@@ -75,7 +76,7 @@ struct PodcastListView: View {
     }
     
     private func addPodcast() {
-        let newFeed = PodcastFeed(id: UUID(), title: newPodcastTitle, url: newPodcastURL)
+        let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
         viewModel.addPodcastFeed(newFeed)
         newPodcastTitle = ""
         newPodcastURL = ""
@@ -299,7 +300,9 @@ struct PodcastPlayerView: View {
     
     var filteredEpisodes: [PodcastEpisode] {
         if selectedTab == 0 {
-            return viewModel.currentEpisodes.filter { radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0 }
+            return viewModel.currentEpisodes.filter {
+                return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
+            }
         } else {
             return viewModel.currentEpisodes
         }
@@ -380,14 +383,14 @@ struct PodcastPlayerView: View {
             .padding(.horizontal)
             
             List(filteredEpisodes) { episode in
-                EpisodeRowView(
-                    episode: episode,
-                    isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
-                    progress: radioPlayer.podcastProgress[episode.id] ?? 0,
-                    onPlay: { radioPlayer.playPodcastEpisode(episode) },
-                    onStop: { radioPlayer.stopPodcast() }
-                )
-            }
+                            EpisodeRowView(
+                                episode: episode,
+                                isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
+                                progress: radioPlayer.podcastProgress[episode.id] ?? 0,
+                                onPlay: { radioPlayer.playPodcastEpisode(episode) },
+                                onStop: { radioPlayer.stopPodcast() }
+                            )
+                        }
         }
         .frame(maxHeight: .infinity)
         .onAppear {
@@ -425,3 +428,4 @@ extension PodcastViewModel {
         // This might involve re-fetching RSS feeds for all podcasts
     }
 }
+
