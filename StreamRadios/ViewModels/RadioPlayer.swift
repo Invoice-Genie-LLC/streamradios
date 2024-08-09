@@ -41,7 +41,8 @@ class RadioPlayer: NSObject, ObservableObject {
         @Published var isPodcastPlaying = false
     @Published var podcastProgress: [String: Double] = [:]
     @Published var currentPodcastTime: Double = 0.0
-    @Published var currentPodcastDuration: Double = 1.0
+    @Published var currentPodcastDuration: Double = 0
+    private var podcastViewModel: PodcastViewModel
     @Published var isSeeking: Bool = false
 
     private var timeObserver: Any?
@@ -64,6 +65,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     override init() {
+        self.podcastViewModel = PodcastViewModel()
             super.init()
             configureAudioSession()
             addInterruptionObserver()
@@ -76,6 +78,7 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             let queue = DispatchQueue(label: "NetworkMonitor")
             monitor.start(queue: queue)
+        setupTimeObserver()
         }
     
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
@@ -175,9 +178,10 @@ class RadioPlayer: NSObject, ObservableObject {
             guard let currentEpisode = currentPodcastEpisode, currentPodcastDuration > 0 else { return }
             let progress = currentPodcastTime / currentPodcastDuration
             podcastProgress[currentEpisode.id] = progress
+            podcastViewModel.updateEpisodeState(episodeId: currentEpisode.id, isPlayed: progress >= 0.9, progress: progress)
         }
 
-        // ... (other methods remain the same)
+        // ... add other podcast-related methods here ...
 
         deinit {
             if let timeObserver = timeObserver {
@@ -188,13 +192,13 @@ class RadioPlayer: NSObject, ObservableObject {
     
     
     private func setupTimeObserver() {
-            let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-            timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-                guard let self = self, !self.isSeeking else { return }
-                self.currentPodcastTime = time.seconds
-                self.updatePodcastProgress()
-            }
-        }
+           let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+           timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+               guard let self = self, !self.isSeeking else { return }
+               self.currentPodcastTime = time.seconds
+               self.updatePodcastProgress()
+           }
+       }
     
     private func updateNowPlayingInfoForPodcast() {
            guard let episode = currentPodcastEpisode else { return }
