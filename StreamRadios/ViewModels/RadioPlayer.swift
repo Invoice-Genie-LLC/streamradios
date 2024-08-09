@@ -44,6 +44,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var currentPodcastDuration: Double = 0
     private var podcastViewModel: PodcastViewModel
     @Published var isSeeking: Bool = false
+    private let podcastProgressKey = "PodcastProgress"
 
     private var timeObserver: Any?
 
@@ -67,6 +68,7 @@ class RadioPlayer: NSObject, ObservableObject {
     override init() {
         self.podcastViewModel = PodcastViewModel()
             super.init()
+        loadPodcastProgress()
             configureAudioSession()
             addInterruptionObserver()
             autoPlayLastStationSetup()
@@ -98,6 +100,17 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
             }
         }
+    
+    private func savePodcastProgress() {
+           let progress = ["currentPodcastTime": currentPodcastTime, "currentPodcastDuration": currentPodcastDuration]
+           UserDefaults.standard.set(progress, forKey: podcastProgressKey)
+       }
+    
+    private func loadPodcastProgress() {
+          guard let progress = UserDefaults.standard.dictionary(forKey: podcastProgressKey) as? [String: Double] else { return }
+          currentPodcastTime = progress["currentPodcastTime"] ?? 0.0
+          currentPodcastDuration = progress["currentPodcastDuration"] ?? 0.0
+      }
 
     func playPodcastEpisode(_ episode: PodcastEpisode) {
             guard let url = URL(string: episode.audioUrl) else { return }
@@ -179,6 +192,7 @@ class RadioPlayer: NSObject, ObservableObject {
             let progress = currentPodcastTime / currentPodcastDuration
             podcastProgress[currentEpisode.id] = progress
             podcastViewModel.updateEpisodeState(episodeId: currentEpisode.id, isPlayed: progress >= 0.9, progress: progress)
+        savePodcastProgress()
         }
 
         // ... add other podcast-related methods here ...

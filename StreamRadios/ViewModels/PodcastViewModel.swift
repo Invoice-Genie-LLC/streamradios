@@ -9,17 +9,17 @@ import Foundation
 import Combine
 import SwiftUI
 
-struct PodcastFeed: Identifiable {
+struct PodcastFeed: Identifiable, Codable {
     let id: String
     var title: String
     var url: String
     var artworkUrl: String?
-    var description: String? 
+    var description: String?
     var iconData: String?
     var episodes: [PodcastEpisode] = []
 }
 
-struct PodcastEpisode: Identifiable {
+struct PodcastEpisode: Identifiable, Codable {
     let id: String
     var title: String
     var description: String
@@ -28,18 +28,8 @@ struct PodcastEpisode: Identifiable {
     var duration: TimeInterval
     var feed: PodcastFeed
     var state: EpisodeState
-    
-    init(id: String, title: String, description: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, feed: PodcastFeed, state: EpisodeState = EpisodeState(isPlayed: false, progress: 0.0)) {
-        self.id = id
-        self.title = title
-        self.description = description
-        self.audioUrl = audioUrl
-        self.publicationDate = publicationDate
-        self.duration = duration
-        self.feed = feed
-        self.state = state
-    }
 }
+
 
 class PodcastViewModel: ObservableObject {
     @Published var podcastFeeds: [PodcastFeed] = []
@@ -49,6 +39,27 @@ class PodcastViewModel: ObservableObject {
     @Published var podcastUrls: [String] = []
     private let userDefaults = UserDefaults.standard
         private let episodeStatesKey = "PodcastEpisodeStates"
+    private let progressKey = "PodcastProgress"
+    
+    
+
+    private func saveProgress() {
+            do {
+                let encodedData = try JSONEncoder().encode(podcastFeeds)
+                UserDefaults.standard.set(encodedData, forKey: progressKey)
+            } catch {
+                print("Failed to save progress: \(error)")
+            }
+        }
+    private func loadProgress() {
+           guard let savedData = UserDefaults.standard.data(forKey: progressKey) else { return }
+           do {
+               let decodedFeeds = try JSONDecoder().decode([PodcastFeed].self, from: savedData)
+               self.podcastFeeds = decodedFeeds
+           } catch {
+               print("Failed to load progress: \(error)")
+           }
+       }
     
     func addPodcastFeed(_ feed: PodcastFeed) {
         isLoading = true
@@ -81,9 +92,10 @@ class PodcastViewModel: ObservableObject {
        }
         
     func updateEpisodeState(episodeId: String, isPlayed: Bool, progress: Double) {
-            episodeStates[episodeId] = EpisodeState(isPlayed: isPlayed, progress: progress)
-            updateEpisodeInCurrentEpisodes(episodeId: episodeId)
-        }
+           episodeStates[episodeId] = EpisodeState(isPlayed: isPlayed, progress: progress)
+           updateEpisodeInCurrentEpisodes(episodeId: episodeId)
+           saveProgress() // Save progress whenever it changes
+       }
         
         private func updateEpisodeInCurrentEpisodes(episodeId: String) {
             if let index = currentEpisodes.firstIndex(where: { $0.id == episodeId }) {
@@ -308,8 +320,10 @@ class RSSParser: NSObject, XMLParserDelegate {
                     audioUrl: enclosure,
                     publicationDate: pubDate,
                     duration: duration,
-                    feed: PodcastFeed(id: UUID().uuidString, title: "", url: "")  // Convert UUID to String
+                    feed: PodcastFeed(id: UUID().uuidString, title: "", url: ""),
+                    state: EpisodeState(isPlayed: false, progress: 0.0) // Provide a default EpisodeState
                 )
+
                 
                 episodes.append(episode)
             }
