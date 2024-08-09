@@ -16,6 +16,8 @@ struct PodcastListView: View {
     @State private var newPodcastURL = ""
     @State private var selectedPodcast: PodcastFeed?
     @State private var searchText = ""
+    @State private var showingDeleteConfirmation = false
+    @State private var podcastToDelete: PodcastFeed?
     var podcastProgress: [String: Int] = [:]
     
     var filteredPodcasts: [PodcastFeed] {
@@ -32,19 +34,34 @@ struct PodcastListView: View {
                 searchBar
                 
                 List {
-                    ForEach(filteredPodcasts) { feed in
-                        PodcastRowView(
-                            feed: feed,
-                            isPlaying: radioPlayer.currentPodcastEpisode?.feed.id == feed.id,
-                            onPlay: { playLatestEpisode(for: feed) },
-                            onStop: { radioPlayer.stopPodcast() },
-                            onTap: { selectedPodcast = feed }
-                        )
-                    }
-                    .onDelete(perform: deletePodcasts)
-                }
-                .listStyle(PlainListStyle())
+                                    ForEach(filteredPodcasts) { feed in
+                                        PodcastRowView(
+                                            feed: feed,
+                                            isPlaying: radioPlayer.currentPodcastEpisode?.feed.id == feed.id,
+                                            onPlay: { playLatestEpisode(for: feed) },
+                                            onStop: { radioPlayer.stopPodcast() },
+                                            onTap: { selectedPodcast = feed }
+                                        )
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button(role: .destructive) {
+                                                podcastToDelete = feed
+                                                showingDeleteConfirmation = true
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                        }
+                                    }
+                                }
+                                .listStyle(PlainListStyle())
             }
+            .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
+                        Button("Cancel", role: .cancel) {}
+                        Button("Delete", role: .destructive) {
+                            viewModel.deletePodcastFeed(podcast)
+                        }
+                    } message: { podcast in
+                        Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
+                    }
             .navigationTitle("Podcasts")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -53,6 +70,9 @@ struct PodcastListView: View {
                     }
                 }
             }
+            .onAppear {
+                        viewModel.fetchPodcastFeeds()
+                    }
             .sheet(isPresented: $showingAddPodcast) {
                 AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
             }
@@ -69,19 +89,19 @@ struct PodcastListView: View {
     }
     
     private func deletePodcasts(at offsets: IndexSet) {
-        offsets.forEach { index in
-            let feedToDelete = filteredPodcasts[index]
-            viewModel.deletePodcastFeed(feedToDelete)
+            for index in offsets {
+                let feedToDelete = filteredPodcasts[index]
+                viewModel.deletePodcastFeed(feedToDelete)
+            }
         }
-    }
     
     private func addPodcast() {
-        let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
-        viewModel.addPodcastFeed(newFeed)
-        newPodcastTitle = ""
-        newPodcastURL = ""
-        showingAddPodcast = false
-    }
+            let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
+            viewModel.addPodcastFeed(newFeed)
+            newPodcastTitle = ""
+            newPodcastURL = ""
+            showingAddPodcast = false
+        }
     
     private func playLatestEpisode(for feed: PodcastFeed) {
         viewModel.fetchEpisodes(for: feed) { result in
@@ -106,7 +126,9 @@ struct PodcastRowView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            PodcastArtworkView(artworkUrl: feed.artworkUrl)
+            PodcastIconView(iconData: feed.iconData, artworkUrl: feed.artworkUrl)
+                .frame(width: 60, height: 60)
+                .cornerRadius(8)
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(feed.title)
@@ -129,6 +151,33 @@ struct PodcastRowView: View {
     }
 }
 
+struct PodcastIconView: View {
+    let iconData: String?
+    let artworkUrl: String?
+    
+    var body: some View {
+        Group {
+            if let iconData = iconData, let uiImage = UIImage(data: Data(base64Encoded: iconData) ?? Data()) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else if let artworkUrl = artworkUrl, let url = URL(string: artworkUrl) {
+                AsyncImage(url: url) { image in
+                    image.resizable()
+                } placeholder: {
+                    Color.gray
+                }
+            } else {
+                Image(systemName: "mic")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(8)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+            }
+        }
+    }
+}
 
 struct EpisodeRowView: View {
     let episode: PodcastEpisode
@@ -383,14 +432,14 @@ struct PodcastPlayerView: View {
             .padding(.horizontal)
             
             List(filteredEpisodes) { episode in
-                            EpisodeRowView(
-                                episode: episode,
-                                isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
-                                progress: radioPlayer.podcastProgress[episode.id] ?? 0,
-                                onPlay: { radioPlayer.playPodcastEpisode(episode) },
-                                onStop: { radioPlayer.stopPodcast() }
-                            )
-                        }
+                EpisodeRowView(
+                    episode: episode,
+                    isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
+                    progress: radioPlayer.podcastProgress[episode.id] ?? 0,
+                    onPlay: { radioPlayer.playPodcastEpisode(episode) },
+                    onStop: { radioPlayer.stopPodcast() }
+                )
+            }
         }
         .frame(maxHeight: .infinity)
         .onAppear {
@@ -416,7 +465,7 @@ struct PodcastPlayerView: View {
     }
     
     private func formatTime(_ time: Double) -> String {
-        let minutes = Int(time) / 60
+        let minutes = Int(time) /  60
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
