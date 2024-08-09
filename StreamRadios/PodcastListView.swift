@@ -181,10 +181,10 @@ struct PodcastIconView: View {
 
 struct EpisodeRowView: View {
     let episode: PodcastEpisode
-    let isPlaying: Bool
-    let progress: Double
-    let onPlay: () -> Void
-    let onStop: () -> Void
+        let isPlaying: Bool
+        let progress: Double?
+        let onPlay: () -> Void
+        let onStop: () -> Void
     
     var body: some View {
         HStack {
@@ -196,12 +196,14 @@ struct EpisodeRowView: View {
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                             
-                            ProgressView(value: progress)
-                                .accentColor(.blue)
-                            
-                            Text(formatRemainingTime(progress: progress))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            if let progress = progress {
+                                ProgressView(value: progress)
+                                    .accentColor(.blue)
+                                
+                                Text(formatRemainingTime(progress: progress))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
             
             Spacer()
@@ -213,45 +215,54 @@ struct EpisodeRowView: View {
     }
     
     private var statusLabel: some View {
-        Group {
-            if progress == 0 {
-                Text("New")
-                    .font(.caption)
-                    .padding(4)
-                    .background(Color.green)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
-            } else if progress > 0 && progress < 1 {
-                Text("In Progress")
-                    .font(.caption)
-                    .padding(4)
-                    .background(Color.orange)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
-            } else {
-                Text("Played")
-                    .font(.caption)
-                    .padding(4)
-                    .background(Color.gray)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
-            }
-        }
-    }
+           Group {
+               if let progress = progress {
+                   if progress == 0 {
+                       Text("New")
+                           .font(.caption)
+                           .padding(4)
+                           .background(Color.green)
+                           .foregroundColor(.white)
+                           .cornerRadius(4)
+                   } else if progress > 0 && progress < 1 {
+                       Text("In Progress")
+                           .font(.caption)
+                           .padding(4)
+                           .background(Color.orange)
+                           .foregroundColor(.white)
+                           .cornerRadius(4)
+                   } else {
+                       Text("Played")
+                           .font(.caption)
+                           .padding(4)
+                           .background(Color.gray)
+                           .foregroundColor(.white)
+                           .cornerRadius(4)
+                   }
+               } else {
+                   Text("New")
+                       .font(.caption)
+                       .padding(4)
+                       .background(Color.green)
+                       .foregroundColor(.white)
+                       .cornerRadius(4)
+               }
+           }
+       }
     
     private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-    
-    private func formatRemainingTime(progress: Double) -> String {
-        let remainingTime = (1 - progress) * episode.duration
-        let minutes = Int(remainingTime / 60)
-        let seconds = Int(remainingTime.truncatingRemainder(dividingBy: 60))
-        return String(format: "%d:%02d remaining", minutes, seconds)
-    }
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            return formatter.string(from: date)
+        }
+        
+        private func formatRemainingTime(progress: Double) -> String {
+            let remainingTime = (1 - progress) * episode.duration
+            let minutes = Int(remainingTime / 60)
+            let seconds = Int(remainingTime.truncatingRemainder(dividingBy: 60))
+            return String(format: "%d:%02d remaining", minutes, seconds)
+        }
 }
 
 struct PodcastArtworkView: View {
@@ -421,14 +432,14 @@ struct PodcastPlayerView: View {
             .padding(.horizontal)
             
             List(filteredEpisodes) { episode in
-                EpisodeRowView(
-                    episode: episode,
-                    isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
-                    progress: radioPlayer.podcastProgress[episode.id] ?? 0,
-                    onPlay: { radioPlayer.playPodcastEpisode(episode) },
-                    onStop: { radioPlayer.stopPodcast() }
-                )
-            }
+                            EpisodeRowView(
+                                episode: episode,
+                                isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
+                                progress: selectedTab == 1 ? (radioPlayer.podcastProgress[episode.id] ?? 0) : nil,
+                                onPlay: { radioPlayer.playPodcastEpisode(episode) },
+                                onStop: { radioPlayer.stopPodcast() }
+                            )
+                        }
         }
         .frame(maxHeight: .infinity)
         .onAppear {
@@ -444,14 +455,14 @@ struct PodcastPlayerView: View {
     }
     
     var filteredEpisodes: [PodcastEpisode] {
-        if selectedTab == 1 {
-            return viewModel.currentEpisodes
-        } else {
-            return viewModel.currentEpisodes.filter {
-                return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
-            }
-        }
-    }
+           if selectedTab == 1 {
+               return viewModel.currentEpisodes
+           } else {
+               return viewModel.currentEpisodes.filter {
+                   return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
+               }
+           }
+       }
     
     private func loadEpisodes() {
         viewModel.fetchEpisodes(for: feed) { _ in }
