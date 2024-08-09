@@ -350,12 +350,12 @@ struct ErrorView: View {
 
 struct PodcastPlayerView: View {
     @ObservedObject var viewModel: PodcastViewModel
-    let feed: PodcastFeed
-    @ObservedObject var radioPlayer: RadioPlayer
-    @State private var currentEpisodeIndex = 0
-    @State private var selectedTab = 1 // Start with "All" tab
-    @State private var seekPosition: Double = 0
-    @AppStorage("podcastProgress") private var savedProgress: Data = Data()
+       let feed: PodcastFeed
+       @ObservedObject var radioPlayer: RadioPlayer
+       @State private var currentEpisodeIndex = 0
+       @State private var selectedTab = 1 // Start with "All" tab
+       @State private var seekPosition: Double = 0
+       @AppStorage("podcastProgress") private var savedProgress: Data = Data()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -435,11 +435,17 @@ struct PodcastPlayerView: View {
                             EpisodeRowView(
                                 episode: episode,
                                 isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
-                                progress: selectedTab == 1 ? (radioPlayer.podcastProgress[episode.id] ?? 0) : nil,
-                                onPlay: { radioPlayer.playPodcastEpisode(episode) },
+                                progress: selectedTab == 1 ? radioPlayer.podcastProgress[episode.id] : nil,
+                                onPlay: {
+                                    radioPlayer.playPodcastEpisode(episode)
+                                    if selectedTab == 0 {
+                                        selectedTab = 1 // Switch to "All" tab
+                                    }
+                                },
                                 onStop: { radioPlayer.stopPodcast() }
                             )
                         }
+                    
         }
         .frame(maxHeight: .infinity)
         .onAppear {
