@@ -135,10 +135,10 @@ struct PodcastRowView: View {
                     .font(.headline)
                     .lineLimit(1)
                 
-                Text(feed.url)
+                Text(feed.description ?? "No description available")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             
             Spacer()
@@ -350,15 +350,15 @@ struct ErrorView: View {
 
 struct PodcastPlayerView: View {
     @ObservedObject var viewModel: PodcastViewModel
-       let feed: PodcastFeed
-       @ObservedObject var radioPlayer: RadioPlayer
-       @State private var currentEpisodeIndex = 0
-       @State private var selectedTab = 1 // Start with "All" tab
-       @State private var seekPosition: Double = 0
-       @AppStorage("podcastProgress") private var savedProgress: Data = Data()
+    let feed: PodcastFeed
+    @ObservedObject var radioPlayer: RadioPlayer
+    @State private var currentEpisodeIndex = 0
+    @State private var selectedTab = 1 // Start with "All" tab
+    @State private var seekPosition: Double = 0
+    @AppStorage("podcastProgress") private var savedProgress: Data = Data()
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 10) {
             Text(feed.title)
                 .font(.title)
                 .padding(.top)
@@ -369,60 +369,11 @@ struct PodcastPlayerView: View {
                 } placeholder: {
                     Color.gray
                 }
-                .frame(width: 200, height: 200)
+                .frame(width: 150, height: 150)
                 .cornerRadius(10)
             }
             
-            if let currentEpisode = radioPlayer.currentPodcastEpisode, currentEpisode.feed.id == feed.id {
-                Text(currentEpisode.title)
-                    .font(.headline)
-                    .padding(.horizontal)
-                    .multilineTextAlignment(.center)
-                
-                VStack(spacing: 10) {
-                    HStack(spacing: 30) {
-                        Button(action: radioPlayer.rewind) {
-                            Image(systemName: "gobackward.15")
-                                .resizable()
-                                .frame(width: 30, height: 30)
-                        }
-                        
-                        Button(action: togglePlayPause) {
-                            Image(systemName: radioPlayer.isPodcastPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                .resizable()
-                                .frame(width: 60, height: 60)
-                        }
-                        
-                        Button(action: radioPlayer.skipForward) {
-                            Image(systemName: "goforward.15")
-                                .resizable()
-                                .frame(width: 30, height: 30)
-                        }
-                    }
-                    
-                    Slider(value: $seekPosition, in: 0...max(radioPlayer.currentPodcastDuration, 1)) { editing in
-                        if editing {
-                            radioPlayer.isSeeking = true
-                        } else {
-                            radioPlayer.isSeeking = false
-                            radioPlayer.seek(to: seekPosition)
-                        }
-                    }
-                    .disabled(radioPlayer.currentPodcastDuration == 0)
-                    
-                    HStack {
-                        Text(formatTime(radioPlayer.currentPodcastTime))
-                        Spacer()
-                        Text(formatTime(radioPlayer.currentPodcastDuration))
-                    }
-                    .font(.caption)
-                }
-                .padding(.horizontal)
-            } else {
-                Text("No episode playing")
-                    .font(.headline)
-                    .padding()
-            }
+            nowPlayingView
             
             Picker("", selection: $selectedTab) {
                 Text("All").tag(1)
@@ -431,21 +382,7 @@ struct PodcastPlayerView: View {
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
             
-            List(filteredEpisodes) { episode in
-                            EpisodeRowView(
-                                episode: episode,
-                                isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
-                                progress: selectedTab == 1 ? radioPlayer.podcastProgress[episode.id] : nil,
-                                onPlay: {
-                                    radioPlayer.playPodcastEpisode(episode)
-                                    if selectedTab == 0 {
-                                        selectedTab = 1 // Switch to "All" tab
-                                    }
-                                },
-                                onStop: { radioPlayer.stopPodcast() }
-                            )
-                        }
-                    
+            episodeList
         }
         .frame(maxHeight: .infinity)
         .onAppear {
@@ -460,15 +397,100 @@ struct PodcastPlayerView: View {
         }
     }
     
+    private var nowPlayingView: some View {
+        Group {
+            if let currentEpisode = radioPlayer.currentPodcastEpisode, currentEpisode.feed.id == feed.id {
+                VStack(spacing: 5) {
+                    Text(currentEpisode.title)
+                        .font(.headline)
+                        .padding(.horizontal)
+                        .multilineTextAlignment(.center)
+                    
+                    playerControls
+                    
+                    progressSlider
+                        .padding(.horizontal, 20)
+                    timeLabels
+                        .padding(.horizontal, 20)
+                }
+            } else {
+                Text("No episode playing")
+                    .font(.headline)
+                    .padding()
+            }
+        }
+    }
+    
+    private var playerControls: some View {
+        HStack(spacing: 30) {
+            Button(action: radioPlayer.rewind) {
+                Image(systemName: "gobackward.15")
+                    .resizable()
+                    .frame(width: 30, height: 30)
+            }
+            
+            Button(action: togglePlayPause) {
+                Image(systemName: radioPlayer.isPodcastPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .resizable()
+                    .frame(width: 60, height: 60)
+            }
+            
+            Button(action: radioPlayer.skipForward) {
+                Image(systemName: "goforward.15")
+                    .resizable()
+                    .frame(width: 30, height: 30)
+            }
+        }
+    }
+    
+    private var progressSlider: some View {
+        Slider(value: $seekPosition, in: 0...max(radioPlayer.currentPodcastDuration, 1)) { editing in
+            if editing {
+                radioPlayer.isSeeking = true
+            } else {
+                radioPlayer.isSeeking = false
+                radioPlayer.seek(to: seekPosition)
+            }
+        }
+        .disabled(radioPlayer.currentPodcastDuration == 0)
+    }
+    
+    private var timeLabels: some View {
+        HStack {
+            Text(formatTime(radioPlayer.currentPodcastTime))
+            Spacer()
+            Text(formatTime(radioPlayer.currentPodcastDuration))
+        }
+        .font(.caption)
+    }
+    
+    private var episodeList: some View {
+        List(filteredEpisodes) { episode in
+            EpisodeRowView(
+                episode: episode,
+                isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
+                progress: selectedTab == 1 ? radioPlayer.podcastProgress[episode.id] : nil,
+                onPlay: {
+                    radioPlayer.playPodcastEpisode(episode)
+                    if selectedTab == 0 {
+                        selectedTab = 1 // Switch to "All" tab
+                    }
+                },
+                onStop: { radioPlayer.stopPodcast() }
+            )
+        }
+        .listStyle(PlainListStyle())
+    }
+    
     var filteredEpisodes: [PodcastEpisode] {
-           if selectedTab == 1 {
-               return viewModel.currentEpisodes
-           } else {
-               return viewModel.currentEpisodes.filter {
-                   return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
-               }
-           }
-       }
+        if selectedTab == 1 {
+            return viewModel.currentEpisodes
+        } else {
+            return viewModel.currentEpisodes.filter {
+                return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
+            }
+        }
+    }
     
     private func loadEpisodes() {
         viewModel.fetchEpisodes(for: feed) { _ in }
@@ -483,7 +505,7 @@ struct PodcastPlayerView: View {
     }
     
     private func formatTime(_ time: Double) -> String {
-        let minutes = Int(time) /  60
+        let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
