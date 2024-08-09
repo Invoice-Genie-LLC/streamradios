@@ -39,7 +39,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private var isOnCellularNetwork = false
     @Published var currentPodcastEpisode: PodcastEpisode?
         @Published var isPodcastPlaying = false
-    @Published var podcastProgress: [UUID: Double] = [:]
+    @Published var podcastProgress: [String: Double] = [:]
     @Published var currentPodcastTime: Double = 0.0
     @Published var currentPodcastDuration: Double = 1.0
     @Published var isSeeking: Bool = false
