@@ -189,22 +189,20 @@ struct EpisodeRowView: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(episode.title)
-                    .font(.headline)
-                
-                Text(formatDate(episode.publicationDate))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                if progress > 0 {
-                    ProgressView(value: progress)
-                        .accentColor(.blue)
-                    
-                    Text(formatRemainingTime(progress: progress))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+                            Text(episode.title)
+                                .font(.headline)
+                            
+                            Text(formatDate(episode.publicationDate))
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            ProgressView(value: progress)
+                                .accentColor(.blue)
+                            
+                            Text(formatRemainingTime(progress: progress))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
             
             Spacer()
             
@@ -344,18 +342,9 @@ struct PodcastPlayerView: View {
     let feed: PodcastFeed
     @ObservedObject var radioPlayer: RadioPlayer
     @State private var currentEpisodeIndex = 0
-    @State private var selectedTab = 0
+    @State private var selectedTab = 1 // Start with "All" tab
     @State private var seekPosition: Double = 0
-    
-    var filteredEpisodes: [PodcastEpisode] {
-        if selectedTab == 0 {
-            return viewModel.currentEpisodes.filter {
-                return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
-            }
-        } else {
-            return viewModel.currentEpisodes
-        }
-    }
+    @AppStorage("podcastProgress") private var savedProgress: Data = Data()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -425,8 +414,8 @@ struct PodcastPlayerView: View {
             }
             
             Picker("", selection: $selectedTab) {
-                Text("Unplayed").tag(0)
                 Text("All").tag(1)
+                Text("Unplayed").tag(0)
             }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
@@ -444,10 +433,22 @@ struct PodcastPlayerView: View {
         .frame(maxHeight: .infinity)
         .onAppear {
             loadEpisodes()
+            loadSavedProgress()
         }
         .onChange(of: radioPlayer.currentPodcastTime) { newValue in
             if !radioPlayer.isSeeking {
                 seekPosition = newValue
+            }
+            saveProgress()
+        }
+    }
+    
+    var filteredEpisodes: [PodcastEpisode] {
+        if selectedTab == 1 {
+            return viewModel.currentEpisodes
+        } else {
+            return viewModel.currentEpisodes.filter {
+                return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
             }
         }
     }
@@ -468,6 +469,24 @@ struct PodcastPlayerView: View {
         let minutes = Int(time) /  60
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+    
+    private func saveProgress() {
+        do {
+            let encodedData = try JSONEncoder().encode(radioPlayer.podcastProgress)
+            savedProgress = encodedData
+        } catch {
+            print("Error saving podcast progress: \(error)")
+        }
+    }
+    
+    private func loadSavedProgress() {
+        do {
+            let decodedProgress = try JSONDecoder().decode([String: Double].self, from: savedProgress)
+            radioPlayer.podcastProgress = decodedProgress
+        } catch {
+            print("Error loading podcast progress: \(error)")
+        }
     }
 }
 
