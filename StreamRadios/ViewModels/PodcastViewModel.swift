@@ -14,6 +14,7 @@ struct PodcastFeed: Identifiable {
     var title: String
     var url: String
     var artworkUrl: String?
+    var description: String? 
     var iconData: String?
     var episodes: [PodcastEpisode] = []
 }
