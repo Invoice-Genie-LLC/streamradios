@@ -521,39 +521,50 @@ extension RadioStationViewModel {
     func saveStationsToCoreData() {
         let context = CoreDataStack.shared.persistentContainer.viewContext
         
-        // First, delete all existing records to ensure synchronization
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
-        do {
-            try context.execute(deleteRequest)
-            print("All existing stations deleted from CoreData.")
-        } catch {
-            print("Error deleting existing stations from CoreData: \(error)")
-        }
+        // Fetch existing stations
+        let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
         
-        // Then, add new records from the current list of stations
-        if !stations.isEmpty {
+        do {
+            let existingStations = try context.fetch(fetchRequest)
+            let existingDict = Dictionary(uniqueKeysWithValues: existingStations.map { ($0.id!, $0) })
+            
             for (index, station) in stations.enumerated() {
-                let cdStation = CDStation(context: context)
-                cdStation.id = station.id
-                cdStation.name = station.name
-                cdStation.url = station.url
-                cdStation.iconData = station.iconData
-                cdStation.country = station.country
-                cdStation.isFavorite = station.isFavorite
-                cdStation.order = Int16(index)  // Set the order attribute
-                cdStation.lastPlayed = station.lastPlayed  // Add this line
+                if let existingStation = existingDict[station.id] {
+                    // Update existing station
+                    existingStation.name = station.name
+                    existingStation.url = station.url
+                    existingStation.iconData = station.iconData
+                    existingStation.country = station.country
+                    existingStation.isFavorite = station.isFavorite
+                    existingStation.order = Int16(index)
+                    existingStation.lastPlayed = station.lastPlayed
+                } else {
+                    // Create new station if it doesn't exist
+                    let newStation = CDStation(context: context)
+                    newStation.id = station.id
+                    newStation.name = station.name
+                    newStation.url = station.url
+                    newStation.iconData = station.iconData
+                    newStation.country = station.country
+                    newStation.isFavorite = station.isFavorite
+                    newStation.order = Int16(index)
+                    newStation.lastPlayed = station.lastPlayed
+                }
             }
-            print("New stations are being saved to CoreData.")
-        } else {
-            print("No stations available to save to CoreData.")
-        }
-        
-        // Finally, attempt to save context changes
-        do {
+            
+            // Remove stations that are no longer in the array
+            let stationIDs = Set(stations.map { $0.id })
+            for existingStation in existingStations {
+                if !stationIDs.contains(existingStation.id!) {
+                    context.delete(existingStation)
+                }
+            }
+            
+            // Save changes
             try context.save()
-            print("CoreData context saved successfully.")
+            print("CoreData stations updated successfully.")
         } catch {
-            print("Failed to save stations to CoreData: \(error)")
+            print("Failed to update stations in CoreData: \(error)")
         }
     }
     

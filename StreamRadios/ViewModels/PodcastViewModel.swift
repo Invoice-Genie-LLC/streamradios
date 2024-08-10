@@ -40,6 +40,7 @@ class PodcastViewModel: ObservableObject {
     private let userDefaults = UserDefaults.standard
         private let episodeStatesKey = "PodcastEpisodeStates"
     private let progressKey = "PodcastProgress"
+    private let dataStore = DataStore.shared
     
     
 
@@ -62,19 +63,19 @@ class PodcastViewModel: ObservableObject {
        }
     
     func addPodcastFeed(_ feed: PodcastFeed) {
-        isLoading = true
-        DataStore.shared.savePodcastFeedToCloudKit(feed) { [weak self] success, _ in
-            DispatchQueue.main.async {
-                self?.isLoading = false
-                if success {
-                    self?.podcastFeeds.append(feed)
-                    self?.fetchRSSFeed(for: feed) { _ in }
-                } else {
-                    self?.error = "Failed to save podcast feed"
+            isLoading = true
+            dataStore.savePodcastFeedToCloudKit(feed) { [weak self] success, _ in
+                DispatchQueue.main.async {
+                    self?.isLoading = false
+                    if success {
+                        self?.podcastFeeds.append(feed)
+                        self?.fetchRSSFeed(for: feed) { _ in }
+                    } else {
+                        self?.error = "Failed to save podcast feed"
+                    }
                 }
             }
         }
-    }
     
     private var episodeStates: [String: EpisodeState] {
            get {
@@ -108,21 +109,21 @@ class PodcastViewModel: ObservableObject {
         }
     
     func fetchPodcastFeeds() {
-        isLoading = true
-        DataStore.shared.fetchPodcastFeedsFromCloudKit { feeds, error in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                if let feeds = feeds {
-                    self.podcastFeeds = feeds
-                    for feed in feeds {
-                        self.fetchRSSFeed(for: feed) { _ in }
+            isLoading = true
+            dataStore.fetchPodcastFeedsFromCloudKit { [weak self] feeds, error in
+                DispatchQueue.main.async {
+                    self?.isLoading = false
+                    if let feeds = feeds {
+                        self?.podcastFeeds = feeds
+                        for feed in feeds {
+                            self?.fetchRSSFeed(for: feed) { _ in }
+                        }
+                    } else if let error = error {
+                        self?.error = error.localizedDescription
                     }
-                } else if let error = error {
-                    self.error = error.localizedDescription
                 }
             }
         }
-    }
     
     func addPodcastUrl(_ url: String) {
         isLoading = true
@@ -154,7 +155,7 @@ class PodcastViewModel: ObservableObject {
     
     func deletePodcastFeed(_ feed: PodcastFeed) {
             isLoading = true
-            DataStore.shared.deletePodcastFeedFromCloudKit(feed) { [weak self] success in
+            dataStore.deletePodcastFeedFromCloudKit(feed) { [weak self] success in
                 DispatchQueue.main.async {
                     self?.isLoading = false
                     if success {
@@ -167,26 +168,21 @@ class PodcastViewModel: ObservableObject {
         }
     
     func fetchEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
-           isLoading = true
-           fetchRSSFeed(for: feed) { result in
-               DispatchQueue.main.async {
-                   self.isLoading = false
-                   switch result {
-                   case .success(let updatedFeed):
-                       let episodes = updatedFeed.episodes.map { episode in
-                           var updatedEpisode = episode
-                           updatedEpisode.state = self.getEpisodeState(episodeId: episode.id)
-                           return updatedEpisode
-                       }
-                       self.currentEpisodes = episodes
-                       completion(.success(episodes))
-                   case .failure(let error):
-                       self.error = error.localizedDescription
-                       completion(.failure(error))
-                   }
-               }
-           }
-       }
+            isLoading = true
+            fetchRSSFeed(for: feed) { result in
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    switch result {
+                    case .success(let updatedFeed):
+                        self.currentEpisodes = updatedFeed.episodes
+                        completion(.success(updatedFeed.episodes))
+                    case .failure(let error):
+                        self.error = error.localizedDescription
+                        completion(.failure(error))
+                    }
+                }
+            }
+        }
     
     private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
         guard let url = URL(string: feed.url) else {

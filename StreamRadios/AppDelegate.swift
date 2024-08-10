@@ -16,38 +16,42 @@ import SpotifyiOS
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     
     var window: UIWindow?
-    var radioPlayer = RadioPlayer.shared
-    var viewModel = RadioStationViewModel.shared
+       var radioPlayer = RadioPlayer.shared
+       var podcastPlayer = PodcastPlayer.shared
+       var viewModel = RadioStationViewModel.shared
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        if isFirstLaunch() {
-            deleteLocalCoreDataStore()
+            if isFirstLaunch() {
+                deleteLocalCoreDataStore()
+            }
+            
+            UNUserNotificationCenter.current().delegate = self
+            requestNotificationAuthorization()
+            registerBackgroundTasks()
+            configureAudioSession()
+            
+            let alarmCategory = UNNotificationCategory(identifier: "ALARM_CATEGORY", actions: [], intentIdentifiers: [], options: [])
+            UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
+            
+            application.registerForRemoteNotifications()
+            
+            checkBackgroundRefreshStatus()
+            
+            radioPlayer.podcastPlayer = podcastPlayer
+            podcastPlayer.radioPlayer = radioPlayer
+            
+            // Check if the app was launched due to an alarm
+            if let launchOptions = launchOptions,
+               launchOptions[UIApplication.LaunchOptionsKey.location] != nil {
+                // App was launched due to an alarm, play the alarm station
+                radioPlayer.playFavoriteStationForAlarm()
+            } else {
+                // Normal app launch, load the last played station
+                radioPlayer.autoPlayLastStationSetup()
+            }
+            
+            return true
         }
-        
-        UNUserNotificationCenter.current().delegate = self
-        requestNotificationAuthorization()
-        registerBackgroundTasks()
-        configureAudioSession()
-        
-        let alarmCategory = UNNotificationCategory(identifier: "ALARM_CATEGORY", actions: [], intentIdentifiers: [], options: [])
-        UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
-        
-        application.registerForRemoteNotifications()
-        
-        checkBackgroundRefreshStatus()
-        
-        // Check if the app was launched due to an alarm
-           if let launchOptions = launchOptions,
-              launchOptions[UIApplication.LaunchOptionsKey.location] != nil {
-               // App was launched due to an alarm, play the alarm station
-               radioPlayer.playFavoriteStationForAlarm()
-           } else {
-               // Normal app launch, load the last played station
-               radioPlayer.autoPlayLastStationSetup()
-           }
-        
-        return true
-    }
     
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         if let aps = userInfo["aps"] as? [String: AnyObject] {

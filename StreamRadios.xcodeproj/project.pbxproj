@@ -27,6 +27,8 @@
 		77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */; };
 		77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */; };
 		77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EEB2C45609E00C5D449 /* NotificationManager.swift */; };
+		774180502C6703FC0030B459 /* PodcastPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7741804F2C6703FC0030B459 /* PodcastPlayer.swift */; };
+		774180522C6708020030B459 /* AudioPlayerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774180512C6708020030B459 /* AudioPlayerProtocol.swift */; };
 		7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746177B2C17290200F442B3 /* RadioStreamApp.swift */; };
 		774617842C17411C00F442B3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617832C17411C00F442B3 /* WidgetKit.framework */; };
 		774617862C17411C00F442B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617852C17411C00F442B3 /* SwiftUI.framework */; };
@@ -119,6 +121,8 @@
 		77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStore.swift; sourceTree = "<group>"; };
 		77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
 		77322EEB2C45609E00C5D449 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		7741804F2C6703FC0030B459 /* PodcastPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastPlayer.swift; sourceTree = "<group>"; };
+		774180512C6708020030B459 /* AudioPlayerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerProtocol.swift; sourceTree = "<group>"; };
 		7746177B2C17290200F442B3 /* RadioStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStreamApp.swift; sourceTree = "<group>"; };
 		774617812C17411C00F442B3 /* StreamRadioWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamRadioWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		774617832C17411C00F442B3 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
@@ -223,10 +227,12 @@
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
 				77F50BCA2C647AEF00187488 /* PodcastListView.swift */,
+				774180512C6708020030B459 /* AudioPlayerProtocol.swift */,
 				77F50BB82C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
 				77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */,
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
+				7741804F2C6703FC0030B459 /* PodcastPlayer.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
 				77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */,
 				7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */,
@@ -485,6 +491,7 @@
 				7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */,
 				7715BD982C4C9D8300FA7CB1 /* ExportStation.swift in Sources */,
 				77F50BA82C62613700187488 /* SpotifyAuthorizationManager.swift in Sources */,
+				774180522C6708020030B459 /* AudioPlayerProtocol.swift in Sources */,
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7715BD9A2C4CA97300FA7CB1 /* ExportSheet.swift in Sources */,
 				77F50BB72C63B81800187488 /* YouTubeMusicManager.swift in Sources */,
@@ -505,6 +512,7 @@
 				77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,
 				7780E96F2C3E2C05009CCF6F /* Country.swift in Sources */,
+				774180502C6703FC0030B459 /* PodcastPlayer.swift in Sources */,
 				77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */,
 				77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */,
 				7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */,
