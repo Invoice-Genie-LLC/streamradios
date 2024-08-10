@@ -8,9 +8,11 @@
 import SwiftUI
 import Combine
 
+import SwiftUI
+
 struct PodcastListView: View {
     @StateObject private var viewModel = PodcastViewModel()
-    @EnvironmentObject var radioPlayer: RadioPlayer
+    @StateObject private var podcastPlayer = PodcastPlayer.shared
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
@@ -18,7 +20,6 @@ struct PodcastListView: View {
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
-    var podcastProgress: [String: Int] = [:]
     
     var filteredPodcasts: [PodcastFeed] {
         if searchText.isEmpty {
@@ -34,34 +35,34 @@ struct PodcastListView: View {
                 searchBar
                 
                 List {
-                                    ForEach(filteredPodcasts) { feed in
-                                        PodcastRowView(
-                                            feed: feed,
-                                            isPlaying: radioPlayer.currentPodcastEpisode?.feed.id == feed.id,
-                                            onPlay: { playLatestEpisode(for: feed) },
-                                            onStop: { radioPlayer.stopPodcast() },
-                                            onTap: { selectedPodcast = feed }
-                                        )
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                            Button(role: .destructive) {
-                                                podcastToDelete = feed
-                                                showingDeleteConfirmation = true
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                        }
-                                    }
-                                }
-                                .listStyle(PlainListStyle())
+                    ForEach(filteredPodcasts) { feed in
+                        PodcastRowView(
+                            feed: feed,
+                            isPlaying: podcastPlayer.currentEpisode?.feed.id == feed.id && podcastPlayer.isPlaying,
+                            onPlay: { playLatestEpisode(for: feed) },
+                            onStop: { podcastPlayer.togglePlayPause() },
+                            onTap: { selectedPodcast = feed }
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                podcastToDelete = feed
+                                showingDeleteConfirmation = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .listStyle(PlainListStyle())
             }
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
-                        Button("Cancel", role: .cancel) {}
-                        Button("Delete", role: .destructive) {
-                            viewModel.deletePodcastFeed(podcast)
-                        }
-                    } message: { podcast in
-                        Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
-                    }
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    viewModel.deletePodcastFeed(podcast)
+                }
+            } message: { podcast in
+                Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
+            }
             .navigationTitle("Podcasts")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -71,13 +72,13 @@ struct PodcastListView: View {
                 }
             }
             .onAppear {
-                        viewModel.fetchPodcastFeeds()
-                    }
+                viewModel.fetchPodcastFeeds()
+            }
             .sheet(isPresented: $showingAddPodcast) {
                 AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
             }
             .sheet(item: $selectedPodcast) { podcast in
-                PodcastPlayerView(viewModel: viewModel, feed: podcast, radioPlayer: radioPlayer)
+                PodcastPlayerView(viewModel: viewModel, feed: podcast, podcastPlayer: podcastPlayer)
             }
         }
     }
@@ -88,27 +89,20 @@ struct PodcastListView: View {
             .padding(.horizontal)
     }
     
-    private func deletePodcasts(at offsets: IndexSet) {
-            for index in offsets {
-                let feedToDelete = filteredPodcasts[index]
-                viewModel.deletePodcastFeed(feedToDelete)
-            }
-        }
-    
     private func addPodcast() {
-            let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
-            viewModel.addPodcastFeed(newFeed)
-            newPodcastTitle = ""
-            newPodcastURL = ""
-            showingAddPodcast = false
-        }
+        let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
+        viewModel.addPodcastFeed(newFeed)
+        newPodcastTitle = ""
+        newPodcastURL = ""
+        showingAddPodcast = false
+    }
     
     private func playLatestEpisode(for feed: PodcastFeed) {
         viewModel.fetchEpisodes(for: feed) { result in
             switch result {
             case .success(let episodes):
                 if let latestEpisode = episodes.first {
-                    radioPlayer.playPodcastEpisode(latestEpisode)
+                    podcastPlayer.playEpisode(latestEpisode)
                 }
             case .failure(let error):
                 print("Failed to fetch episodes: \(error.localizedDescription)")
@@ -181,30 +175,30 @@ struct PodcastIconView: View {
 
 struct EpisodeRowView: View {
     let episode: PodcastEpisode
-        let isPlaying: Bool
-        let progress: Double?
-        let onPlay: () -> Void
-        let onStop: () -> Void
+    let isPlaying: Bool
+    let progress: Double?
+    let onPlay: () -> Void
+    let onStop: () -> Void
     
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                            Text(episode.title)
-                                .font(.headline)
-                            
-                            Text(formatDate(episode.publicationDate))
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            if let progress = progress {
-                                ProgressView(value: progress)
-                                    .accentColor(.blue)
-                                
-                                Text(formatRemainingTime(progress: progress))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
+                Text(episode.title)
+                    .font(.headline)
+                
+                Text(formatDate(episode.publicationDate))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                if let progress = progress {
+                    ProgressView(value: progress)
+                        .accentColor(.blue)
+                    
+                    Text(formatRemainingTime(progress: progress))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
             
             Spacer()
             
@@ -215,52 +209,61 @@ struct EpisodeRowView: View {
     }
     
     private var statusLabel: some View {
-           Group {
-               if let progress = progress {
-                   if progress == 0 {
-                       Text("New")
-                           .font(.caption)
-                           .padding(4)
-                           .background(Color.green)
-                           .foregroundColor(.white)
-                           .cornerRadius(4)
-                   } else if progress > 0 && progress < 1 {
-                       Text("In Progress")
-                           .font(.caption)
-                           .padding(4)
-                           .background(Color.orange)
-                           .foregroundColor(.white)
-                           .cornerRadius(4)
-                   } else {
-                       Text("Played")
-                           .font(.caption)
-                           .padding(4)
-                           .background(Color.gray)
-                           .foregroundColor(.white)
-                           .cornerRadius(4)
-                   }
-               } else {
-                   Text("New")
-                       .font(.caption)
-                       .padding(4)
-                       .background(Color.green)
-                       .foregroundColor(.white)
-                       .cornerRadius(4)
-               }
-           }
-       }
+        Group {
+            if let progress = progress {
+                if progress == 0 {
+                    Text("New")
+                        .font(.caption)
+                        .padding(4)
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                } else if progress > 0 && progress < 1 {
+                    Text("In Progress")
+                        .font(.caption)
+                        .padding(4)
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                } else {
+                    Text("Played")
+                        .font(.caption)
+                        .padding(4)
+                        .background(Color.gray)
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                }
+            } else {
+                Text("New")
+                    .font(.caption)
+                    .padding(4)
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(4)
+            }
+        }
+    }
     
     private func formatDate(_ date: Date) -> String {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-            return formatter.string(from: date)
-        }
-        
-        private func formatRemainingTime(progress: Double) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+    
+    private func formatRemainingTime(progress: Double) -> String {
+            guard progress.isFinite, episode.duration.isFinite,
+                  progress >= 0, progress <= 1, episode.duration >= 0 else {
+                return "Invalid duration"
+            }
+
             let remainingTime = (1 - progress) * episode.duration
-            let minutes = Int(remainingTime / 60)
-            let seconds = Int(remainingTime.truncatingRemainder(dividingBy: 60))
+            guard remainingTime.isFinite else {
+                return "Invalid duration"
+            }
+
+            let minutes = Int(max(0, remainingTime) / 60)
+            let seconds = Int(max(0, remainingTime).truncatingRemainder(dividingBy: 60))
             return String(format: "%d:%02d remaining", minutes, seconds)
         }
 }
@@ -351,11 +354,10 @@ struct ErrorView: View {
 struct PodcastPlayerView: View {
     @ObservedObject var viewModel: PodcastViewModel
     let feed: PodcastFeed
-    @ObservedObject var radioPlayer: RadioPlayer
+    @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var currentEpisodeIndex = 0
     @State private var selectedTab = 1 // Start with "All" tab
     @State private var seekPosition: Double = 0
-    @AppStorage("podcastProgress") private var savedProgress: Data = Data()
     
     var body: some View {
         VStack(spacing: 10) {
@@ -387,19 +389,17 @@ struct PodcastPlayerView: View {
         .frame(maxHeight: .infinity)
         .onAppear {
             loadEpisodes()
-            loadSavedProgress()
         }
-        .onChange(of: radioPlayer.currentPodcastTime) { newValue in
-            if !radioPlayer.isSeeking {
+        .onChange(of: podcastPlayer.currentTime) { newValue in
+            if !podcastPlayer.isSeeking {
                 seekPosition = newValue
             }
-            saveProgress()
         }
     }
     
     private var nowPlayingView: some View {
         Group {
-            if let currentEpisode = radioPlayer.currentPodcastEpisode, currentEpisode.feed.id == feed.id {
+            if let currentEpisode = podcastPlayer.currentEpisode, currentEpisode.feed.id == feed.id {
                 VStack(spacing: 5) {
                     Text(currentEpisode.title)
                         .font(.headline)
@@ -423,19 +423,19 @@ struct PodcastPlayerView: View {
     
     private var playerControls: some View {
         HStack(spacing: 30) {
-            Button(action: radioPlayer.rewind) {
+            Button(action: podcastPlayer.skipBackward) {
                 Image(systemName: "gobackward.15")
                     .resizable()
                     .frame(width: 30, height: 30)
             }
             
-            Button(action: togglePlayPause) {
-                Image(systemName: radioPlayer.isPodcastPlaying ? "pause.circle.fill" : "play.circle.fill")
+            Button(action: podcastPlayer.togglePlayPause) {
+                Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .resizable()
                     .frame(width: 60, height: 60)
             }
             
-            Button(action: radioPlayer.skipForward) {
+            Button(action: podcastPlayer.skipForward) {
                 Image(systemName: "goforward.15")
                     .resizable()
                     .frame(width: 30, height: 30)
@@ -444,95 +444,61 @@ struct PodcastPlayerView: View {
     }
     
     private var progressSlider: some View {
-        Slider(value: $seekPosition, in: 0...max(radioPlayer.currentPodcastDuration, 1)) { editing in
+        Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1)) { editing in
             if editing {
-                radioPlayer.isSeeking = true
+                podcastPlayer.isSeeking = true
             } else {
-                radioPlayer.isSeeking = false
-                radioPlayer.seek(to: seekPosition)
+                podcastPlayer.isSeeking = false
+                podcastPlayer.seek(to: seekPosition)
             }
         }
-        .disabled(radioPlayer.currentPodcastDuration == 0)
+        .disabled(podcastPlayer.duration == 0)
     }
     
     private var timeLabels: some View {
-        HStack {
-            Text(formatTime(radioPlayer.currentPodcastTime))
-            Spacer()
-            Text(formatTime(radioPlayer.currentPodcastDuration))
+            HStack {
+                Text(formatTime(podcastPlayer.currentTime))
+                Spacer()
+                Text(formatTime(podcastPlayer.duration))
+            }
+            .font(.caption)
         }
-        .font(.caption)
-    }
-    
-    private var episodeList: some View {
-        List(filteredEpisodes) { episode in
-            EpisodeRowView(
-                episode: episode,
-                isPlaying: radioPlayer.currentPodcastEpisode?.id == episode.id,
-                progress: selectedTab == 1 ? radioPlayer.podcastProgress[episode.id] : nil,
-                onPlay: {
-                    radioPlayer.playPodcastEpisode(episode)
-                    if selectedTab == 0 {
-                        selectedTab = 1 // Switch to "All" tab
-                    }
-                },
-                onStop: { radioPlayer.stopPodcast() }
-            )
+        
+        private var episodeList: some View {
+            List(filteredEpisodes) { episode in
+                EpisodeRowView(
+                    episode: episode,
+                    isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                    progress: selectedTab == 1 ? podcastPlayer.progress[episode.id] : nil,
+                    onPlay: {
+                        podcastPlayer.playEpisode(episode)
+                        if selectedTab == 0 {
+                            selectedTab = 1 // Switch to "All" tab
+                        }
+                    },
+                    onStop: { podcastPlayer.togglePlayPause() }
+                )
+            }
+            .listStyle(PlainListStyle())
         }
-        .listStyle(PlainListStyle())
-    }
-    
-    var filteredEpisodes: [PodcastEpisode] {
-        if selectedTab == 1 {
-            return viewModel.currentEpisodes
-        } else {
-            return viewModel.currentEpisodes.filter {
-                return radioPlayer.podcastProgress[$0.id] == nil || radioPlayer.podcastProgress[$0.id] == 0
+        
+        var filteredEpisodes: [PodcastEpisode] {
+            if selectedTab == 1 {
+                return viewModel.currentEpisodes
+            } else {
+                return viewModel.currentEpisodes.filter {
+                    return podcastPlayer.progress[$0.id] == nil || podcastPlayer.progress[$0.id] == 0
+                }
             }
         }
-    }
-    
-    private func loadEpisodes() {
-        viewModel.fetchEpisodes(for: feed) { _ in }
-    }
-    
-    private func togglePlayPause() {
-        if radioPlayer.isPodcastPlaying {
-            radioPlayer.pausePodcast()
-        } else {
-            radioPlayer.playPodcast()
+        
+        private func loadEpisodes() {
+            viewModel.fetchEpisodes(for: feed) { _ in }
+        }
+        
+        private func formatTime(_ time: Double) -> String {
+            let minutes = Int(time) / 60
+            let seconds = Int(time) % 60
+            return String(format: "%02d:%02d", minutes, seconds)
         }
     }
-    
-    private func formatTime(_ time: Double) -> String {
-        let minutes = Int(time) / 60
-        let seconds = Int(time) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-    
-    private func saveProgress() {
-        do {
-            let encodedData = try JSONEncoder().encode(radioPlayer.podcastProgress)
-            savedProgress = encodedData
-        } catch {
-            print("Error saving podcast progress: \(error)")
-        }
-    }
-    
-    private func loadSavedProgress() {
-        do {
-            let decodedProgress = try JSONDecoder().decode([String: Double].self, from: savedProgress)
-            radioPlayer.podcastProgress = decodedProgress
-        } catch {
-            print("Error loading podcast progress: \(error)")
-        }
-    }
-}
-
-extension PodcastViewModel {
-    func refreshAllPodcasts() async {
-        // Implement the logic to refresh all podcasts
-        // This might involve re-fetching RSS feeds for all podcasts
-    }
-}
-
