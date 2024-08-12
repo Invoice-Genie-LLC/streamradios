@@ -51,6 +51,11 @@ struct PlayerSheetView: View {
     @StateObject private var youtubeMusicManager = YouTubeMusicManager.shared
     @State private var showingYouTubeMusicConfirmationDialog = false
     @State private var activeSheet: ActiveSheetPlayer?
+    @State private var forceTokenRefresh = false
+    @State private var debugLog = ""
+    @State private var showSpotifyOptions = false
+       @State private var spotifyTrackURI: String?
+    @State private var debugMessage = ""
 
     var body: some View {
         NavigationView {
@@ -142,15 +147,25 @@ struct PlayerSheetView: View {
                 }
             }
         }
-        .confirmationDialog("Save to Spotify", isPresented: $showingSpotifyConfirmationDialog) {
-            Button("Add to Playlist") {
-                addToSpotifyPlaylist()
-            }
-            Button("Open in Spotify") {
-                openInSpotify()
-            }
-            Button("Cancel", role: .cancel) {}
-        }
+        .confirmationDialog("Spotify Options", isPresented: $showingSpotifyConfirmationDialog) {
+                    Button("Add to Playlist") {
+                        addToSpotifyPlaylist()
+                    }
+                    Button("Open in Spotify") {
+                        openInSpotify()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+                .alert("Spotify Not Installed", isPresented: $showSpotifyOptions) {
+                    Button("Install Spotify") {
+                        if let appStoreURL = URL(string: "itms-apps://apple.com/app/id324684580") {
+                            UIApplication.shared.open(appStoreURL, options: [:], completionHandler: nil)
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Spotify app is not installed. Would you like to install it?")
+                }
         .confirmationDialog("YouTube Music Options", isPresented: $showingYouTubeMusicConfirmationDialog) {
             Button("Open in YouTube Music") {
                 openInYouTubeMusic()
@@ -276,9 +291,9 @@ struct PlayerSheetView: View {
                     showingConfirmationDialog = true
                 }) {
                     HStack {
-                        Image(systemName: "music.note")
+                        Image(systemName: "apple.logo")
                             .font(.headline)
-                        Text("Apple Music")
+                        Text("Music")
                             .font(.headline)
                     }
                     .foregroundColor(Color.primary)
@@ -287,22 +302,7 @@ struct PlayerSheetView: View {
                 }
                 
                 Button(action: {
-                    if spotifyManager.isAuthorized {
-                        showingSpotifyConfirmationDialog = true
-                    } else {
-                        spotifyManager.authorize { success in
-                            if success {
-                                DispatchQueue.main.async {
-                                    self.showingSpotifyConfirmationDialog = true
-                                }
-                            } else {
-                                DispatchQueue.main.async {
-                                    self.alertMessage = "Failed to authorize with Spotify"
-                                    self.showAlert = true
-                                }
-                            }
-                        }
-                    }
+                    handleSpotifyAuthorization()
                 }) {
                     HStack {
                         Image(systemName: "music.note.list")
@@ -334,6 +334,31 @@ struct PlayerSheetView: View {
                         }
                     }
                 }) {
+                    /*
+                     // Remove this after Spotify is in production. For testing purpose only
+                    VStack {
+                        // ... (existing content)
+
+                        // Debug section
+                        Toggle("Force Token Refresh", isOn: $forceTokenRefresh)
+                            .padding()
+                        
+                        Button("Clear Debug Log") {
+                            debugLog = ""
+                        }
+                        .padding()
+                        
+                        ScrollView {
+                            Text(debugLog)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding()
+                        }
+                        .frame(height: 200)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(10)
+                        .padding()
+                    }
+                     */
                     HStack {
                         Image(systemName: "play.circle")
                             .font(.headline)
@@ -384,6 +409,71 @@ struct PlayerSheetView: View {
         }
     }
     
+    private func handleSpotifyAuthorization() {
+            if spotifyManager.isAuthorized {
+                spotifyManager.checkAndRefreshTokenIfNeeded { success in
+                    DispatchQueue.main.async {
+                        if success {
+                            self.showingSpotifyConfirmationDialog = true
+                        } else {
+                            self.reauthorizeSpotify()
+                        }
+                    }
+                }
+            } else {
+                reauthorizeSpotify()
+            }
+        }
+    
+    private func reauthorizeSpotify() {
+            isAuthorizingSpotify = true
+            spotifyManager.authorize { success in
+                DispatchQueue.main.async {
+                    self.isAuthorizingSpotify = false
+                    if success {
+                        self.showingSpotifyConfirmationDialog = true
+                    } else {
+                        self.alertMessage = "Failed to authorize Spotify. Please try again."
+                        self.showAlert = true
+                    }
+                }
+            }
+        }
+
+    private func fetchSpotifyPlaylists() {
+        spotifyManager.fetchUserPlaylists { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let playlists):
+                    if playlists.isEmpty {
+                        self.alertMessage = "No playlists found in your Spotify account."
+                        self.showAlert = true
+                    } else {
+                        self.spotifyPlaylists = playlists
+                        self.activeSheet = .spotifyPlaylistPicker
+                    }
+                case .failure(let error):
+                    if (error as NSError).code == 401 {
+                        // Token refresh failed, re-authorize
+                        self.spotifyManager.authorize { success in
+                            if success {
+                                self.fetchSpotifyPlaylists()
+                            } else {
+                                self.alertMessage = "Failed to re-authorize Spotify. Please try again."
+                                self.showAlert = true
+                            }
+                        }
+                    } else {
+                        let errorMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
+                        print(errorMessage)
+                        self.alertMessage = errorMessage
+                        self.showAlert = true
+                    }
+                }
+            }
+        }
+    }
+    
     private func saveToYouTubeMusicPlaylist(playlistId: String) {
         guard let songTitle = shazamViewModel.shazamMedia.title,
               let artistName = shazamViewModel.shazamMedia.artistName else {
@@ -407,19 +497,19 @@ struct PlayerSheetView: View {
     }
     
     private func addToSpotifyPlaylist() {
-        spotifyManager.fetchUserPlaylists { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let playlists):
-                    self.spotifyPlaylists = playlists
-                    self.activeSheet = .spotifyPlaylistPicker
-                case .failure(let error):
-                    self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
-                    self.showAlert = true
+            spotifyManager.fetchUserPlaylists { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let playlists):
+                        self.spotifyPlaylists = playlists
+                        self.activeSheet = .spotifyPlaylistPicker
+                    case .failure(let error):
+                        self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
+                        self.showAlert = true
+                    }
                 }
             }
         }
-    }
     
     private func openInSpotify() {
             guard let songTitle = shazamViewModel.shazamMedia.title,
@@ -429,28 +519,145 @@ struct PlayerSheetView: View {
                 return
             }
             
-            spotifyManager.searchForTrackURI(songTitle: songTitle, artistName: artistName) { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let uri):
-                        if let spotifyURL = URL(string: uri) {
-                            UIApplication.shared.open(spotifyURL) { success in
-                                if !success {
-                                    self.alertMessage = "Unable to open Spotify. Please ensure Spotify is installed on your device."
-                                    self.showAlert = true
-                                }
+            debugMessage += "Searching for: \(songTitle) by \(artistName)\n"
+            
+            spotifyManager.checkAndRefreshTokenIfNeeded { success in
+                if success {
+                    self.performSpotifySearch(songTitle: songTitle, artistName: artistName)
+                } else {
+                    DispatchQueue.main.async {
+                        self.debugMessage += "Failed to refresh token. Attempting to reauthorize...\n"
+                        self.spotifyManager.authorize { success in
+                            if success {
+                                self.debugMessage += "Reauthorization successful\n"
+                                self.performSpotifySearch(songTitle: songTitle, artistName: artistName)
+                            } else {
+                                self.debugMessage += "Reauthorization failed\n"
+                                self.alertMessage = "Failed to authorize Spotify. Please try again."
+                                self.showAlert = true
                             }
-                        } else {
-                            self.alertMessage = "Invalid Spotify URI"
-                            self.showAlert = true
                         }
-                    case .failure(let error):
-                        self.alertMessage = "Failed to find track: \(error.localizedDescription)"
-                        self.showAlert = true
                     }
                 }
             }
         }
+    
+    private func performSpotifySearch(songTitle: String, artistName: String) {
+        spotifyManager.searchForTrackURI(songTitle: songTitle, artistName: artistName) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let uri):
+                    self.spotifyTrackURI = uri
+                    self.debugMessage += "Found Spotify URI: \(uri)\n"
+                    
+                    // Extract the ID from the URI
+                    let id = uri.components(separatedBy: ":").last ?? uri
+                    
+                    // Construct the correct URLs for opening in the Spotify app
+                    let spotifyAppURL = URL(string: "spotify:track:\(id)")
+                    let spotifyHttpURL = URL(string: "https://open.spotify.com/track/\(id)")
+                    
+                    self.debugMessage += "Checking Spotify URL schemes...\n"
+                    self.debugMessage += "Can open 'spotify:': \(UIApplication.shared.canOpenURL(URL(string: "spotify:")!))\n"
+                    self.debugMessage += "Can open 'spotify:track:': \(UIApplication.shared.canOpenURL(URL(string: "spotify:track:")!))\n"
+                    
+                    if let appURL = spotifyAppURL {
+                        self.debugMessage += "Attempting to open \(appURL.absoluteString)\n"
+                        
+                        UIApplication.shared.open(appURL, options: [:]) { success in
+                            if success {
+                                self.debugMessage += "Successfully opened Spotify app\n"
+                            } else {
+                                self.debugMessage += "Failed to open Spotify app, falling back to HTTP URL\n"
+                                self.openSpotifyWebURL(spotifyHttpURL)
+                            }
+                        }
+                    } else {
+                        self.debugMessage += "Invalid Spotify app URL, falling back to HTTP URL\n"
+                        self.openSpotifyWebURL(spotifyHttpURL)
+                    }
+                    
+                case .failure(let error):
+                    self.alertMessage = "Failed to find track on Spotify: \(error.localizedDescription)"
+                    self.showAlert = true
+                    self.debugMessage += "Error: \(error.localizedDescription)\n"
+                }
+                
+                print(self.debugMessage) // Print debug messages to console
+            }
+        }
+    }
+    
+    private func fallbackToSpotifyWeb(httpURL: URL?) {
+        guard let url = httpURL else {
+            self.debugMessage += "Invalid Spotify HTTP URL\n"
+            self.alertMessage = "There was an error creating the Spotify link. Please try again."
+            self.showAlert = true
+            return
+        }
+        
+        self.debugMessage += "Attempting to open Spotify web URL: \(url.absoluteString)\n"
+        
+        UIApplication.shared.open(url, options: [:]) { success in
+            if success {
+                self.debugMessage += "Successfully opened Spotify web URL\n"
+            } else {
+                self.debugMessage += "Failed to open Spotify web URL\n"
+                self.showSpotifyOptions = true
+            }
+        }
+    }
+    
+    private func openSpotifyWebURL(_ url: URL?) {
+        guard let webURL = url else {
+            self.debugMessage += "Invalid Spotify web URL\n"
+            self.alertMessage = "There was an error creating the Spotify link. Please try again."
+            self.showAlert = true
+            return
+        }
+        
+        self.debugMessage += "Attempting to open Spotify web URL: \(webURL.absoluteString)\n"
+        
+        UIApplication.shared.open(webURL, options: [:]) { success in
+            if success {
+                self.debugMessage += "Successfully opened Spotify web URL\n"
+            } else {
+                self.debugMessage += "Failed to open Spotify web URL\n"
+                self.alertMessage = "Unable to open Spotify. You can search for '\(self.shazamViewModel.shazamMedia.title ?? "")' by '\(self.shazamViewModel.shazamMedia.artistName ?? "")' manually in Spotify."
+                self.showAlert = true
+            }
+        }
+    }
+    
+    private func searchAndOpenSpotify(songTitle: String, artistName: String) {
+        spotifyManager.searchForTrackURI(songTitle: songTitle, artistName: artistName) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let uri):
+                    debugLog += "Successfully found track URI: \(uri)\n"
+                    if let spotifyURL = URL(string: uri) {
+                        UIApplication.shared.open(spotifyURL) { success in
+                            if success {
+                                debugLog += "Opened Spotify successfully\n"
+                            } else {
+                                debugLog += "Failed to open Spotify\n"
+                                self.alertMessage = "Unable to open Spotify. Please ensure Spotify is installed on your device."
+                                self.showAlert = true
+                            }
+                        }
+                    } else {
+                        debugLog += "Invalid Spotify URI\n"
+                        self.alertMessage = "Invalid Spotify URI"
+                        self.showAlert = true
+                    }
+                case .failure(let error):
+                    debugLog += "Failed to find track: \(error.localizedDescription)\n"
+                    self.alertMessage = "Failed to find track: \(error.localizedDescription)"
+                    self.showAlert = true
+                }
+            }
+        }
+    }
         
         private func requestMusicAuthorization() {
             Task {

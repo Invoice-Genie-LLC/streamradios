@@ -30,10 +30,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
     
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-            if let url = URLContexts.first?.url {
-                handleIncomingURL(url)
-            }
+        guard let url = URLContexts.first?.url else { return }
+        let handled = SpotifyAuthorizationManager.shared.handleAuthCallback(url: url)
+        if handled {
+            print("Handled Spotify auth callback")
         }
+    }
     
     func handleIncomingURL(_ url: URL) {
             if url.absoluteString == "streamradios://openapp" {
@@ -53,6 +55,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 }
             }
         }
+    
 
     func sceneDidDisconnect(_ scene: UIScene) {
         // ToDo
