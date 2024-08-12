@@ -9,6 +9,8 @@ import Foundation
 import GoogleSignIn
 import GoogleAPIClientForREST_YouTube
 import UIKit
+import WebKit
+
 
 class YouTubeMusicManager: ObservableObject {
     @Published var isAuthorized = false
@@ -35,7 +37,21 @@ class YouTubeMusicManager: ObservableObject {
     }
     
     func authorize(completion: @escaping (Bool) -> Void) {
-        print("Required scopes: \(self.scopes)")
+        print("Starting authorization process")
+        
+        // Clear all Google Sign-In data
+        GIDSignIn.sharedInstance.signOut()
+        
+        // Clean expired tokens and all related data
+        self.cleanExpiredTokens()
+        
+        // Wait for a moment before starting the sign-in process
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.performSignIn(retryCount: 3, completion: completion)
+        }
+    }
+
+    private func performSignIn(retryCount: Int, completion: @escaping (Bool) -> Void) {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let window = windowScene.windows.first,
               let rootViewController = window.rootViewController else {
@@ -44,13 +60,24 @@ class YouTubeMusicManager: ObservableObject {
             return
         }
         
-        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: self.clientID)
         
-        print("Starting Google Sign-In process")
+        print("Starting new Google Sign-In process (Attempt: \(4 - retryCount))")
         GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController, hint: nil, additionalScopes: self.scopes) { signInResult, error in
-            if let error = error {
+            if let error = error as NSError? {
                 print("Google Sign-In error: \(error.localizedDescription)")
-                completion(false)
+                print("Error domain: \(error.domain)")
+                print("Error code: \(error.code)")
+                print("Error user info: \(error.userInfo)")
+                
+                if retryCount > 0 {
+                    print("Retrying in 2 seconds...")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        self.performSignIn(retryCount: retryCount - 1, completion: completion)
+                    }
+                } else {
+                    completion(false)
+                }
                 return
             }
             
@@ -61,7 +88,6 @@ class YouTubeMusicManager: ObservableObject {
             }
             
             print("Successfully signed in user: \(user.userID ?? "Unknown")")
-            // Check if we have the required scopes
             let grantedScopes = user.grantedScopes ?? []
             print("Granted scopes: \(grantedScopes)")
             
@@ -93,6 +119,42 @@ class YouTubeMusicManager: ObservableObject {
         }
     }
     
+    private func cleanExpiredTokens() {
+        // Remove all Google Sign-In related data from UserDefaults
+        let userDefaults = UserDefaults.standard
+        userDefaults.dictionaryRepresentation().keys.forEach { key in
+            if key.lowercased().contains("google") || key.lowercased().contains("gid") {
+                userDefaults.removeObject(forKey: key)
+            }
+        }
+        
+        // Clear all cookies
+        if let cookies = HTTPCookieStorage.shared.cookies {
+            for cookie in cookies {
+                HTTPCookieStorage.shared.deleteCookie(cookie)
+            }
+        }
+        
+        // Clear all website data
+        if #available(iOS 9.0, *) {
+            let dataTypes = Set([WKWebsiteDataTypeLocalStorage,
+                                 WKWebsiteDataTypeSessionStorage,
+                                 WKWebsiteDataTypeMemoryCache,
+                                 WKWebsiteDataTypeDiskCache])
+            let date = Date(timeIntervalSince1970: 0)
+            WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, modifiedSince: date, completionHandler: {})
+        }
+        
+        // Clear keychain items
+        let secItemClasses = [kSecClassGenericPassword, kSecClassInternetPassword, kSecClassCertificate, kSecClassKey, kSecClassIdentity]
+        for itemClass in secItemClasses {
+            let spec: NSDictionary = [kSecClass: itemClass]
+            SecItemDelete(spec)
+        }
+        
+        print("Thoroughly cleaned all tokens and authentication data")
+    }
+    
     private func setupYouTubeService(user: GIDGoogleUser) {
         let service = GTLRYouTubeService()
         service.authorizer = user.fetcherAuthorizer
@@ -100,6 +162,39 @@ class YouTubeMusicManager: ObservableObject {
         
         DispatchQueue.main.async {
             self.isAuthorized = true
+        }
+    }
+    
+    private func refreshToken(completion: @escaping (Bool) -> Void) {
+        GIDSignIn.sharedInstance.restorePreviousSignIn { [weak self] user, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("Error restoring previous sign-in: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            
+            if let user = user {
+                user.refreshTokensIfNeeded { user, error in
+                    if let error = error {
+                        print("Error refreshing tokens: \(error.localizedDescription)")
+                        completion(false)
+                        return
+                    }
+                    
+                    if let user = user {
+                        self.setupYouTubeService(user: user)
+                        completion(true)
+                    } else {
+                        print("No user after token refresh")
+                        completion(false)
+                    }
+                }
+            } else {
+                print("No previous sign-in to restore")
+                completion(false)
+            }
         }
     }
     
@@ -113,7 +208,22 @@ class YouTubeMusicManager: ObservableObject {
         query.mine = true
         query.maxResults = 50
         
-        service.executeQuery(query) { (ticket, result, error) in
+        service.executeQuery(query) { [weak self] (ticket, result, error) in
+            guard let self = self else { return }
+            
+            if let error = error as? GTLRErrorObject, error.code == 401 {
+                // Token might be expired, try to refresh
+                self.refreshToken { success in
+                    if success {
+                        // Retry the request with the new token
+                        self.fetchUserPlaylists(completion: completion)
+                    } else {
+                        completion(.failure(NSError(domain: "YouTubeMusicError", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to refresh token"])))
+                    }
+                }
+                return
+            }
+            
             if let error = error {
                 completion(.failure(error))
                 return

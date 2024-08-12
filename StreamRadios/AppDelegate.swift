@@ -65,7 +65,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
-        if url.scheme == "streamradios" {
+        if url.scheme == "spotify-ios-quick-start" {
             SpotifyAuthorizationManager.shared.handleAuthCallback(url: url)
             return true
         }
