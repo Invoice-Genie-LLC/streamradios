@@ -167,16 +167,18 @@ struct EpisodeRowView: View {
     let onPlay: () -> Void
     let onStop: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
+    @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var isFavorite: Bool
     @State private var isDownloaded: Bool
 
-    init(episode: PodcastEpisode, isPlaying: Bool, progress: Double?, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel) {
+    init(episode: PodcastEpisode, isPlaying: Bool, progress: Double?, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
         self.isPlaying = isPlaying
         self.progress = progress
         self.onPlay = onPlay
         self.onStop = onStop
         self.viewModel = viewModel
+        self.podcastPlayer = podcastPlayer
         _isFavorite = State(initialValue: episode.state.isFavorite)
         _isDownloaded = State(initialValue: episode.state.isDownloaded)
     }
@@ -244,8 +246,26 @@ struct EpisodeRowView: View {
 
             Spacer().frame(width: 16) // Space between buttons and play button
             
-            // Play Button
-            PlayButton(isPlaying: isPlaying, onPlay: onPlay, onStop: onStop)
+            // Play/Pause Button
+            Button(action: {
+                if isPlaying {
+                    onStop()
+                } else {
+                    if podcastPlayer.currentEpisode?.id == episode.id {
+                        // Resume playback from where it left off
+                        podcastPlayer.play()
+                    } else {
+                        // Start playing a new episode
+                        onPlay()
+                    }
+                }
+            }) {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .resizable()
+                    .frame(width: 30, height: 30)
+                    .foregroundColor(.blue)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding(.vertical, 8)
     }
@@ -300,7 +320,6 @@ struct EpisodeRowView: View {
         return String(format: "%d:%02d remaining", minutes, seconds)
     }
 }
-
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?
@@ -531,20 +550,21 @@ struct PodcastPlayerView: View {
 
     private var episodeList: some View {
         List(filteredEpisodes) { episode in
-            if let feed = viewModel.podcastFeeds.first(where: { $0.id == episode.feedId }) { // Find the feed associated with the episode
+            if let feed = viewModel.podcastFeeds.first(where: { $0.id == episode.feedId }) {
                 EpisodeRowView(
                     episode: episode,
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
                     progress: selectedTab == 1 ? podcastPlayer.progress[episode.id] : nil,
                     onPlay: {
                         os_log("Playing episode: %@", log: log, type: .info, episode.title)
-                        podcastPlayer.playEpisode(episode, feed: feed) // Pass the feed here
+                        podcastPlayer.playEpisode(episode, feed: feed)
                     },
                     onStop: {
                         os_log("Stopping episode: %@", log: log, type: .info, episode.title)
                         podcastPlayer.togglePlayPause()
                     },
-                    viewModel: viewModel
+                    viewModel: viewModel,
+                    podcastPlayer: podcastPlayer  // Add this line
                 )
                 .onAppear {
                     os_log("EpisodeRowView appeared for episode: %@", log: log, type: .info, episode.title)
