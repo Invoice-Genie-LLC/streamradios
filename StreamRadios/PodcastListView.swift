@@ -409,10 +409,10 @@ struct PodcastPlayerView: View {
     let feed: PodcastFeed
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var currentEpisodeIndex = 0
-    @State private var selectedTab = 1 // Start with "All" tab
+    @State private var selectedTab = 0 // Start with "All" tab
     @State private var seekPosition: Double = 0
-    @State private var lastLoggedSeekPosition: Double = 0 // Add this state variable
-    private let seekThreshold: Double = 1.0 // Define the threshold
+    @State private var lastLoggedSeekPosition: Double = 0
+    private let seekThreshold: Double = 1.0
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastPlayerView")
 
@@ -440,34 +440,30 @@ struct PodcastPlayerView: View {
 
             nowPlayingView
 
-            if selectedTab == 1 || selectedTab == 0 { // Show the picker only when in "All" or "Unplayed" tabs
-                Picker("", selection: $selectedTab) {
-                    Text("All").tag(1)
-                    Text("Unplayed").tag(0)
-                }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding(.horizontal)
-                .onChange(of: podcastPlayer.currentTime) { newValue in
-                    if !podcastPlayer.isSeeking {
-                        seekPosition = newValue
-                        if abs(seekPosition - lastLoggedSeekPosition) >= seekThreshold {
-                            os_log("Seek position updated to: %f", log: log, type: .info, newValue)
-                            lastLoggedSeekPosition = seekPosition
-                        }
+            Picker("", selection: $selectedTab) {
+                Text("All").tag(0)
+                Text("Unplayed").tag(1)
+                Text("Favorite").tag(2)
+                Text("Downloads").tag(3)
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding(.horizontal)
+            .onChange(of: podcastPlayer.currentTime) { newValue in
+                if !podcastPlayer.isSeeking {
+                    seekPosition = newValue
+                    if abs(seekPosition - lastLoggedSeekPosition) >= seekThreshold {
+                        os_log("Seek position updated to: %f", log: log, type: .info, newValue)
+                        lastLoggedSeekPosition = seekPosition
                     }
                 }
-                Divider()
-                                    .frame(height: 2) // Adjust height to make it more prominent
-                                    .background(Color.blue) // Change color as per your design
-                                    .padding(.horizontal, 20)
             }
+            
+            Divider()
+                .frame(height: 2)
+                .background(Color.blue)
+                .padding(.horizontal, 20)
 
             episodeList
-
-            footerMenu
-                .frame(height: 60)
-                .background(Color(.systemGray6))
-                .edgesIgnoringSafeArea(.bottom)
         }
         .onAppear {
             os_log("Loading episodes for feed: %@", log: log, type: .info, feed.title)
@@ -554,7 +550,7 @@ struct PodcastPlayerView: View {
                 EpisodeRowView(
                     episode: episode,
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                    progress: selectedTab == 1 ? podcastPlayer.progress[episode.id] : nil,
+                    progress: podcastPlayer.progress[episode.id],
                     onPlay: {
                         os_log("Playing episode: %@", log: log, type: .info, episode.title)
                         podcastPlayer.playEpisode(episode, feed: feed)
@@ -564,7 +560,7 @@ struct PodcastPlayerView: View {
                         podcastPlayer.togglePlayPause()
                     },
                     viewModel: viewModel,
-                    podcastPlayer: podcastPlayer  // Add this line
+                    podcastPlayer: podcastPlayer
                 )
                 .onAppear {
                     os_log("EpisodeRowView appeared for episode: %@", log: log, type: .info, episode.title)
@@ -576,11 +572,18 @@ struct PodcastPlayerView: View {
 
     var filteredEpisodes: [PodcastEpisode] {
         switch selectedTab {
+        case 0: // All
+            return viewModel.currentEpisodes.sorted { $0.publicationDate > $1.publicationDate }
+        case 1: // Unplayed
+            return viewModel.currentEpisodes.filter { podcastPlayer.progress[$0.id] == nil || podcastPlayer.progress[$0.id] == 0 }
+                .sorted { $0.publicationDate > $1.publicationDate }
         case 2: // Favorite
             return viewModel.currentEpisodes.filter { $0.state.isFavorite }
+                .sorted { $0.publicationDate > $1.publicationDate }
         case 3: // Downloads
             return viewModel.currentEpisodes.filter { $0.state.isDownloaded }
-        default: // All or Unplayed
+                .sorted { $0.publicationDate > $1.publicationDate }
+        default:
             return viewModel.currentEpisodes
         }
     }
@@ -594,40 +597,6 @@ struct PodcastPlayerView: View {
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
-
-    private var footerMenu: some View {
-        HStack {
-            Spacer()
-            Button(action: { selectedTab = 1 }) {
-                VStack {
-                    Image(systemName: "clock")
-                    Text("Recent")
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            Spacer()
-            Button(action: { selectedTab = 2 }) {
-                VStack {
-                    Image(systemName: "star")
-                    Text("Favorite")
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            Spacer()
-            Button(action: { selectedTab = 3 }) {
-                VStack {
-                    Image(systemName: "arrow.down.circle")
-                    Text("Downloads")
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            Spacer()
-        }
-    }
-
 }
 
 
