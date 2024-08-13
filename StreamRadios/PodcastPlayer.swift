@@ -8,6 +8,8 @@
 import AVFoundation
 import Combine
 import MediaPlayer
+import MediaPlayer
+
 
 class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     static let shared = PodcastPlayer()
@@ -22,6 +24,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var duration: Double = 0
     @Published var isSeeking = false
     @Published var progress: [String: Double] = [:]
+    @Published var currentFeed: PodcastFeed? // Add this line
+
     
     private var timeObserver: Any?
     private var playerItemObserver: NSKeyValueObservation?
@@ -31,38 +35,39 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         setupRemoteCommandCenter()
     }
     
-    func playEpisode(_ episode: PodcastEpisode) {
-        guard let url = URL(string: episode.audioUrl) else { return }
-        
-        let playerItem = AVPlayerItem(url: url)
-        
-        if player == nil {
-            player = AVPlayer(playerItem: playerItem)
-        } else {
-            player?.replaceCurrentItem(with: playerItem)
+    func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+            guard let url = URL(string: episode.audioUrl) else { return }
+            
+            let playerItem = AVPlayerItem(url: url)
+            if player == nil {
+                player = AVPlayer(playerItem: playerItem)
+            } else {
+                player?.replaceCurrentItem(with: playerItem)
+            }
+            
+            currentEpisode = episode
+            currentFeed = feed // Store the feed
+            play()
         }
-        
-        currentEpisode = episode
-        play()
-    }
-    
-    func play() {
+
+        func play() {
             if radioPlayer?.isPlaying == true {
                 radioPlayer?.pause()
             }
             
-            guard let player = player, let currentEpisode = currentEpisode else { return }
+            guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else { return }
             
             player.play()
             isPlaying = true
             
-            setupNowPlaying(for: currentEpisode)
+            setupNowPlaying(for: currentEpisode, feed: currentFeed) // Pass feed here
             setupTimeObserver()
             observePlayerItem()
             
             updateNowPlayingInfo()
             objectWillChange.send()
         }
+
     
     func pause() {
             guard let player = player else { return }
@@ -151,16 +156,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         updateNowPlayingInfo()
     }
     
-    private func setupNowPlaying(for episode: PodcastEpisode) {
+    private func setupNowPlaying(for episode: PodcastEpisode, feed: PodcastFeed) {
         var nowPlayingInfo = [String: Any]()
         nowPlayingInfo[MPMediaItemPropertyTitle] = episode.title
-        nowPlayingInfo[MPMediaItemPropertyArtist] = episode.feed.title
-        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = episode.feed.title
+        nowPlayingInfo[MPMediaItemPropertyArtist] = feed.title
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = feed.title
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         
-        if let artworkUrlString = episode.feed.artworkUrl, let artworkUrl = URL(string: artworkUrlString) {
+        if let artworkUrlString = feed.artworkUrl, let artworkUrl = URL(string: artworkUrlString) {
             URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
                 if let data = data, let image = UIImage(data: data) {
                     let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
@@ -170,10 +175,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     }
                 }
             }.resume()
+        } else {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         }
-        
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
+
+
     
     private func updateNowPlayingInfo() {
         guard var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
