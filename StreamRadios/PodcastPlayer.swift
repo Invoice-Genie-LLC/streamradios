@@ -8,8 +8,6 @@
 import AVFoundation
 import Combine
 import MediaPlayer
-import MediaPlayer
-
 
 class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     static let shared = PodcastPlayer()
@@ -19,14 +17,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var player: AVPlayer?
     @Published var currentEpisode: PodcastEpisode?
     @Published var isPlaying: Bool = false
-
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     @Published var isSeeking = false
     @Published var progress: [String: Double] = [:]
-    @Published var currentFeed: PodcastFeed? // Add this line
+    @Published var currentFeed: PodcastFeed?
 
-    
     private var timeObserver: Any?
     private var playerItemObserver: NSKeyValueObservation?
     private var cancellables = Set<AnyCancellable>()
@@ -36,48 +32,59 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-            guard let url = URL(string: episode.audioUrl) else { return }
-            
-            let playerItem = AVPlayerItem(url: url)
-            if player == nil {
-                player = AVPlayer(playerItem: playerItem)
-            } else {
-                player?.replaceCurrentItem(with: playerItem)
-            }
-            
-            currentEpisode = episode
-            currentFeed = feed // Store the feed
-            play()
+        guard let url = URL(string: episode.audioUrl) else { return }
+        
+        let playerItem = AVPlayerItem(url: url)
+        if player == nil {
+            player = AVPlayer(playerItem: playerItem)
+        } else {
+            player?.replaceCurrentItem(with: playerItem)
         }
-
-        func play() {
-            if radioPlayer?.isPlaying == true {
-                radioPlayer?.pause()
-            }
-            
-            guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else { return }
-            
-            player.play()
-            isPlaying = true
-            
-            setupNowPlaying(for: currentEpisode, feed: currentFeed) // Pass feed here
-            setupTimeObserver()
-            observePlayerItem()
-            
-            updateNowPlayingInfo()
-            objectWillChange.send()
+        
+        currentEpisode = episode
+        currentFeed = feed
+        
+        // Check if there's saved progress for this episode
+        if let savedProgress = progress[episode.id] {
+            let time = CMTime(seconds: savedProgress * episode.duration, preferredTimescale: 1)
+            player?.seek(to: time)
         }
+        
+        play()
+    }
 
-    
+    func play() {
+        if radioPlayer?.isPlaying == true {
+            radioPlayer?.pause()
+        }
+        
+        guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else { return }
+        
+        player.play()
+        isPlaying = true
+        
+        setupNowPlaying(for: currentEpisode, feed: currentFeed)
+        setupTimeObserver()
+        observePlayerItem()
+        
+        updateNowPlayingInfo()
+        objectWillChange.send()
+    }
+
     func pause() {
-            guard let player = player else { return }
-            
-            player.pause()
-            isPlaying = false
-            
-            updateNowPlayingInfo()
-            objectWillChange.send()
+        guard let player = player else { return }
+        
+        player.pause()
+        isPlaying = false
+        
+        // Save current progress
+        if let currentEpisode = currentEpisode {
+            progress[currentEpisode.id] = currentTime / duration
         }
+        
+        updateNowPlayingInfo()
+        objectWillChange.send()
+    }
     
     func togglePlayPause() {
         if isPlaying {
@@ -180,8 +187,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
 
-
-    
     private func updateNowPlayingInfo() {
         guard var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
