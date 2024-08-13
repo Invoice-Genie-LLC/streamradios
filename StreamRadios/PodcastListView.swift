@@ -7,8 +7,7 @@
 
 import SwiftUI
 import Combine
-
-import SwiftUI
+import os
 
 struct PodcastListView: View {
     @StateObject private var viewModel = PodcastViewModel()
@@ -16,44 +15,29 @@ struct PodcastListView: View {
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
-    @State private var selectedPodcast: PodcastFeed?
+    @State private var selectedPodcast: PodcastFeed? // Binding for selectedPodcast
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
-    
+
     var filteredPodcasts: [PodcastFeed] {
-        if searchText.isEmpty {
-            return viewModel.podcastFeeds
-        } else {
-            return viewModel.podcastFeeds.filter { $0.title.lowercased().contains(searchText.lowercased()) }
-        }
+        return viewModel.podcastFeeds.sorted { $0.episodes.first?.publicationDate ?? Date() > $1.episodes.first?.publicationDate ?? Date() }
     }
-    
+
     var body: some View {
         NavigationView {
             VStack {
                 searchBar
-                
-                List {
-                    ForEach(filteredPodcasts) { feed in
-                        PodcastRowView(
-                            feed: feed,
-                            isPlaying: podcastPlayer.currentEpisode?.feed.id == feed.id && podcastPlayer.isPlaying,
-                            onPlay: { playLatestEpisode(for: feed) },
-                            onStop: { podcastPlayer.togglePlayPause() },
-                            onTap: { selectedPodcast = feed }
-                        )
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                podcastToDelete = feed
-                                showingDeleteConfirmation = true
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-                .listStyle(PlainListStyle())
+                PodcastList(
+                    feeds: filteredPodcasts,
+                    podcastPlayer: podcastPlayer,
+                    onPlay: { playLatestEpisode(for: $0) }, // Pass playLatestEpisode as a closure
+                    onDelete: { feed in
+                        podcastToDelete = feed
+                        showingDeleteConfirmation = true
+                    },
+                    selectedPodcast: $selectedPodcast // Pass the binding to selectedPodcast
+                )
             }
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
                 Button("Cancel", role: .cancel) {}
@@ -82,13 +66,13 @@ struct PodcastListView: View {
             }
         }
     }
-    
+
     private var searchBar: some View {
         TextField("Search podcasts", text: $searchText)
             .textFieldStyle(RoundedBorderTextFieldStyle())
             .padding(.horizontal)
     }
-    
+
     private func addPodcast() {
         let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
         viewModel.addPodcastFeed(newFeed)
@@ -96,13 +80,13 @@ struct PodcastListView: View {
         newPodcastURL = ""
         showingAddPodcast = false
     }
-    
+
     private func playLatestEpisode(for feed: PodcastFeed) {
         viewModel.fetchEpisodes(for: feed) { result in
             switch result {
             case .success(let episodes):
                 if let latestEpisode = episodes.first {
-                    podcastPlayer.playEpisode(latestEpisode)
+                    podcastPlayer.playEpisode(latestEpisode, feed: feed)
                 }
             case .failure(let error):
                 print("Failed to fetch episodes: \(error.localizedDescription)")
@@ -110,6 +94,9 @@ struct PodcastListView: View {
         }
     }
 }
+
+
+
 
 struct PodcastRowView: View {
     let feed: PodcastFeed
@@ -179,7 +166,8 @@ struct EpisodeRowView: View {
     let progress: Double?
     let onPlay: () -> Void
     let onStop: () -> Void
-    
+    @ObservedObject var viewModel: PodcastViewModel
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -204,8 +192,35 @@ struct EpisodeRowView: View {
             
             statusLabel
             
+            Spacer()
+
+            // Favorite Button
+            Button(action: {
+                viewModel.toggleFavorite(for: episode)
+            }) {
+                Image(systemName: episode.state.isFavorite ? "star.fill" : "star")
+                    .resizable()
+                    .frame(width: 24, height: 24)
+                    .foregroundColor(episode.state.isFavorite ? .yellow : .gray)
+            }
+            
+            Spacer().frame(width: 16) // Space between buttons
+            
+            // Download Button
+            Button(action: {
+                // Handle download action here
+            }) {
+                Image(systemName: episode.state.isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    .resizable()
+                    .frame(width: 24, height: 24)
+                    .foregroundColor(episode.state.isDownloaded ? .blue : .gray)
+            }
+
+            Spacer().frame(width: 16) // Space between buttons and play button
+            
             PlayButton(isPlaying: isPlaying, onPlay: onPlay, onStop: onStop)
         }
+        .padding(.vertical, 8)
     }
     
     private var statusLabel: some View {
@@ -243,30 +258,22 @@ struct EpisodeRowView: View {
             }
         }
     }
-    
+
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter.string(from: date)
     }
-    
+
     private func formatRemainingTime(progress: Double) -> String {
-            guard progress.isFinite, episode.duration.isFinite,
-                  progress >= 0, progress <= 1, episode.duration >= 0 else {
-                return "Invalid duration"
-            }
-
-            let remainingTime = (1 - progress) * episode.duration
-            guard remainingTime.isFinite else {
-                return "Invalid duration"
-            }
-
-            let minutes = Int(max(0, remainingTime) / 60)
-            let seconds = Int(max(0, remainingTime).truncatingRemainder(dividingBy: 60))
-            return String(format: "%d:%02d remaining", minutes, seconds)
-        }
+        let remainingTime = (1 - progress) * episode.duration
+        let minutes = Int(remainingTime) / 60
+        let seconds = Int(remainingTime) % 60
+        return String(format: "%d:%02d remaining", minutes, seconds)
+    }
 }
+
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?
@@ -358,13 +365,20 @@ struct PodcastPlayerView: View {
     @State private var currentEpisodeIndex = 0
     @State private var selectedTab = 1 // Start with "All" tab
     @State private var seekPosition: Double = 0
+    @State private var lastLoggedSeekPosition: Double = 0 // Add this state variable
+    private let seekThreshold: Double = 1.0 // Define the threshold
     
+    private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastPlayerView")
+
     var body: some View {
         VStack(spacing: 10) {
             Text(feed.title)
                 .font(.title)
                 .padding(.top)
-            
+                .onAppear {
+                    os_log("PodcastPlayerView appeared for feed: %@", log: log, type: .info, feed.title)
+                }
+
             if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
                 AsyncImage(url: url) { image in
                     image.resizable()
@@ -373,41 +387,65 @@ struct PodcastPlayerView: View {
                 }
                 .frame(width: 150, height: 150)
                 .cornerRadius(10)
+                .onAppear {
+                    os_log("Artwork loaded for feed: %@", log: log, type: .info, feed.title)
+                }
             }
-            
+
             nowPlayingView
-            
-            Picker("", selection: $selectedTab) {
-                Text("All").tag(1)
-                Text("Unplayed").tag(0)
+
+            if selectedTab == 1 || selectedTab == 0 { // Show the picker only when in "All" or "Unplayed" tabs
+                Picker("", selection: $selectedTab) {
+                    Text("All").tag(1)
+                    Text("Unplayed").tag(0)
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal)
+                .onChange(of: podcastPlayer.currentTime) { newValue in
+                    if !podcastPlayer.isSeeking {
+                        seekPosition = newValue
+                        if abs(seekPosition - lastLoggedSeekPosition) >= seekThreshold {
+                            os_log("Seek position updated to: %f", log: log, type: .info, newValue)
+                            lastLoggedSeekPosition = seekPosition
+                        }
+                    }
+                }
+                Divider()
+                                    .frame(height: 2) // Adjust height to make it more prominent
+                                    .background(Color.blue) // Change color as per your design
+                                    .padding(.horizontal, 20)
             }
-            .pickerStyle(SegmentedPickerStyle())
-            .padding(.horizontal)
-            
+
             episodeList
+
+            footerMenu
+                .frame(height: 60)
+                .background(Color(.systemGray6))
+                .edgesIgnoringSafeArea(.bottom)
         }
-        .frame(maxHeight: .infinity)
         .onAppear {
+            os_log("Loading episodes for feed: %@", log: log, type: .info, feed.title)
             loadEpisodes()
         }
         .onChange(of: podcastPlayer.currentTime) { newValue in
             if !podcastPlayer.isSeeking {
                 seekPosition = newValue
+                os_log("Seek position updated to: %f", log: log, type: .info, newValue)
             }
         }
     }
-    
+
     private var nowPlayingView: some View {
         Group {
-            if let currentEpisode = podcastPlayer.currentEpisode, currentEpisode.feed.id == feed.id {
+            if let currentEpisode = podcastPlayer.currentEpisode, currentEpisode.feedId == feed.id {
                 VStack(spacing: 5) {
                     Text(currentEpisode.title)
                         .font(.headline)
                         .padding(.horizontal)
                         .multilineTextAlignment(.center)
-                    
+
                     playerControls
-                    
+
                     progressSlider
                         .padding(.horizontal, 20)
                     timeLabels
@@ -420,7 +458,7 @@ struct PodcastPlayerView: View {
             }
         }
     }
-    
+
     private var playerControls: some View {
         HStack(spacing: 30) {
             Button(action: podcastPlayer.skipBackward) {
@@ -428,13 +466,13 @@ struct PodcastPlayerView: View {
                     .resizable()
                     .frame(width: 30, height: 30)
             }
-            
+
             Button(action: podcastPlayer.togglePlayPause) {
                 Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .resizable()
                     .frame(width: 60, height: 60)
             }
-            
+
             Button(action: podcastPlayer.skipForward) {
                 Image(systemName: "goforward.15")
                     .resizable()
@@ -442,7 +480,7 @@ struct PodcastPlayerView: View {
             }
         }
     }
-    
+
     private var progressSlider: some View {
         Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1)) { editing in
             if editing {
@@ -454,51 +492,126 @@ struct PodcastPlayerView: View {
         }
         .disabled(podcastPlayer.duration == 0)
     }
-    
+
     private var timeLabels: some View {
-            HStack {
-                Text(formatTime(podcastPlayer.currentTime))
-                Spacer()
-                Text(formatTime(podcastPlayer.duration))
-            }
-            .font(.caption)
+        HStack {
+            Text(formatTime(podcastPlayer.currentTime))
+            Spacer()
+            Text(formatTime(podcastPlayer.duration))
         }
-        
-        private var episodeList: some View {
-            List(filteredEpisodes) { episode in
+        .font(.caption)
+    }
+
+    private var episodeList: some View {
+        List(filteredEpisodes) { episode in
+            if let feed = viewModel.podcastFeeds.first(where: { $0.id == episode.feedId }) { // Find the feed associated with the episode
                 EpisodeRowView(
                     episode: episode,
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
                     progress: selectedTab == 1 ? podcastPlayer.progress[episode.id] : nil,
                     onPlay: {
-                        podcastPlayer.playEpisode(episode)
-                        if selectedTab == 0 {
-                            selectedTab = 1 // Switch to "All" tab
-                        }
+                        os_log("Playing episode: %@", log: log, type: .info, episode.title)
+                        podcastPlayer.playEpisode(episode, feed: feed) // Pass the feed here
                     },
-                    onStop: { podcastPlayer.togglePlayPause() }
+                    onStop: {
+                        os_log("Stopping episode: %@", log: log, type: .info, episode.title)
+                        podcastPlayer.togglePlayPause()
+                    },
+                    viewModel: viewModel
                 )
-            }
-            .listStyle(PlainListStyle())
-        }
-        
-        var filteredEpisodes: [PodcastEpisode] {
-            if selectedTab == 1 {
-                return viewModel.currentEpisodes
-            } else {
-                return viewModel.currentEpisodes.filter {
-                    return podcastPlayer.progress[$0.id] == nil || podcastPlayer.progress[$0.id] == 0
+                .onAppear {
+                    os_log("EpisodeRowView appeared for episode: %@", log: log, type: .info, episode.title)
                 }
             }
         }
-        
-        private func loadEpisodes() {
-            viewModel.fetchEpisodes(for: feed) { _ in }
-        }
-        
-        private func formatTime(_ time: Double) -> String {
-            let minutes = Int(time) / 60
-            let seconds = Int(time) % 60
-            return String(format: "%02d:%02d", minutes, seconds)
+        .listStyle(PlainListStyle())
+    }
+
+    var filteredEpisodes: [PodcastEpisode] {
+        switch selectedTab {
+        case 2: // Favorite
+            return viewModel.currentEpisodes.filter { $0.state.isFavorite }
+        case 3: // Downloads
+            return viewModel.currentEpisodes.filter { $0.state.isDownloaded }
+        default: // All or Unplayed
+            return viewModel.currentEpisodes
         }
     }
+
+    private func loadEpisodes() {
+        viewModel.fetchEpisodes(for: feed) { _ in }
+    }
+
+    private func formatTime(_ time: Double) -> String {
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private var footerMenu: some View {
+        HStack {
+            Spacer()
+            Button(action: { selectedTab = 1 }) {
+                VStack {
+                    Image(systemName: "clock")
+                    Text("Recent")
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer()
+            Button(action: { selectedTab = 2 }) {
+                VStack {
+                    Image(systemName: "star")
+                    Text("Favorite")
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer()
+            Button(action: { selectedTab = 3 }) {
+                VStack {
+                    Image(systemName: "arrow.down.circle")
+                    Text("Downloads")
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer()
+        }
+    }
+
+}
+
+
+struct PodcastList: View {
+    let feeds: [PodcastFeed]
+    @ObservedObject var podcastPlayer: PodcastPlayer
+    let onPlay: (PodcastFeed) -> Void
+    let onDelete: (PodcastFeed) -> Void
+    @Binding var selectedPodcast: PodcastFeed? // Use a binding to update the selectedPodcast
+
+    var body: some View {
+        List {
+            ForEach(feeds) { feed in
+                PodcastRowView(
+                    feed: feed,
+                    isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                    onPlay: { onPlay(feed) }, // Use the passed onPlay closure
+                    onStop: { podcastPlayer.togglePlayPause() },
+                    onTap: { selectedPodcast = feed } // Update the binding when a podcast is selected
+                )
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        onDelete(feed)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
+        .listStyle(PlainListStyle())
+    }
+}
+
+

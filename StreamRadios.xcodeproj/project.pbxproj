@@ -38,6 +38,7 @@
 		7746178F2C17411E00F442B3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7746178E2C17411E00F442B3 /* Assets.xcassets */; };
 		774617932C17411E00F442B3 /* StreamRadioWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 774617812C17411C00F442B3 /* StreamRadioWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179B2C17834200F442B3 /* CircularProgressView.swift */; };
+		7746A4932C6BE2130025C215 /* ManagedPodcastEpisode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
 		775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775B55562C30E8C100ECDBF0 /* Tabs.swift */; };
 		775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04282C287AF700E99061 /* ShazamViewModel.swift */; };
@@ -134,6 +135,7 @@
 		774617902C17411E00F442B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		774617982C17425000F442B3 /* streamRadiosWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = streamRadiosWidgetExtension.entitlements; sourceTree = "<group>"; };
 		7746179B2C17834200F442B3 /* CircularProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularProgressView.swift; sourceTree = "<group>"; };
+		7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedPodcastEpisode.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		775B55562C30E8C100ECDBF0 /* Tabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tabs.swift; sourceTree = "<group>"; };
 		775D04282C287AF700E99061 /* ShazamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamViewModel.swift; sourceTree = "<group>"; };
@@ -236,6 +238,7 @@
 				775D04372C28E89300E99061 /* LyricsView.swift */,
 				77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */,
 				7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */,
+				7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */,
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
@@ -476,6 +479,7 @@
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
 				7715BD962C4C3AD700FA7CB1 /* DocumentPicker.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
+				7746A4932C6BE2130025C215 /* ManagedPodcastEpisode.swift in Sources */,
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
 				7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */,
