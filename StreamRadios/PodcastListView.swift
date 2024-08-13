@@ -167,12 +167,26 @@ struct EpisodeRowView: View {
     let onPlay: () -> Void
     let onStop: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
+    @State private var isFavorite: Bool
+    @State private var isDownloaded: Bool
+
+    init(episode: PodcastEpisode, isPlaying: Bool, progress: Double?, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel) {
+        self.episode = episode
+        self.isPlaying = isPlaying
+        self.progress = progress
+        self.onPlay = onPlay
+        self.onStop = onStop
+        self.viewModel = viewModel
+        _isFavorite = State(initialValue: episode.state.isFavorite)
+        _isDownloaded = State(initialValue: episode.state.isDownloaded)
+    }
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(episode.title)
                     .font(.headline)
+                    .lineLimit(1)
                 
                 Text(formatDate(episode.publicationDate))
                     .font(.subheadline)
@@ -196,28 +210,41 @@ struct EpisodeRowView: View {
 
             // Favorite Button
             Button(action: {
+                isFavorite.toggle()
                 viewModel.toggleFavorite(for: episode)
             }) {
-                Image(systemName: episode.state.isFavorite ? "star.fill" : "star")
+                Image(systemName: isFavorite ? "star.fill" : "star")
                     .resizable()
                     .frame(width: 24, height: 24)
-                    .foregroundColor(episode.state.isFavorite ? .yellow : .gray)
+                    .foregroundColor(isFavorite ? .yellow : .gray)
             }
+            .buttonStyle(PlainButtonStyle())
             
             Spacer().frame(width: 16) // Space between buttons
             
             // Download Button
             Button(action: {
-                // Handle download action here
+                isDownloaded.toggle()
+                // Add logic to start/cancel download
+                // For now, we'll just toggle the state
+                viewModel.updateEpisodeState(
+                    episodeId: episode.id,
+                    isPlayed: episode.state.isPlayed,
+                    isFavorite: isFavorite,
+                    progress: episode.state.progress,
+                    isDownloaded: isDownloaded
+                )
             }) {
-                Image(systemName: episode.state.isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
                     .resizable()
                     .frame(width: 24, height: 24)
-                    .foregroundColor(episode.state.isDownloaded ? .blue : .gray)
+                    .foregroundColor(isDownloaded ? .blue : .gray)
             }
+            .buttonStyle(PlainButtonStyle())
 
             Spacer().frame(width: 16) // Space between buttons and play button
             
+            // Play Button
             PlayButton(isPlaying: isPlaying, onPlay: onPlay, onStop: onStop)
         }
         .padding(.vertical, 8)
