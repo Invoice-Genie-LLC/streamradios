@@ -7,47 +7,58 @@
 
 import CoreData
 
-@objc(ManagedPodcastEpisode)
-public class ManagedPodcastEpisode: NSManagedObject {
+extension FeedModel {
+
+    func update(from feed: PodcastFeed) {
+        id = feed.id
+        title = feed.title
+        url = feed.url
+        artworkUrl = feed.artworkUrl
+        descriptionText = feed.description
+        iconData = feed.iconData
+    }
+    
+    func toPodcastFeed() -> PodcastFeed {
+        return PodcastFeed(id: id ?? UUID().uuidString,
+                           title: title ?? "",
+                           url: url ?? "",
+                           artworkUrl: artworkUrl,
+                           description: descriptionText,
+                           iconData: iconData)
+    }
 }
 
-extension ManagedPodcastEpisode {
-    @nonobjc public class func fetchRequest() -> NSFetchRequest<ManagedPodcastEpisode> {
-        return NSFetchRequest<ManagedPodcastEpisode>(entityName: "PodcastModel")
+extension PodcastModel {
+    // Remove redeclarations of fetchRequest(), id, title, etc.
+
+    func update(from episode: PodcastEpisode) {
+        id = episode.id
+        title = episode.title
+        descriptionText = episode.description
+        audioUrl = episode.audioUrl
+        publicationDate = episode.publicationDate
+        duration = episode.duration
+        isFavorite = episode.state.isFavorite
+        isDownloaded = episode.state.isDownloaded
+        progress = episode.state.progress
+        feedId = episode.feedId
     }
 
-    @NSManaged public var id: String
-    @NSManaged public var title: String
-    @NSManaged public var descriptionText: String
-    @NSManaged public var audioUrl: String
-    @NSManaged public var publicationDate: Date
-    @NSManaged public var duration: Double
-    @NSManaged public var isFavorite: Bool
-    @NSManaged public var isDownloaded: Bool
-    @NSManaged public var progress: Double
-    @NSManaged public var feedId: String
-    
     func toPodcastEpisode() -> PodcastEpisode {
-        // Create a basic PodcastFeed with the feedId.
-        // You can customize this further depending on your data structure.
-        let feed = PodcastFeed(id: self.feedId, title: "", url: "")
-
         return PodcastEpisode(
-            id: self.id,
-            title: self.title,
-            description: self.descriptionText,
-            audioUrl: self.audioUrl,
-            publicationDate: self.publicationDate,
-            duration: self.duration,
+            id: id ?? UUID().uuidString,
+            title: title ?? "",
+            description: descriptionText ?? "",
+            audioUrl: audioUrl ?? "",
+            publicationDate: publicationDate ?? Date(),
+            duration: duration,
             state: EpisodeState(
-                isPlayed: self.isDownloaded,
-                isFavorite: self.isFavorite,
-                progress: self.progress,
-                isDownloaded: self.isDownloaded
+                isPlayed: progress == 1.0,
+                isFavorite: isFavorite,
+                progress: progress,
+                isDownloaded: isDownloaded
             ),
-            feedId: self.feedId
+            feedId: feedId ?? ""
         )
     }
 }
-
-

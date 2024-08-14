@@ -33,12 +33,12 @@ struct PodcastListView: View {
                 PodcastList(
                     feeds: filteredPodcasts,
                     podcastPlayer: podcastPlayer,
-                    onPlay: { playLatestEpisode(for: $0) }, // Pass playLatestEpisode as a closure
+                    onPlay: { playLatestEpisode(for: $0) },
                     onDelete: { feed in
                         podcastToDelete = feed
                         showingDeleteConfirmation = true
                     },
-                    selectedPodcast: $selectedPodcast // Pass the binding to selectedPodcast
+                    selectedPodcast: $selectedPodcast
                 )
             }
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
@@ -59,7 +59,7 @@ struct PodcastListView: View {
             }
             .onAppear {
                 os_log("PodcastListView appeared", log: log, type: .info)
-                               viewModel.loadInitialData()
+                viewModel.fetchPodcastFeeds()
             }
             .sheet(isPresented: $showingAddPodcast) {
                 AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
@@ -67,6 +67,7 @@ struct PodcastListView: View {
             .sheet(item: $selectedPodcast) { podcast in
                 PodcastPlayerView(viewModel: viewModel, feed: podcast, podcastPlayer: podcastPlayer)
             }
+        
         }
     }
 
@@ -77,25 +78,25 @@ struct PodcastListView: View {
     }
 
     private func addPodcast() {
-        let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
-        viewModel.addPodcastFeed(newFeed)
-        newPodcastTitle = ""
-        newPodcastURL = ""
-        showingAddPodcast = false
-    }
+           let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
+           viewModel.addPodcastFeed(newFeed)
+           newPodcastTitle = ""
+           newPodcastURL = ""
+           showingAddPodcast = false
+       }
 
     private func playLatestEpisode(for feed: PodcastFeed) {
-        viewModel.fetchEpisodes(for: feed) { result in
-            switch result {
-            case .success(let episodes):
-                if let latestEpisode = episodes.first {
-                    podcastPlayer.playEpisode(latestEpisode, feed: feed)
+            viewModel.fetchEpisodes(for: feed) { result in
+                switch result {
+                case .success(let episodes):
+                    if let latestEpisode = episodes.first {
+                        podcastPlayer.playEpisode(latestEpisode, feed: feed)
+                    }
+                case .failure(let error):
+                    os_log("Failed to fetch episodes: %@", log: log, type: .error, error.localizedDescription)
                 }
-            case .failure(let error):
-                print("Failed to fetch episodes: \(error.localizedDescription)")
             }
         }
-    }
 }
 
 
