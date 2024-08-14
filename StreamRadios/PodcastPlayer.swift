@@ -76,27 +76,32 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         play()
     }
 
-
-
-    
-    
     private func loadProgress(for episodeId: String) -> Double? {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
         return UserDefaults.standard.value(forKey: key) as? Double
     }
 
     func play() {
-            if radioPlayer?.isPlaying == true {
-                radioPlayer?.pause()
-            }
-            
-            guard let player = player else { return }
-            player.play()
-            isPlaying = true
-            setupTimeObserver()
-            updateNowPlayingInfo()
-            objectWillChange.send()
+        guard let player = player else { return }
+        
+        // Safely unwrap the currentEpisode and currentFeed
+        guard let currentEpisode = currentEpisode, let currentFeed = currentFeed else {
+            os_log("No current episode or feed available", log: OSLog.default, type: .error)
+            return
         }
+        
+        player.play()
+        isPlaying = true
+        
+        // Set up now playing information and observers
+        setupNowPlaying(for: currentEpisode, feed: currentFeed)
+        setupTimeObserver()
+        observePlayerItem()
+        updateNowPlayingInfo()
+        
+        objectWillChange.send()
+    }
+
     
     func pause() {
         guard let player = player else { return }
