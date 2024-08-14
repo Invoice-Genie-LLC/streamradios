@@ -22,50 +22,22 @@ class AlertManager: ObservableObject {
         
         currentAlertType = alertType
         
+        customAlertTitle = alertType.title
+        customAlertMessage = alertType.message
+        customAlertPrimaryButtonText = alertType.primaryButtonText
+        customAlertSecondaryButtonText = alertType.secondaryButtonText
+        
         switch alertType {
-        case .selectCountryBeforeAddingStation:
-            customAlertTitle = "Select a Country"
-            customAlertMessage = "Please select a country before creating a new station."
-            customAlertPrimaryButtonText = "OK"
+        case .selectCountryBeforeAddingStation, .exportWithoutCountry, .importWithoutCountry, .deleteStationError:
             customAlertPrimaryAction = { [weak self] in
                 self?.dismissAlert()
             }
-            customAlertSecondaryButtonText = nil
-        case .exportWithoutCountry:
-            customAlertTitle = "Select a Country"
-            customAlertMessage = "Please select a country from the country selector in the app before exporting stations."
-            customAlertPrimaryButtonText = "OK"
-            customAlertPrimaryAction = nil
-            customAlertSecondaryButtonText = nil
             customAlertSecondaryAction = nil
-        case .importWithoutCountry:
-            customAlertTitle = "Select a Country"
-            customAlertMessage = "Please select a country from the country selector in the app before importing stations."
-            customAlertPrimaryButtonText = "OK"
-            customAlertPrimaryAction = nil
-            customAlertSecondaryButtonText = nil
-            customAlertSecondaryAction = nil
-        case .deleteAllData:
-            customAlertTitle = "Delete All Data"
-            customAlertMessage = "Important: You're about to delete all station playlist data. This will remove all your saved playlists from both iCloud and your device's local storage. This action is permanent and cannot be reversed."
-            customAlertPrimaryButtonText = "Delete"
+        case .deleteAllData, .deleteStation, .clearAllPodcasts:
             customAlertPrimaryAction = deleteAction
-            customAlertSecondaryButtonText = "Cancel"
-            customAlertSecondaryAction = nil
-        case .deleteStation:
-            customAlertTitle = "Delete Station"
-            customAlertMessage = "Are you sure you want to delete this station? This action cannot be undone."
-            customAlertPrimaryButtonText = "Delete"
-            customAlertPrimaryAction = deleteAction
-            customAlertSecondaryButtonText = "Cancel"
-            customAlertSecondaryAction = nil
-        case .deleteStationError:
-            customAlertTitle = "Error"
-            customAlertMessage = "Failed to delete the station. Please try again later."
-            customAlertPrimaryButtonText = "OK"
-            customAlertPrimaryAction = nil
-            customAlertSecondaryButtonText = nil
-            customAlertSecondaryAction = nil
+            customAlertSecondaryAction = { [weak self] in
+                self?.dismissAlert()
+            }
         }
         
         showCustomAlert = true
@@ -89,6 +61,7 @@ enum AlertType: Identifiable {
     case selectCountryBeforeAddingStation
     case deleteStation
     case deleteStationError
+    case clearAllPodcasts
     
     var id: Int {
         switch self {
@@ -98,6 +71,59 @@ enum AlertType: Identifiable {
         case .selectCountryBeforeAddingStation: return 3
         case .deleteStation: return 4
         case .deleteStationError: return 5
+        case .clearAllPodcasts: return 6
+        }
+    }
+    
+    var title: String {
+        switch self {
+        case .exportWithoutCountry, .importWithoutCountry, .selectCountryBeforeAddingStation:
+            return "Select a Country"
+        case .deleteAllData:
+            return "Delete All Data"
+        case .deleteStation:
+            return "Delete Station"
+        case .deleteStationError:
+            return "Error"
+        case .clearAllPodcasts:
+            return "Clear All Podcast Episodes"
+        }
+    }
+    
+    var message: String {
+        switch self {
+        case .exportWithoutCountry:
+            return "Please select a country from the country selector in the app before exporting stations."
+        case .importWithoutCountry:
+            return "Please select a country from the country selector in the app before importing stations."
+        case .deleteAllData:
+            return "Important: You're about to delete all station playlist data. This will remove all your saved playlists from both iCloud and your device's local storage. This action is permanent and cannot be reversed."
+        case .selectCountryBeforeAddingStation:
+            return "Please select a country before creating a new station."
+        case .deleteStation:
+            return "Are you sure you want to delete this station? This action cannot be undone."
+        case .deleteStationError:
+            return "Failed to delete the station. Please try again later."
+        case .clearAllPodcasts:
+            return "Are you sure you want to clear all podcast episodes? This will erase all downloaded episodes and their progress. This action cannot be undone."
+        }
+    }
+    
+    var primaryButtonText: String {
+        switch self {
+        case .exportWithoutCountry, .importWithoutCountry, .selectCountryBeforeAddingStation, .deleteStationError:
+            return "OK"
+        case .deleteAllData, .deleteStation, .clearAllPodcasts:
+            return "Delete"
+        }
+    }
+    
+    var secondaryButtonText: String? {
+        switch self {
+        case .deleteAllData, .deleteStation, .clearAllPodcasts:
+            return "Cancel"
+        default:
+            return nil
         }
     }
 }

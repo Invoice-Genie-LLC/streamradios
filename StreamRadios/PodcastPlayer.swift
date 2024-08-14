@@ -32,26 +32,34 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-        guard let url = URL(string: episode.audioUrl) else { return }
-        
-        let playerItem = AVPlayerItem(url: url)
-        if player == nil {
-            player = AVPlayer(playerItem: playerItem)
-        } else {
-            player?.replaceCurrentItem(with: playerItem)
+            var url: URL?
+            
+            if let localFilePath = episode.localFilePath {
+                url = URL(fileURLWithPath: localFilePath)
+            } else {
+                url = URL(string: episode.audioUrl)
+            }
+            
+            guard let playUrl = url else { return }
+            
+            let playerItem = AVPlayerItem(url: playUrl)
+            if player == nil {
+                player = AVPlayer(playerItem: playerItem)
+            } else {
+                player?.replaceCurrentItem(with: playerItem)
+            }
+            
+            currentEpisode = episode
+            currentFeed = feed
+            
+            // Check if there's saved progress for this episode
+            if let savedProgress = loadProgress(for: episode.id) {
+                let time = CMTime(seconds: savedProgress * episode.duration, preferredTimescale: 1)
+                player?.seek(to: time)
+            }
+            
+            play()
         }
-        
-        currentEpisode = episode
-        currentFeed = feed
-        
-        // Check if there's saved progress for this episode
-        if let savedProgress = loadProgress(for: episode.id) {
-            let time = CMTime(seconds: savedProgress * episode.duration, preferredTimescale: 1)
-            player?.seek(to: time)
-        }
-        
-        play()
-    }
     
     private func loadProgress(for episodeId: String) -> Double? {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
