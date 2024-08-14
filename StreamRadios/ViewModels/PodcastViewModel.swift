@@ -54,15 +54,13 @@ class PodcastViewModel: ObservableObject {
                 print("Failed to save progress: \(error)")
             }
         }
-    private func loadProgress() {
-           guard let savedData = UserDefaults.standard.data(forKey: progressKey) else { return }
-           do {
-               let decodedFeeds = try JSONDecoder().decode([PodcastFeed].self, from: savedData)
-               self.podcastFeeds = decodedFeeds
-           } catch {
-               print("Failed to load progress: \(error)")
-           }
-       }
+    
+    private func loadProgress(for episodeId: String) -> Double? {
+        // Retrieve the saved progress for the episode from UserDefaults or your preferred storage
+        let progressKey = "progress_\(episodeId)"
+        return userDefaults.double(forKey: progressKey)
+    }
+
     
     func addPodcastFeed(_ feed: PodcastFeed) {
             isLoading = true
@@ -189,24 +187,32 @@ class PodcastViewModel: ObservableObject {
         }
     
     func fetchEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
-            os_log("Fetching episodes for feed: %@", log: log, type: .info, feed.title)
-            isLoading = true
-            fetchRSSFeed(for: feed) { result in
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    switch result {
-                    case .success(let updatedFeed):
-                        os_log("Successfully fetched episodes for feed: %@", log: self.log, type: .info, feed.title)
-                        self.currentEpisodes = updatedFeed.episodes
-                        completion(.success(updatedFeed.episodes))
-                    case .failure(let error):
-                        os_log("Failed to fetch episodes for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
-                        self.error = error.localizedDescription
-                        completion(.failure(error))
+        os_log("Fetching episodes for feed: %@", log: log, type: .info, feed.title)
+        isLoading = true
+        fetchRSSFeed(for: feed) { result in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                switch result {
+                case .success(var updatedFeed): // Make updatedFeed mutable by using var
+                    os_log("Successfully fetched episodes for feed: %@", log: self.log, type: .info, feed.title)
+                    // Load saved progress for each episode
+                    for index in updatedFeed.episodes.indices {
+                        let episodeId = updatedFeed.episodes[index].id
+                        if let savedProgress = self.loadProgress(for: episodeId) {
+                            updatedFeed.episodes[index].state.progress = savedProgress
+                        }
                     }
+                    self.currentEpisodes = updatedFeed.episodes
+                    completion(.success(updatedFeed.episodes))
+                case .failure(let error):
+                    os_log("Failed to fetch episodes for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                    self.error = error.localizedDescription
+                    completion(.failure(error))
                 }
             }
         }
+    }
+
     
     private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
         os_log("Starting RSS feed fetch for feed: %@", log: log, type: .info, feed.title)
@@ -448,5 +454,4 @@ struct EpisodeState: Codable {
     var progress: Double // 0.0 to 1.0
     var isDownloaded: Bool // Add this line
 }
-
 
