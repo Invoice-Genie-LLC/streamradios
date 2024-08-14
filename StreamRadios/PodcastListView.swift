@@ -20,6 +20,8 @@ struct PodcastListView: View {
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
 
+    private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
+
     var filteredPodcasts: [PodcastFeed] {
         return viewModel.podcastFeeds.sorted { $0.episodes.first?.publicationDate ?? Date() > $1.episodes.first?.publicationDate ?? Date() }
     }
@@ -56,7 +58,8 @@ struct PodcastListView: View {
                 }
             }
             .onAppear {
-                viewModel.fetchPodcastFeeds()
+                os_log("PodcastListView appeared", log: log, type: .info)
+                               viewModel.loadInitialData()
             }
             .sheet(isPresented: $showingAddPodcast) {
                 AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
@@ -448,15 +451,9 @@ struct PodcastPlayerView: View {
             }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
-            .onChange(of: podcastPlayer.currentTime) { newValue in
-                if !podcastPlayer.isSeeking {
-                    seekPosition = newValue
-                    if abs(seekPosition - lastLoggedSeekPosition) >= seekThreshold {
-                        os_log("Seek position updated to: %f", log: log, type: .info, newValue)
-                        lastLoggedSeekPosition = seekPosition
-                    }
-                }
-            }
+            .onChange(of: selectedTab) { _ in
+                            updateFilteredEpisodes()
+                        }
             
             Divider()
                 .frame(height: 2)
@@ -468,12 +465,6 @@ struct PodcastPlayerView: View {
         .onAppear {
             os_log("Loading episodes for feed: %@", log: log, type: .info, feed.title)
             loadEpisodes()
-        }
-        .onChange(of: podcastPlayer.currentTime) { newValue in
-            if !podcastPlayer.isSeeking {
-                seekPosition = newValue
-                os_log("Seek position updated to: %f", log: log, type: .info, newValue)
-            }
         }
     }
 
@@ -545,8 +536,7 @@ struct PodcastPlayerView: View {
     }
 
     private var episodeList: some View {
-        List(filteredEpisodes) { episode in
-            if let feed = viewModel.podcastFeeds.first(where: { $0.id == episode.feedId }) {
+            List(filteredEpisodes) { episode in
                 EpisodeRowView(
                     episode: episode,
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
@@ -566,9 +556,8 @@ struct PodcastPlayerView: View {
                     os_log("EpisodeRowView appeared for episode: %@", log: log, type: .info, episode.title)
                 }
             }
+            .listStyle(PlainListStyle())
         }
-        .listStyle(PlainListStyle())
-    }
 
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         if podcastPlayer.currentEpisode?.id == episode.id {
@@ -581,26 +570,31 @@ struct PodcastPlayerView: View {
     }
 
     var filteredEpisodes: [PodcastEpisode] {
-        switch selectedTab {
-        case 0: // All
-            return viewModel.currentEpisodes.sorted { $0.publicationDate > $1.publicationDate }
-        case 1: // Unplayed
-            return viewModel.currentEpisodes.filter { podcastPlayer.progress[$0.id] == nil || podcastPlayer.progress[$0.id] == 0 }
-                .sorted { $0.publicationDate > $1.publicationDate }
-        case 2: // Favorite
-            return viewModel.currentEpisodes.filter { $0.state.isFavorite }
-                .sorted { $0.publicationDate > $1.publicationDate }
-        case 3: // Downloads
-            return viewModel.currentEpisodes.filter { $0.state.isDownloaded }
-                .sorted { $0.publicationDate > $1.publicationDate }
-        default:
-            return viewModel.currentEpisodes
+            viewModel.currentEpisodes
         }
-    }
 
     private func loadEpisodes() {
-        viewModel.fetchEpisodes(for: feed) { _ in }
-    }
+           viewModel.fetchEpisodes(for: feed) { _ in
+               updateFilteredEpisodes()
+           }
+       }
+    
+    private func updateFilteredEpisodes() {
+            switch selectedTab {
+            case 0: // All
+                viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+            case 1: // Unplayed
+                viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id && (podcastPlayer.progress[$0.id] == nil || podcastPlayer.progress[$0.id] == 0) }
+            case 2: // Favorite
+                viewModel.currentEpisodes = viewModel.getFavoriteEpisodes().filter { $0.feedId == feed.id }
+            case 3: // Downloads
+                viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id && $0.state.isDownloaded }
+            default:
+                viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+            }
+            viewModel.currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
+        }
+
 
     private func formatTime(_ time: Double) -> String {
         let minutes = Int(time) / 60
