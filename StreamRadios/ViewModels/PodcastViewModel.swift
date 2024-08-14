@@ -99,44 +99,54 @@ class PodcastViewModel: ObservableObject {
         }
     
     func downloadEpisode(_ episode: PodcastEpisode, completion: @escaping (Result<PodcastEpisode, Error>) -> Void) {
-            guard let url = URL(string: episode.audioUrl) else {
-                completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+        guard let url = URL(string: episode.audioUrl) else {
+            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+            return
+        }
+        
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] localUrl, response, error in
+            if let error = error {
+                completion(.failure(error))
                 return
             }
             
-            let task = URLSession.shared.downloadTask(with: url) { [weak self] localUrl, response, error in
-                if let error = error {
-                    completion(.failure(error))
-                    return
-                }
-                
-                guard let localUrl = localUrl else {
-                    completion(.failure(NSError(domain: "No data received", code: 0, userInfo: nil)))
-                    return
-                }
-                
-                do {
-                    let fileName = "\(episode.id).mp3"
-                    let documentsDirectory = try self?.getDocumentsDirectory()
-                    let destinationUrl = documentsDirectory?.appendingPathComponent(fileName)
-                    
-                    try self?.fileManager.moveItem(at: localUrl, to: destinationUrl!)
-                    
-                    var updatedEpisode = episode
-                    updatedEpisode.localFilePath = destinationUrl?.path
-                    updatedEpisode.state.isDownloaded = true
-                    
-                    DispatchQueue.main.async {
-                        self?.updateDownloadedEpisode(updatedEpisode)
-                        completion(.success(updatedEpisode))
-                    }
-                } catch {
-                    completion(.failure(error))
-                }
+            guard let localUrl = localUrl else {
+                completion(.failure(NSError(domain: "No data received", code: 0, userInfo: nil)))
+                return
             }
             
-            task.resume()
+            do {
+                let fileName = "\(episode.id).mp3"
+                let documentsDirectory = try self?.getDocumentsDirectory()
+                let destinationUrl = documentsDirectory?.appendingPathComponent(fileName)
+                
+                try self?.fileManager.moveItem(at: localUrl, to: destinationUrl!)
+                
+                os_log("Downloaded file saved to: %@", log: OSLog.default, type: .info, destinationUrl?.path ?? "Unknown path")
+                
+                // Verify that the file was moved successfully
+                if let path = destinationUrl?.path, FileManager.default.fileExists(atPath: path) {
+                    os_log("File exists at path: %@", log: OSLog.default, type: .info, path)
+                } else {
+                    os_log("File does NOT exist at path: %@", log: OSLog.default, type: .error, destinationUrl?.path ?? "Unknown path")
+                }
+                
+                var updatedEpisode = episode
+                updatedEpisode.localFilePath = destinationUrl?.path
+                updatedEpisode.state.isDownloaded = true
+                
+                DispatchQueue.main.async {
+                    self?.updateDownloadedEpisode(updatedEpisode)
+                    completion(.success(updatedEpisode))
+                }
+            } catch {
+                completion(.failure(error))
+            }
         }
+        
+        task.resume()
+    }
+
         
         private func updateDownloadedEpisode(_ episode: PodcastEpisode) {
             if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
@@ -546,37 +556,46 @@ class PodcastViewModel: ObservableObject {
     }
     
     func clearAllPodcastEpisodes(completion: @escaping (Bool) -> Void) {
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            
-            do {
-                let episodes = try context.fetch(fetchRequest)
-                for episode in episodes {
-                    context.delete(episode)
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        
+        do {
+            let episodes = try context.fetch(fetchRequest)
+            for episode in episodes {
+                // Delete the local file if it exists
+                if let localFilePath = episode.localFilePath {
+                    do {
+                        try fileManager.removeItem(atPath: localFilePath)
+                        os_log("Deleted local file for episode: %@", log: log, type: .info, episode.title ?? "Unknown Title")
+                    } catch {
+                        os_log("Failed to delete local file for episode: %@, error: %@", log: log, type: .error, episode.title ?? "Unknown Title", error.localizedDescription)
+                    }
                 }
-                
-                // Save the context to persist the deletion
-                try context.save()
-                os_log("Cleared all podcast episodes from Core Data", log: log, type: .info)
-                
-                // Clear associated UserDefaults data
-                userDefaults.removeObject(forKey: episodeStatesKey)
-                userDefaults.removeObject(forKey: favoritesKey)
-                userDefaults.removeObject(forKey: progressKey)
-                os_log("Cleared episode states, favorites, and progress from UserDefaults", log: log, type: .info)
-                
-                // Reset view model properties
-                allEpisodes.removeAll()
-                currentEpisodes.removeAll()
-                os_log("Reset allEpisodes and currentEpisodes in the view model", log: log, type: .info)
-                
-                // Notify completion with success
-                completion(true)
-            } catch {
-                os_log("Failed to clear podcast episodes: %@", log: log, type: .error, error.localizedDescription)
-                // Notify completion with failure
-                completion(false)
+                context.delete(episode)
             }
+            
+            // Save the context to persist the deletion
+            try context.save()
+            os_log("Cleared all podcast episodes from Core Data", log: log, type: .info)
+            
+            // Clear associated UserDefaults data
+            userDefaults.removeObject(forKey: episodeStatesKey)
+            userDefaults.removeObject(forKey: favoritesKey)
+            userDefaults.removeObject(forKey: progressKey)
+            os_log("Cleared episode states, favorites, and progress from UserDefaults", log: log, type: .info)
+            
+            // Reset view model properties
+            allEpisodes.removeAll()
+            currentEpisodes.removeAll()
+            os_log("Reset allEpisodes and currentEpisodes in the view model", log: log, type: .info)
+            
+            // Notify completion with success
+            completion(true)
+        } catch {
+            os_log("Failed to clear podcast episodes: %@", log: log, type: .error, error.localizedDescription)
+            // Notify completion with failure
+            completion(false)
         }
+    }
 
     
     private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {

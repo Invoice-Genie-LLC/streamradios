@@ -29,7 +29,6 @@ extension FeedModel {
 }
 
 extension PodcastModel {
-    // Remove redeclarations of fetchRequest(), id, title, etc.
 
     func update(from episode: PodcastEpisode) {
         id = episode.id
@@ -42,6 +41,7 @@ extension PodcastModel {
         isDownloaded = episode.state.isDownloaded
         progress = episode.state.progress
         feedId = episode.feedId
+        localFilePath = episode.localFilePath // Add this line to update localFilePath
     }
 
     func toPodcastEpisode() -> PodcastEpisode {
@@ -58,7 +58,9 @@ extension PodcastModel {
                 progress: progress,
                 isDownloaded: isDownloaded
             ),
-            feedId: feedId ?? ""
+            feedId: feedId ?? "",
+            localFilePath: localFilePath // Add this line to include localFilePath in the conversion
         )
     }
 }
+
