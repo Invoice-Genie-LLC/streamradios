@@ -39,6 +39,7 @@
 		774617932C17411E00F442B3 /* StreamRadioWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 774617812C17411C00F442B3 /* StreamRadioWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746179B2C17834200F442B3 /* CircularProgressView.swift */; };
 		7746A4932C6BE2130025C215 /* ManagedPodcastEpisode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */; };
+		7746A49D2C6D07C10025C215 /* ReachabilityCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746A49C2C6D07C10025C215 /* ReachabilityCheck.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
 		775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775B55562C30E8C100ECDBF0 /* Tabs.swift */; };
 		775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04282C287AF700E99061 /* ShazamViewModel.swift */; };
@@ -136,6 +137,7 @@
 		774617982C17425000F442B3 /* streamRadiosWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = streamRadiosWidgetExtension.entitlements; sourceTree = "<group>"; };
 		7746179B2C17834200F442B3 /* CircularProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularProgressView.swift; sourceTree = "<group>"; };
 		7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedPodcastEpisode.swift; sourceTree = "<group>"; };
+		7746A49C2C6D07C10025C215 /* ReachabilityCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReachabilityCheck.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		775B55562C30E8C100ECDBF0 /* Tabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tabs.swift; sourceTree = "<group>"; };
 		775D04282C287AF700E99061 /* ShazamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamViewModel.swift; sourceTree = "<group>"; };
@@ -243,6 +245,7 @@
 				77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */,
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
+				7746A49C2C6D07C10025C215 /* ReachabilityCheck.swift */,
 				7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
@@ -521,6 +524,7 @@
 				77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */,
 				7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */,
 				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
+				7746A49D2C6D07C10025C215 /* ReachabilityCheck.swift in Sources */,
 				77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

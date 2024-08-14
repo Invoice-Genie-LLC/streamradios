@@ -8,6 +8,8 @@
 import AVFoundation
 import Combine
 import MediaPlayer
+import os
+import Reachability
 
 class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     static let shared = PodcastPlayer()
@@ -32,34 +34,51 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-            var url: URL?
-            
-            if let localFilePath = episode.localFilePath {
-                url = URL(fileURLWithPath: localFilePath)
+        var playUrl: URL?
+
+        // Prefer the local file if it exists and is accessible
+        if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
+            playUrl = URL(fileURLWithPath: localFilePath)
+            os_log("Playing episode from local file: %@", log: OSLog.default, type: .info, localFilePath)
+        } else {
+            // Only fall back to streaming if the local file is not available
+            os_log("Local file not found or unavailable. Attempting to stream.", log: OSLog.default, type: .error)
+            if let url = URL(string: episode.audioUrl), ReachabilityCheck.isConnectedToNetwork() {
+                playUrl = url
+                os_log("Playing episode from streaming URL: %@", log: OSLog.default, type: .info, episode.audioUrl)
             } else {
-                url = URL(string: episode.audioUrl)
+                os_log("Cannot play episode. No internet connection and local file is unavailable.", log: OSLog.default, type: .error)
+                return
             }
-            
-            guard let playUrl = url else { return }
-            
-            let playerItem = AVPlayerItem(url: playUrl)
-            if player == nil {
-                player = AVPlayer(playerItem: playerItem)
-            } else {
-                player?.replaceCurrentItem(with: playerItem)
-            }
-            
-            currentEpisode = episode
-            currentFeed = feed
-            
-            // Check if there's saved progress for this episode
-            if let savedProgress = loadProgress(for: episode.id) {
-                let time = CMTime(seconds: savedProgress * episode.duration, preferredTimescale: 1)
-                player?.seek(to: time)
-            }
-            
-            play()
         }
+
+        guard let url = playUrl else {
+            os_log("Failed to create play URL for episode: %@", log: OSLog.default, type: .error, episode.title)
+            return
+        }
+
+        let playerItem = AVPlayerItem(url: url)
+        if player == nil {
+            player = AVPlayer(playerItem: playerItem)
+        } else {
+            player?.replaceCurrentItem(with: playerItem)
+        }
+
+        currentEpisode = episode
+        currentFeed = feed
+
+        // Check if there's saved progress for this episode
+        if let savedProgress = loadProgress(for: episode.id) {
+            let time = CMTime(seconds: savedProgress * episode.duration, preferredTimescale: 1)
+            player?.seek(to: time)
+        }
+
+        play()
+    }
+
+
+
+    
     
     private func loadProgress(for episodeId: String) -> Double? {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
@@ -67,23 +86,18 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
 
     func play() {
-        if radioPlayer?.isPlaying == true {
-            radioPlayer?.pause()
+            if radioPlayer?.isPlaying == true {
+                radioPlayer?.pause()
+            }
+            
+            guard let player = player else { return }
+            player.play()
+            isPlaying = true
+            setupTimeObserver()
+            updateNowPlayingInfo()
+            objectWillChange.send()
         }
-        
-        guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else { return }
-        
-        player.play()
-        isPlaying = true
-        
-        setupNowPlaying(for: currentEpisode, feed: currentFeed)
-        setupTimeObserver()
-        observePlayerItem()
-        
-        updateNowPlayingInfo()
-        objectWillChange.send()
-    }
-
+    
     func pause() {
         guard let player = player else { return }
         

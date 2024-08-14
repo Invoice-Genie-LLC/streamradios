@@ -377,7 +377,6 @@ struct SettingsView: View {
         isCleaningPodcasts = true
         podcastCleanupComplete = false
 
-        // Calling a method on the `podcastViewModel` directly
         podcastViewModel.clearAllPodcastEpisodes { success in
             DispatchQueue.main.async {
                 self.isCleaningPodcasts = false
