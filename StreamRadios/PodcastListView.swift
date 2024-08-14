@@ -78,26 +78,27 @@ struct PodcastListView: View {
     }
 
     private func addPodcast() {
-           let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
-           viewModel.addPodcastFeed(newFeed)
-           newPodcastTitle = ""
-           newPodcastURL = ""
-           showingAddPodcast = false
-       }
+        let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
+        viewModel.addPodcastFeed(newFeed)
+        newPodcastTitle = ""
+        newPodcastURL = ""
+        showingAddPodcast = false
+    }
 
     private func playLatestEpisode(for feed: PodcastFeed) {
-            viewModel.fetchEpisodes(for: feed) { result in
-                switch result {
-                case .success(let episodes):
-                    if let latestEpisode = episodes.first {
-                        podcastPlayer.playEpisode(latestEpisode, feed: feed)
-                    }
-                case .failure(let error):
-                    os_log("Failed to fetch episodes: %@", log: log, type: .error, error.localizedDescription)
+        viewModel.fetchEpisodes(for: feed) { result in
+            switch result {
+            case .success(let episodes):
+                if let latestEpisode = episodes.first {
+                    podcastPlayer.playEpisode(latestEpisode, feed: feed)
                 }
+            case .failure(let error):
+                os_log("Failed to fetch episodes: %@", log: log, type: .error, error.localizedDescription)
             }
         }
+    }
 }
+
 
 
 
@@ -174,19 +175,19 @@ struct EpisodeRowView: View {
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var isFavorite: Bool
     @State private var isDownloaded: Bool
-       @State private var isDownloading: Bool = false
+    @State private var isDownloading: Bool = false
 
     init(episode: PodcastEpisode, isPlaying: Bool, progress: Double?, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
-            self.episode = episode
-            self.isPlaying = isPlaying
-            self.progress = progress
-            self.onPlay = onPlay
-            self.onStop = onStop
-            self.viewModel = viewModel
-            self.podcastPlayer = podcastPlayer
-            _isFavorite = State(initialValue: episode.state.isFavorite)
-            _isDownloaded = State(initialValue: episode.state.isDownloaded)
-        }
+        self.episode = episode
+        self.isPlaying = isPlaying
+        self.progress = progress
+        self.onPlay = onPlay
+        self.onStop = onStop
+        self.viewModel = viewModel
+        self.podcastPlayer = podcastPlayer
+        _isFavorite = State(initialValue: episode.state.isFavorite)
+        _isDownloaded = State(initialValue: episode.state.isDownloaded)
+    }
 
     var body: some View {
         HStack {
@@ -200,13 +201,13 @@ struct EpisodeRowView: View {
                     .foregroundColor(.secondary)
                 
                 if let progress = progress, progress > 0.0 && progress < 1.0 {
-                                    ProgressView(value: progress)
-                                        .accentColor(.blue)
-                                    
-                                    Text(formatRemainingTime(progress: progress))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
+                    ProgressView(value: progress)
+                        .accentColor(.blue)
+                    
+                    Text(formatRemainingTime(progress: progress))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
             
             Spacer()
@@ -230,35 +231,35 @@ struct EpisodeRowView: View {
             Spacer().frame(width: 16) // Space between buttons
             
             // Download Button
-                       Button(action: {
-                           if !isDownloaded {
-                               isDownloading = true
-                               viewModel.downloadEpisode(episode) { result in
-                                   DispatchQueue.main.async {
-                                       isDownloading = false
-                                       switch result {
-                                       case .success(let updatedEpisode):
-                                           isDownloaded = updatedEpisode.state.isDownloaded
-                                       case .failure(let error):
-                                           // Handle download error (e.g., show an alert)
-                                           print("Download failed: \(error)")
-                                       }
-                                   }
-                               }
-                           } else {
-                               // Handle already downloaded state (e.g., play from local file)
-                           }
-                       }) {
-                           if isDownloading {
-                               ProgressView()
-                                   .frame(width: 24, height: 24)
-                           } else {
-                               Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
-                                   .resizable()
-                                   .frame(width: 24, height: 24)
-                                   .foregroundColor(isDownloaded ? .blue : .gray)
-                           }
-                       }
+            Button(action: {
+                if !isDownloaded {
+                    isDownloading = true
+                    viewModel.downloadEpisode(episode) { result in
+                        DispatchQueue.main.async {
+                            isDownloading = false
+                            switch result {
+                            case .success(let updatedEpisode):
+                                isDownloaded = updatedEpisode.state.isDownloaded
+                            case .failure(let error):
+                                // Handle download error (e.g., show an alert)
+                                print("Download failed: \(error)")
+                            }
+                        }
+                    }
+                } else {
+                    // Handle already downloaded state (e.g., play from local file)
+                }
+            }) {
+                if isDownloading {
+                    ProgressView()
+                        .frame(width: 24, height: 24)
+                } else {
+                    Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                        .resizable()
+                        .frame(width: 24, height: 24)
+                        .foregroundColor(isDownloaded ? .blue : .gray)
+                }
+            }
             .buttonStyle(PlainButtonStyle())
 
             Spacer().frame(width: 16) // Space between buttons and play button
@@ -337,6 +338,7 @@ struct EpisodeRowView: View {
         return String(format: "%d:%02d remaining", minutes, seconds)
     }
 }
+
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?
@@ -466,8 +468,8 @@ struct PodcastPlayerView: View {
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
             .onChange(of: selectedTab) { _ in
-                            updateFilteredEpisodes()
-                        }
+                updateFilteredEpisodes()
+            }
             
             Divider()
                 .frame(height: 2)
@@ -479,6 +481,7 @@ struct PodcastPlayerView: View {
         .onAppear {
             os_log("Loading episodes for feed: %@", log: log, type: .info, feed.title)
             loadEpisodes()
+            seekPosition = podcastPlayer.currentTime
         }
     }
 
@@ -537,7 +540,7 @@ struct PodcastPlayerView: View {
                 podcastPlayer.seek(to: seekPosition)
             }
         }
-        .disabled(podcastPlayer.duration == 0)
+        .disabled(podcastPlayer.duration == 0) // Disable only if there's no duration
     }
 
     private var timeLabels: some View {
@@ -557,11 +560,9 @@ struct PodcastPlayerView: View {
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
                     progress: podcastPlayer.progress[episode.id] ?? 0,
                     onPlay: {
-                        os_log("Playing episode: %@", log: log, type: .info, episode.title)
                         playEpisode(episode, feed: feed)
                     },
                     onStop: {
-                        os_log("Stopping episode: %@", log: log, type: .info, episode.title)
                         podcastPlayer.togglePlayPause()
                     },
                     viewModel: viewModel,
@@ -592,14 +593,14 @@ struct PodcastPlayerView: View {
     }
 
     var filteredEpisodes: [PodcastEpisode] {
-            viewModel.currentEpisodes
-        }
+        viewModel.currentEpisodes
+    }
 
     private func loadEpisodes() {
-           viewModel.fetchEpisodes(for: feed) { _ in
-               updateFilteredEpisodes()
-           }
-       }
+        viewModel.fetchEpisodes(for: feed) { _ in
+            updateFilteredEpisodes()
+        }
+    }
     
     private func updateFilteredEpisodes() {
         switch selectedTab {
@@ -617,14 +618,12 @@ struct PodcastPlayerView: View {
         viewModel.currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
     }
 
-
     private func formatTime(_ time: Double) -> String {
         let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
 }
-
 
 struct PodcastList: View {
     let feeds: [PodcastFeed]
@@ -655,5 +654,6 @@ struct PodcastList: View {
         .listStyle(PlainListStyle())
     }
 }
+
 
 
