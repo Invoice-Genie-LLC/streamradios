@@ -167,6 +167,40 @@ class PodcastViewModel: ObservableObject {
                 os_log("Failed to load podcast feeds: %@", log: log, type: .error, error.localizedDescription)
             }
         }
+    
+    func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
+            // Remove the local file
+            if let localFilePath = episode.localFilePath {
+                do {
+                    try fileManager.removeItem(atPath: localFilePath)
+                    os_log("Deleted local file for episode: %@", log: log, type: .info, episode.title)
+                } catch {
+                    os_log("Failed to delete local file for episode: %@, error: %@", log: log, type: .error, episode.title, error.localizedDescription)
+                }
+            }
+
+            // Remove the episode from the Core Data
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+
+            do {
+                let results = try context.fetch(fetchRequest)
+                for object in results {
+                    context.delete(object)
+                }
+
+                // Save the context to persist the deletion
+                try context.save()
+
+                // Remove the episode from the in-memory lists
+                allEpisodes.removeAll { $0.id == episode.id }
+                currentEpisodes.removeAll { $0.id == episode.id }
+                
+                os_log("Deleted episode from Core Data and in-memory list: %@", log: log, type: .info, episode.title)
+            } catch {
+                os_log("Failed to delete episode from Core Data: %@, error: %@", log: log, type: .error, episode.title, error.localizedDescription)
+            }
+        }
 
     private func loadAllEpisodes() {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
