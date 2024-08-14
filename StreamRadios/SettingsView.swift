@@ -24,6 +24,9 @@ struct SettingsView: View {
     @State private var activeAlert: AlertType?
     @EnvironmentObject var alertManager: AlertManager
     var onImportComplete: ((String) -> Void)?
+    @StateObject private var podcastViewModel = PodcastViewModel()
+        @State private var isCleaningPodcasts = false
+        @State private var podcastCleanupComplete = false
 
     
     var body: some View {
@@ -34,6 +37,7 @@ struct SettingsView: View {
                     displaySettingsSection
                     streamFileUploadSection
                     dataManagementSection
+                    podcastDataManagementSection
                 }
                 .padding()
             }
@@ -87,6 +91,56 @@ struct SettingsView: View {
                 
         }
     }
+    
+    private var podcastDataManagementSection: some View {
+           VStack(alignment: .leading, spacing: 20) {
+               Text("Podcast Data Management")
+                   .font(.headline)
+                   .padding(.top)
+               
+               VStack(alignment: .leading, spacing: 15) {
+                   Button("Clear All Podcast Episodes") {
+                       showAlert(for: .clearAllPodcasts)
+                   }
+                   .padding()
+                   .frame(maxWidth: .infinity)
+                   .background(Color(.systemBackground))
+                   .cornerRadius(12)
+                   .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                   
+                   if isCleaningPodcasts {
+                       ProgressView("Clearing podcast data...")
+                           .padding()
+                   } else if podcastCleanupComplete {
+                       Text("All podcast episodes have been cleared.")
+                           .foregroundColor(.green)
+                           .padding()
+                   }
+                   
+                   podcastCleanupWarningText
+               }
+               .padding()
+               .background(Color(.systemGray6))
+               .cornerRadius(16)
+               .overlay(
+                   RoundedRectangle(cornerRadius: 16)
+                       .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+               )
+           }
+           .animation(.default, value: isCleaningPodcasts)
+           .animation(.default, value: podcastCleanupComplete)
+       }
+    
+    private var podcastCleanupWarningText: some View {
+            Text("Warning: ")
+                .fontWeight(.bold)
+                .foregroundColor(.red)
+                .font(.footnote) +
+            Text("Clearing all podcast episodes will permanently erase all downloaded episodes and their associated information from your device's local storage. This includes playback progress and favorites. This action cannot be undone.")
+                .font(.footnote)
+                .foregroundColor(.gray)
+        }
+    
     
     private var playbackSettingsSection: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -307,7 +361,34 @@ struct SettingsView: View {
     }
     
     private func showAlert(for alertType: AlertType) {
-        alertManager.showCustomAlert(for: alertType, deleteAction: alertType == .deleteAllData ? initiateDataDeletion : nil)
+            alertManager.showCustomAlert(for: alertType, deleteAction: {
+                switch alertType {
+                case .deleteAllData:
+                    initiateDataDeletion()
+                case .clearAllPodcasts:
+                    initiatePodcastCleanup()
+                default:
+                    break
+                }
+            })
+        }
+    
+    private func initiatePodcastCleanup() {
+        isCleaningPodcasts = true
+        podcastCleanupComplete = false
+
+        // Calling a method on the `podcastViewModel` directly
+        podcastViewModel.clearAllPodcastEpisodes { success in
+            DispatchQueue.main.async {
+                self.isCleaningPodcasts = false
+                if success {
+                    self.podcastCleanupComplete = true
+                    self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast episodes have been successfully cleared from local storage.")
+                } else {
+                    self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast episodes. Please try again.")
+                }
+            }
+        }
     }
     
     private func initiateDataDeletion() {

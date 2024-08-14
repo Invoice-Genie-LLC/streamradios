@@ -174,18 +174,19 @@ struct EpisodeRowView: View {
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var isFavorite: Bool
     @State private var isDownloaded: Bool
+       @State private var isDownloading: Bool = false
 
     init(episode: PodcastEpisode, isPlaying: Bool, progress: Double?, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
-        self.episode = episode
-        self.isPlaying = isPlaying
-        self.progress = progress
-        self.onPlay = onPlay
-        self.onStop = onStop
-        self.viewModel = viewModel
-        self.podcastPlayer = podcastPlayer
-        _isFavorite = State(initialValue: episode.state.isFavorite)
-        _isDownloaded = State(initialValue: episode.state.isDownloaded)
-    }
+            self.episode = episode
+            self.isPlaying = isPlaying
+            self.progress = progress
+            self.onPlay = onPlay
+            self.onStop = onStop
+            self.viewModel = viewModel
+            self.podcastPlayer = podcastPlayer
+            _isFavorite = State(initialValue: episode.state.isFavorite)
+            _isDownloaded = State(initialValue: episode.state.isDownloaded)
+        }
 
     var body: some View {
         HStack {
@@ -229,23 +230,35 @@ struct EpisodeRowView: View {
             Spacer().frame(width: 16) // Space between buttons
             
             // Download Button
-            Button(action: {
-                isDownloaded.toggle()
-                // Add logic to start/cancel download
-                // For now, we'll just toggle the state
-                viewModel.updateEpisodeState(
-                    episodeId: episode.id,
-                    isPlayed: episode.state.isPlayed,
-                    isFavorite: isFavorite,
-                    progress: episode.state.progress,
-                    isDownloaded: isDownloaded
-                )
-            }) {
-                Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
-                    .resizable()
-                    .frame(width: 24, height: 24)
-                    .foregroundColor(isDownloaded ? .blue : .gray)
-            }
+                       Button(action: {
+                           if !isDownloaded {
+                               isDownloading = true
+                               viewModel.downloadEpisode(episode) { result in
+                                   DispatchQueue.main.async {
+                                       isDownloading = false
+                                       switch result {
+                                       case .success(let updatedEpisode):
+                                           isDownloaded = updatedEpisode.state.isDownloaded
+                                       case .failure(let error):
+                                           // Handle download error (e.g., show an alert)
+                                           print("Download failed: \(error)")
+                                       }
+                                   }
+                               }
+                           } else {
+                               // Handle already downloaded state (e.g., play from local file)
+                           }
+                       }) {
+                           if isDownloading {
+                               ProgressView()
+                                   .frame(width: 24, height: 24)
+                           } else {
+                               Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                                   .resizable()
+                                   .frame(width: 24, height: 24)
+                                   .foregroundColor(isDownloaded ? .blue : .gray)
+                           }
+                       }
             .buttonStyle(PlainButtonStyle())
 
             Spacer().frame(width: 16) // Space between buttons and play button
