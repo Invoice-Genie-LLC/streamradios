@@ -45,12 +45,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         currentFeed = feed
         
         // Check if there's saved progress for this episode
-        if let savedProgress = progress[episode.id] {
+        if let savedProgress = loadProgress(for: episode.id) {
             let time = CMTime(seconds: savedProgress * episode.duration, preferredTimescale: 1)
             player?.seek(to: time)
         }
         
         play()
+    }
+    
+    private func loadProgress(for episodeId: String) -> Double? {
+        let key = UserDefaultsKeys.progressKey(for: episodeId)
+        return UserDefaults.standard.value(forKey: key) as? Double
     }
 
     func play() {
@@ -79,11 +84,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Save current progress
         if let currentEpisode = currentEpisode {
-            progress[currentEpisode.id] = currentTime / duration
+            let progress = currentTime / duration
+            saveProgress(for: currentEpisode.id, progress: progress)
         }
         
         updateNowPlayingInfo()
         objectWillChange.send()
+    }
+    
+    private func saveProgress(for episodeId: String, progress: Double) {
+        let key = UserDefaultsKeys.progressKey(for: episodeId)
+        UserDefaults.standard.set(progress, forKey: key)
     }
     
     func togglePlayPause() {
@@ -128,7 +139,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             timeObserver = nil
         }
         
-        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self, !self.isSeeking else { return }
             self.currentTime = time.seconds
@@ -160,7 +171,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         guard let episodeId = currentEpisode?.id, duration > 0 else { return }
         let progress = currentTime / duration
         self.progress[episodeId] = progress
+        saveProgress(for: episodeId, progress: progress)
         updateNowPlayingInfo()
+    }
+    
+    private func clearProgress(for episodeId: String) {
+        let key = UserDefaultsKeys.progressKey(for: episodeId)
+        UserDefaults.standard.removeObject(forKey: key)
     }
     
     private func setupNowPlaying(for episode: PodcastEpisode, feed: PodcastFeed) {
@@ -236,5 +253,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if let observer = timeObserver {
             player?.removeTimeObserver(observer)
         }
+    }
+}
+
+struct UserDefaultsKeys {
+    static func progressKey(for episodeId: String) -> String {
+        return "PodcastProgress_\(episodeId)"
     }
 }

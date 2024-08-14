@@ -194,14 +194,14 @@ struct EpisodeRowView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 
-                if let progress = progress {
-                    ProgressView(value: progress)
-                        .accentColor(.blue)
-                    
-                    Text(formatRemainingTime(progress: progress))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                if let progress = progress, progress > 0.0 && progress < 1.0 {
+                                    ProgressView(value: progress)
+                                        .accentColor(.blue)
+                                    
+                                    Text(formatRemainingTime(progress: progress))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
             }
             
             Spacer()
@@ -550,10 +550,10 @@ struct PodcastPlayerView: View {
                 EpisodeRowView(
                     episode: episode,
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                    progress: podcastPlayer.progress[episode.id],
+                    progress: podcastPlayer.progress[episode.id] ?? 0,
                     onPlay: {
                         os_log("Playing episode: %@", log: log, type: .info, episode.title)
-                        podcastPlayer.playEpisode(episode, feed: feed)
+                        playEpisode(episode, feed: feed)
                     },
                     onStop: {
                         os_log("Stopping episode: %@", log: log, type: .info, episode.title)
@@ -568,6 +568,16 @@ struct PodcastPlayerView: View {
             }
         }
         .listStyle(PlainListStyle())
+    }
+
+    private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+        if podcastPlayer.currentEpisode?.id == episode.id {
+            // If it's the same episode, just toggle play/pause
+            podcastPlayer.togglePlayPause()
+        } else {
+            // If it's a different episode, play it from the beginning or saved progress
+            podcastPlayer.playEpisode(episode, feed: feed)
+        }
     }
 
     var filteredEpisodes: [PodcastEpisode] {
