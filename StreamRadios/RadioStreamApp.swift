@@ -15,15 +15,10 @@ struct RadioStreamApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var alertManager = AlertManager()
+    @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var podcastPlayer = PodcastPlayer.shared
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel.shared
-    @StateObject private var podcastViewModel = PodcastViewModel()
-        @StateObject private var podcastPlayer = PodcastPlayer.shared
-    
-    init() {
-        PodcastPlayer.shared.configure(with: podcastViewModel)
-
-       }
 
     var body: some Scene {
         WindowGroup {
@@ -40,6 +35,7 @@ struct RadioStreamApp: App {
                 .preferredColorScheme(isDarkMode ? .dark : .light)
                 .onAppear {
                     setupApp()
+                    PodcastPlayer.shared.configure(with: podcastViewModel)
                 }
         }
     }
@@ -56,9 +52,6 @@ struct RadioStreamApp: App {
             UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
         }
         
-        // Load podcast episode progress
-        podcastViewModel.loadAllEpisodesProgress()
-
         // Handle the fetched stations if needed
         if viewModel.stations.isEmpty {
             if UserDefaults.standard.bool(forKey: "HasLaunchedBefore") == false {
@@ -67,6 +60,12 @@ struct RadioStreamApp: App {
                 viewModel.loadStationsFromCoreData()
             }
         }
+        
+        // Load podcast episode progress
+          podcastViewModel.loadAllEpisodesProgress()
+          
+          // Clean up any duplicate episodes
+          podcastViewModel.cleanupDuplicateEpisodes()
     }
 
     private func fetchStationsFromCloudKit() {
