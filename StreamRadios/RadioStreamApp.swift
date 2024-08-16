@@ -17,6 +17,13 @@ struct RadioStreamApp: App {
     @StateObject private var alertManager = AlertManager()
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel.shared
+    @StateObject private var podcastViewModel = PodcastViewModel()
+        @StateObject private var podcastPlayer = PodcastPlayer.shared
+    
+    init() {
+        PodcastPlayer.shared.configure(with: podcastViewModel)
+
+       }
 
     var body: some Scene {
         WindowGroup {
@@ -28,6 +35,8 @@ struct RadioStreamApp: App {
                 .environmentObject(RadioStationViewModel.shared)
                 .environmentObject(notificationManager)
                 .environmentObject(alertManager)
+                .environmentObject(podcastViewModel)
+                .environmentObject(podcastPlayer)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
                 .onAppear {
                     setupApp()
@@ -46,6 +55,9 @@ struct RadioStreamApp: App {
             notificationManager.requestAuthorization()
             UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
         }
+        
+        // Load podcast episode progress
+        podcastViewModel.loadAllEpisodesProgress()
 
         // Handle the fetched stations if needed
         if viewModel.stations.isEmpty {
