@@ -24,6 +24,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var isSeeking = false
     @Published var progress: [String: Double] = [:]
     @Published var currentFeed: PodcastFeed?
+    
 
     private var timeObserver: Any?
     private var playerItemObserver: NSKeyValueObservation?

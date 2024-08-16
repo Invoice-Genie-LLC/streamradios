@@ -73,6 +73,8 @@ class PodcastViewModel: ObservableObject {
     @Published var podcastUrls: [String] = []
         @Published var isLoading = false
         @Published var error: String?
+    @Published var episodeProgress: [String: Double] = [:]
+
         
         private let userDefaults = UserDefaults.standard
     private let episodeStatesKey = "PodcastEpisodeStates"
@@ -92,11 +94,11 @@ class PodcastViewModel: ObservableObject {
         }
     
     private func loadSavedData() {
-            loadPodcastFeeds()
-            loadAllEpisodes()
-            loadFavorites()
-            loadProgress()
-        }
+           loadPodcastFeeds()
+           loadAllEpisodes()
+           loadFavorites()
+           loadAllEpisodesProgress()
+       }
     
     func downloadEpisode(_ episode: PodcastEpisode, completion: @escaping (Result<PodcastEpisode, Error>) -> Void) {
         guard let url = URL(string: episode.audioUrl) else {
@@ -476,23 +478,52 @@ class PodcastViewModel: ObservableObject {
         }
     
     func updateProgress(for episode: PodcastEpisode, progress: Double) {
-        guard let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) else { return }
-        
-        // Check if the progress has changed
-        let currentProgress = allEpisodes[index].state.progress
-        if currentProgress == progress {
-            return // No change, so skip saving
+            episodeProgress[episode.id] = progress
+            
+            if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                allEpisodes[index].state.progress = progress
+            }
+            
+            if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                currentEpisodes[currentIndex].state.progress = progress
+            }
+            
+            saveEpisodeProgress(episodeId: episode.id, progress: progress)
         }
-        
-        // Update the in-memory state
-        allEpisodes[index].state.progress = progress
-        if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-            currentEpisodes[currentIndex].state.progress = progress
+    
+    private func saveEpisodeProgress(episodeId: String, progress: Double) {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+            
+            do {
+                let results = try context.fetch(fetchRequest)
+                if let managedEpisode = results.first {
+                    managedEpisode.progress = progress
+                    try context.save()
+                }
+            } catch {
+                print("Failed to save episode progress: \(error)")
+            }
         }
-        
-        // Save only the updated episode to Core Data
-        saveEpisodesToCoreData([allEpisodes[index]])
-    }
+    
+    func getProgress(for episode: PodcastEpisode) -> Double {
+           return episodeProgress[episode.id] ?? 0.0
+       }
+    
+    func loadAllEpisodesProgress() {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            do {
+                let results = try context.fetch(fetchRequest)
+                for managedEpisode in results {
+                    if let id = managedEpisode.id {
+                        episodeProgress[id] = managedEpisode.progress
+                    }
+                }
+            } catch {
+                print("Failed to load episode progress: \(error)")
+            }
+        }
+    
 
         func getFavoriteEpisodes() -> [PodcastEpisode] {
             return allEpisodes.filter { $0.state.isFavorite }
