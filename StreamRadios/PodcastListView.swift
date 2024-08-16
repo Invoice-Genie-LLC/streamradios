@@ -167,27 +167,27 @@ struct PodcastIconView: View {
 
 struct EpisodeRowView: View {
     let episode: PodcastEpisode
-    let isPlaying: Bool
-    let progress: Double?
-    let onPlay: () -> Void
-    let onStop: () -> Void
+       let isPlaying: Bool
+       let progress: Double?
+       let onPlay: () -> Void
+       let onStop: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
-    @ObservedObject var podcastPlayer: PodcastPlayer
-    @State private var isFavorite: Bool
-    @State private var isDownloaded: Bool
-    @State private var isDownloading: Bool = false
+       @ObservedObject var podcastPlayer: PodcastPlayer
+       @State private var isFavorite: Bool
+       @State private var isDownloaded: Bool
+       @State private var isDownloading: Bool = false
 
     init(episode: PodcastEpisode, isPlaying: Bool, progress: Double?, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
-        self.episode = episode
-        self.isPlaying = isPlaying
-        self.progress = progress
-        self.onPlay = onPlay
-        self.onStop = onStop
-        self.viewModel = viewModel
-        self.podcastPlayer = podcastPlayer
-        _isFavorite = State(initialValue: episode.state.isFavorite)
-        _isDownloaded = State(initialValue: episode.state.isDownloaded)
-    }
+           self.episode = episode
+           self.isPlaying = isPlaying
+           self.progress = progress
+           self.onPlay = onPlay
+           self.onStop = onStop
+           self.viewModel = viewModel
+           self.podcastPlayer = podcastPlayer
+           _isFavorite = State(initialValue: episode.state.isFavorite)
+           _isDownloaded = State(initialValue: episode.state.isDownloaded)
+       }
 
     var body: some View {
         HStack {
@@ -200,14 +200,15 @@ struct EpisodeRowView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 
-                if let progress = progress, progress > 0.0 && progress < 1.0 {
-                    ProgressView(value: progress)
-                        .accentColor(.blue)
-                    
-                    Text(formatRemainingTime(progress: progress))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                let progress = viewModel.getProgress(for: episode)
+                                if progress > 0.0 && progress < 1.0 {
+                                    ProgressView(value: progress)
+                                        .accentColor(.blue)
+                                    
+                                    Text(formatRemainingTime(progress: progress))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
             }
             
             Spacer()
@@ -269,13 +270,8 @@ struct EpisodeRowView: View {
                 if isPlaying {
                     onStop()
                 } else {
-                    if podcastPlayer.currentEpisode?.id == episode.id {
-                        // Resume playback from where it left off
-                        podcastPlayer.play()
-                    } else {
-                        // Start playing a new episode
-                        onPlay()
-                    }
+                    onPlay()
+                
                 }
             }) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -332,11 +328,11 @@ struct EpisodeRowView: View {
     }
 
     private func formatRemainingTime(progress: Double) -> String {
-        let remainingTime = (1 - progress) * episode.duration
-        let minutes = Int(remainingTime) / 60
-        let seconds = Int(remainingTime) % 60
-        return String(format: "%d:%02d remaining", minutes, seconds)
-    }
+           let remainingTime = (1 - progress) * episode.duration
+           let minutes = Int(remainingTime) / 60
+           let seconds = Int(remainingTime) % 60
+           return String(format: "%d:%02d remaining", minutes, seconds)
+       }
 }
 
 
@@ -467,6 +463,14 @@ struct PodcastPlayerView: View {
             }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
+            .onAppear {
+                       seekPosition = viewModel.getProgress(for: podcastPlayer.currentEpisode ?? PodcastEpisode(id: "", title: "", description: "", audioUrl: "", publicationDate: Date(), duration: 0, state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0, isDownloaded: false), feedId: ""))
+                   }
+            .onChange(of: podcastPlayer.currentTime) { newValue in
+                        if let currentEpisode = podcastPlayer.currentEpisode {
+                            viewModel.updateProgress(for: currentEpisode, progress: newValue / podcastPlayer.duration)
+                        }
+                    }
             .onChange(of: selectedTab) { _ in
                 updateFilteredEpisodes()
             }
@@ -532,16 +536,16 @@ struct PodcastPlayerView: View {
     }
 
     private var progressSlider: some View {
-        Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1)) { editing in
-            if editing {
-                podcastPlayer.isSeeking = true
-            } else {
-                podcastPlayer.isSeeking = false
-                podcastPlayer.seek(to: seekPosition)
+            Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1)) { editing in
+                if !editing {
+                    podcastPlayer.seek(to: seekPosition)
+                    if let currentEpisode = podcastPlayer.currentEpisode {
+                        viewModel.updateProgress(for: currentEpisode, progress: seekPosition / podcastPlayer.duration)
+                    }
+                }
             }
+            .disabled(podcastPlayer.duration == 0)
         }
-        .disabled(podcastPlayer.duration == 0) // Disable only if there's no duration
-    }
 
     private var timeLabels: some View {
         HStack {
