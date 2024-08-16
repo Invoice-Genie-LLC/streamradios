@@ -466,15 +466,14 @@ struct PodcastPlayerView: View {
             .onAppear {
                        seekPosition = viewModel.getProgress(for: podcastPlayer.currentEpisode ?? PodcastEpisode(id: "", title: "", description: "", audioUrl: "", publicationDate: Date(), duration: 0, state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0, isDownloaded: false), feedId: ""))
                    }
+            .onChange(of: selectedTab) { newValue in
+                            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
+                        }
             .onChange(of: podcastPlayer.currentTime) { newValue in
                         if let currentEpisode = podcastPlayer.currentEpisode {
                             viewModel.updateProgress(for: currentEpisode, progress: newValue / podcastPlayer.duration)
                         }
                     }
-            .onChange(of: selectedTab) { _ in
-                updateFilteredEpisodes()
-            }
-            
             Divider()
                 .frame(height: 2)
                 .background(Color.blue)
@@ -485,8 +484,10 @@ struct PodcastPlayerView: View {
         .onAppear {
             os_log("Loading episodes for feed: %@", log: log, type: .info, feed.title)
             loadEpisodes()
-            seekPosition = podcastPlayer.currentTime
+                        seekPosition = podcastPlayer.currentTime
+                        viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
         }
+     
     }
 
     private var nowPlayingView: some View {
@@ -557,34 +558,26 @@ struct PodcastPlayerView: View {
     }
 
     private var episodeList: some View {
-        List {
-            ForEach(filteredEpisodes) { episode in
-                EpisodeRowView(
-                    episode: episode,
-                    isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                    progress: podcastPlayer.progress[episode.id] ?? 0,
-                    onPlay: {
-                        playEpisode(episode, feed: feed)
-                    },
-                    onStop: {
-                        podcastPlayer.togglePlayPause()
-                    },
-                    viewModel: viewModel,
-                    podcastPlayer: podcastPlayer
-                )
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    if episode.state.isDownloaded {
-                        Button(role: .destructive) {
-                            viewModel.deleteDownloadedEpisode(episode)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
+            List {
+                ForEach(viewModel.currentEpisodes, id: \.id) { episode in
+                    EpisodeRowView(
+                        episode: episode,
+                        isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                        progress: viewModel.getProgress(for: episode),
+                        onPlay: {
+                            playEpisode(episode, feed: feed)
+                        },
+                        onStop: {
+                            podcastPlayer.togglePlayPause()
+                        },
+                        viewModel: viewModel,
+                        podcastPlayer: podcastPlayer
+                    )
                 }
             }
+            .listStyle(PlainListStyle())
         }
-        .listStyle(PlainListStyle())
-    }
+    
 
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         if podcastPlayer.currentEpisode?.id == episode.id {
@@ -606,16 +599,16 @@ struct PodcastPlayerView: View {
         }
     }
     
-    private func updateFilteredEpisodes() {
+private func updateFilteredEpisodes() {
         switch selectedTab {
         case 0: // All
             viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
         case 1: // Unplayed
-            viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id && (podcastPlayer.progress[$0.id] == nil || podcastPlayer.progress[$0.id] == 0) }
+            viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id && $0.state.progress == 0 }
         case 2: // Favorite
-            viewModel.currentEpisodes = viewModel.getFavoriteEpisodes().filter { $0.feedId == feed.id }
+            viewModel.currentEpisodes = viewModel.favoriteEpisodes.filter { $0.feedId == feed.id }
         case 3: // Downloads
-            viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id && $0.state.isDownloaded }
+            viewModel.currentEpisodes = viewModel.downloadedEpisodes.filter { $0.feedId == feed.id }
         default:
             viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
         }

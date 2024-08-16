@@ -31,18 +31,18 @@ extension FeedModel {
 extension PodcastModel {
 
     func update(from episode: PodcastEpisode) {
-        id = episode.id
-        title = episode.title
-        descriptionText = episode.description
-        audioUrl = episode.audioUrl
-        publicationDate = episode.publicationDate
-        duration = episode.duration
-        isFavorite = episode.state.isFavorite
-        isDownloaded = episode.state.isDownloaded
-        progress = episode.state.progress
-        feedId = episode.feedId
-        localFilePath = episode.localFilePath // Add this line to update localFilePath
-    }
+            self.id = episode.id
+            self.title = episode.title
+            self.descriptionText = episode.description
+            self.audioUrl = episode.audioUrl
+            self.publicationDate = episode.publicationDate
+            self.duration = episode.duration
+            self.isFavorite = episode.state.isFavorite
+            self.isDownloaded = episode.state.isDownloaded
+            self.progress = episode.state.progress
+            self.feedId = episode.feedId
+            self.localFilePath = episode.localFilePath
+        }
 
     func toPodcastEpisode() -> PodcastEpisode {
         return PodcastEpisode(
