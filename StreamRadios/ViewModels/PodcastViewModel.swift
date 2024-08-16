@@ -218,21 +218,36 @@ class PodcastViewModel: ObservableObject {
             }
         }
 
-        private func loadAllEpisodes() {
+    private func loadAllEpisodes() {
+            let context = CoreDataStack.shared.persistentContainer.viewContext
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            
             do {
                 let managedEpisodes = try context.fetch(fetchRequest)
-                allEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
-                
-                // Initialize lastSavedProgress with current progress values from Core Data
-                lastSavedProgress = allEpisodes.reduce(into: [:]) { dict, episode in
-                    dict[episode.id] = episode.state.progress
-                }
-                
-                os_log("Loaded %d episodes from Core Data", log: log, type: .info, allEpisodes.count)
+                self.allEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
+                print("Loaded \(self.allEpisodes.count) episodes")
             } catch {
-                os_log("Failed to load episodes: %@", log: log, type: .error, error.localizedDescription)
+                print("Failed to load episodes: \(error)")
             }
+        }
+    
+    private func convertToPodcastEpisode(_ managedEpisode: PodcastModel) -> PodcastEpisode {
+            return PodcastEpisode(
+                id: managedEpisode.id ?? UUID().uuidString,
+                title: managedEpisode.title ?? "",
+                description: managedEpisode.descriptionText ?? "",
+                audioUrl: managedEpisode.audioUrl ?? "",
+                publicationDate: managedEpisode.publicationDate ?? Date(),
+                duration: managedEpisode.duration,
+                state: EpisodeState(
+                    isPlayed: managedEpisode.progress == 1.0,
+                    isFavorite: managedEpisode.isFavorite,
+                    progress: managedEpisode.progress,
+                    isDownloaded: managedEpisode.isDownloaded
+                ),
+                feedId: managedEpisode.feedId ?? "",
+                localFilePath: managedEpisode.localFilePath
+            )
         }
 
         private func loadFavorites() {
@@ -419,23 +434,74 @@ class PodcastViewModel: ObservableObject {
         saveEpisodesToCoreData(updatedFeed.episodes)
     }
     
-    private func updateEpisodes(for feed: PodcastFeed) {
-        var updatedEpisodes = [PodcastEpisode]()
-        
-        for episode in feed.episodes {
-            if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                allEpisodes[index] = episode
-            } else {
-                allEpisodes.append(episode)
+    func updateEpisodes(for feed: PodcastFeed) {
+            var updatedEpisodes = [PodcastEpisode]()
+            
+            for episode in feed.episodes {
+                if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    // Update existing episode
+                    var updatedEpisode = episode
+                    updatedEpisode.state = allEpisodes[existingIndex].state
+                    allEpisodes[existingIndex] = updatedEpisode
+                    updatedEpisodes.append(updatedEpisode)
+                } else {
+                    // Add new episode
+                    allEpisodes.append(episode)
+                    updatedEpisodes.append(episode)
+                }
             }
-            updatedEpisodes.append(episode)
+            
+            saveEpisodesToCoreData(updatedEpisodes)
+            currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
+            
+            objectWillChange.send()
         }
-        
-        saveEpisodesToCoreData(updatedEpisodes)
-        currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
-    }
+    
+    func cleanupDuplicateEpisodes() {
+            let context = CoreDataStack.shared.persistentContainer.viewContext
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            
+            do {
+                let allEpisodes = try context.fetch(fetchRequest)
+                var uniqueEpisodes = [String: PodcastModel]()
+                var duplicatesToDelete = [PodcastModel]()
+                
+                for episode in allEpisodes {
+                    if let id = episode.id {
+                        if let existing = uniqueEpisodes[id] {
+                            // Keep the most recently updated episode
+                            if episode.publicationDate ?? Date() > existing.publicationDate ?? Date() {
+                                duplicatesToDelete.append(existing)
+                                uniqueEpisodes[id] = episode
+                            } else {
+                                duplicatesToDelete.append(episode)
+                            }
+                        } else {
+                            uniqueEpisodes[id] = episode
+                        }
+                    }
+                }
+                
+                // Delete duplicates
+                for duplicate in duplicatesToDelete {
+                    context.delete(duplicate)
+                }
+                
+                // Save changes
+                try context.save()
+                print("Cleaned up \(duplicatesToDelete.count) duplicate episodes")
+                
+                // Refresh allEpisodes array
+                self.loadAllEpisodes()
+                
+            } catch {
+                print("Failed to clean up duplicate episodes: \(error)")
+            }
+        }
     
     private func saveEpisodesToCoreData(_ episodes: [PodcastEpisode]) {
+            let context = CoreDataStack.shared.persistentContainer.viewContext
+            
             for episode in episodes {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
@@ -443,23 +509,33 @@ class PodcastViewModel: ObservableObject {
                 do {
                     let results = try context.fetch(fetchRequest)
                     let managedEpisode: PodcastModel
+                    
                     if let existingEpisode = results.first {
+                        // Update existing episode
                         managedEpisode = existingEpisode
                     } else {
+                        // Create new episode only if it doesn't exist
                         managedEpisode = PodcastModel(context: context)
                     }
+                    
+                    // Update managed episode properties
                     managedEpisode.update(from: episode)
+                    
                 } catch {
-                    os_log("Failed to fetch/save episode: %@", log: log, type: .error, error.localizedDescription)
+                    print("Failed to fetch/save episode: \(error)")
                 }
             }
             
+            // Save context after processing all episodes
             do {
                 try context.save()
-                os_log("Successfully saved episodes to Core Data", log: log, type: .info)
+                print("Successfully saved episodes to Core Data")
             } catch {
-                os_log("Failed to save episodes to Core Data: %@", log: log, type: .error, error.localizedDescription)
+                print("Failed to save context: \(error)")
             }
+            
+            // Refresh allEpisodes array to reflect the changes
+            loadAllEpisodes()
         }
     
     func updateProgress(for episode: PodcastEpisode, progress: Double) {
@@ -794,116 +870,125 @@ class PodcastViewModel: ObservableObject {
         }
     }
 
-    class RSSParser: NSObject, XMLParserDelegate {
-        private let parser: XMLParser
-        var podcastTitle: String?
-        var podcastDescription: String?
-        var artworkUrl: String?
-        var episodes: [PodcastEpisode] = []
-        private let feedId: String
+class RSSParser: NSObject, XMLParserDelegate {
+    private let parser: XMLParser
+    var podcastTitle: String?
+    var podcastDescription: String?
+    var artworkUrl: String?
+    var episodes: [PodcastEpisode] = []
+    private let feedId: String
+    
+    private var currentElement = ""
+    private var currentTitle: String?
+    private var currentDescription: String?
+    private var currentPubDate: String?
+    private var currentDuration: String?
+    private var currentEnclosure: String?
+    private var currentGuid: String?
+    private var isParsingItem = false
+    
+    init(data: Data, feedId: String) {
+        self.parser = XMLParser(data: data)
+        self.feedId = feedId
+        super.init()
+        self.parser.delegate = self
+    }
+    
+    func parse() {
+        parser.parse()
+    }
+    
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
+        currentElement = elementName
         
-        private var currentElement = ""
-        private var currentTitle: String?
-        private var currentDescription: String?
-        private var currentPubDate: String?
-        private var currentDuration: String?
-        private var currentEnclosure: String?
-        private var isParsingItem = false
-        
-        init(data: Data, feedId: String) {
-            self.parser = XMLParser(data: data)
-            self.feedId = feedId
-            super.init()
-            self.parser.delegate = self
+        switch elementName {
+        case "item":
+            isParsingItem = true
+            currentTitle = nil
+            currentDescription = nil
+            currentPubDate = nil
+            currentDuration = nil
+            currentEnclosure = nil
+            currentGuid = nil
+        case "enclosure":
+            if isParsingItem {
+                currentEnclosure = attributeDict["url"]
+            }
+        case "itunes:image":
+            if !isParsingItem {
+                artworkUrl = attributeDict["href"]
+            }
+        default:
+            break
         }
-        
-        func parse() {
-            parser.parse()
-        }
-        
-        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-            currentElement = elementName
+    }
+    
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if elementName == "item" {
+            if let title = currentTitle,
+               let description = currentDescription,
+               let pubDateString = currentPubDate,
+               let enclosure = currentEnclosure {
+                
+                let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
+                let duration = TimeInterval(currentDuration ?? "0") ?? 0
+                
+                // Use the GUID if available, otherwise generate a UUID
+                let id = currentGuid ?? UUID().uuidString
+                
+                let episode = PodcastEpisode(
+                    id: id,
+                    title: title,
+                    description: description,
+                    audioUrl: enclosure,
+                    publicationDate: pubDate,
+                    duration: duration,
+                    state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
+                    feedId: feedId
+                )
+                
+                episodes.append(episode)
+            }
             
-            switch elementName {
-            case "item":
-                isParsingItem = true
-                currentTitle = nil
-                currentDescription = nil
-                currentPubDate = nil
-                currentDuration = nil
-                currentEnclosure = nil
-            case "enclosure":
+            isParsingItem = false
+        }
+    }
+    
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        let data = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if !data.isEmpty {
+            switch currentElement {
+            case "title":
                 if isParsingItem {
-                    currentEnclosure = attributeDict["url"]
+                    currentTitle = (currentTitle ?? "") + data
+                } else {
+                    podcastTitle = (podcastTitle ?? "") + data
                 }
-            case "itunes:image":
-                if !isParsingItem {
-                    artworkUrl = attributeDict["href"]
+            case "description":
+                if isParsingItem {
+                    currentDescription = (currentDescription ?? "") + data
+                } else {
+                    podcastDescription = (podcastDescription ?? "") + data
+                }
+            case "pubDate":
+                if isParsingItem {
+                    currentPubDate = (currentPubDate ?? "") + data
+                }
+            case "itunes:duration":
+                if isParsingItem {
+                    currentDuration = (currentDuration ?? "") + data
+                }
+            case "guid":
+                if isParsingItem {
+                    currentGuid = (currentGuid ?? "") + data
                 }
             default:
                 break
             }
         }
-        
-        func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-            if elementName == "item" {
-                if let title = currentTitle,
-                   let description = currentDescription,
-                   let pubDateString = currentPubDate,
-                   let enclosure = currentEnclosure {
-                    
-                    let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
-                    let duration = TimeInterval(currentDuration ?? "0") ?? 0
-                    
-                    let episode = PodcastEpisode(
-                        id: UUID().uuidString,
-                        title: title,
-                        description: description,
-                        audioUrl: enclosure,
-                        publicationDate: pubDate,
-                        duration: duration,
-                        state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
-                        feedId: feedId
-                    )
-                    
-                    episodes.append(episode)
-                }
-                
-                isParsingItem = false
-            }
-        }
-        
-        func parser(_ parser: XMLParser, foundCharacters string: String) {
-            let data = string.trimmingCharacters(in: .whitespacesAndNewlines)
-            
-            if !data.isEmpty {
-                switch currentElement {
-                case "title":
-                    if isParsingItem {
-                        currentTitle = (currentTitle ?? "") + data
-                    } else {
-                        podcastTitle = (podcastTitle ?? "") + data
-                    }
-                case "description":
-                    if isParsingItem {
-                        currentDescription = (currentDescription ?? "") + data
-                    } else {
-                        podcastDescription = (podcastDescription ?? "") + data
-                    }
-                case "pubDate":
-                    if isParsingItem {
-                        currentPubDate = (currentPubDate ?? "") + data
-                    }
-                case "itunes:duration":
-                    if isParsingItem {
-                        currentDuration = (currentDuration ?? "") + data
-                    }
-                default:
-                    break
-                }
-            }
-        }
     }
+}
 
     extension DateFormatter {
         static let rfc2822: DateFormatter = {

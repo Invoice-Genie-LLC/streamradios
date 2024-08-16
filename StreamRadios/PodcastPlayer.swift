@@ -31,13 +31,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     weak var viewModel: PodcastViewModel?
 
-    private init() {
-            setupRemoteCommandCenter()
-        }
+    private init() {}
     
     func configure(with viewModel: PodcastViewModel) {
-           self.viewModel = viewModel
-       }
+            self.viewModel = viewModel
+        }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
             var playUrl: URL?
