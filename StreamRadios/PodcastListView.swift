@@ -19,6 +19,7 @@ struct PodcastListView: View {
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
+    @State private var seekPosition: Double = 0.0
 
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
 
@@ -185,7 +186,7 @@ struct EpisodeRowView: View {
         self.onStop = onStop
         self.viewModel = viewModel
         self.podcastPlayer = podcastPlayer
-        _isFavorite = State(initialValue: episode.state.isFavorite) // Correctly bind to the initial favorite state
+        _isFavorite = State(initialValue: episode.state.isFavorite)
         _isDownloaded = State(initialValue: episode.state.isDownloaded)
     }
 
@@ -205,12 +206,6 @@ struct EpisodeRowView: View {
                         .accentColor(.blue)
                     
                     HStack {
-                        Text("In Progress")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                        
-                        Spacer()
-                        
                         Text(formatRemainingTime(progress: progress, duration: episode.duration))
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -224,21 +219,19 @@ struct EpisodeRowView: View {
             
             Spacer()
 
-            // Favorite Button
             Button(action: {
-                isFavorite.toggle() // Toggle the local state
-                viewModel.toggleFavorite(for: episode) // Update the favorite status in the ViewModel
+                isFavorite.toggle()
+                viewModel.toggleFavorite(for: episode)
             }) {
                 Image(systemName: isFavorite ? "star.fill" : "star")
                     .resizable()
                     .frame(width: 24, height: 24)
-                    .foregroundColor(isFavorite ? .yellow : .gray) // Fill with color when favorited
+                    .foregroundColor(isFavorite ? .yellow : .gray)
             }
             .buttonStyle(PlainButtonStyle())
             
-            Spacer().frame(width: 16) // Space between buttons
+            Spacer().frame(width: 16)
             
-            // Download Button
             Button(action: {
                 if !isDownloaded {
                     isDownloading = true
@@ -249,13 +242,12 @@ struct EpisodeRowView: View {
                             case .success(let updatedEpisode):
                                 isDownloaded = updatedEpisode.state.isDownloaded
                             case .failure(let error):
-                                // Handle download error (e.g., show an alert)
                                 print("Download failed: \(error)")
                             }
                         }
                     }
                 } else {
-                    // Handle already downloaded state (e.g., play from local file)
+                    // Handle already downloaded state
                 }
             }) {
                 if isDownloading {
@@ -270,9 +262,8 @@ struct EpisodeRowView: View {
             }
             .buttonStyle(PlainButtonStyle())
 
-            Spacer().frame(width: 16) // Space between buttons and play button
+            Spacer().frame(width: 16)
             
-            // Play/Pause Button
             Button(action: {
                 if isPlaying {
                     onStop()
@@ -331,7 +322,6 @@ struct EpisodeRowView: View {
         return String(format: "%d:%02d remaining", minutes, seconds)
     }
 }
-
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?
@@ -525,16 +515,14 @@ struct PodcastPlayerView: View {
     }
 
     private var progressSlider: some View {
-            Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1)) { editing in
-                if !editing {
-                    podcastPlayer.seek(to: seekPosition)
-                    if let currentEpisode = podcastPlayer.currentEpisode {
-                        viewModel.updateProgress(for: currentEpisode, progress: seekPosition / podcastPlayer.duration)
-                    }
-                }
+        Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1), onEditingChanged: { editing in
+            if !editing {
+                podcastPlayer.seek(to: seekPosition)
             }
-            .disabled(podcastPlayer.duration == 0)
-        }
+        })
+        .disabled(podcastPlayer.duration == 0)
+    }
+
 
     private var timeLabels: some View {
         HStack {
@@ -586,7 +574,7 @@ struct PodcastPlayerView: View {
         }
     }
     
-private func updateFilteredEpisodes() {
+    private func updateFilteredEpisodes() {
         switch selectedTab {
         case 0: // All
             viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
@@ -599,8 +587,15 @@ private func updateFilteredEpisodes() {
         default:
             viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
         }
+
         viewModel.currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
+
+        // Log to ensure progress is correctly calculated and included
+        for episode in viewModel.currentEpisodes {
+            print("Episode: \(episode.title), Progress: \(episode.state.progress)")
+        }
     }
+
 
     private func formatTime(_ time: Double) -> String {
         let minutes = Int(time) / 60

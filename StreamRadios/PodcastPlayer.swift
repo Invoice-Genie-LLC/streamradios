@@ -10,6 +10,7 @@ import Combine
 import MediaPlayer
 import os
 import Reachability
+import SwiftUI
 
 class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     static let shared = PodcastPlayer()
@@ -23,8 +24,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        @Published var duration: Double = 0
        @Published var isSeeking = false
        @Published var progress: [String: Double] = [:]
+        @State private var seekPosition: Double = 0
        @Published var currentFeed: PodcastFeed?
-       
+        private let saveThreshold: Double = 0.05
+        private var lastSavedProgress: Double = 0.0
        private var timeObserver: Any?
        private var playerItemObserver: NSKeyValueObservation?
        private var cancellables = Set<AnyCancellable>()
@@ -38,41 +41,35 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-            var playUrl: URL?
+        var playUrl: URL?
 
-            if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
-                playUrl = URL(fileURLWithPath: localFilePath)
-                os_log("Playing episode from local file: %@", log: OSLog.default, type: .info, localFilePath)
-            } else if let url = URL(string: episode.audioUrl), ReachabilityCheck.isConnectedToNetwork() {
-                playUrl = url
-                os_log("Playing episode from streaming URL: %@", log: OSLog.default, type: .info, episode.audioUrl)
-            } else {
-                os_log("Cannot play episode. No internet connection and local file is unavailable.", log: OSLog.default, type: .error)
-                return
-            }
-
-            guard let url = playUrl else {
-                os_log("Failed to create play URL for episode: %@", log: OSLog.default, type: .error, episode.title)
-                return
-            }
-
-            let playerItem = AVPlayerItem(url: url)
-            if player == nil {
-                player = AVPlayer(playerItem: playerItem)
-            } else {
-                player?.replaceCurrentItem(with: playerItem)
-            }
-
-            currentEpisode = episode
-            currentFeed = feed
-
-            if let savedProgress = viewModel?.episodeProgress[episode.id] {
-                let time = CMTime(seconds: savedProgress * episode.duration, preferredTimescale: 1)
-                player?.seek(to: time)
-            }
-
-            play()
+        if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
+            playUrl = URL(fileURLWithPath: localFilePath)
+        } else if let url = URL(string: episode.audioUrl) {
+            playUrl = url
+        } else {
+            return
         }
+
+        guard let url = playUrl else { return }
+
+        let playerItem = AVPlayerItem(url: url)
+        if player == nil {
+            player = AVPlayer(playerItem: playerItem)
+        } else {
+            player?.replaceCurrentItem(with: playerItem)
+        }
+
+        // Save progress of the previous episode before switching
+        saveProgressIfNeeded()
+
+        // Set the current episode and feed before playing
+        currentEpisode = episode
+        currentFeed = feed
+
+        // Now play the episode
+        play()
+    }
     
     private func loadProgress(for episodeId: String) -> Double? {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
@@ -80,10 +77,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
 
     func play() {
-        guard let player = player else { return }
-        
-        // Safely unwrap the currentEpisode and currentFeed
-        guard let currentEpisode = currentEpisode, let currentFeed = currentFeed else {
+        guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else {
             os_log("No current episode or feed available", log: OSLog.default, type: .error)
             return
         }
@@ -91,22 +85,21 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.play()
         isPlaying = true
         
-        // Set up now playing information and observers
+        // Set up now playing information, observers, etc.
         setupNowPlaying(for: currentEpisode, feed: currentFeed)
         setupTimeObserver()
-        observePlayerItem()
         updateNowPlayingInfo()
-        
+
         objectWillChange.send()
     }
-
     
     func pause() {
         guard let player = player else { return }
         
         player.pause()
         isPlaying = false
-        
+        saveProgressIfNeeded()
+
         // Save current progress
         if let currentEpisode = currentEpisode {
             let progress = currentTime / duration
@@ -137,13 +130,24 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func seek(to time: Double) {
-        guard let player = player else { return }
-        let targetTime = CMTime(seconds: time, preferredTimescale: 1)
-        player.seek(to: targetTime) { [weak self] _ in
-            self?.updateNowPlayingInfo()
+            guard let player = player else { return }
+            let targetTime = CMTime(seconds: time, preferredTimescale: 1)
+            player.seek(to: targetTime)
+            currentTime = time
         }
-        currentTime = time
-    }
+    
+    private func saveProgressIfNeeded() {
+            guard let currentEpisode = currentEpisode, duration > 0 else { return }
+            
+            let progress = currentTime / duration
+            let progressDifference = abs(progress - lastSavedProgress)
+            
+            // Only save if the progress difference exceeds the threshold
+            if progressDifference > saveThreshold {
+                viewModel?.updateProgress(for: currentEpisode, progress: progress)
+                lastSavedProgress = progress
+            }
+        }
     
     func skipForward() {
         seek(by: 15)
@@ -159,32 +163,28 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func setupTimeObserver() {
-            if let observer = timeObserver {
-                player?.removeTimeObserver(observer)
-                timeObserver = nil
-            }
-            
-            let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-            timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-                guard let self = self, !self.isSeeking else { return }
-                self.currentTime = time.seconds
-                self.updateProgress()
-            }
+        let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            guard let self = self else { return }
+            self.currentTime = time.seconds
+            self.seekPosition = time.seconds
+            self.updateProgress()
         }
+    }
     
     private func observePlayerItem() {
         playerItemObserver?.invalidate()
         playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
+            guard let self = self else { return }
             if playerItem.status == .readyToPlay {
-                self?.updateDuration()
+                self.updateDuration()
+                self.seekPosition = self.currentTime // Update seek position as well
             }
         }
     }
     
     private func updateDuration() {
-        if let currentItem = player?.currentItem,
-           currentItem.status == .readyToPlay,
-           currentItem.duration.seconds.isFinite {
+        if let currentItem = player?.currentItem, currentItem.status == .readyToPlay, currentItem.duration.seconds.isFinite {
             duration = currentItem.duration.seconds
         } else {
             duration = 0
@@ -193,16 +193,26 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func updateProgress() {
-           guard let episode = currentEpisode, duration > 0 else { return }
-           let progress = currentTime / duration
-           viewModel?.updateProgress(for: episode, progress: progress)
-           updateNowPlayingInfo()
-       }
+        guard let currentEpisode = currentEpisode, duration > 0 else { return }
+        let progressValue = currentTime / duration
+        
+        // Update progress in the dictionary that stores progress per episode ID
+        progress[currentEpisode.id] = progressValue
+        
+        // If you have additional UI updates that depend on progress, add them here
+        // For example, you might want to trigger an update in your UI:
+        objectWillChange.send()  // Notifies the SwiftUI view to re-render if needed
+    }
+
     
     private func clearProgress(for episodeId: String) {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
         UserDefaults.standard.removeObject(forKey: key)
     }
+    
+    func handleAppWillTerminate() {
+          saveProgressIfNeeded()
+      }
     
     private func setupNowPlaying(for episode: PodcastEpisode, feed: PodcastFeed) {
         var nowPlayingInfo = [String: Any]()
