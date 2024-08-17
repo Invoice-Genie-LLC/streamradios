@@ -167,27 +167,27 @@ struct PodcastIconView: View {
 
 struct EpisodeRowView: View {
     let episode: PodcastEpisode
-       let isPlaying: Bool
-       let progress: Double?
-       let onPlay: () -> Void
-       let onStop: () -> Void
+    let isPlaying: Bool
+    let progress: Double
+    let onPlay: () -> Void
+    let onStop: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
-       @ObservedObject var podcastPlayer: PodcastPlayer
-       @State private var isFavorite: Bool
-       @State private var isDownloaded: Bool
-       @State private var isDownloading: Bool = false
+    @ObservedObject var podcastPlayer: PodcastPlayer
+    @State private var isFavorite: Bool
+    @State private var isDownloaded: Bool
+    @State private var isDownloading: Bool = false
 
-    init(episode: PodcastEpisode, isPlaying: Bool, progress: Double?, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
-           self.episode = episode
-           self.isPlaying = isPlaying
-           self.progress = progress
-           self.onPlay = onPlay
-           self.onStop = onStop
-           self.viewModel = viewModel
-           self.podcastPlayer = podcastPlayer
-           _isFavorite = State(initialValue: episode.state.isFavorite)
-           _isDownloaded = State(initialValue: episode.state.isDownloaded)
-       }
+    init(episode: PodcastEpisode, isPlaying: Bool, progress: Double, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
+        self.episode = episode
+        self.isPlaying = isPlaying
+        self.progress = progress
+        self.onPlay = onPlay
+        self.onStop = onStop
+        self.viewModel = viewModel
+        self.podcastPlayer = podcastPlayer
+        _isFavorite = State(initialValue: episode.state.isFavorite) // Correctly bind to the initial favorite state
+        _isDownloaded = State(initialValue: episode.state.isDownloaded)
+    }
 
     var body: some View {
         HStack {
@@ -200,15 +200,22 @@ struct EpisodeRowView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 
-                let progress = viewModel.getProgress(for: episode)
-                                if progress > 0.0 && progress < 1.0 {
-                                    ProgressView(value: progress)
-                                        .accentColor(.blue)
-                                    
-                                    Text(formatRemainingTime(progress: progress))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
+                if progress > 0.0 && progress < 1.0 {
+                    ProgressView(value: progress)
+                        .accentColor(.blue)
+                    
+                    HStack {
+                        Text("In Progress")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        
+                        Spacer()
+                        
+                        Text(formatRemainingTime(progress: progress, duration: episode.duration))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             
             Spacer()
@@ -219,13 +226,13 @@ struct EpisodeRowView: View {
 
             // Favorite Button
             Button(action: {
-                isFavorite.toggle()
-                viewModel.toggleFavorite(for: episode)
+                isFavorite.toggle() // Toggle the local state
+                viewModel.toggleFavorite(for: episode) // Update the favorite status in the ViewModel
             }) {
                 Image(systemName: isFavorite ? "star.fill" : "star")
                     .resizable()
                     .frame(width: 24, height: 24)
-                    .foregroundColor(isFavorite ? .yellow : .gray)
+                    .foregroundColor(isFavorite ? .yellow : .gray) // Fill with color when favorited
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -271,7 +278,6 @@ struct EpisodeRowView: View {
                     onStop()
                 } else {
                     onPlay()
-                
                 }
             }) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -283,37 +289,28 @@ struct EpisodeRowView: View {
         }
         .padding(.vertical, 8)
     }
-    
+
     private var statusLabel: some View {
         Group {
-            if let progress = progress {
-                if progress == 0 {
-                    Text("New")
-                        .font(.caption)
-                        .padding(4)
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(4)
-                } else if progress > 0 && progress < 1 {
-                    Text("In Progress")
-                        .font(.caption)
-                        .padding(4)
-                        .background(Color.orange)
-                        .foregroundColor(.white)
-                        .cornerRadius(4)
-                } else {
-                    Text("Played")
-                        .font(.caption)
-                        .padding(4)
-                        .background(Color.gray)
-                        .foregroundColor(.white)
-                        .cornerRadius(4)
-                }
-            } else {
+            if progress == 0 {
                 Text("New")
                     .font(.caption)
                     .padding(4)
                     .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(4)
+            } else if progress > 0 && progress < 1 {
+                Text("In Progress")
+                    .font(.caption)
+                    .padding(4)
+                    .background(Color.orange)
+                    .foregroundColor(.white)
+                    .cornerRadius(4)
+            } else {
+                Text("Played")
+                    .font(.caption)
+                    .padding(4)
+                    .background(Color.gray)
                     .foregroundColor(.white)
                     .cornerRadius(4)
             }
@@ -327,12 +324,12 @@ struct EpisodeRowView: View {
         return formatter.string(from: date)
     }
 
-    private func formatRemainingTime(progress: Double) -> String {
-           let remainingTime = (1 - progress) * episode.duration
-           let minutes = Int(remainingTime) / 60
-           let seconds = Int(remainingTime) % 60
-           return String(format: "%d:%02d remaining", minutes, seconds)
-       }
+    private func formatRemainingTime(progress: Double, duration: TimeInterval) -> String {
+        let remainingTime = (1 - progress) * duration
+        let minutes = Int(remainingTime) / 60
+        let seconds = Int(remainingTime) % 60
+        return String(format: "%d:%02d remaining", minutes, seconds)
+    }
 }
 
 
@@ -463,17 +460,9 @@ struct PodcastPlayerView: View {
             }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
-            .onAppear {
-                       seekPosition = viewModel.getProgress(for: podcastPlayer.currentEpisode ?? PodcastEpisode(id: "", title: "", description: "", audioUrl: "", publicationDate: Date(), duration: 0, state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0, isDownloaded: false), feedId: ""))
-                   }
             .onChange(of: selectedTab) { newValue in
-                            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
-                        }
-            .onChange(of: podcastPlayer.currentTime) { newValue in
-                        if let currentEpisode = podcastPlayer.currentEpisode {
-                            viewModel.updateProgress(for: currentEpisode, progress: newValue / podcastPlayer.duration)
-                        }
-                    }
+                           viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
+                       }
             Divider()
                 .frame(height: 2)
                 .background(Color.blue)
@@ -482,11 +471,10 @@ struct PodcastPlayerView: View {
             episodeList
         }
         .onAppear {
-            os_log("Loading episodes for feed: %@", log: log, type: .info, feed.title)
-            loadEpisodes()
-                        seekPosition = podcastPlayer.currentTime
-                        viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-        }
+                  viewModel.fetchEpisodes(for: feed) { _ in
+                      viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+                  }
+              }
      
     }
 
@@ -558,26 +546,25 @@ struct PodcastPlayerView: View {
     }
 
     private var episodeList: some View {
-            List {
-                ForEach(viewModel.currentEpisodes, id: \.id) { episode in
-                    EpisodeRowView(
-                        episode: episode,
-                        isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                        progress: viewModel.getProgress(for: episode),
-                        onPlay: {
-                            playEpisode(episode, feed: feed)
-                        },
-                        onStop: {
-                            podcastPlayer.togglePlayPause()
-                        },
-                        viewModel: viewModel,
-                        podcastPlayer: podcastPlayer
-                    )
-                }
+        List {
+            ForEach(viewModel.currentEpisodes, id: \.id) { episode in
+                EpisodeRowView(
+                    episode: episode,
+                    isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                    progress: viewModel.getProgress(for: episode),
+                    onPlay: {
+                        playEpisode(episode, feed: feed)
+                    },
+                    onStop: {
+                        podcastPlayer.togglePlayPause()
+                    },
+                    viewModel: viewModel, // Pass the viewModel correctly
+                    podcastPlayer: podcastPlayer // Pass the podcastPlayer correctly
+                )
             }
-            .listStyle(PlainListStyle())
         }
-    
+        .listStyle(PlainListStyle())
+    }
 
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         if podcastPlayer.currentEpisode?.id == episode.id {
