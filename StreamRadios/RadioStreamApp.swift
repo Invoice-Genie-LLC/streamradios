@@ -37,6 +37,9 @@ struct RadioStreamApp: App {
                     setupApp()
                     PodcastPlayer.shared.configure(with: podcastViewModel)
                 }
+                .onDisappear {
+                            podcastViewModel.saveContextIfNeeded()
+                        }
         }
     }
 

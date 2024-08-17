@@ -87,7 +87,8 @@ class PodcastViewModel: ObservableObject {
     private let context = CoreDataStack.shared.persistentContainer.viewContext
     private var lastSavedProgress: [String: Double] = [:]
     private let fileManager = FileManager.default
-    
+    private var hasChanges = false
+
     
     init() {
         loadSavedData()
@@ -553,22 +554,36 @@ class PodcastViewModel: ObservableObject {
                 saveEpisodeProgress(updatedEpisode)
             }
             
+            hasChanges = true
             objectWillChange.send()
         }
     
     private func saveEpisodeProgress(_ episode: PodcastEpisode) {
-            let context = CoreDataStack.shared.persistentContainer.viewContext
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-            
-            do {
-                let results = try context.fetch(fetchRequest)
-                if let managedEpisode = results.first {
-                    managedEpisode.progress = episode.state.progress
+           let context = CoreDataStack.shared.persistentContainer.viewContext
+           let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+           fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+           
+           do {
+               let results = try context.fetch(fetchRequest)
+               if let managedEpisode = results.first {
+                   managedEpisode.progress = episode.state.progress
+                   hasChanges = true
+               }
+           } catch {
+               print("Failed to save episode progress: \(error)")
+           }
+       }
+    
+    func saveContextIfNeeded() {
+            if hasChanges {
+                let context = CoreDataStack.shared.persistentContainer.viewContext
+                do {
                     try context.save()
+                    hasChanges = false
+                    print("Core Data context saved successfully")
+                } catch {
+                    print("Failed to save Core Data context: \(error)")
                 }
-            } catch {
-                print("Failed to save episode progress: \(error)")
             }
         }
     
@@ -612,6 +627,7 @@ class PodcastViewModel: ObservableObject {
             updateEpisodeInLists(updatedEpisode)
             saveEpisodesToCoreData([updatedEpisode])
             
+            hasChanges = true
             os_log("Toggled favorite for episode: %@, isFavorite: %@", log: log, type: .info, updatedEpisode.title, updatedEpisode.state.isFavorite ? "true" : "false")
         }
     
@@ -677,52 +693,69 @@ class PodcastViewModel: ObservableObject {
         }
         
     func downloadEpisode(_ episode: PodcastEpisode, completion: @escaping (Result<PodcastEpisode, Error>) -> Void) {
-            guard let url = URL(string: episode.audioUrl) else {
-                completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+        guard let url = URL(string: episode.audioUrl) else {
+            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
+            return
+        }
+        
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] localUrl, response, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
                 return
             }
             
-            let task = URLSession.shared.downloadTask(with: url) { [weak self] localUrl, response, error in
-                guard let self = self else { return }
-
-                if let error = error {
-                    DispatchQueue.main.async {
-                        completion(.failure(error))
-                    }
-                    return
+            guard let localUrl = localUrl else {
+                DispatchQueue.main.async {
+                    completion(.failure(NSError(domain: "No data received", code: 0, userInfo: nil)))
                 }
-                
-                guard let localUrl = localUrl else {
-                    DispatchQueue.main.async {
-                        completion(.failure(NSError(domain: "No data received", code: 0, userInfo: nil)))
-                    }
-                    return
-                }
-                
-                do {
-                    let fileName = "\(episode.id).mp3"
-                    let documentsDirectory = try self.getDocumentsDirectory()
-                    let destinationUrl = documentsDirectory.appendingPathComponent(fileName)
-                    
-                    try self.fileManager.moveItem(at: localUrl, to: destinationUrl)
-                    
-                    var updatedEpisode = episode
-                    updatedEpisode.localFilePath = destinationUrl.path
-                    updatedEpisode.state.isDownloaded = true
-                    
-                    DispatchQueue.main.async {
-                        self.updateDownloadedEpisode(updatedEpisode)
-                        completion(.success(updatedEpisode))
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        completion(.failure(error))
-                    }
-                }
+                return
             }
             
-            task.resume()
+            do {
+                let documentsDirectory = try self.getDocumentsDirectory()
+                let sanitizedFileName = self.sanitizeFileName(episode.title)
+                let destinationUrl = documentsDirectory.appendingPathComponent("\(sanitizedFileName).mp3")
+                
+                // Remove any existing file
+                if FileManager.default.fileExists(atPath: destinationUrl.path) {
+                    try FileManager.default.removeItem(at: destinationUrl)
+                }
+                
+                try FileManager.default.moveItem(at: localUrl, to: destinationUrl)
+                
+                var updatedEpisode = episode
+                updatedEpisode.localFilePath = destinationUrl.path
+                updatedEpisode.state.isDownloaded = true
+                
+                DispatchQueue.main.async {
+                    self.updateDownloadedEpisode(updatedEpisode)
+                    completion(.success(updatedEpisode))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
         }
+        
+        task.resume()
+    }
+
+    private func getDocumentsDirectory() throws -> URL {
+        guard let path = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw NSError(domain: "Documents directory not found", code: 0, userInfo: nil)
+        }
+        return path
+    }
+
+    private func sanitizeFileName(_ fileName: String) -> String {
+        let invalidCharacters = CharacterSet(charactersIn: "\\/:*?\"<>|")
+        return fileName.components(separatedBy: invalidCharacters).joined(separator: "_")
+    }
         
     private func updateDownloadedEpisode(_ episode: PodcastEpisode) {
             // Update in allEpisodes
@@ -768,13 +801,6 @@ class PodcastViewModel: ObservableObject {
             
             // Trigger UI update
             objectWillChange.send()
-        }
-        
-    private func getDocumentsDirectory() throws -> URL {
-            guard let path = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
-                throw NSError(domain: "Documents directory not found", code: 0, userInfo: nil)
-            }
-            return path
         }
         
         func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
