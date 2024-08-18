@@ -41,35 +41,60 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-        var playUrl: URL?
+            var playUrl: URL?
 
-        if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
-            playUrl = URL(fileURLWithPath: localFilePath)
-        } else if let url = URL(string: episode.audioUrl) {
-            playUrl = url
-        } else {
-            return
+            if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
+                playUrl = URL(fileURLWithPath: localFilePath)
+            } else if let url = URL(string: episode.audioUrl) {
+                playUrl = url
+            } else {
+                return
+            }
+
+            guard let url = playUrl else { return }
+
+            let playerItem = AVPlayerItem(url: url)
+            if player == nil {
+                player = AVPlayer(playerItem: playerItem)
+            } else {
+                player?.replaceCurrentItem(with: playerItem)
+            }
+
+            // Save progress of the previous episode before switching
+            saveProgressIfNeeded()
+
+            // Set the current episode and feed before playing
+            currentEpisode = episode
+            currentFeed = feed
+
+            // Set up observers
+            setupPlayerItemObserver()
+            setupTimeObserver()
+
+            // Reset current time and duration
+            currentTime = 0
+            duration = 0
+
+            // Now play the episode
+            play()
         }
-
-        guard let url = playUrl else { return }
-
-        let playerItem = AVPlayerItem(url: url)
-        if player == nil {
-            player = AVPlayer(playerItem: playerItem)
-        } else {
-            player?.replaceCurrentItem(with: playerItem)
+    
+    private func setupPlayerItemObserver() {
+            playerItemObserver?.invalidate()
+            playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
+                guard let self = self else { return }
+                if playerItem.status == .readyToPlay {
+                    self.duration = playerItem.duration.seconds
+                    self.updateProgress()
+                }
+            }
+            
+            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+            NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
+                guard let self = self, let currentEpisode = self.currentEpisode else { return }
+                self.viewModel?.markEpisodeAsCompleted(currentEpisode)
+            }
         }
-
-        // Save progress of the previous episode before switching
-        saveProgressIfNeeded()
-
-        // Set the current episode and feed before playing
-        currentEpisode = episode
-        currentFeed = feed
-
-        // Now play the episode
-        play()
-    }
     
     private func loadProgress(for episodeId: String) -> Double? {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
@@ -138,15 +163,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     private func saveProgressIfNeeded() {
             guard let currentEpisode = currentEpisode, duration > 0 else { return }
-            
             let progress = currentTime / duration
-            let progressDifference = abs(progress - lastSavedProgress)
-            
-            // Only save if the progress difference exceeds the threshold
-            if progressDifference > saveThreshold {
-                viewModel?.updateProgress(for: currentEpisode, progress: progress)
-                lastSavedProgress = progress
-            }
+            viewModel?.updateProgress(for: currentEpisode, progress: progress)
         }
     
     func skipForward() {
@@ -163,14 +181,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func setupTimeObserver() {
-        let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self = self else { return }
-            self.currentTime = time.seconds
-            self.seekPosition = time.seconds
-            self.updateProgress()
+            if let existingObserver = timeObserver {
+                player?.removeTimeObserver(existingObserver)
+            }
+
+            let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+            timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+                guard let self = self else { return }
+                self.currentTime = time.seconds
+                self.updateProgress()
+            }
         }
-    }
     
     private func observePlayerItem() {
         playerItemObserver?.invalidate()
@@ -193,16 +214,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func updateProgress() {
-        guard let currentEpisode = currentEpisode, duration > 0 else { return }
-        let progressValue = currentTime / duration
-        
-        // Update progress in the dictionary that stores progress per episode ID
-        progress[currentEpisode.id] = progressValue
-        
-        // If you have additional UI updates that depend on progress, add them here
-        // For example, you might want to trigger an update in your UI:
-        objectWillChange.send()  // Notifies the SwiftUI view to re-render if needed
-    }
+            guard let currentEpisode = currentEpisode, duration > 0 else { return }
+            let progressValue = currentTime / duration
+            viewModel?.updateProgress(for: currentEpisode, progress: progressValue)
+        }
 
     
     private func clearProgress(for episodeId: String) {
