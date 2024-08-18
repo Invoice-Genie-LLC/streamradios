@@ -198,19 +198,23 @@ struct EpisodeRowView: View {
                     .lineLimit(1)
                 
                 Text(formatDate(episode.publicationDate))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                if progress > 0.0 && progress < 1.0 {
-                    ProgressView(value: progress)
-                        .accentColor(.blue)
-                    
-                    HStack {
-                        Text(formatRemainingTime(progress: progress, duration: episode.duration))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                
+                                if progress > 0.0 && progress < 0.99 {
+                                    ProgressView(value: progress)
+                                        .accentColor(.blue)
+                                    
+                                    HStack {
+                                        Text(formatRemainingTime(progress: progress, duration: episode.duration))
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                } else if progress >= 0.99 {
+                                    Text("Played")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
             }
             
             Spacer()
@@ -413,8 +417,6 @@ struct PodcastPlayerView: View {
     @State private var currentEpisodeIndex = 0
     @State private var selectedTab = 0 // Start with "All" tab
     @State private var seekPosition: Double = 0
-    @State private var lastLoggedSeekPosition: Double = 0
-    private let seekThreshold: Double = 1.0
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastPlayerView")
 
@@ -448,11 +450,17 @@ struct PodcastPlayerView: View {
                 Text("Favorite").tag(2)
                 Text("Downloads").tag(3)
             }
+            .onAppear {
+                        viewModel.fetchEpisodes(for: feed) { _ in
+                            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+                        }
+                    }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
             .onChange(of: selectedTab) { newValue in
-                           viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
-                       }
+                viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
+            }
+            
             Divider()
                 .frame(height: 2)
                 .background(Color.blue)
@@ -461,11 +469,10 @@ struct PodcastPlayerView: View {
             episodeList
         }
         .onAppear {
-                  viewModel.fetchEpisodes(for: feed) { _ in
-                      viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-                  }
-              }
-     
+            viewModel.fetchEpisodes(for: feed) { _ in
+                viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+            }
+        }
     }
 
     private var nowPlayingView: some View {
@@ -515,14 +522,15 @@ struct PodcastPlayerView: View {
     }
 
     private var progressSlider: some View {
-        Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1), onEditingChanged: { editing in
-            if !editing {
-                podcastPlayer.seek(to: seekPosition)
-            }
-        })
-        .disabled(podcastPlayer.duration == 0)
-    }
-
+           Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1), onEditingChanged: { editing in
+               if !editing {
+                   podcastPlayer.seek(to: seekPosition)
+               }
+           })
+           .onChange(of: podcastPlayer.currentTime) { newValue in
+               seekPosition = newValue
+           }
+       }
 
     private var timeLabels: some View {
         HStack {
@@ -546,8 +554,8 @@ struct PodcastPlayerView: View {
                     onStop: {
                         podcastPlayer.togglePlayPause()
                     },
-                    viewModel: viewModel, // Pass the viewModel correctly
-                    podcastPlayer: podcastPlayer // Pass the podcastPlayer correctly
+                    viewModel: viewModel,
+                    podcastPlayer: podcastPlayer
                 )
             }
         }
@@ -556,46 +564,11 @@ struct PodcastPlayerView: View {
 
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         if podcastPlayer.currentEpisode?.id == episode.id {
-            // If it's the same episode, just toggle play/pause
             podcastPlayer.togglePlayPause()
         } else {
-            // If it's a different episode, play it from the beginning or saved progress
             podcastPlayer.playEpisode(episode, feed: feed)
         }
     }
-
-    var filteredEpisodes: [PodcastEpisode] {
-        viewModel.currentEpisodes
-    }
-
-    private func loadEpisodes() {
-        viewModel.fetchEpisodes(for: feed) { _ in
-            updateFilteredEpisodes()
-        }
-    }
-    
-    private func updateFilteredEpisodes() {
-        switch selectedTab {
-        case 0: // All
-            viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-        case 1: // Unplayed
-            viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id && $0.state.progress == 0 }
-        case 2: // Favorite
-            viewModel.currentEpisodes = viewModel.favoriteEpisodes.filter { $0.feedId == feed.id }
-        case 3: // Downloads
-            viewModel.currentEpisodes = viewModel.downloadedEpisodes.filter { $0.feedId == feed.id }
-        default:
-            viewModel.currentEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-        }
-
-        viewModel.currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
-
-        // Log to ensure progress is correctly calculated and included
-        for episode in viewModel.currentEpisodes {
-            print("Episode: \(episode.title), Progress: \(episode.state.progress)")
-        }
-    }
-
 
     private func formatTime(_ time: Double) -> String {
         let minutes = Int(time) / 60
