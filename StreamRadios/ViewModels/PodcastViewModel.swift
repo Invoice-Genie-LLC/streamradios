@@ -33,15 +33,19 @@ struct PodcastFeed: Identifiable, Codable {
 }
 
 struct PodcastEpisode: Identifiable, Codable, Equatable {
-    let id: String
-    var title: String
-    var description: String
-    var audioUrl: String
-    var publicationDate: Date
-    var duration: TimeInterval
-    var state: EpisodeState
-    var feedId: String
-    var localFilePath: String?
+    var id: String
+        var title: String
+        var description: String
+        var audioUrl: String
+        var publicationDate: Date
+        var duration: TimeInterval
+        var state: EpisodeState
+        var feedId: String
+        var localFilePath: String?
+        
+    var compositeID: String {
+            return "\(feedId)_\(id)_\(publicationDate.timeIntervalSince1970)"
+        }
     
     init(id: String = UUID().uuidString, title: String, description: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil) {
         self.id = id
@@ -314,26 +318,33 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func updateEpisodes(for feed: PodcastFeed) {
-        var updatedEpisodes = [PodcastEpisode]()
-        
-        for episode in feed.episodes {
-            if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                // Update existing episode
-                var updatedEpisode = episode
-                updatedEpisode.state = allEpisodes[existingIndex].state
-                allEpisodes[existingIndex] = updatedEpisode
-                updatedEpisodes.append(updatedEpisode)
-            } else {
-                // Add new episode
-                allEpisodes.append(episode)
-                updatedEpisodes.append(episode)
-            }
-        }
-        
-        currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
-        
-        objectWillChange.send()
-    }
+           var updatedEpisodes = [PodcastEpisode]()
+           var seenIds = Set<String>()
+           
+           for var episode in feed.episodes {
+               if seenIds.contains(episode.id) {
+                   // If we've seen this ID before, generate a new unique ID
+                   episode.id = UUID().uuidString
+               }
+               seenIds.insert(episode.id)
+               
+               if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                   // Update existing episode
+                   var updatedEpisode = episode
+                   updatedEpisode.state = allEpisodes[existingIndex].state
+                   allEpisodes[existingIndex] = updatedEpisode
+                   updatedEpisodes.append(updatedEpisode)
+               } else {
+                   // Add new episode
+                   allEpisodes.append(episode)
+                   updatedEpisodes.append(episode)
+               }
+           }
+           
+           currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
+           
+           objectWillChange.send()
+       }
     
     private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
         os_log("Starting RSS feed fetch for feed: %@", log: log, type: .info, feed.title)
