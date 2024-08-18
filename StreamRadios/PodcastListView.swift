@@ -31,16 +31,16 @@ struct PodcastListView: View {
         NavigationView {
             VStack {
                 searchBar
-                PodcastList(
-                    feeds: filteredPodcasts,
-                    podcastPlayer: podcastPlayer,
-                    onPlay: { playLatestEpisode(for: $0) },
-                    onDelete: { feed in
-                        podcastToDelete = feed
-                        showingDeleteConfirmation = true
-                    },
-                    selectedPodcast: $selectedPodcast
-                )
+                                PodcastList(
+                                    feeds: filteredPodcasts,
+                                    podcastPlayer: podcastPlayer,
+                                    onPlay: { playLatestEpisode(for: $0) },
+                                    onDelete: { feed in
+                                        podcastToDelete = feed
+                                        showingDeleteConfirmation = true
+                                    },
+                                    selectedPodcast: $selectedPodcast
+                                )
             }
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
                 Button("Cancel", role: .cancel) {}
@@ -543,23 +543,23 @@ struct PodcastPlayerView: View {
 
     private var episodeList: some View {
         List {
-            ForEach(viewModel.currentEpisodes, id: \.id) { episode in
-                EpisodeRowView(
-                    episode: episode,
-                    isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                    progress: viewModel.getProgress(for: episode),
-                    onPlay: {
-                        playEpisode(episode, feed: feed)
-                    },
-                    onStop: {
-                        podcastPlayer.togglePlayPause()
-                    },
-                    viewModel: viewModel,
-                    podcastPlayer: podcastPlayer
-                )
-            }
-        }
-        .listStyle(PlainListStyle())
+                    ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
+                        EpisodeRowView(
+                            episode: episode,
+                            isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                            progress: viewModel.getProgress(for: episode),
+                            onPlay: {
+                                playEpisode(episode, feed: feed)
+                            },
+                            onStop: {
+                                podcastPlayer.togglePlayPause()
+                            },
+                            viewModel: viewModel,
+                            podcastPlayer: podcastPlayer
+                        )
+                    }
+                }
+                .listStyle(PlainListStyle())
     }
 
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
