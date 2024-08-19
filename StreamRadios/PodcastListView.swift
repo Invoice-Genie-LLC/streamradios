@@ -169,7 +169,6 @@ struct PodcastIconView: View {
 struct EpisodeRowView: View {
     let episode: PodcastEpisode
     let isPlaying: Bool
-    let progress: Double
     let onPlay: () -> Void
     let onStop: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
@@ -177,155 +176,121 @@ struct EpisodeRowView: View {
     @State private var isFavorite: Bool
     @State private var isDownloaded: Bool
     @State private var isDownloading: Bool = false
+    @State private var progress: Double // Add @State for progress
+    private let buttonSize: CGFloat = 30
 
-    init(episode: PodcastEpisode, isPlaying: Bool, progress: Double, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
+
+    init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
         self.isPlaying = isPlaying
-        self.progress = progress
         self.onPlay = onPlay
         self.onStop = onStop
         self.viewModel = viewModel
         self.podcastPlayer = podcastPlayer
         _isFavorite = State(initialValue: episode.state.isFavorite)
         _isDownloaded = State(initialValue: episode.state.isDownloaded)
+        _progress = State(initialValue: viewModel.getProgress(for: episode)) // Initialize progress
     }
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(episode.title)
-                    .font(.headline)
-                    .lineLimit(1)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(episode.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    
+                    Text(formatDate(episode.publicationDate))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    if let progress = viewModel.episodeProgress[episode.id], progress > 0 {
+                        ProgressView(value: progress)
+                            .accentColor(.blue)
+                        
+                        HStack {
+                            Text(formatRemainingTime(progress: progress, duration: episode.duration))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Spacer()
+                            
+                            Text("In Progress")
+                                .font(.caption)
+                                .padding(4)
+                                .background(Color.orange)
+                                .foregroundColor(.white)
+                                .cornerRadius(4)
+                        }
+                    }
+                }
                 
-                Text(formatDate(episode.publicationDate))
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                
-                                if progress > 0.0 && progress < 0.99 {
-                                    ProgressView(value: progress)
-                                        .accentColor(.blue)
-                                    
-                                    HStack {
-                                        Text(formatRemainingTime(progress: progress, duration: episode.duration))
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                } else if progress >= 0.99 {
-                                    Text("Played")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-            }
-            
-            Spacer()
-            
-            statusLabel
-            
-            Spacer()
-
-            Button(action: {
-                isFavorite.toggle()
-                viewModel.toggleFavorite(for: episode)
-            }) {
-                Image(systemName: isFavorite ? "star.fill" : "star")
-                    .resizable()
-                    .frame(width: 24, height: 24)
-                    .foregroundColor(isFavorite ? .yellow : .gray)
-            }
-            .buttonStyle(PlainButtonStyle())
-            
-            Spacer().frame(width: 16)
-            
-            Button(action: {
-                if !isDownloaded {
-                    isDownloading = true
-                    viewModel.downloadEpisode(episode) { result in
-                        DispatchQueue.main.async {
-                            isDownloading = false
-                            switch result {
-                            case .success(let updatedEpisode):
-                                isDownloaded = updatedEpisode.state.isDownloaded
-                            case .failure(let error):
-                                print("Download failed: \(error)")
+                Spacer()
+                
+                Button(action: {
+                    viewModel.toggleFavorite(for: episode)
+                }) {
+                    Image(systemName: episode.state.isFavorite ? "star.fill" : "star")
+                        .foregroundColor(episode.state.isFavorite ? .yellow : .gray)
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                Button(action: {
+                    if !episode.state.isDownloaded && !isDownloading {
+                        isDownloading = true
+                        viewModel.downloadEpisode(episode) { result in
+                            DispatchQueue.main.async {
+                                isDownloading = false
+                                // Handle result if needed
                             }
                         }
                     }
-                } else {
-                    // Handle already downloaded state
+                }) {
+                    Group {
+                        if episode.state.isDownloaded {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .foregroundColor(.blue)
+                        } else if isDownloading {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                        } else if let progress = viewModel.downloadProgress[episode.id] {
+                            ProgressView(value: progress)
+                                .progressViewStyle(CircularProgressViewStyle())
+                        } else {
+                            Image(systemName: "arrow.down.circle")
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .frame(width: buttonSize, height: buttonSize)
                 }
-            }) {
-                if isDownloading {
-                    ProgressView()
-                        .frame(width: 24, height: 24)
-                } else {
-                    Image(systemName: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle")
+                .buttonStyle(PlainButtonStyle())
+                
+                Button(action: onPlay) {
+                    Image(systemName: podcastPlayer.isPlaying && podcastPlayer.currentEpisode?.id == episode.id ? "pause.circle.fill" : "play.circle.fill")
                         .resizable()
-                        .frame(width: 24, height: 24)
-                        .foregroundColor(isDownloaded ? .blue : .gray)
+                        .frame(width: buttonSize, height: buttonSize)
+                        .foregroundColor(.blue)
                 }
+                .buttonStyle(PlainButtonStyle())
             }
-            .buttonStyle(PlainButtonStyle())
-
-            Spacer().frame(width: 16)
-            
-            Button(action: {
-                if isPlaying {
-                    onStop()
-                } else {
-                    onPlay()
-                }
-            }) {
-                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .resizable()
-                    .frame(width: 30, height: 30)
-                    .foregroundColor(.blue)
-            }
-            .buttonStyle(PlainButtonStyle())
+            .padding(.vertical, 8)
         }
-        .padding(.vertical, 8)
-    }
-
-    private var statusLabel: some View {
-        Group {
-            if progress == 0 {
-                Text("New")
-                    .font(.caption)
-                    .padding(4)
-                    .background(Color.green)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
-            } else if progress > 0 && progress < 1 {
-                Text("In Progress")
-                    .font(.caption)
-                    .padding(4)
-                    .background(Color.orange)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
-            } else {
-                Text("Played")
-                    .font(.caption)
-                    .padding(4)
-                    .background(Color.gray)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
-            }
+        
+        private func formatDate(_ date: Date) -> String {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            return formatter.string(from: date)
+        }
+        
+        private func formatRemainingTime(progress: Double, duration: TimeInterval) -> String {
+            let remainingTime = (1 - progress) * duration
+            let minutes = Int(remainingTime) / 60
+            let seconds = Int(remainingTime) % 60
+            return String(format: "%d:%02d remaining", minutes, seconds)
         }
     }
-
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-
-    private func formatRemainingTime(progress: Double, duration: TimeInterval) -> String {
-        let remainingTime = (1 - progress) * duration
-        let minutes = Int(remainingTime) / 60
-        let seconds = Int(remainingTime) % 60
-        return String(format: "%d:%02d remaining", minutes, seconds)
-    }
-}
+    
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?
@@ -543,23 +508,23 @@ struct PodcastPlayerView: View {
 
     private var episodeList: some View {
         List {
-                    ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
-                        EpisodeRowView(
-                            episode: episode,
-                            isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                            progress: viewModel.getProgress(for: episode),
-                            onPlay: {
-                                playEpisode(episode, feed: feed)
-                            },
-                            onStop: {
-                                podcastPlayer.togglePlayPause()
-                            },
-                            viewModel: viewModel,
-                            podcastPlayer: podcastPlayer
-                        )
-                    }
-                }
-                .listStyle(PlainListStyle())
+            ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
+                EpisodeRowView(
+                    episode: episode,
+                    isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                    onPlay: {
+                        playEpisode(episode, feed: feed)
+                    },
+                    onStop: {
+                        podcastPlayer.togglePlayPause()
+                    },
+                    viewModel: viewModel,
+                    podcastPlayer: podcastPlayer
+                )
+            }
+        }
+        .listStyle(PlainListStyle())
+
     }
 
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
