@@ -29,21 +29,21 @@ extension FeedModel {
 }
 
 extension PodcastModel {
-
     func update(from episode: PodcastEpisode) {
-            self.id = episode.id
-            self.title = episode.title
-            self.descriptionText = episode.description
-            self.audioUrl = episode.audioUrl
-            self.publicationDate = episode.publicationDate
-            self.duration = episode.duration
-            self.isFavorite = episode.state.isFavorite
-            self.isDownloaded = episode.state.isDownloaded
-            self.progress = episode.state.progress
-            self.feedId = episode.feedId
-            self.localFilePath = episode.localFilePath
-        }
-
+        self.id = episode.id
+        self.title = episode.title
+        self.descriptionText = episode.description
+        self.audioUrl = episode.audioUrl
+        self.publicationDate = episode.publicationDate
+        self.duration = episode.duration
+        self.isFavorite = episode.state.isFavorite
+        self.isDownloaded = episode.state.isDownloaded
+        self.progress = episode.state.progress
+        self.feedId = episode.feedId
+        self.localFilePath = episode.localFilePath
+        self.fileSize = episode.fileSize ?? 0 // Add this line to include fileSize
+    }
+    
     func toPodcastEpisode() -> PodcastEpisode {
         return PodcastEpisode(
             id: id ?? UUID().uuidString,
@@ -59,8 +59,8 @@ extension PodcastModel {
                 isDownloaded: isDownloaded
             ),
             feedId: feedId ?? "",
-            localFilePath: localFilePath // Add this line to include localFilePath in the conversion
+            localFilePath: localFilePath,
+            fileSize: fileSize // Add this line to include fileSize in the conversion
         )
     }
 }
-
