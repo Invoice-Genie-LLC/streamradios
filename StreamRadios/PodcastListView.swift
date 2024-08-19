@@ -171,7 +171,6 @@ struct EpisodeRowView: View {
     let isPlaying: Bool
     let onPlay: () -> Void
     let onStop: () -> Void
-    let onDelete: (PodcastEpisode) -> Void
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var isFavorite: Bool
@@ -181,12 +180,11 @@ struct EpisodeRowView: View {
     @State private var showingDeleteConfirmation = false
     private let buttonSize: CGFloat = 30
 
-    init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, onDelete: @escaping (PodcastEpisode) -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
+    init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
         self.isPlaying = isPlaying
         self.onPlay = onPlay
         self.onStop = onStop
-        self.onDelete = onDelete
         self.viewModel = viewModel
         self.podcastPlayer = podcastPlayer
         _isFavorite = State(initialValue: episode.state.isFavorite)
@@ -291,16 +289,16 @@ struct EpisodeRowView: View {
             .alert(isPresented: $showingDeleteConfirmation) {
                 Alert(
                     title: Text("Delete Downloaded Episode"),
-                    message: Text("Are you sure you want to delete this downloaded episode?"),
+                    message: Text("Are you sure you want to delete this downloaded episode? This will not affect its favorite status."),
                     primaryButton: .destructive(Text("Delete")) {
-                        onDelete(episode)
+                        viewModel.deleteDownloadedEpisode(episode)
                     },
                     secondaryButton: .cancel()
                 )
             }
             
-            Button(action: onPlay) {
-                Image(systemName: podcastPlayer.isPlaying && podcastPlayer.currentEpisode?.id == episode.id ? "pause.circle.fill" : "play.circle.fill")
+            Button(action: isPlaying ? onStop : onPlay) {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .resizable()
                     .frame(width: buttonSize, height: buttonSize)
                     .foregroundColor(.blue)
@@ -331,7 +329,6 @@ struct EpisodeRowView: View {
         return String(format: "%d:%02d remaining", minutes, seconds)
     }
 }
-
 struct PodcastArtworkView: View {
     let artworkUrl: String?
     
@@ -557,9 +554,6 @@ struct PodcastPlayerView: View {
                     },
                     onStop: {
                         podcastPlayer.togglePlayPause()
-                    },
-                    onDelete: { episodeToDelete in
-                        viewModel.deleteDownloadedEpisode(episodeToDelete)
                     },
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
