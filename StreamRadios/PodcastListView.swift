@@ -171,19 +171,22 @@ struct EpisodeRowView: View {
     let isPlaying: Bool
     let onPlay: () -> Void
     let onStop: () -> Void
+    let onDelete: (PodcastEpisode) -> Void
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var isFavorite: Bool
     @State private var isDownloaded: Bool
     @State private var isDownloading: Bool = false
     @State private var progress: Double
+    @State private var showingDeleteConfirmation = false
     private let buttonSize: CGFloat = 30
 
-    init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
+    init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, onDelete: @escaping (PodcastEpisode) -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
         self.isPlaying = isPlaying
         self.onPlay = onPlay
         self.onStop = onStop
+        self.onDelete = onDelete
         self.viewModel = viewModel
         self.podcastPlayer = podcastPlayer
         _isFavorite = State(initialValue: episode.state.isFavorite)
@@ -203,10 +206,10 @@ struct EpisodeRowView: View {
                     .foregroundColor(.secondary)
                 
                 if let fileSize = episode.fileSize {
-                                    Text(formatFileSize(fileSize))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
+                    Text(formatFileSize(fileSize))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 
                 if let progress = viewModel.episodeProgress[episode.id], progress > 0 {
                     ProgressView(value: progress)
@@ -241,7 +244,9 @@ struct EpisodeRowView: View {
             .buttonStyle(PlainButtonStyle())
             
             Button(action: {
-                if !episode.state.isDownloaded && !isDownloading {
+                if viewModel.currentTab == 3 && episode.state.isDownloaded {
+                    showingDeleteConfirmation = true
+                } else if !isDownloading && !episode.state.isDownloaded {
                     isDownloading = true
                     viewModel.downloadEpisode(episode) { result in
                         DispatchQueue.main.async {
@@ -253,12 +258,16 @@ struct EpisodeRowView: View {
             }) {
                 ZStack {
                     Circle()
+                        .fill(episode.state.isDownloaded ? Color.blue : Color.clear)
+                        .frame(width: buttonSize, height: buttonSize)
+                    
+                    Circle()
                         .stroke(Color.gray.opacity(0.3), lineWidth: 2)
                         .frame(width: buttonSize, height: buttonSize)
                     
-                    if episode.state.isDownloaded {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .foregroundColor(.blue)
+                    if viewModel.currentTab == 3 && episode.state.isDownloaded {
+                        Image(systemName: "trash")
+                            .foregroundColor(.white)
                     } else if isDownloading {
                         Circle()
                             .trim(from: 0, to: CGFloat(viewModel.downloadProgress[episode.id] ?? 0))
@@ -268,6 +277,9 @@ struct EpisodeRowView: View {
                         
                         Image(systemName: "arrow.down.circle")
                             .foregroundColor(.gray)
+                    } else if episode.state.isDownloaded {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundColor(.white)
                     } else {
                         Image(systemName: "arrow.down.circle")
                             .foregroundColor(.gray)
@@ -276,6 +288,16 @@ struct EpisodeRowView: View {
                 .frame(width: buttonSize, height: buttonSize)
             }
             .buttonStyle(PlainButtonStyle())
+            .alert(isPresented: $showingDeleteConfirmation) {
+                Alert(
+                    title: Text("Delete Downloaded Episode"),
+                    message: Text("Are you sure you want to delete this downloaded episode?"),
+                    primaryButton: .destructive(Text("Delete")) {
+                        onDelete(episode)
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
             
             Button(action: onPlay) {
                 Image(systemName: podcastPlayer.isPlaying && podcastPlayer.currentEpisode?.id == episode.id ? "pause.circle.fill" : "play.circle.fill")
@@ -289,11 +311,11 @@ struct EpisodeRowView: View {
     }
     
     private func formatFileSize(_ size: Int64) -> String {
-           let formatter = ByteCountFormatter()
-           formatter.allowedUnits = [.useMB]
-           formatter.countStyle = .file
-           return formatter.string(fromByteCount: size)
-       }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
+    }
     
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
@@ -309,7 +331,6 @@ struct EpisodeRowView: View {
         return String(format: "%d:%02d remaining", minutes, seconds)
     }
 }
-    
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?
@@ -537,13 +558,15 @@ struct PodcastPlayerView: View {
                     onStop: {
                         podcastPlayer.togglePlayPause()
                     },
+                    onDelete: { episodeToDelete in
+                        viewModel.deleteDownloadedEpisode(episodeToDelete)
+                    },
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
                 )
             }
         }
         .listStyle(PlainListStyle())
-
     }
 
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
