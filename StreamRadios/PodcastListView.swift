@@ -414,6 +414,7 @@ struct ErrorView: View {
 
 struct PodcastPlayerView: View {
     @ObservedObject var viewModel: PodcastViewModel
+    @Environment(\.presentationMode) var presentationMode
     let feed: PodcastFeed
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var currentEpisodeIndex = 0
@@ -423,6 +424,36 @@ struct PodcastPlayerView: View {
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastPlayerView")
 
     var body: some View {
+        VStack(spacing: 0) {
+            // Custom navigation bar
+            HStack {
+                           Button(action: {
+                               presentationMode.wrappedValue.dismiss()
+                           }) {
+                               HStack {
+                                   Image(systemName: "chevron.left")
+                                   Text("Back")
+                               }
+                           }
+                           
+                           Spacer()
+                           
+                           Text(feed.title)
+                               .font(.headline)
+                               .lineLimit(1)
+                               .frame(maxWidth: .infinity)
+                           
+                           Spacer()
+                           
+                           // This empty view balances the back button
+                           Color.clear
+                               .frame(width: 60, height: 1)
+                       }
+                       .padding(.horizontal)
+                       .padding(.vertical, 10)
+            .background(Color(UIColor.systemBackground))
+            .shadow(color: Color.gray.opacity(0.3), radius: 2, x: 0, y: 1)
+        }
         VStack(spacing: 10) {
             Text(feed.title)
                 .font(.title)
@@ -457,7 +488,8 @@ struct PodcastPlayerView: View {
                             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
                         }
                     }
-            .navigationBarTitleDisplayMode(.inline) // To control the title's appearance
+            .navigationBarBackButtonHidden(true)
+                    .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .principal) {
                             Text(feed.title)
@@ -465,6 +497,7 @@ struct PodcastPlayerView: View {
                                 .lineLimit(1)
                         }
                     }
+         
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
             .onChange(of: selectedTab) { newValue in
