@@ -116,6 +116,49 @@ class PodcastViewModel: ObservableObject {
            setupObservers()
        }
     
+    func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
+            // Delete the local file
+            if let localFilePath = episode.localFilePath {
+                do {
+                    try FileManager.default.removeItem(atPath: localFilePath)
+                    print("Successfully deleted local file for episode: \(episode.title)")
+                } catch {
+                    print("Error deleting local file for episode \(episode.title): \(error)")
+                }
+            }
+
+            // Update the episode state
+            if var updatedEpisode = allEpisodes.first(where: { $0.id == episode.id }) {
+                updatedEpisode.state.isDownloaded = false
+                updatedEpisode.localFilePath = nil
+                updateEpisodeInLists(updatedEpisode)
+            }
+
+            // Remove from downloadedEpisodes
+            downloadedEpisodes.removeAll { $0.id == episode.id }
+
+            // Update Core Data
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+
+            do {
+                let results = try context.fetch(fetchRequest)
+                if let managedEpisode = results.first {
+                    managedEpisode.isDownloaded = false
+                    managedEpisode.localFilePath = nil
+                    try context.save()
+                    print("Successfully updated Core Data for episode: \(episode.title)")
+                }
+            } catch {
+                print("Error updating Core Data for episode \(episode.title): \(error)")
+            }
+
+            // Refresh the current episodes list
+            updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
+
+            objectWillChange.send()
+        }
+    
     private func setupObservers() {
           NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
               .sink { [weak self] notification in
@@ -830,37 +873,6 @@ class PodcastViewModel: ObservableObject {
             currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
             objectWillChange.send()
         }
-
-    
-    func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
-        if let localFilePath = episode.localFilePath {
-            do {
-                try fileManager.removeItem(atPath: localFilePath)
-                os_log("Deleted local file for episode: %@", log: log, type: .info, episode.title)
-            } catch {
-                os_log("Failed to delete local file for episode: %@, error: %@", log: log, type: .error, episode.title, error.localizedDescription)
-            }
-        }
-
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-
-        do {
-            let results = try context.fetch(fetchRequest)
-            for object in results {
-                context.delete(object)
-            }
-
-            try context.save()
-
-            allEpisodes.removeAll { $0.id == episode.id }
-            currentEpisodes.removeAll { $0.id == episode.id }
-            
-            os_log("Deleted episode from Core Data and in-memory list: %@", log: log, type: .info, episode.title)
-        } catch {
-            os_log("Failed to delete episode from Core Data: %@, error: %@", log: log, type: .error, episode.title, error.localizedDescription)
-        }
-    }
     
     func clearAllPodcastEpisodes(completion: @escaping (Bool) -> Void) {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
