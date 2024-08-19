@@ -180,18 +180,18 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         seek(to: newTime)
     }
     
-    private func setupTimeObserver() {
-            if let existingObserver = timeObserver {
-                player?.removeTimeObserver(existingObserver)
-            }
-
-            let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-            timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-                guard let self = self else { return }
-                self.currentTime = time.seconds
-                self.updateProgress()
-            }
+    func setupTimeObserver() {
+        if let existingObserver = timeObserver {
+            player?.removeTimeObserver(existingObserver)
         }
+
+        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            guard let self = self else { return }
+            self.currentTime = time.seconds
+            self.updateProgress()
+        }
+    }
     
     private func observePlayerItem() {
         playerItemObserver?.invalidate()
@@ -213,12 +213,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         updateNowPlayingInfo()
     }
     
-    private func updateProgress() {
-            guard let currentEpisode = currentEpisode, duration > 0 else { return }
-            let progressValue = currentTime / duration
-            viewModel?.updateProgress(for: currentEpisode, progress: progressValue)
-        }
-
+    func updateProgress() {
+        guard let currentEpisode = currentEpisode, duration > 0 else { return }
+        let progressValue = currentTime / duration
+        viewModel?.updateProgress(for: currentEpisode, progress: progressValue)
+        updateNowPlayingInfo() // To sync with UI
+    }
     
     private func clearProgress(for episodeId: String) {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
