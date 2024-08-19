@@ -202,6 +202,12 @@ struct EpisodeRowView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 
+                if let fileSize = episode.fileSize {
+                                    Text(formatFileSize(fileSize))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                
                 if let progress = viewModel.episodeProgress[episode.id], progress > 0 {
                     ProgressView(value: progress)
                         .accentColor(.blue)
@@ -281,6 +287,13 @@ struct EpisodeRowView: View {
         }
         .padding(.vertical, 8)
     }
+    
+    private func formatFileSize(_ size: Int64) -> String {
+           let formatter = ByteCountFormatter()
+           formatter.allowedUnits = [.useMB]
+           formatter.countStyle = .file
+           return formatter.string(fromByteCount: size)
+       }
     
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()

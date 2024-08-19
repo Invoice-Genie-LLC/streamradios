@@ -43,12 +43,13 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     var state: EpisodeState
     var feedId: String
     var localFilePath: String?
+    var fileSize: Int64? // New property for file size in bytes
         
     var compositeID: String {
         return "\(feedId)_\(id)_\(publicationDate.timeIntervalSince1970)"
     }
     
-    init(id: String = UUID().uuidString, title: String, description: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil) {
+    init(id: String = UUID().uuidString, title: String, description: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil) {
         self.id = id
         self.title = title
         self.description = description
@@ -58,6 +59,7 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
         self.state = state
         self.feedId = feedId
         self.localFilePath = localFilePath
+        self.fileSize = fileSize
     }
     
     // Implement Hashable
@@ -106,7 +108,7 @@ class PodcastViewModel: ObservableObject {
     @Published var downloadProgress: [String: Double] = [:]
     private var cancellables = Set<AnyCancellable>()
     @Published var currentTab: Int = 0
-
+    @NSManaged public var fileSize: Int64
 
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
            self.context = context
@@ -929,6 +931,7 @@ class RSSParser: NSObject, XMLParserDelegate {
     var artworkUrl: String?
     var episodes: [PodcastEpisode] = []
     private let feedId: String
+    private var currentFileSize: Int64?
     
     private var currentElement = ""
     private var currentTitle: String?
@@ -955,17 +958,21 @@ class RSSParser: NSObject, XMLParserDelegate {
         
         switch elementName {
         case "item":
-            isParsingItem = true
-            currentTitle = nil
-            currentDescription = nil
-            currentPubDate = nil
-            currentDuration = nil
-            currentEnclosure = nil
-            currentGuid = nil
-        case "enclosure":
-            if isParsingItem {
-                currentEnclosure = attributeDict["url"]
-            }
+                    isParsingItem = true
+                    currentTitle = nil
+                    currentDescription = nil
+                    currentPubDate = nil
+                    currentDuration = nil
+                    currentEnclosure = nil
+                    currentGuid = nil
+                    currentFileSize = nil
+                case "enclosure":
+                    if isParsingItem {
+                        currentEnclosure = attributeDict["url"]
+                        if let fileSizeString = attributeDict["length"], let fileSize = Int64(fileSizeString) {
+                            currentFileSize = fileSize
+                        }
+                    }
         case "itunes:image":
             if !isParsingItem {
                 artworkUrl = attributeDict["href"]
@@ -977,32 +984,31 @@ class RSSParser: NSObject, XMLParserDelegate {
     
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         if elementName == "item" {
-            if let title = currentTitle,
-               let description = currentDescription,
-               let pubDateString = currentPubDate,
-               let enclosure = currentEnclosure {
-                
-                let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
-                let duration = TimeInterval(currentDuration ?? "0") ?? 0
-                
-                // Use the GUID if available, otherwise generate a UUID
-                let id = currentGuid ?? UUID().uuidString
-                
-                let episode = PodcastEpisode(
-                    id: id,
-                    title: title,
-                    description: description,
-                    audioUrl: enclosure,
-                    publicationDate: pubDate,
-                    duration: duration,
-                    state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
-                    feedId: feedId
-                )
-                
-                episodes.append(episode)
-            }
-            
-            isParsingItem = false
+                    if let title = currentTitle,
+                       let description = currentDescription,
+                       let pubDateString = currentPubDate,
+                       let enclosure = currentEnclosure {
+                        
+                        let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
+                        let duration = TimeInterval(currentDuration ?? "0") ?? 0
+                        let id = currentGuid ?? UUID().uuidString
+                        
+                        let episode = PodcastEpisode(
+                            id: id,
+                            title: title,
+                            description: description,
+                            audioUrl: enclosure,
+                            publicationDate: pubDate,
+                            duration: duration,
+                            state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
+                            feedId: feedId,
+                            fileSize: currentFileSize
+                        )
+                        
+                        episodes.append(episode)
+                    }
+                    
+                    isParsingItem = false
         }
     }
     
