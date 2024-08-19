@@ -131,6 +131,8 @@ class PodcastViewModel: ObservableObject {
             if var updatedEpisode = allEpisodes.first(where: { $0.id == episode.id }) {
                 updatedEpisode.state.isDownloaded = false
                 updatedEpisode.localFilePath = nil
+                // Preserve the favorite status
+                updatedEpisode.state.isFavorite = episode.state.isFavorite
                 updateEpisodeInLists(updatedEpisode)
             }
 
@@ -146,6 +148,8 @@ class PodcastViewModel: ObservableObject {
                 if let managedEpisode = results.first {
                     managedEpisode.isDownloaded = false
                     managedEpisode.localFilePath = nil
+                    // Preserve the favorite status
+                    managedEpisode.isFavorite = episode.state.isFavorite
                     try context.save()
                     print("Successfully updated Core Data for episode: \(episode.title)")
                 }
