@@ -176,9 +176,8 @@ struct EpisodeRowView: View {
     @State private var isFavorite: Bool
     @State private var isDownloaded: Bool
     @State private var isDownloading: Bool = false
-    @State private var progress: Double // Add @State for progress
+    @State private var progress: Double
     private let buttonSize: CGFloat = 30
-
 
     init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
@@ -189,107 +188,114 @@ struct EpisodeRowView: View {
         self.podcastPlayer = podcastPlayer
         _isFavorite = State(initialValue: episode.state.isFavorite)
         _isDownloaded = State(initialValue: episode.state.isDownloaded)
-        _progress = State(initialValue: viewModel.getProgress(for: episode)) // Initialize progress
+        _progress = State(initialValue: viewModel.getProgress(for: episode))
     }
 
     var body: some View {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(episode.title)
-                        .font(.headline)
-                        .lineLimit(1)
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(episode.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                
+                Text(formatDate(episode.publicationDate))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                
+                if let progress = viewModel.episodeProgress[episode.id], progress > 0 {
+                    ProgressView(value: progress)
+                        .accentColor(.blue)
                     
-                    Text(formatDate(episode.publicationDate))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    if let progress = viewModel.episodeProgress[episode.id], progress > 0 {
-                        ProgressView(value: progress)
-                            .accentColor(.blue)
+                    HStack {
+                        Text(formatRemainingTime(progress: progress, duration: episode.duration))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                         
-                        HStack {
-                            Text(formatRemainingTime(progress: progress, duration: episode.duration))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            Spacer()
-                            
-                            Text("In Progress")
-                                .font(.caption)
-                                .padding(4)
-                                .background(Color.orange)
-                                .foregroundColor(.white)
-                                .cornerRadius(4)
-                        }
+                        Spacer()
+                        
+                        Text("In Progress")
+                            .font(.caption)
+                            .padding(4)
+                            .background(Color.orange)
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
                     }
                 }
-                
-                Spacer()
-                
-                Button(action: {
-                    viewModel.toggleFavorite(for: episode)
-                }) {
-                    Image(systemName: episode.state.isFavorite ? "star.fill" : "star")
-                        .foregroundColor(episode.state.isFavorite ? .yellow : .gray)
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                Button(action: {
-                    if !episode.state.isDownloaded && !isDownloading {
-                        isDownloading = true
-                        viewModel.downloadEpisode(episode) { result in
-                            DispatchQueue.main.async {
-                                isDownloading = false
-                                // Handle result if needed
-                            }
-                        }
-                    }
-                }) {
-                    Group {
-                        if episode.state.isDownloaded {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .foregroundColor(.blue)
-                        } else if isDownloading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
-                        } else if let progress = viewModel.downloadProgress[episode.id] {
-                            ProgressView(value: progress)
-                                .progressViewStyle(CircularProgressViewStyle())
-                        } else {
-                            Image(systemName: "arrow.down.circle")
-                                .foregroundColor(.gray)
-                        }
-                    }
-                    .frame(width: buttonSize, height: buttonSize)
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                Button(action: onPlay) {
-                    Image(systemName: podcastPlayer.isPlaying && podcastPlayer.currentEpisode?.id == episode.id ? "pause.circle.fill" : "play.circle.fill")
-                        .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(.blue)
-                }
-                .buttonStyle(PlainButtonStyle())
             }
-            .padding(.vertical, 8)
+            
+            Spacer()
+            
+            Button(action: {
+                viewModel.toggleFavorite(for: episode)
+            }) {
+                Image(systemName: episode.state.isFavorite ? "star.fill" : "star")
+                    .foregroundColor(episode.state.isFavorite ? .yellow : .gray)
+                    .frame(width: buttonSize, height: buttonSize)
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            Button(action: {
+                if !episode.state.isDownloaded && !isDownloading {
+                    isDownloading = true
+                    viewModel.downloadEpisode(episode) { result in
+                        DispatchQueue.main.async {
+                            isDownloading = false
+                            // Handle result if needed
+                        }
+                    }
+                }
+            }) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                        .frame(width: buttonSize, height: buttonSize)
+                    
+                    if episode.state.isDownloaded {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundColor(.blue)
+                    } else if isDownloading {
+                        Circle()
+                            .trim(from: 0, to: CGFloat(viewModel.downloadProgress[episode.id] ?? 0))
+                            .stroke(Color.blue, lineWidth: 2)
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: buttonSize, height: buttonSize)
+                        
+                        Image(systemName: "arrow.down.circle")
+                            .foregroundColor(.gray)
+                    } else {
+                        Image(systemName: "arrow.down.circle")
+                            .foregroundColor(.gray)
+                    }
+                }
+                .frame(width: buttonSize, height: buttonSize)
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            Button(action: onPlay) {
+                Image(systemName: podcastPlayer.isPlaying && podcastPlayer.currentEpisode?.id == episode.id ? "pause.circle.fill" : "play.circle.fill")
+                    .resizable()
+                    .frame(width: buttonSize, height: buttonSize)
+                    .foregroundColor(.blue)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
-        
-        private func formatDate(_ date: Date) -> String {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-            return formatter.string(from: date)
-        }
-        
-        private func formatRemainingTime(progress: Double, duration: TimeInterval) -> String {
-            let remainingTime = (1 - progress) * duration
-            let minutes = Int(remainingTime) / 60
-            let seconds = Int(remainingTime) % 60
-            return String(format: "%d:%02d remaining", minutes, seconds)
-        }
+        .padding(.vertical, 8)
     }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+    
+    private func formatRemainingTime(progress: Double, duration: TimeInterval) -> String {
+        let remainingTime = (1 - progress) * duration
+        let minutes = Int(remainingTime) / 60
+        let seconds = Int(remainingTime) % 60
+        return String(format: "%d:%02d remaining", minutes, seconds)
+    }
+}
     
 
 struct PodcastArtworkView: View {
