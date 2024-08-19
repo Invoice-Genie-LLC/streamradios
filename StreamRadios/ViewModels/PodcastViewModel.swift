@@ -458,7 +458,7 @@ class PodcastViewModel: ObservableObject {
             rssParser.parse()
             
             var updatedFeed = feed
-            updatedFeed.title = rssParser.podcastTitle ?? feed.title
+            updatedFeed.title = feed.title
             updatedFeed.description = rssParser.podcastDescription
             updatedFeed.artworkUrl = rssParser.artworkUrl ?? feed.artworkUrl
             updatedFeed.episodes = rssParser.episodes

@@ -457,6 +457,14 @@ struct PodcastPlayerView: View {
                             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
                         }
                     }
+            .navigationBarTitleDisplayMode(.inline) // To control the title's appearance
+                    .toolbar {
+                        ToolbarItem(placement: .principal) {
+                            Text(feed.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                        }
+                    }
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
             .onChange(of: selectedTab) { newValue in
