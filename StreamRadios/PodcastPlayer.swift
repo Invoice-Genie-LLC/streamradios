@@ -217,6 +217,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         guard let currentEpisode = currentEpisode, duration > 0 else { return }
         let progressValue = currentTime / duration
         viewModel?.updateProgress(for: currentEpisode, progress: progressValue)
+        saveProgressIfNeeded() // Save progress periodically
         updateNowPlayingInfo() // To sync with UI
     }
     

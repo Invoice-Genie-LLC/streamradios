@@ -179,7 +179,7 @@ struct EpisodeRowView: View {
     @State private var progress: Double
     @State private var showingDeleteConfirmation = false
     private let buttonSize: CGFloat = 30
-    
+
     init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
         self.isPlaying = isPlaying
@@ -191,35 +191,24 @@ struct EpisodeRowView: View {
         _isDownloaded = State(initialValue: episode.state.isDownloaded)
         _progress = State(initialValue: viewModel.getProgress(for: episode))
     }
-    
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
+                // Episode title
                 Text(episode.title)
                     .font(.headline)
                     .lineLimit(1)
-                
-                Text(formatDate(episode.publicationDate))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                if let fileSize = episode.fileSize {
-                    Text(formatFileSize(fileSize))
-                        .font(.caption)
+
+                // Episode publication date and "In Progress" label in one line
+                HStack {
+                    Text(formatDate(episode.publicationDate))
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
-                }
-                
-                if let progress = viewModel.episodeProgress[episode.id], progress > 0 {
-                    ProgressView(value: progress)
-                        .accentColor(.blue)
-                    
-                    HStack {
-                        Text(formatRemainingTime(progress: progress, duration: episode.duration))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        Spacer()
-                        
+
+                    Spacer()
+
+                    if isPlaying || progress > 0 {
                         Text("In Progress")
                             .font(.caption)
                             .padding(4)
@@ -228,10 +217,33 @@ struct EpisodeRowView: View {
                             .cornerRadius(4)
                     }
                 }
+
+                // Display file size if available and time remaining
+                if isPlaying || progress > 0 {
+                    ProgressView(value: isPlaying ? safeProgress(podcastPlayer.currentTime, podcastPlayer.duration) : progress)
+                        .accentColor(.blue)
+                    
+                    HStack {
+                        // File size
+                        if let fileSize = episode.fileSize {
+                            Text(formatFileSize(fileSize))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        Spacer()
+
+                        // Time remaining
+                        Text(formatRemainingTime(progress: isPlaying ? safeProgress(podcastPlayer.currentTime, podcastPlayer.duration) : progress, duration: episode.duration))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
-            
+
             Spacer()
-            
+
+            // Favorite button
             Button(action: {
                 viewModel.toggleFavorite(for: episode)
             }) {
@@ -240,7 +252,8 @@ struct EpisodeRowView: View {
                     .frame(width: buttonSize, height: buttonSize)
             }
             .buttonStyle(PlainButtonStyle())
-            
+
+            // Download/Delete button
             Button(action: {
                 if viewModel.currentTab == 3 && episode.state.isDownloaded {
                     showingDeleteConfirmation = true
@@ -258,11 +271,11 @@ struct EpisodeRowView: View {
                     Circle()
                         .fill(episode.state.isDownloaded ? Color.blue : Color.clear)
                         .frame(width: buttonSize, height: buttonSize)
-                    
+
                     Circle()
                         .stroke(Color.gray.opacity(0.3), lineWidth: 2)
                         .frame(width: buttonSize, height: buttonSize)
-                    
+
                     if viewModel.currentTab == 3 && episode.state.isDownloaded {
                         Image(systemName: "trash")
                             .foregroundColor(.white)
@@ -272,7 +285,7 @@ struct EpisodeRowView: View {
                             .stroke(Color.blue, lineWidth: 2)
                             .rotationEffect(.degrees(-90))
                             .frame(width: buttonSize, height: buttonSize)
-                        
+
                         Image(systemName: "arrow.down.circle")
                             .foregroundColor(.gray)
                     } else if episode.state.isDownloaded {
@@ -296,7 +309,8 @@ struct EpisodeRowView: View {
                     secondaryButton: .cancel()
                 )
             }
-            
+
+            // Play/Pause button
             Button(action: isPlaying ? onStop : onPlay) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .resizable()
@@ -306,29 +320,50 @@ struct EpisodeRowView: View {
             .buttonStyle(PlainButtonStyle())
         }
         .padding(.vertical, 8)
+        .onAppear {
+            // Update progress when the view appears
+            progress = viewModel.getProgress(for: episode)
+        }
     }
-    
-    private func formatFileSize(_ size: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useMB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: size)
-    }
-    
+
+    // Helper method to format the date
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter.string(from: date)
     }
-    
+
+    // Helper method to format file size
+    private func formatFileSize(_ size: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
+    }
+
+    // Helper method to safely calculate progress
+    private func safeProgress(_ currentTime: Double, _ duration: Double) -> Double {
+        guard duration > 0, currentTime.isFinite else {
+            return 0.0
+        }
+        return currentTime / duration
+    }
+
+    // Helper method to format the remaining time based on progress and duration
     private func formatRemainingTime(progress: Double, duration: TimeInterval) -> String {
+        guard progress.isFinite else {
+            return "Unknown"
+        }
         let remainingTime = (1 - progress) * duration
         let minutes = Int(remainingTime) / 60
         let seconds = Int(remainingTime) % 60
         return String(format: "%d:%02d remaining", minutes, seconds)
     }
 }
+
+
+
 struct PodcastArtworkView: View {
     let artworkUrl: String?
     
