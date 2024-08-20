@@ -117,6 +117,29 @@ class PodcastViewModel: ObservableObject {
         setupObservers()
     }
     
+    func updateEpisodeDuration(_ episode: PodcastEpisode) {
+           guard let player = PodcastPlayer.shared.player,
+                 let currentItem = player.currentItem else { return }
+           
+           let duration = currentItem.asset.duration.seconds
+           if duration.isFinite && duration > 0 {
+               var updatedEpisode = episode
+               updatedEpisode.duration = duration
+               updateEpisode(updatedEpisode)
+           }
+       }
+    
+    func updateEpisode(_ updatedEpisode: PodcastEpisode) {
+            if let index = allEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+                allEpisodes[index] = updatedEpisode
+            }
+            if let index = currentEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+                currentEpisodes[index] = updatedEpisode
+            }
+            saveEpisodeToCoreData(updatedEpisode)
+            objectWillChange.send()
+        }
+    
     func refreshEpisodeStates() {
         for index in allEpisodes.indices {
             let episode = allEpisodes[index]
