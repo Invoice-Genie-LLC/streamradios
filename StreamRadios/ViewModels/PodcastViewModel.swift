@@ -49,10 +49,10 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
         return "\(feedId)_\(id)_\(publicationDate.timeIntervalSince1970)"
     }
     
-    init(id: String = UUID().uuidString, title: String, description: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil) {
+    init(id: String = UUID().uuidString, title: String, descriptionText: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil) {
         self.id = id
         self.title = title
-        self.descriptionText = description
+        self.descriptionText = descriptionText
         self.audioUrl = audioUrl
         self.publicationDate = publicationDate
         self.duration = duration
@@ -1044,7 +1044,7 @@ class RSSParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         if elementName == "item" {
             if let title = currentTitle,
-               let description = currentDescription,
+               let descriptionText = currentDescription,
                let pubDateString = currentPubDate,
                let enclosure = currentEnclosure {
                 
@@ -1055,7 +1055,7 @@ class RSSParser: NSObject, XMLParserDelegate {
                 let episode = PodcastEpisode(
                     id: id,
                     title: title,
-                    description: description,
+                    descriptionText: descriptionText,
                     audioUrl: enclosure,
                     publicationDate: pubDate,
                     duration: duration,
