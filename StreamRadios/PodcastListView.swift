@@ -595,11 +595,6 @@ struct PodcastPlayerView: View {
                 viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
             }
             
-            Divider()
-                .frame(height: 2)
-                .background(Color.blue)
-                .padding(.horizontal, 20)
-            
             episodeList
         }
         .onAppear {
