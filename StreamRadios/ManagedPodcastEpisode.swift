@@ -41,26 +41,27 @@ extension PodcastModel {
         self.progress = episode.state.progress
         self.feedId = episode.feedId
         self.localFilePath = episode.localFilePath
-        self.fileSize = episode.fileSize ?? 0 // Add this line to include fileSize
+        self.fileSize = episode.fileSize ?? 0
+        self.isPlayed = episode.state.isPlayed
     }
     
     func toPodcastEpisode() -> PodcastEpisode {
         return PodcastEpisode(
             id: id ?? UUID().uuidString,
             title: title ?? "",
-            description: descriptionText ?? "",
+            descriptionText: descriptionText ?? "",
             audioUrl: audioUrl ?? "",
             publicationDate: publicationDate ?? Date(),
             duration: duration,
             state: EpisodeState(
-                isPlayed: progress == 1.0,
+                isPlayed: self.isPlayed,
                 isFavorite: isFavorite,
                 progress: progress,
                 isDownloaded: isDownloaded
             ),
             feedId: feedId ?? "",
             localFilePath: localFilePath,
-            fileSize: fileSize // Add this line to include fileSize in the conversion
+            fileSize: fileSize
         )
     }
 }
