@@ -122,7 +122,7 @@ struct PodcastRowView: View {
                     .font(.headline)
                     .lineLimit(1)
                 
-                Text(feed.description ?? "No description available")
+                Text(feed.descriptionText ?? "No description available")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
