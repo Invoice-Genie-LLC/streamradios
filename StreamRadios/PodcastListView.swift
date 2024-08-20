@@ -100,10 +100,6 @@ struct PodcastListView: View {
     }
 }
 
-
-
-
-
 struct PodcastRowView: View {
     let feed: PodcastFeed
     let isPlaying: Bool
@@ -112,7 +108,7 @@ struct PodcastRowView: View {
     let onTap: () -> Void
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             PodcastIconView(iconData: feed.iconData, artworkUrl: feed.artworkUrl)
                 .frame(width: 60, height: 60)
                 .cornerRadius(8)
@@ -120,17 +116,16 @@ struct PodcastRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(feed.title)
                     .font(.headline)
-                    .lineLimit(1)
+                    .lineLimit(2)
                 
                 Text(feed.descriptionText ?? "No description available")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(4)
+                
+                Spacer()
+                
             }
-            
-            Spacer()
-            
-            PlayButton(isPlaying: isPlaying, onPlay: onPlay, onStop: onStop)
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -497,7 +492,6 @@ struct PodcastPlayerView: View {
     @Environment(\.presentationMode) var presentationMode
     let feed: PodcastFeed
     @ObservedObject var podcastPlayer: PodcastPlayer
-    @State private var currentEpisodeIndex = 0
     @State private var selectedTab = 0 // Start with "All" tab
     @State private var seekPosition: Double = 0
     
@@ -525,7 +519,6 @@ struct PodcastPlayerView: View {
                 
                 Spacer()
                 
-                // This empty view balances the back button
                 Color.clear
                     .frame(width: 60, height: 1)
             }
@@ -534,20 +527,8 @@ struct PodcastPlayerView: View {
             .background(Color(UIColor.systemBackground))
             .shadow(color: Color.gray.opacity(0.3), radius: 2, x: 0, y: 1)
         }
+        
         VStack(spacing: 10) {
-            Text(feed.title)
-                .font(.title)
-                .padding(.top)
-                .onAppear {
-                    viewModel.fetchEpisodes(for: feed) { _ in
-                        viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-                    }
-                }
-            
-                .onAppear {
-                    os_log("PodcastPlayerView appeared for feed: %@", log: log, type: .info, feed.title)
-                }
-            
             if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
                 AsyncImage(url: url) { image in
                     image.resizable()
@@ -556,9 +537,6 @@ struct PodcastPlayerView: View {
                 }
                 .frame(width: 150, height: 150)
                 .cornerRadius(10)
-                .onAppear {
-                    os_log("Artwork loaded for feed: %@", log: log, type: .info, feed.title)
-                }
             }
             
             nowPlayingView
@@ -569,28 +547,8 @@ struct PodcastPlayerView: View {
                 Text("Favorite").tag(2)
                 Text("Downloads").tag(3)
             }
-            .onAppear {
-                viewModel.fetchEpisodes(for: feed) { _ in
-                    viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-                }
-            }
-            .navigationBarBackButtonHidden(true)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text(feed.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                }
-            }
-            
             .pickerStyle(SegmentedPickerStyle())
             .padding(.horizontal)
-            .onAppear {
-                viewModel.fetchEpisodes(for: feed) { _ in
-                    viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-                }
-            }
             .onChange(of: selectedTab) { newValue in
                 viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
             }
@@ -598,10 +556,10 @@ struct PodcastPlayerView: View {
             episodeList
         }
         .onAppear {
-            viewModel.fetchEpisodes(for: feed) { _ in
-                viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-            }
+            os_log("PodcastPlayerView appeared for feed: %@", log: log, type: .info, feed.title)
+            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
         }
+        .navigationBarHidden(true)
     }
     
     private var nowPlayingView: some View {
@@ -676,12 +634,8 @@ struct PodcastPlayerView: View {
                 EpisodeRowView(
                     episode: episode,
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                    onPlay: {
-                        playEpisode(episode, feed: feed)
-                    },
-                    onStop: {
-                        podcastPlayer.togglePlayPause()
-                    },
+                    onPlay: { playEpisode(episode, feed: feed) },
+                    onStop: { podcastPlayer.togglePlayPause() },
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
                 )
