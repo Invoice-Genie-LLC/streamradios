@@ -219,25 +219,28 @@ struct EpisodeRowView: View {
                 }
 
                 // Display file size if available and time remaining
-                if isPlaying || progress > 0 {
-                    ProgressView(value: isPlaying ? safeProgress(podcastPlayer.currentTime, podcastPlayer.duration) : progress)
-                        .accentColor(.blue)
+                HStack {
+                    // Display file size in Downloads tab or when playing
+                    if let fileSize = episode.fileSize, (viewModel.currentTab == 3 || isPlaying) {
+                        Text(formatFileSize(fileSize))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     
-                    HStack {
-                        // File size
-                        if let fileSize = episode.fileSize {
-                            Text(formatFileSize(fileSize))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        Spacer()
+                    Spacer()
 
-                        // Time remaining
+                    // Time remaining
+                    if isPlaying || progress > 0 {
                         Text(formatRemainingTime(progress: isPlaying ? safeProgress(podcastPlayer.currentTime, podcastPlayer.duration) : progress, duration: episode.duration))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                }
+
+                // Progress bar
+                if isPlaying || progress > 0 {
+                    ProgressView(value: isPlaying ? safeProgress(podcastPlayer.currentTime, podcastPlayer.duration) : progress)
+                        .accentColor(.blue)
                 }
             }
 
