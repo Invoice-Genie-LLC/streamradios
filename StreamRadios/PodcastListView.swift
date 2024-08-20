@@ -229,17 +229,23 @@ struct EpisodeRowView: View {
                     
                     Spacer()
 
-                    // Time remaining
-                    if isPlaying || progress > 0 {
-                        Text(formatRemainingTime(progress: isPlaying ? safeProgress(podcastPlayer.currentTime, podcastPlayer.duration) : progress, duration: episode.duration))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    // Time remaining or duration
+                    if episode.duration > 0 {
+                        if isPlaying || progress > 0 {
+                            Text(formatRemainingTime())
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text(formatDuration(episode.duration))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
 
                 // Progress bar
-                if isPlaying || progress > 0 {
-                    ProgressView(value: isPlaying ? safeProgress(podcastPlayer.currentTime, podcastPlayer.duration) : progress)
+                if episode.duration > 0 && (isPlaying || progress > 0) {
+                    ProgressView(value: currentProgress())
                         .accentColor(.blue)
                 }
             }
@@ -316,7 +322,16 @@ struct EpisodeRowView: View {
             }
 
             // Play/Pause button
-            Button(action: isPlaying ? onStop : onPlay) {
+            Button(action: {
+                if isPlaying {
+                    onStop()
+                } else {
+                    onPlay()
+                    if episode.duration == 0 {
+                        viewModel.updateEpisodeDuration(episode)
+                    }
+                }
+            }) {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .resizable()
                     .frame(width: buttonSize, height: buttonSize)
@@ -328,6 +343,7 @@ struct EpisodeRowView: View {
         .onAppear {
             // Update progress when the view appears
             progress = viewModel.getProgress(for: episode)
+            print("EpisodeRowView appeared for \(episode.title): progress=\(progress), duration=\(episode.duration)")
         }
     }
 
@@ -347,27 +363,51 @@ struct EpisodeRowView: View {
         return formatter.string(fromByteCount: size)
     }
 
+    // Helper method to format duration
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    // Helper method to calculate current progress
+    private func currentProgress() -> Double {
+        if episode.duration > 0 {
+            if isPlaying {
+                return safeProgress(podcastPlayer.currentTime, episode.duration)
+            } else {
+                return progress
+            }
+        }
+        return 0.0
+    }
+
     // Helper method to safely calculate progress
     private func safeProgress(_ currentTime: Double, _ duration: Double) -> Double {
         guard duration > 0, currentTime.isFinite else {
             return 0.0
         }
-        return currentTime / duration
+        let calculatedProgress = min(currentTime / duration, 1.0)
+        print("Calculated safe progress: currentTime=\(currentTime), duration=\(duration), progress=\(calculatedProgress)")
+        return calculatedProgress
     }
 
-    // Helper method to format the remaining time based on progress and duration
-    private func formatRemainingTime(progress: Double, duration: TimeInterval) -> String {
-        guard progress.isFinite else {
-            return "Unknown"
+    // Updated formatRemainingTime method
+    private func formatRemainingTime() -> String {
+        guard episode.duration > 0 else {
+            return ""
         }
-        let remainingTime = (1 - progress) * duration
-        let minutes = Int(remainingTime) / 60
-        let seconds = Int(remainingTime) % 60
-        return String(format: "%d:%02d remaining", minutes, seconds)
+
+        let remainingTime: TimeInterval
+        if isPlaying {
+            remainingTime = max(episode.duration - podcastPlayer.currentTime, 0)
+        } else {
+            remainingTime = max((1 - progress) * episode.duration, 0)
+        }
+        
+        return formatDuration(remainingTime) + " remaining"
     }
 }
-
-
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?

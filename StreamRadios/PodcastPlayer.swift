@@ -17,7 +17,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        
        weak var radioPlayer: RadioPlayer?
        
-       private var player: AVPlayer?
+        var player: AVPlayer?
        @Published var currentEpisode: PodcastEpisode?
        @Published var isPlaying: Bool = false
        @Published var currentTime: Double = 0
@@ -31,6 +31,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        private var timeObserver: Any?
        private var playerItemObserver: NSKeyValueObservation?
        private var cancellables = Set<AnyCancellable>()
+    var onEpisodeStart: ((PodcastEpisode) -> Void)?
+
     
     weak var viewModel: PodcastViewModel?
 
@@ -66,6 +68,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Set the current episode and feed before playing
             currentEpisode = episode
             currentFeed = feed
+        
+        onEpisodeStart?(episode)
+            
 
             // Set up observers
             setupPlayerItemObserver()
