@@ -17,7 +17,7 @@ struct PodcastFeed: Identifiable, Codable {
     var title: String
     var url: String
     var artworkUrl: String?
-    var description: String?
+    var descriptionText: String?
     var iconData: String?
     var episodes: [PodcastEpisode] = []
     
@@ -27,7 +27,7 @@ struct PodcastFeed: Identifiable, Codable {
         self.title = title
         self.url = url
         self.artworkUrl = artworkUrl
-        self.description = description
+        self.descriptionText = description
         self.iconData = iconData
         self.episodes = episodes
     }
@@ -36,7 +36,7 @@ struct PodcastFeed: Identifiable, Codable {
 struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     var id: String
     var title: String
-    var description: String
+    var descriptionText: String
     var audioUrl: String
     var publicationDate: Date
     var duration: TimeInterval
@@ -52,7 +52,7 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     init(id: String = UUID().uuidString, title: String, description: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil) {
         self.id = id
         self.title = title
-        self.description = description
+        self.descriptionText = description
         self.audioUrl = audioUrl
         self.publicationDate = publicationDate
         self.duration = duration
@@ -495,7 +495,7 @@ class PodcastViewModel: ObservableObject {
             
             var updatedFeed = feed
             updatedFeed.title = feed.title
-            updatedFeed.description = rssParser.podcastDescription
+            updatedFeed.descriptionText = rssParser.podcastDescription
             updatedFeed.artworkUrl = rssParser.artworkUrl ?? feed.artworkUrl
             updatedFeed.episodes = rssParser.episodes
             

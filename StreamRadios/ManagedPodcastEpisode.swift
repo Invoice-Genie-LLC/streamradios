@@ -14,7 +14,7 @@ extension FeedModel {
         title = feed.title
         url = feed.url
         artworkUrl = feed.artworkUrl
-        descriptionText = feed.description
+        descriptionText = feed.descriptionText
         iconData = feed.iconData
     }
     
@@ -32,7 +32,7 @@ extension PodcastModel {
     func update(from episode: PodcastEpisode) {
         self.id = episode.id
         self.title = episode.title
-        self.descriptionText = episode.description
+        self.descriptionText = episode.descriptionText
         self.audioUrl = episode.audioUrl
         self.publicationDate = episode.publicationDate
         self.duration = episode.duration
