@@ -202,7 +202,7 @@ struct EpisodeRowView: View {
                 // Episode title
                 Text(episode.title)
                     .font(.headline)
-                    .lineLimit(1)
+                    .lineLimit(nil)
 
                 // Episode publication date and "In Progress" label in one line
                 HStack {
@@ -239,11 +239,7 @@ struct EpisodeRowView: View {
                             Text(formatRemainingTime())
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                        } else {
-                            Text(formatDuration(episode.duration))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                        } 
                     }
                 }
 
@@ -523,7 +519,7 @@ struct PodcastPlayerView: View {
                 
                 Text(feed.title)
                     .font(.headline)
-                    .lineLimit(1)
+                    .lineLimit(nil)
                     .frame(maxWidth: .infinity)
                 
                 Spacer()
