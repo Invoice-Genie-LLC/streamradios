@@ -24,8 +24,17 @@ struct PodcastListView: View {
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     
     var filteredPodcasts: [PodcastFeed] {
-        return viewModel.podcastFeeds.sorted { $0.episodes.first?.publicationDate ?? Date() > $1.episodes.first?.publicationDate ?? Date() }
-    }
+            let sortedPodcasts = viewModel.podcastFeeds.sorted { $0.episodes.first?.publicationDate ?? Date() > $1.episodes.first?.publicationDate ?? Date() }
+            
+            if searchText.isEmpty {
+                return sortedPodcasts
+            } else {
+                return sortedPodcasts.filter { feed in
+                    feed.title.lowercased().contains(searchText.lowercased()) ||
+                    (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
+                }
+            }
+        }
     
     var body: some View {
            NavigationView {
