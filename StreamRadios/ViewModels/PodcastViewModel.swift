@@ -109,6 +109,7 @@ class PodcastViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     @Published var currentTab: Int = 0
     @NSManaged public var fileSize: Int64
+    @Published var downloadedEpisodeIds: Set<String> = []
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
@@ -306,15 +307,16 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func loadAllEpisodes() {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        do {
-            let managedEpisodes = try context.fetch(fetchRequest)
-            self.allEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
-            print("Loaded \(self.allEpisodes.count) episodes")
-        } catch {
-            print("Failed to load episodes: \(error)")
-        }
-    }
+           let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+           do {
+               let managedEpisodes = try context.fetch(fetchRequest)
+               self.allEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
+               self.downloadedEpisodeIds = Set(managedEpisodes.compactMap { $0.isDownloaded ? $0.id : nil })
+               print("Loaded \(self.allEpisodes.count) episodes, \(self.downloadedEpisodeIds.count) downloaded")
+           } catch {
+               print("Failed to load episodes: \(error)")
+           }
+       }
     
     func fetchPodcastFeeds() {
         isLoading = true

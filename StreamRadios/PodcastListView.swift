@@ -28,36 +28,36 @@ struct PodcastListView: View {
     }
     
     var body: some View {
-        NavigationView {
-            VStack {
-                searchBar
-                PodcastList(
-                    feeds: filteredPodcasts,
-                    podcastPlayer: podcastPlayer,
-                    onPlay: { playLatestEpisode(for: $0) },
-                    onDelete: { feed in
-                        podcastToDelete = feed
-                        showingDeleteConfirmation = true
-                    },
-                    selectedPodcast: $selectedPodcast
-                )
-            }
-            .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    viewModel.deletePodcastFeed(podcast)
-                }
-            } message: { podcast in
-                Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
-            }
-            .navigationTitle("Podcasts")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddPodcast = true }) {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
+           NavigationView {
+               VStack {
+                   searchBar
+                   PodcastList(
+                       feeds: filteredPodcasts,
+                       podcastPlayer: podcastPlayer,
+                       onPlay: { playLatestEpisode(for: $0) },
+                       onDelete: { feed in
+                           podcastToDelete = feed
+                           showingDeleteConfirmation = true
+                       },
+                       selectedPodcast: $selectedPodcast
+                   )
+               }
+               .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
+                   Button("Cancel", role: .cancel) {}
+                   Button("Delete", role: .destructive) {
+                       viewModel.deletePodcastFeed(podcast)
+                   }
+               } message: { podcast in
+                   Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
+               }
+               .navigationTitle("Podcasts")
+               .toolbar {
+                   ToolbarItem(placement: .navigationBarTrailing) {
+                       Button(action: { showingAddPodcast = true }) {
+                           Image(systemName: "plus")
+                       }
+                   }
+               }
             .onAppear {
                 os_log("PodcastListView appeared", log: log, type: .info)
                 viewModel.fetchPodcastFeeds()
@@ -265,7 +265,9 @@ struct EpisodeRowView: View {
                     viewModel.downloadEpisode(episode) { result in
                         DispatchQueue.main.async {
                             isDownloading = false
-                            // Handle result if needed
+                            if case .success(let updatedEpisode) = result {
+                                self.isDownloaded = updatedEpisode.state.isDownloaded
+                            }
                         }
                     }
                 }
