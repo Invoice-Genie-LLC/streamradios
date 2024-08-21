@@ -64,6 +64,12 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             let queue = DispatchQueue(label: "NetworkMonitor")
             monitor.start(queue: queue)
+                
+        DispatchQueue.main.async {
+                   self.podcastPlayer = PodcastPlayer.shared
+                   self.podcastPlayer?.setRadioPlayer(self)
+               }
+
         }
 
     
@@ -326,6 +332,7 @@ class RadioPlayer: NSObject, ObservableObject {
             player.pause()
         } else {
             player.play()
+            stopPodcastPlayback()
             resetRetryCount()
         }
         updateNowPlayingInfo()
@@ -333,9 +340,7 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func play() {
-            if podcastPlayer?.isPlaying == true {
-                podcastPlayer?.pause()
-            }
+        stopPodcastPlayback()
             
             // Existing play logic
             guard let player = player else { return }
@@ -352,6 +357,12 @@ class RadioPlayer: NSObject, ObservableObject {
             updateNowPlayingInfo()
             updateWidget()
             scheduleAppRefresh()
+        }
+    
+    private func stopPodcastPlayback() {
+            if let podcastPlayer = podcastPlayer, podcastPlayer.isPlaying {
+                podcastPlayer.pause()
+            }
         }
     
     func pause() {
@@ -378,6 +389,8 @@ class RadioPlayer: NSObject, ObservableObject {
        }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
+        stopPodcastPlayback()
+        
         guard index >= 0 && index < stations.count else { return }
         
         stopCurrentStation()
