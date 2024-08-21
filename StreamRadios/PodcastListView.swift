@@ -38,7 +38,11 @@ struct PodcastListView: View {
     
     var body: some View {
            NavigationView {
-               VStack {
+               VStack(alignment: .leading, spacing: 8) {
+                   Text("Tap on a podcast image to explore its episodes and discover more content.")
+                                      .font(.subheadline)
+                                      .foregroundColor(.secondary)
+                                     .padding(.horizontal, 16)
                    searchBar
                    PodcastList(
                        feeds: filteredPodcasts,
@@ -115,66 +119,103 @@ struct PodcastRowView: View {
     let onPlay: () -> Void
     let onStop: () -> Void
     let onTap: () -> Void
+    @Binding var isExpanded: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 8) {
             PodcastIconView(iconData: feed.iconData, artworkUrl: feed.artworkUrl)
                 .frame(width: 70, height: 70)
                 .cornerRadius(10)
                 .padding(.top, 10)
+                .padding(.trailing, 8)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(feed.title)
                     .font(.headline)
-                    .foregroundColor(.primary)
                     .lineLimit(2)
-                   .alignmentGuide(.top) { d in d[.top] }
-                Text(feed.descriptionText ?? "No description available")
-                    .font(.subheadline)
-                    .foregroundColor(.gray)
-                    .fixedSize(horizontal: false, vertical: true)
-                if isPlaying {
-                    Button(action: onStop) {
-                        HStack {
-                            Image(systemName: "pause.circle.fill")
-                                .foregroundColor(.blue)
-                            Text("Pause")
-                                .font(.footnote)
-                                .foregroundColor(.blue)
-                        }
-                    }
-                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                        impactFeedback.impactOccurred()
-                        onStop()
-                    })
+                    .alignmentGuide(.top) { d in d[.top] }
+
+                if isExpanded {
+                    Text(feed.descriptionText ?? "No description available")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Button(action: onPlay) {
-                        HStack {
-                            Image(systemName: "play.circle.fill")
-                                .foregroundColor(.green)
-                            Text("Play")
+                    Text(feed.descriptionText ?? "No description available")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack {
+                    if !isExpanded && (feed.descriptionText?.count ?? 0) > 100 {
+                        Button(action: {
+                            isExpanded.toggle()
+                        }) {
+                            Text("Read More")
                                 .font(.footnote)
-                                .foregroundColor(.green)
+                                .foregroundColor(.blue)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+
+                    Spacer()
+
+                    if isPlaying {
+                        Button(action: {
+                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                            impactFeedback.impactOccurred()
+                            onStop()
+                        }) {
+                            HStack {
+                                Image(systemName: "pause.circle.fill")
+                                    .foregroundColor(.blue)
+                                Text("Pause")
+                                    .font(.footnote)
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onStop()
+                        }
+                    } else {
+                        Button(action: {
+                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                            impactFeedback.impactOccurred()
+                            onPlay()
+                        }) {
+                            HStack {
+                                Image(systemName: "play.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Play")
+                                    .font(.footnote)
+                                    .foregroundColor(.green)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onPlay()
                         }
                     }
-                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                        impactFeedback.impactOccurred()
-                        onPlay()
-                    })
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.leading, 6)
+            .padding(.vertical, 6)
             .alignmentGuide(.top) { d in d[.top] }
 
             Spacer()
         }
-        .padding(.horizontal)
-        .onTapGesture(perform: onTap)
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
     }
 }
+
 
 struct PodcastIconView: View {
     let iconData: String?
@@ -709,17 +750,24 @@ struct PodcastList: View {
     @ObservedObject var podcastPlayer: PodcastPlayer
     let onPlay: (PodcastFeed) -> Void
     let onDelete: (PodcastFeed) -> Void
-    @Binding var selectedPodcast: PodcastFeed? // Use a binding to update the selectedPodcast
-    
+    @Binding var selectedPodcast: PodcastFeed?
+    @State private var expandedFeedId: String? // Track the currently expanded feed
+
     var body: some View {
         List {
             ForEach(feeds) { feed in
                 PodcastRowView(
                     feed: feed,
                     isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                    onPlay: { onPlay(feed) }, // Use the passed onPlay closure
+                    onPlay: { onPlay(feed) },
                     onStop: { podcastPlayer.togglePlayPause() },
-                    onTap: { selectedPodcast = feed } // Update the binding when a podcast is selected
+                    onTap: { selectedPodcast = feed },
+                    isExpanded: Binding(
+                        get: { expandedFeedId == feed.id },
+                        set: { isExpanded in
+                            expandedFeedId = isExpanded ? feed.id : nil
+                        }
+                    )
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
@@ -733,6 +781,7 @@ struct PodcastList: View {
         .listStyle(PlainListStyle())
     }
 }
+
 
 
 
