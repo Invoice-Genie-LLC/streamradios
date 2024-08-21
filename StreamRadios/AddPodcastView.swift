@@ -13,8 +13,6 @@ struct AddPodcastView: View {
     @Binding var url: String
     @State private var showAlert = false
     @State private var alertMessage: String = ""
-    @State private var iconImage: UIImage? = nil
-    @State private var showImagePicker = false
     @EnvironmentObject var permissionManager: PermissionManager
     
     let onAdd: () -> Void
@@ -78,18 +76,15 @@ struct AddPodcastView: View {
                             }
                         }
                          
-                        
-                        Button(action: savePodcast) {
+                        Button(action: validateAndSavePodcast) {
                             HStack {
+                                Spacer()
                                 Image(systemName: "plus.circle.fill")
                                 Text("Add Podcast")
+                                Spacer()
                             }
                         }
                         .foregroundColor(.green)
-                        .disabled(title.isEmpty || url.isEmpty)
-                    }
-                    .alert(isPresented: $showAlert) {
-                        Alert(title: Text("Validation Error"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
                     }
                 }
                 .navigationBarHidden(true) // Hide the default navigation bar
@@ -104,15 +99,19 @@ struct AddPodcastView: View {
         }
     }
     
-    private func savePodcast() {
-        guard !title.isEmpty else {
-            alertMessage = "Podcast title is required."
+    private func validateAndSavePodcast() {
+        // Validate title
+        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            alertMessage = "Please enter a podcast title."
             showAlert = true
             return
         }
         
-        guard let url = URL(string: url), UIApplication.shared.canOpenURL(url) else {
-            alertMessage = "Please enter a valid RSS Feed URL."
+        // Validate URL
+        guard let url = URL(string: self.url),
+              UIApplication.shared.canOpenURL(url),
+              url.scheme == "http" || url.scheme == "https" else {
+            alertMessage = "Please enter a valid RSS Feed URL (must start with http:// or https://)."
             showAlert = true
             return
         }
@@ -123,12 +122,8 @@ struct AddPodcastView: View {
 }
 
 struct AddPodcastView_Previews: PreviewProvider {
-    @State static var isPresented: Bool = true
-    @State static var title: String = ""
-    @State static var url: String = ""
-
     static var previews: some View {
-        AddPodcastView(isPresented: $isPresented, title: $title, url: $url, onAdd: {
+        AddPodcastView(isPresented: .constant(true), title: .constant(""), url: .constant(""), onAdd: {
             print("Podcast added")
         })
         .environmentObject(PermissionManager())
