@@ -53,6 +53,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             return true
         }
     
+    lazy var persistentContainer: NSPersistentContainer = {
+            let container = NSPersistentContainer(name: "PodcastModel")
+            container.loadPersistentStores { (storeDescription, error) in
+                if let error = error as NSError? {
+                    fatalError("Unresolved error \(error), \(error.userInfo)")
+                }
+            }
+            return container
+        }()
+    
+    func saveContext() {
+            let context = persistentContainer.viewContext
+            if context.hasChanges {
+                do {
+                    try context.save()
+                } catch {
+                    let nserror = error as NSError
+                    fatalError("Unresolved error \(nserror), \(nserror.userInfo)")
+                }
+            }
+        }
+    
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         if let aps = userInfo["aps"] as? [String: AnyObject] {
             if aps["content-available"] as? Int == 1 {

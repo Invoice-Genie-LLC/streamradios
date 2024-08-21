@@ -110,12 +110,16 @@ class PodcastViewModel: ObservableObject {
     @Published var currentTab: Int = 0
     @NSManaged public var fileSize: Int64
     @Published var downloadedEpisodeIds: Set<String> = []
+    private var backgroundContext: NSManagedObjectContext
+    private let saveThreshold: Double = 0.05
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
-        self.context = context
-        loadSavedData()
-        setupObservers()
-    }
+            self.context = context
+            self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+            self.backgroundContext.parent = context
+            loadSavedData()
+            loadAllEpisodesProgress()
+        }
     
     func updateEpisodeDuration(_ episode: PodcastEpisode) {
            guard let player = PodcastPlayer.shared.player,
@@ -654,13 +658,12 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateProgress(for episode: PodcastEpisode, progress: Double) {
-        episodeProgress[episode.id] = progress
-        var updatedEpisode = episode
-        updatedEpisode.state.progress = progress
-        updateEpisodeInLists(updatedEpisode)
-        saveEpisodeToCoreData(updatedEpisode)
-        objectWillChange.send()
-    }
+            episodeProgress[episode.id] = progress
+            var updatedEpisode = episode
+            updatedEpisode.state.progress = progress
+            updateEpisodeInLists(updatedEpisode)
+            saveEpisodeToCoreData(updatedEpisode)
+        }
     
     func markEpisodeAsCompleted(_ episode: PodcastEpisode) {
         updateProgress(for: episode, progress: 1.0)
@@ -724,16 +727,30 @@ class PodcastViewModel: ObservableObject {
     }
     
     func saveContextIfNeeded() {
-        if hasChanges {
-            do {
-                try context.save()
-                hasChanges = false
-                print("Core Data context saved successfully")
-            } catch {
-                print("Failed to save Core Data context: \(error)")
+            guard hasChanges else { return }
+            
+            // Perform the save operation on a background thread
+            backgroundContext.perform { [weak self] in
+                guard let self = self else { return }
+                
+                do {
+                    try self.backgroundContext.save()
+                    
+                    // If background save is successful, save the main context on the main thread
+                    DispatchQueue.main.async {
+                        do {
+                            try self.context.save()
+                            self.hasChanges = false
+                            print("Core Data context saved successfully")
+                        } catch {
+                            print("Failed to save main context: \(error)")
+                        }
+                    }
+                } catch {
+                    print("Failed to save background context: \(error)")
+                }
             }
         }
-    }
     
     
     func toggleFavorite(for episode: PodcastEpisode) {
@@ -744,27 +761,33 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            let managedEpisode: PodcastModel
-            
-            if let existingEpisode = results.first {
-                managedEpisode = existingEpisode
-            } else {
-                managedEpisode = PodcastModel(context: context)
-            }
-            
-            managedEpisode.update(from: episode)
-            
-            try context.save()
-            print("Successfully saved episode to Core Data")
-        } catch {
-            print("Failed to save episode to Core Data: \(error)")
-        }
-    }
+           backgroundContext.perform { [weak self] in
+               guard let self = self else { return }
+               
+               let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+               fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+               
+               do {
+                   let results = try self.backgroundContext.fetch(fetchRequest)
+                   let managedEpisode: PodcastModel
+                   
+                   if let existingEpisode = results.first {
+                       managedEpisode = existingEpisode
+                   } else {
+                       managedEpisode = PodcastModel(context: self.backgroundContext)
+                   }
+                   
+                   managedEpisode.update(from: episode)
+                   try self.backgroundContext.save()
+                   
+                   DispatchQueue.main.async {
+                       self.hasChanges = true
+                   }
+               } catch {
+                   print("Failed to save episode to Core Data: \(error)")
+               }
+           }
+       }
     
     
     func getProgress(for episode: PodcastEpisode) -> Double {
@@ -774,15 +797,12 @@ class PodcastViewModel: ObservableObject {
     private func updateEpisodeInLists(_ episode: PodcastEpisode) {
         // Update in allEpisodes
         if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-            allEpisodes[index] = episode
-        } else {
-            allEpisodes.append(episode)
-        }
-        
-        // Update in currentEpisodes
-        if let index = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-            currentEpisodes[index] = episode
-        }
+                    allEpisodes[index] = episode
+                }
+                
+                if let index = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    currentEpisodes[index] = episode
+                }
         
         // Update favoriteEpisodes
         if episode.state.isFavorite {
@@ -982,29 +1002,29 @@ class PodcastViewModel: ObservableObject {
     }
     
     func loadAllEpisodesProgress() {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            for managedEpisode in results {
-                if let id = managedEpisode.id {
-                    episodeProgress[id] = managedEpisode.progress
-                    
-                    if let index = allEpisodes.firstIndex(where: { $0.id == id }) {
-                        allEpisodes[index].state.progress = managedEpisode.progress
-                    }
-                    
-                    if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == id }) {
-                        currentEpisodes[currentIndex].state.progress = managedEpisode.progress
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            
+            do {
+                let results = try context.fetch(fetchRequest)
+                for managedEpisode in results {
+                    if let id = managedEpisode.id {
+                        episodeProgress[id] = managedEpisode.progress
+                        
+                        if let index = allEpisodes.firstIndex(where: { $0.id == id }) {
+                            allEpisodes[index].state.progress = managedEpisode.progress
+                        }
+                        
+                        if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == id }) {
+                            currentEpisodes[currentIndex].state.progress = managedEpisode.progress
+                        }
                     }
                 }
+            } catch {
+                print("Failed to load episode progress: \(error)")
             }
-        } catch {
-            print("Failed to load episode progress: \(error)")
+            
+            objectWillChange.send()
         }
-        
-        objectWillChange.send()
-    }
 }
 
 class RSSParser: NSObject, XMLParserDelegate {

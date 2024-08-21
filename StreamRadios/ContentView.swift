@@ -27,7 +27,7 @@ struct ContentView: View {
     @State private var activeSheet: ActiveSheet?
     @State private var selectedTab: Tab = .all
     @EnvironmentObject var alertManager: AlertManager
-
+    @EnvironmentObject var podcastViewModel: PodcastViewModel
 
     init() {
         if let savedTab = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
@@ -327,6 +327,9 @@ struct ContentView: View {
                 self.selectedTab = .all
             }
         }
+        .onDisappear {
+                    podcastViewModel.saveContextIfNeeded()
+                }
         .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
             UIApplication.shared.addTapGestureRecognizer()

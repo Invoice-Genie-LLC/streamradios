@@ -84,6 +84,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         // Called as the scene transitions from the foreground to the background.
+        (UIApplication.shared.delegate as? AppDelegate)?.saveContext()
+        PodcastPlayer.shared.handleAppWillTerminate()
         RadioPlayer.shared.saveLastPlayedStation()
     }
 }
