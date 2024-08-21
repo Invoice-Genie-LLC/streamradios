@@ -43,7 +43,10 @@ struct SideMenuView: View {
                     .padding(.horizontal, 20)
                 }
                 
-                NavigationLink(destination: PodcastListView().environmentObject(PodcastViewModel())) {
+                NavigationLink(destination: PodcastListView().onAppear {
+                    self.showSideMenu = false
+                })
+                {
                     HStack {
                         Image(systemName: "mic")
                             .font(.headline)
