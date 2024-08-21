@@ -115,29 +115,63 @@ struct PodcastRowView: View {
     let onPlay: () -> Void
     let onStop: () -> Void
     let onTap: () -> Void
-    
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             PodcastIconView(iconData: feed.iconData, artworkUrl: feed.artworkUrl)
-                .frame(width: 60, height: 60)
-                .cornerRadius(8)
-            
-            VStack(alignment: .leading, spacing: 4) {
+                .frame(width: 70, height: 70)
+                .cornerRadius(10)
+                .padding(.top, 10)
+
+            VStack(alignment: .leading, spacing: 6) {
                 Text(feed.title)
                     .font(.headline)
+                    .foregroundColor(.primary)
                     .lineLimit(2)
-                
+                   .alignmentGuide(.top) { d in d[.top] }
                 Text(feed.descriptionText ?? "No description available")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(4)
-                
-                Spacer()
-                
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+                    .fixedSize(horizontal: false, vertical: true)
+                if isPlaying {
+                    Button(action: onStop) {
+                        HStack {
+                            Image(systemName: "pause.circle.fill")
+                                .foregroundColor(.blue)
+                            Text("Pause")
+                                .font(.footnote)
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                        impactFeedback.impactOccurred()
+                        onStop()
+                    })
+                } else {
+                    Button(action: onPlay) {
+                        HStack {
+                            Image(systemName: "play.circle.fill")
+                                .foregroundColor(.green)
+                            Text("Play")
+                                .font(.footnote)
+                                .foregroundColor(.green)
+                        }
+                    }
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                        impactFeedback.impactOccurred()
+                        onPlay()
+                    })
+                }
             }
+            .padding(.vertical, 8)
+            .padding(.leading, 6)
+            .alignmentGuide(.top) { d in d[.top] }
+
+            Spacer()
         }
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
+        .padding(.horizontal)
         .onTapGesture(perform: onTap)
     }
 }
@@ -145,7 +179,7 @@ struct PodcastRowView: View {
 struct PodcastIconView: View {
     let iconData: String?
     let artworkUrl: String?
-    
+
     var body: some View {
         Group {
             if let iconData = iconData, let uiImage = UIImage(data: Data(base64Encoded: iconData) ?? Data()) {
@@ -155,16 +189,22 @@ struct PodcastIconView: View {
             } else if let artworkUrl = artworkUrl, let url = URL(string: artworkUrl) {
                 AsyncImage(url: url) { image in
                     image.resizable()
+                        .aspectRatio(contentMode: .fill)
                 } placeholder: {
                     Color.gray
+                        .overlay(
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                        )
                 }
             } else {
-                Image(systemName: "mic")
+                Image(systemName: "mic.fill")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .padding(8)
-                    .background(Color.blue)
+                    .padding(16)
+                    .background(Color.blue.opacity(0.3))
                     .foregroundColor(.white)
+                    .cornerRadius(10)
             }
         }
     }
@@ -239,7 +279,7 @@ struct EpisodeRowView: View {
                             Text(formatRemainingTime())
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                        } 
+                        }
                     }
                 }
 
