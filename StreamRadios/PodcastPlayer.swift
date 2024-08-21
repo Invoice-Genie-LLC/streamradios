@@ -42,47 +42,53 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             self.viewModel = viewModel
         }
     
+    func setRadioPlayer(_ player: RadioPlayer) {
+           self.radioPlayer = player
+       }
+    
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-            var playUrl: URL?
-
-            if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
-                playUrl = URL(fileURLWithPath: localFilePath)
-            } else if let url = URL(string: episode.audioUrl) {
-                playUrl = url
-            } else {
-                return
-            }
-
-            guard let url = playUrl else { return }
-
-            let playerItem = AVPlayerItem(url: url)
-            if player == nil {
-                player = AVPlayer(playerItem: playerItem)
-            } else {
-                player?.replaceCurrentItem(with: playerItem)
-            }
-
-            // Save progress of the previous episode before switching
-            saveProgressIfNeeded()
-
-            // Set the current episode and feed before playing
-            currentEpisode = episode
-            currentFeed = feed
+        // Stop radio playback if it's playing
+        stopRadioPlayback()
         
-        onEpisodeStart?(episode)
-            
+        var playUrl: URL?
 
-            // Set up observers
-            setupPlayerItemObserver()
-            setupTimeObserver()
-
-            // Reset current time and duration
-            currentTime = 0
-            duration = 0
-
-            // Now play the episode
-            play()
+        if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
+            playUrl = URL(fileURLWithPath: localFilePath)
+        } else if let url = URL(string: episode.audioUrl) {
+            playUrl = url
+        } else {
+            return
         }
+
+        guard let url = playUrl else { return }
+
+        let playerItem = AVPlayerItem(url: url)
+        if player == nil {
+            player = AVPlayer(playerItem: playerItem)
+        } else {
+            player?.replaceCurrentItem(with: playerItem)
+        }
+
+        // Save progress of the previous episode before switching
+        saveProgressIfNeeded()
+
+        // Set the current episode and feed before playing
+        currentEpisode = episode
+        currentFeed = feed
+
+        onEpisodeStart?(episode)
+
+        // Set up observers
+        setupPlayerItemObserver()
+        setupTimeObserver()
+
+        // Reset current time and duration
+        currentTime = 0
+        duration = 0
+
+        // Now play the episode
+        play()
+    }
     
     private func setupPlayerItemObserver() {
             playerItemObserver?.invalidate()
@@ -107,6 +113,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
 
     func play() {
+        stopRadioPlayback()
+
         guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else {
             os_log("No current episode or feed available", log: OSLog.default, type: .error)
             return
@@ -149,15 +157,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if isPlaying {
             pause()
         } else {
+            stopRadioPlayback()
             play()
         }
     }
     
     private func stopRadioPlayback() {
-        if let radioPlayer = radioPlayer as? RadioPlayer, radioPlayer.isPlaying {
-            radioPlayer.pause()
+            if let radioPlayer = radioPlayer, radioPlayer.isPlaying {
+                radioPlayer.pause()
+            }
         }
-    }
     
     func seek(to time: Double) {
             guard let player = player else { return }
