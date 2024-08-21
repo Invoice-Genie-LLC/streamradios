@@ -323,10 +323,10 @@ struct EpisodeRowView: View {
                 }
 
                 // Progress bar
-                if episode.duration > 0 && (isPlaying || progress > 0) {
-                    ProgressView(value: currentProgress())
-                        .accentColor(.blue)
-                }
+                if episode.duration > 0 {
+                            ProgressView(value: viewModel.episodeProgress[episode.id] ?? 0)
+                                .accentColor(.blue)
+                        }
             }
 
             Spacer()
@@ -466,7 +466,6 @@ struct EpisodeRowView: View {
             return 0.0
         }
         let calculatedProgress = min(currentTime / duration, 1.0)
-        print("Calculated safe progress: currentTime=\(currentTime), duration=\(duration), progress=\(calculatedProgress)")
         return calculatedProgress
     }
 
