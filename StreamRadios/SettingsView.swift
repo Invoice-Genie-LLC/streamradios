@@ -93,43 +93,43 @@ struct SettingsView: View {
     }
     
     private var podcastDataManagementSection: some View {
-           VStack(alignment: .leading, spacing: 20) {
-               Text("Podcast Data Management")
-                   .font(.headline)
-                   .padding(.top)
-               
-               VStack(alignment: .leading, spacing: 15) {
-                   Button("Clear All Podcast Episodes") {
-                       showAlert(for: .clearAllPodcasts)
-                   }
-                   .padding()
-                   .frame(maxWidth: .infinity)
-                   .background(Color(.systemBackground))
-                   .cornerRadius(12)
-                   .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                   
-                   if isCleaningPodcasts {
-                       ProgressView("Clearing podcast data...")
-                           .padding()
-                   } else if podcastCleanupComplete {
-                       Text("All podcast episodes have been cleared.")
-                           .foregroundColor(.green)
-                           .padding()
-                   }
-                   
-                   podcastCleanupWarningText
-               }
-               .padding()
-               .background(Color(.systemGray6))
-               .cornerRadius(16)
-               .overlay(
-                   RoundedRectangle(cornerRadius: 16)
-                       .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-               )
-           }
-           .animation(.default, value: isCleaningPodcasts)
-           .animation(.default, value: podcastCleanupComplete)
-       }
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Podcast Data Management")
+                        .font(.headline)
+                        .padding(.top)
+                    
+                    VStack(alignment: .leading, spacing: 15) {
+                        Button("Clear All Podcast Episodes") {
+                            showAlert(for: .clearAllPodcasts)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        
+                        if isCleaningPodcasts {
+                            ProgressView("Clearing podcast data...")
+                                .padding()
+                        } else if podcastCleanupComplete {
+                            Text("All podcast episodes have been cleared.")
+                                .foregroundColor(.green)
+                                .padding()
+                        }
+                        
+                        podcastCleanupWarningText
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                    )
+                }
+                .animation(.default, value: isCleaningPodcasts)
+                .animation(.default, value: podcastCleanupComplete)
+            }
     
     private var podcastCleanupWarningText: some View {
             Text("Warning: ")
@@ -374,21 +374,21 @@ struct SettingsView: View {
         }
     
     private func initiatePodcastCleanup() {
-            isCleaningPodcasts = true
-            podcastCleanupComplete = false
+                isCleaningPodcasts = true
+                podcastCleanupComplete = false
 
-            podcastViewModel.clearAllPodcastData { success in
-                DispatchQueue.main.async {
-                    self.isCleaningPodcasts = false
-                    if success {
-                        self.podcastCleanupComplete = true
-                        self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data has been successfully cleared, including downloads, stored episodes, and bookmarks.")
-                    } else {
-                        self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
+                podcastViewModel.clearAllPodcastData { success in
+                    DispatchQueue.main.async {
+                        self.isCleaningPodcasts = false
+                        if success {
+                            self.podcastCleanupComplete = true
+                            self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data has been successfully cleared, including downloads, stored episodes, and bookmarks.")
+                        } else {
+                            self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
+                        }
                     }
                 }
             }
-        }
     
     private func initiateDataDeletion() {
         if viewModel.isCloudKitOperationRunning {
