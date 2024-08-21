@@ -264,19 +264,43 @@ class PodcastViewModel: ObservableObject {
             group.leave()
         }
         
-        // 3. Clear all bookmarks and favorites
-        group.enter()
-        clearAllBookmarksAndFavorites { result in
-            if !result {
-                success = false
-            }
-            group.leave()
-        }
-        
-        group.notify(queue: .main) {
-            completion(success)
-        }
+        // 3. Clear all bookmarks, favorites, and progress from UserDefaults
+                  group.enter()
+                  clearAllUserDefaultsData { result in
+                      if !result {
+                          success = false
+                      }
+                      group.leave()
+                  }
+
+                  group.notify(queue: .main) {
+                      // Reset view model properties
+                      self.podcastFeeds = []
+                      self.allEpisodes = []
+                      self.currentEpisodes = []
+                      self.downloadedEpisodes = []
+                      self.favoriteEpisodes = []
+                      self.episodeProgress = [:]
+                      
+                      completion(success)
+                  }
     }
+    
+    private func clearAllUserDefaultsData(completion: @escaping (Bool) -> Void) {
+               let userDefaults = UserDefaults.standard
+               userDefaults.removeObject(forKey: favoritesKey)
+               userDefaults.removeObject(forKey: progressKey)
+               userDefaults.removeObject(forKey: episodeStatesKey)
+               
+               // Remove all keys that start with "PodcastProgress_"
+               for key in userDefaults.dictionaryRepresentation().keys {
+                   if key.hasPrefix("PodcastProgress_") {
+                       userDefaults.removeObject(forKey: key)
+                   }
+               }
+
+               completion(true)
+           }
     
     private func deleteAllDownloadedPodcasts(completion: @escaping (Bool) -> Void) {
         let fileManager = FileManager.default
@@ -1061,7 +1085,7 @@ class RSSParser: NSObject, XMLParserDelegate {
                     duration: duration,
                     state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
                     feedId: feedId,
-                    fileSize: currentFileSize
+                    fileSize: currentFileSize // Ensure file size is set here
                 )
                 
                 episodes.append(episode)

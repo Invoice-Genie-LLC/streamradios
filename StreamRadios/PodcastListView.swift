@@ -305,16 +305,14 @@ struct EpisodeRowView: View {
 
                 // Display file size if available and time remaining
                 HStack {
-                    // Display file size in Downloads tab or when playing
-                    if let fileSize = episode.fileSize, (viewModel.currentTab == 3 || isPlaying) {
+                    if let fileSize = episode.fileSize {
                         Text(formatFileSize(fileSize))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    
+
                     Spacer()
 
-                    // Time remaining or duration
                     if episode.duration > 0 {
                         if isPlaying || progress > 0 {
                             Text(formatRemainingTime())
@@ -422,7 +420,6 @@ struct EpisodeRowView: View {
         }
         .padding(.vertical, 8)
         .onAppear {
-            // Update progress when the view appears
             progress = viewModel.getProgress(for: episode)
             print("EpisodeRowView appeared for \(episode.title): progress=\(progress), duration=\(episode.duration)")
         }
@@ -489,6 +486,7 @@ struct EpisodeRowView: View {
         return formatDuration(remainingTime) + " remaining"
     }
 }
+
 
 struct PodcastArtworkView: View {
     let artworkUrl: String?
