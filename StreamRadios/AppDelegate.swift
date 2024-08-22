@@ -53,6 +53,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             return true
         }
     
+    func applicationWillTerminate(_ application: UIApplication) {
+         PodcastPlayer.shared.handleAppWillTerminate()
+     }
+
+     func applicationDidEnterBackground(_ application: UIApplication) {
+         PodcastPlayer.shared.handleAppWillTerminate()
+     }
+    
     lazy var persistentContainer: NSPersistentContainer = {
             let container = NSPersistentContainer(name: "PodcastModel")
             container.loadPersistentStores { (storeDescription, error) in
