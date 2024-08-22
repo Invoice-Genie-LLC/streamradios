@@ -99,21 +99,33 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func setupPlayerItemObserver() {
-            playerItemObserver?.invalidate()
-            playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
-                guard let self = self else { return }
-                if playerItem.status == .readyToPlay {
-                    self.duration = playerItem.duration.seconds
-                    self.updateProgress()
-                }
-            }
-            
-            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-            NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
-                guard let self = self, let currentEpisode = self.currentEpisode else { return }
-                self.viewModel?.markEpisodeAsCompleted(currentEpisode)
+        playerItemObserver?.invalidate()
+        playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
+            guard let self = self else { return }
+            if playerItem.status == .readyToPlay {
+                self.duration = playerItem.duration.seconds
+                self.seekToSavedProgress()
             }
         }
+
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
+            guard let self = self, let currentEpisode = self.currentEpisode else { return }
+            self.viewModel?.markEpisodeAsCompleted(currentEpisode)
+        }
+    }
+    
+    private func seekToSavedProgress() {
+        guard let currentEpisode = currentEpisode else { return }
+        if let savedProgress = viewModel?.episodeProgress[currentEpisode.id] {
+            let targetTime = savedProgress * duration
+            os_log("Seeking to saved progress: %f seconds", targetTime)
+            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero)
+            currentTime = targetTime
+        } else {
+            os_log("No saved progress found, starting from the beginning")
+        }
+    }
     
     private func loadProgress(for episodeId: String) -> Double? {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
@@ -140,15 +152,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func pause() {
-            guard let player = player else { return }
-            
-            player.pause()
-            isPlaying = false
-            saveProgressIfNeeded()
-            
-            updateNowPlayingInfo()
-            objectWillChange.send()
-        }
+        guard let player = player else { return }
+        
+        player.pause()
+        isPlaying = false
+        saveProgressIfNeeded()  // Progress is saved here
+        
+        updateNowPlayingInfo()
+        objectWillChange.send()
+    }
     
     private func saveProgress(for episodeId: String, progress: Double) {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
@@ -157,7 +169,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func togglePlayPause() {
         if isPlaying {
-            pause()
+            pause()  // Saves progress when pausing
         } else {
             stopRadioPlayback()
             play()
@@ -185,10 +197,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func skipForward() {
         seek(by: 15)
+        saveProgressIfNeeded()
     }
     
     func skipBackward() {
         seek(by: -15)
+        saveProgressIfNeeded()
     }
     
     private func seek(by seconds: Double) {
