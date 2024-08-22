@@ -658,12 +658,13 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateProgress(for episode: PodcastEpisode, progress: Double) {
-            episodeProgress[episode.id] = progress
-            var updatedEpisode = episode
-            updatedEpisode.state.progress = progress
-            updateEpisodeInLists(updatedEpisode)
-            saveEpisodeToCoreData(updatedEpisode)
-        }
+        episodeProgress[episode.id] = progress
+        var updatedEpisode = episode
+        updatedEpisode.state.progress = progress
+        updateEpisodeInLists(updatedEpisode)
+        saveEpisodeToCoreData(updatedEpisode)
+        saveContextIfNeeded()
+    }
     
     func markEpisodeAsCompleted(_ episode: PodcastEpisode) {
         updateProgress(for: episode, progress: 1.0)
@@ -761,33 +762,25 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
-           backgroundContext.perform { [weak self] in
-               guard let self = self else { return }
-               
-               let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-               fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-               
-               do {
-                   let results = try self.backgroundContext.fetch(fetchRequest)
-                   let managedEpisode: PodcastModel
-                   
-                   if let existingEpisode = results.first {
-                       managedEpisode = existingEpisode
-                   } else {
-                       managedEpisode = PodcastModel(context: self.backgroundContext)
-                   }
-                   
-                   managedEpisode.update(from: episode)
-                   try self.backgroundContext.save()
-                   
-                   DispatchQueue.main.async {
-                       self.hasChanges = true
-                   }
-               } catch {
-                   print("Failed to save episode to Core Data: \(error)")
-               }
-           }
-       }
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+        
+        do {
+            let results = try context.fetch(fetchRequest)
+            let managedEpisode: PodcastModel
+            
+            if let existingEpisode = results.first {
+                managedEpisode = existingEpisode
+            } else {
+                managedEpisode = PodcastModel(context: context)
+            }
+            
+            managedEpisode.update(from: episode)
+            try context.save()
+        } catch {
+            print("Failed to save episode to Core Data: \(error)")
+        }
+    }
     
     
     func getProgress(for episode: PodcastEpisode) -> Double {
@@ -1002,29 +995,30 @@ class PodcastViewModel: ObservableObject {
     }
     
     func loadAllEpisodesProgress() {
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            
-            do {
-                let results = try context.fetch(fetchRequest)
-                for managedEpisode in results {
-                    if let id = managedEpisode.id {
-                        episodeProgress[id] = managedEpisode.progress
-                        
-                        if let index = allEpisodes.firstIndex(where: { $0.id == id }) {
-                            allEpisodes[index].state.progress = managedEpisode.progress
-                        }
-                        
-                        if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == id }) {
-                            currentEpisodes[currentIndex].state.progress = managedEpisode.progress
-                        }
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        
+        do {
+            let results = try context.fetch(fetchRequest)
+            for managedEpisode in results {
+                if let id = managedEpisode.id {
+                    episodeProgress[id] = managedEpisode.progress
+                    
+                    if let index = allEpisodes.firstIndex(where: { $0.id == id }) {
+                        allEpisodes[index].state.progress = managedEpisode.progress
+                    }
+                    
+                    if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == id }) {
+                        currentEpisodes[currentIndex].state.progress = managedEpisode.progress
                     }
                 }
-            } catch {
-                print("Failed to load episode progress: \(error)")
             }
-            
-            objectWillChange.send()
+            print("Loaded progress for \(episodeProgress.count) episodes")
+        } catch {
+            print("Failed to load episode progress: \(error)")
         }
+        
+        objectWillChange.send()
+    }
 }
 
 class RSSParser: NSObject, XMLParserDelegate {
