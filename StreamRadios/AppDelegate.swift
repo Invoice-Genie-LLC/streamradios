@@ -19,6 +19,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
        var radioPlayer = RadioPlayer.shared
        var podcastPlayer = PodcastPlayer.shared
        var viewModel = RadioStationViewModel.shared
+        var podcastViewModel = PodcastViewModel()
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
             if isFirstLaunch() {
@@ -54,8 +55,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     
     func applicationWillTerminate(_ application: UIApplication) {
-         PodcastPlayer.shared.handleAppWillTerminate()
-     }
+        PodcastPlayer.shared.handleAppWillTerminate()
+        podcastViewModel.saveContextIfNeeded()
+    }
 
      func applicationDidEnterBackground(_ application: UIApplication) {
          PodcastPlayer.shared.handleAppWillTerminate()
