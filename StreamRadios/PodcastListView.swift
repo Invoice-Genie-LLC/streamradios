@@ -324,9 +324,9 @@ struct EpisodeRowView: View {
 
                 // Progress bar
                 if episode.duration > 0 {
-                            ProgressView(value: viewModel.episodeProgress[episode.id] ?? 0)
-                                .accentColor(.blue)
-                        }
+                    ProgressView(value: podcastPlayer.getCurrentProgress(for: episode))
+                        .accentColor(.blue)
+                }
             }
 
             Spacer()

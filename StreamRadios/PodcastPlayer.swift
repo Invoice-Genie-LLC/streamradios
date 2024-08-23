@@ -33,6 +33,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        private var cancellables = Set<AnyCancellable>()
     private var lastSavedTime: TimeInterval = 0
         private let saveInterval: TimeInterval = 5
+    @Published var currentProgress: Double = 0
+
     
     var onEpisodeStart: ((PodcastEpisode) -> Void)?
 
@@ -96,6 +98,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
         // Now play the episode
         play()
+        
+        updateProgress()
     }
     
     private func setupPlayerItemObserver() {
@@ -223,6 +227,14 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
         }
     
+    func getCurrentProgress(for episode: PodcastEpisode) -> Double {
+        if currentEpisode?.id == episode.id {
+            return currentProgress
+        } else {
+            return viewModel?.getProgress(for: episode) ?? 0
+        }
+    }
+    
     private func observePlayerItem() {
         playerItemObserver?.invalidate()
         playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
@@ -244,14 +256,18 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func updateProgress() {
-            guard let currentEpisode = currentEpisode, duration > 0 else { return }
-            let progress = currentTime / duration
-            
-            if currentTime - lastSavedTime >= saveInterval {
-                viewModel?.updateProgress(for: currentEpisode, progress: progress)
-                lastSavedTime = currentTime
-            }
+        guard let currentEpisode = currentEpisode, duration > 0 else { return }
+        let progress = currentTime / duration
+        
+        // Always update currentProgress and trigger UI update
+        self.currentProgress = progress
+        self.objectWillChange.send()
+        
+        if currentTime - lastSavedTime >= saveInterval {
+            viewModel?.updateProgress(for: currentEpisode, progress: progress)
+            lastSavedTime = currentTime
         }
+    }
     
     private func clearProgress(for episodeId: String) {
         let key = UserDefaultsKeys.progressKey(for: episodeId)
