@@ -90,59 +90,53 @@ class PodcastViewModel: ObservableObject {
     @Published var currentEpisodes: [PodcastEpisode] = []
     @Published var downloadedEpisodes: [PodcastEpisode] = []
     @Published var favoriteEpisodes: [PodcastEpisode] = []
-    @Published var isLoading = false
-    @Published var error: String?
-    @Published var episodeProgress: [String: Double] = [:]
-    
-    private let userDefaults = UserDefaults.standard
     private let episodeStatesKey = "PodcastEpisodeStates"
     private let favoritesKey = "FavoritePodcastEpisodes"
     private let progressKey = "PodcastProgress"
-    private let podcastUrlsKey = "PodcastUrls"
-    private let dataStore = DataStore.shared
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastViewModel")
-    private var lastSavedProgress: [String: Double] = [:]
+    @Published var isLoading = false
+    @Published var error: String?
+    @Published var episodeProgress: [String: Double] = [:]
+    @Published var downloadProgress: [String: Double] = [:]
+    @Published var currentTab: Int = 0
+    @Published var downloadedEpisodeIds: Set<String> = []
+    private let userDefaults = UserDefaults.standard
     private let fileManager = FileManager.default
     private var hasChanges = false
     private let context: NSManagedObjectContext
-    @Published var downloadProgress: [String: Double] = [:]
     private var cancellables = Set<AnyCancellable>()
-    @Published var currentTab: Int = 0
-    @NSManaged public var fileSize: Int64
-    @Published var downloadedEpisodeIds: Set<String> = []
     private var backgroundContext: NSManagedObjectContext
-    private let saveThreshold: Double = 0.05
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
-            self.context = context
-            self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
-            self.backgroundContext.parent = context
-            loadSavedData()
-            loadAllEpisodesProgress()
-        }
+        self.context = context
+        self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        self.backgroundContext.parent = context
+        loadSavedData()
+        loadAllEpisodesProgress()
+    }
     
     func updateEpisodeDuration(_ episode: PodcastEpisode) {
-           guard let player = PodcastPlayer.shared.player,
-                 let currentItem = player.currentItem else { return }
-           
-           let duration = currentItem.asset.duration.seconds
-           if duration.isFinite && duration > 0 {
-               var updatedEpisode = episode
-               updatedEpisode.duration = duration
-               updateEpisode(updatedEpisode)
-           }
-       }
+        guard let player = PodcastPlayer.shared.player,
+              let currentItem = player.currentItem else { return }
+        
+        let duration = currentItem.asset.duration.seconds
+        if duration.isFinite && duration > 0 {
+            var updatedEpisode = episode
+            updatedEpisode.duration = duration
+            updateEpisode(updatedEpisode)
+        }
+    }
     
     func updateEpisode(_ updatedEpisode: PodcastEpisode) {
-            if let index = allEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
-                allEpisodes[index] = updatedEpisode
-            }
-            if let index = currentEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
-                currentEpisodes[index] = updatedEpisode
-            }
-            saveEpisodeToCoreData(updatedEpisode)
-            objectWillChange.send()
+        if let index = allEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+            allEpisodes[index] = updatedEpisode
         }
+        if let index = currentEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+            currentEpisodes[index] = updatedEpisode
+        }
+        saveEpisodeToCoreData(updatedEpisode)
+        objectWillChange.send()
+    }
     
     func refreshEpisodeStates() {
         for index in allEpisodes.indices {
@@ -198,19 +192,6 @@ class PodcastViewModel: ObservableObject {
         updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
         
         objectWillChange.send()
-    }
-    
-    private func setupObservers() {
-        NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)
-            .sink { [weak self] notification in
-                guard let self = self,
-                      let item = notification.object as? AVPlayerItem,
-                      let currentEpisode = self.currentEpisodes.first(where: { $0.audioUrl == (item.asset as? AVURLAsset)?.url.absoluteString }) else {
-                    return
-                }
-                self.updateProgress(for: currentEpisode, progress: 1.0)
-            }
-            .store(in: &cancellables)
     }
     
     func loadSavedData() {
@@ -269,42 +250,42 @@ class PodcastViewModel: ObservableObject {
         }
         
         // 3. Clear all bookmarks, favorites, and progress from UserDefaults
-                  group.enter()
-                  clearAllUserDefaultsData { result in
-                      if !result {
-                          success = false
-                      }
-                      group.leave()
-                  }
-
-                  group.notify(queue: .main) {
-                      // Reset view model properties
-                      self.podcastFeeds = []
-                      self.allEpisodes = []
-                      self.currentEpisodes = []
-                      self.downloadedEpisodes = []
-                      self.favoriteEpisodes = []
-                      self.episodeProgress = [:]
-                      
-                      completion(success)
-                  }
+        group.enter()
+        clearAllUserDefaultsData { result in
+            if !result {
+                success = false
+            }
+            group.leave()
+        }
+        
+        group.notify(queue: .main) {
+            // Reset view model properties
+            self.podcastFeeds = []
+            self.allEpisodes = []
+            self.currentEpisodes = []
+            self.downloadedEpisodes = []
+            self.favoriteEpisodes = []
+            self.episodeProgress = [:]
+            
+            completion(success)
+        }
     }
     
     private func clearAllUserDefaultsData(completion: @escaping (Bool) -> Void) {
-               let userDefaults = UserDefaults.standard
-               userDefaults.removeObject(forKey: favoritesKey)
-               userDefaults.removeObject(forKey: progressKey)
-               userDefaults.removeObject(forKey: episodeStatesKey)
-               
-               // Remove all keys that start with "PodcastProgress_"
-               for key in userDefaults.dictionaryRepresentation().keys {
-                   if key.hasPrefix("PodcastProgress_") {
-                       userDefaults.removeObject(forKey: key)
-                   }
-               }
-
-               completion(true)
-           }
+        let userDefaults = UserDefaults.standard
+        userDefaults.removeObject(forKey: favoritesKey)
+        userDefaults.removeObject(forKey: progressKey)
+        userDefaults.removeObject(forKey: episodeStatesKey)
+        
+        // Remove all keys that start with "PodcastProgress_"
+        for key in userDefaults.dictionaryRepresentation().keys {
+            if key.hasPrefix("PodcastProgress_") {
+                userDefaults.removeObject(forKey: key)
+            }
+        }
+        
+        completion(true)
+    }
     
     private func deleteAllDownloadedPodcasts(completion: @escaping (Bool) -> Void) {
         let fileManager = FileManager.default
@@ -339,13 +320,6 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    private func clearAllBookmarksAndFavorites(completion: @escaping (Bool) -> Void) {
-        UserDefaults.standard.removeObject(forKey: favoritesKey)
-        episodeProgress.removeAll()
-        
-        completion(true)
-    }
-    
     private func loadPodcastFeeds() {
         let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
         do {
@@ -358,21 +332,21 @@ class PodcastViewModel: ObservableObject {
     }
     
     func loadAllEpisodes() {
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            do {
-                let managedEpisodes = try context.fetch(fetchRequest)
-                self.allEpisodes = managedEpisodes.map { managedEpisode in
-                    var episode = managedEpisode.toPodcastEpisode()
-                    episode.state.isPlayed = managedEpisode.isPlayed
-                    episode.state.progress = managedEpisode.progress
-                    return episode
-                }
-                self.downloadedEpisodeIds = Set(managedEpisodes.compactMap { $0.isDownloaded ? $0.id : nil })
-                print("Loaded \(self.allEpisodes.count) episodes, \(self.downloadedEpisodeIds.count) downloaded")
-            } catch {
-                print("Failed to load episodes: \(error)")
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        do {
+            let managedEpisodes = try context.fetch(fetchRequest)
+            self.allEpisodes = managedEpisodes.map { managedEpisode in
+                var episode = managedEpisode.toPodcastEpisode()
+                episode.state.isPlayed = managedEpisode.isPlayed
+                episode.state.progress = managedEpisode.progress
+                return episode
             }
+            self.downloadedEpisodeIds = Set(managedEpisodes.compactMap { $0.isDownloaded ? $0.id : nil })
+            print("Loaded \(self.allEpisodes.count) episodes, \(self.downloadedEpisodeIds.count) downloaded")
+        } catch {
+            print("Failed to load episodes: \(error)")
         }
+    }
     
     func fetchPodcastFeeds() {
         isLoading = true
@@ -624,44 +598,6 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    private func saveEpisodesToCoreData(_ episodes: [PodcastEpisode]) {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        
-        for episode in episodes {
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-            
-            do {
-                let results = try context.fetch(fetchRequest)
-                let managedEpisode: PodcastModel
-                
-                if let existingEpisode = results.first {
-                    // Update existing episode
-                    managedEpisode = existingEpisode
-                } else {
-                    // Create new episode only if it doesn't exist
-                    managedEpisode = PodcastModel(context: context)
-                }
-                
-                // Update managed episode properties
-                managedEpisode.update(from: episode)
-                
-            } catch {
-                print("Failed to fetch/save episode: \(error)")
-            }
-        }
-        
-        // Save context after processing all episodes
-        do {
-            try context.save()
-            print("Successfully saved episodes to Core Data")
-        } catch {
-            print("Failed to save context: \(error)")
-        }
-        
-        // Refresh allEpisodes array to reflect the changes
-        loadAllEpisodes()
-    }
-    
     func updateProgress(for episode: PodcastEpisode, progress: Double) {
         episodeProgress[episode.id] = progress
         var updatedEpisode = episode
@@ -672,27 +608,12 @@ class PodcastViewModel: ObservableObject {
     }
     
     func markEpisodeAsCompleted(_ episode: PodcastEpisode) {
-           var updatedEpisode = episode
-           updatedEpisode.state.isPlayed = true
-           updatedEpisode.state.progress = 1.0
-           updateEpisodeInLists(updatedEpisode)
-           saveEpisodeToCoreData(updatedEpisode)
-           objectWillChange.send()
-       }
-    
-    private func saveEpisodeProgress(_ episode: PodcastEpisode, progress: Double) {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            if let managedEpisode = results.first {
-                managedEpisode.progress = progress
-                try context.save()
-            }
-        } catch {
-            print("Failed to save episode progress: \(error)")
-        }
+        var updatedEpisode = episode
+        updatedEpisode.state.isPlayed = true
+        updatedEpisode.state.progress = 1.0
+        updateEpisodeInLists(updatedEpisode)
+        saveEpisodeToCoreData(updatedEpisode)
+        objectWillChange.send()
     }
     
     func updateEpisodePlayStatus(_ episode: PodcastEpisode, isPlayed: Bool) {
@@ -703,21 +624,21 @@ class PodcastViewModel: ObservableObject {
     }
     
     func resetEpisodeProgress(_ episode: PodcastEpisode) -> PodcastEpisode {
-              var updatedEpisode = episode
-              updatedEpisode.state.progress = 0.0
-              updatedEpisode.state.isPlayed = false
-              
-              updateEpisodeInLists(updatedEpisode)
-              saveEpisodeToCoreData(updatedEpisode)
-              episodeProgress[episode.id] = 0.0
-              
-              updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
-              
-              objectWillChange.send()
-              
-              return updatedEpisode
-          }
-
+        var updatedEpisode = episode
+        updatedEpisode.state.progress = 0.0
+        updatedEpisode.state.isPlayed = false
+        
+        updateEpisodeInLists(updatedEpisode)
+        saveEpisodeToCoreData(updatedEpisode)
+        episodeProgress[episode.id] = 0.0
+        
+        updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
+        
+        objectWillChange.send()
+        
+        return updatedEpisode
+    }
+    
     
     private func saveEpisodeCompletedState(_ episode: PodcastEpisode) {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
@@ -734,46 +655,31 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    private func saveEpisodeProgress(_ episode: PodcastEpisode) {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+    func saveContextIfNeeded() {
+        guard hasChanges else { return }
         
-        do {
-            let results = try context.fetch(fetchRequest)
-            if let managedEpisode = results.first {
-                managedEpisode.progress = episode.state.progress
-                try context.save()
+        // Perform the save operation on a background thread
+        backgroundContext.perform { [weak self] in
+            guard let self = self else { return }
+            
+            do {
+                try self.backgroundContext.save()
+                
+                // If background save is successful, save the main context on the main thread
+                DispatchQueue.main.async {
+                    do {
+                        try self.context.save()
+                        self.hasChanges = false
+                        print("Core Data context saved successfully")
+                    } catch {
+                        print("Failed to save main context: \(error)")
+                    }
+                }
+            } catch {
+                print("Failed to save background context: \(error)")
             }
-        } catch {
-            print("Failed to save episode progress: \(error)")
         }
     }
-    
-    func saveContextIfNeeded() {
-            guard hasChanges else { return }
-            
-            // Perform the save operation on a background thread
-            backgroundContext.perform { [weak self] in
-                guard let self = self else { return }
-                
-                do {
-                    try self.backgroundContext.save()
-                    
-                    // If background save is successful, save the main context on the main thread
-                    DispatchQueue.main.async {
-                        do {
-                            try self.context.save()
-                            self.hasChanges = false
-                            print("Core Data context saved successfully")
-                        } catch {
-                            print("Failed to save main context: \(error)")
-                        }
-                    }
-                } catch {
-                    print("Failed to save background context: \(error)")
-                }
-            }
-        }
     
     
     func toggleFavorite(for episode: PodcastEpisode) {
@@ -784,26 +690,26 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+        
+        do {
+            let results = try context.fetch(fetchRequest)
+            let managedEpisode: PodcastModel
             
-            do {
-                let results = try context.fetch(fetchRequest)
-                let managedEpisode: PodcastModel
-                
-                if let existingEpisode = results.first {
-                    managedEpisode = existingEpisode
-                } else {
-                    managedEpisode = PodcastModel(context: context)
-                }
-                
-                managedEpisode.update(from: episode)
-                try context.save()
-                print("Successfully saved episode state to Core Data: \(episode.title)")
-            } catch {
-                print("Failed to save episode to Core Data: \(error)")
+            if let existingEpisode = results.first {
+                managedEpisode = existingEpisode
+            } else {
+                managedEpisode = PodcastModel(context: context)
             }
+            
+            managedEpisode.update(from: episode)
+            try context.save()
+            print("Successfully saved episode state to Core Data: \(episode.title)")
+        } catch {
+            print("Failed to save episode to Core Data: \(error)")
         }
+    }
     
     func getProgress(for episode: PodcastEpisode) -> Double {
         return episodeProgress[episode.id] ?? 0.0
@@ -812,11 +718,11 @@ class PodcastViewModel: ObservableObject {
     private func updateEpisodeInLists(_ episode: PodcastEpisode) {
         // Update in allEpisodes
         if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                   allEpisodes[index] = episode
-               }
-               if let index = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                   currentEpisodes[index] = episode
-               }
+            allEpisodes[index] = episode
+        }
+        if let index = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+            currentEpisodes[index] = episode
+        }
         
         // Update favoriteEpisodes
         if episode.state.isFavorite {
@@ -841,30 +747,6 @@ class PodcastViewModel: ObservableObject {
         }
         
         updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
-        objectWillChange.send()
-    }
-    
-    func addAllEpisodesToFavorites() {
-        for episode in allEpisodes {
-            if !favoriteEpisodes.contains(where: { $0.id == episode.id }) {
-                var updatedEpisode = episode
-                updatedEpisode.state.isFavorite = true
-                favoriteEpisodes.append(updatedEpisode)
-                updateEpisodeInLists(updatedEpisode)
-                saveEpisodeToCoreData(updatedEpisode)
-            }
-        }
-        objectWillChange.send()
-    }
-    
-    func removeAllEpisodesFromFavorites() {
-        for episode in favoriteEpisodes {
-            var updatedEpisode = episode
-            updatedEpisode.state.isFavorite = false
-            updateEpisodeInLists(updatedEpisode)
-            saveEpisodeToCoreData(updatedEpisode)
-        }
-        favoriteEpisodes.removeAll()
         objectWillChange.send()
     }
     
@@ -947,13 +829,6 @@ class PodcastViewModel: ObservableObject {
         return fileName.components(separatedBy: invalidCharacters).joined(separator: "_")
     }
     
-    private func updateDownloadedEpisode(_ episode: PodcastEpisode) {
-        updateEpisodeInLists(episode)
-        saveEpisodeToCoreData(episode)
-        downloadProgress.removeValue(forKey: episode.id)
-        objectWillChange.send()
-    }
-    
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
         currentTab = selectedTab
         
@@ -974,43 +849,6 @@ class PodcastViewModel: ObservableObject {
         
         currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
         objectWillChange.send() // Ensure UI update
-    }
-    
-    
-    func clearAllPodcastEpisodes(completion: @escaping (Bool) -> Void) {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        
-        do {
-            let episodes = try context.fetch(fetchRequest)
-            for episode in episodes {
-                if let localFilePath = episode.localFilePath {
-                    do {
-                        try fileManager.removeItem(atPath: localFilePath)
-                        os_log("Deleted local file for episode: %@", log: log, type: .info, episode.title ?? "Unknown Title")
-                    } catch {
-                        os_log("Failed to delete local file for episode: %@, error: %@", log: log, type: .error, episode.title ?? "Unknown Title", error.localizedDescription)
-                    }
-                }
-                context.delete(episode)
-            }
-            
-            try context.save()
-            os_log("Cleared all podcast episodes from Core Data", log: log, type: .info)
-            
-            userDefaults.removeObject(forKey: episodeStatesKey)
-            userDefaults.removeObject(forKey: favoritesKey)
-            userDefaults.removeObject(forKey: progressKey)
-            os_log("Cleared episode states, favorites, and progress from UserDefaults", log: log, type: .info)
-            
-            allEpisodes.removeAll()
-            currentEpisodes.removeAll()
-            os_log("Reset allEpisodes and currentEpisodes in the view model", log: log, type: .info)
-            
-            completion(true)
-        } catch {
-            os_log("Failed to clear podcast episodes: %@", log: log, type: .error, error.localizedDescription)
-            completion(false)
-        }
     }
     
     func loadAllEpisodesProgress() {
