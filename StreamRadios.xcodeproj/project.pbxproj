@@ -73,6 +73,7 @@
 		77F50BC72C64723600187488 /* PodcastViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC62C64723600187488 /* PodcastViewModel.swift */; };
 		77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC82C64725600187488 /* AddPodcastView.swift */; };
 		77F50BCB2C647AEF00187488 /* PodcastListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BCA2C647AEF00187488 /* PodcastListView.swift */; };
+		77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F6689E2C7A56CF00E2618C /* BannerAlert.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -164,6 +165,7 @@
 		77F50BC62C64723600187488 /* PodcastViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastViewModel.swift; sourceTree = "<group>"; };
 		77F50BC82C64725600187488 /* AddPodcastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastView.swift; sourceTree = "<group>"; };
 		77F50BCA2C647AEF00187488 /* PodcastListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastListView.swift; sourceTree = "<group>"; };
+		77F6689E2C7A56CF00E2618C /* BannerAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerAlert.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -242,6 +244,7 @@
 				7715BD952C4C3AD700FA7CB1 /* DocumentPicker.swift */,
 				7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
+				77F6689E2C7A56CF00E2618C /* BannerAlert.swift */,
 				77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */,
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
@@ -515,6 +518,7 @@
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */,
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
+				77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
 				77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,

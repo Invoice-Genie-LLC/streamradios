@@ -30,21 +30,21 @@ extension FeedModel {
 
 extension PodcastModel {
     func update(from episode: PodcastEpisode) {
-        self.id = episode.id
-        self.title = episode.title
-        self.descriptionText = episode.descriptionText
-        self.audioUrl = episode.audioUrl
-        self.publicationDate = episode.publicationDate
-        self.duration = episode.duration
-        self.isFavorite = episode.state.isFavorite
-        self.isDownloaded = episode.state.isDownloaded
-        self.progress = episode.state.progress
-        self.feedId = episode.feedId
-        self.localFilePath = episode.localFilePath
-        self.fileSize = episode.fileSize ?? 0
-        self.isPlayed = episode.state.isPlayed
+        id = episode.id
+        title = episode.title
+        descriptionText = episode.descriptionText
+        audioUrl = episode.audioUrl
+        publicationDate = episode.publicationDate
+        duration = episode.duration
+        feedId = episode.feedId
+        localFilePath = episode.localFilePath
+        fileSize = episode.fileSize ?? 0
+        isDownloaded = episode.state.isDownloaded
+        isFavorite = episode.state.isFavorite
+        progress = episode.state.progress
+        isPlayed = episode.state.isPlayed  // Make sure this line is present
     }
-    
+
     func toPodcastEpisode() -> PodcastEpisode {
         return PodcastEpisode(
             id: id ?? UUID().uuidString,
@@ -54,7 +54,7 @@ extension PodcastModel {
             publicationDate: publicationDate ?? Date(),
             duration: duration,
             state: EpisodeState(
-                isPlayed: self.isPlayed,
+                isPlayed: isPlayed,  // Make sure this line is present
                 isFavorite: isFavorite,
                 progress: progress,
                 isDownloaded: isDownloaded
@@ -65,4 +65,3 @@ extension PodcastModel {
         )
     }
 }
-
