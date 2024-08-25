@@ -106,6 +106,7 @@ class PodcastViewModel: ObservableObject {
     private let context: NSManagedObjectContext
     private var cancellables = Set<AnyCancellable>()
     private var backgroundContext: NSManagedObjectContext
+    private let dataStore = DataStore.shared
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
@@ -371,24 +372,60 @@ class PodcastViewModel: ObservableObject {
     }
     
     func fetchPodcastFeeds() {
-        isLoading = true
-        let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-        
-        do {
-            let managedFeeds = try context.fetch(fetchRequest)
-            podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
-            os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
+            isLoading = true
             
-            for feed in podcastFeeds {
-                fetchRSSFeed(for: feed) { _ in }
+            // Fetch from CoreData
+            let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+            
+            do {
+                let managedFeeds = try context.fetch(fetchRequest)
+                podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
+                os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
+            } catch {
+                os_log("Failed to load podcast feeds from Core Data: %@", log: log, type: .error, error.localizedDescription)
             }
-        } catch {
-            os_log("Failed to load podcast feeds: %@", log: log, type: .error, error.localizedDescription)
-            self.error = "Failed to load podcast feeds"
+            
+            // Fetch from CloudKit
+            dataStore.fetchPodcastFeedsFromCloudKit { [weak self] (cloudFeeds, error) in
+                guard let self = self else { return }
+                
+                DispatchQueue.main.async {
+                    if let cloudFeeds = cloudFeeds {
+                        // Merge CloudKit feeds with CoreData feeds
+                        self.mergeFeedsFromCloudKit(cloudFeeds)
+                        os_log("Merged %d podcast feeds from CloudKit", log: self.log, type: .info, cloudFeeds.count)
+                    } else if let error = error {
+                        os_log("Failed to fetch podcast feeds from CloudKit: %@", log: self.log, type: .error, error.localizedDescription)
+                    }
+                    
+                    for feed in self.podcastFeeds {
+                        self.fetchRSSFeed(for: feed) { _ in }
+                    }
+                    
+                    self.isLoading = false
+                }
+            }
         }
-        
-        isLoading = false
-    }
+    
+    private func mergeFeedsFromCloudKit(_ cloudFeeds: [PodcastFeed]) {
+            let existingFeedIds = Set(podcastFeeds.map { $0.id })
+            
+            for cloudFeed in cloudFeeds {
+                if !existingFeedIds.contains(cloudFeed.id) {
+                    // Add new feed from CloudKit to CoreData
+                    let managedFeed = FeedModel(context: context)
+                    managedFeed.update(from: cloudFeed)
+                    podcastFeeds.append(cloudFeed)
+                }
+            }
+            
+            do {
+                try context.save()
+                os_log("Merged CloudKit feeds with Core Data", log: log, type: .info)
+            } catch {
+                os_log("Failed to save merged feeds to Core Data: %@", log: log, type: .error, error.localizedDescription)
+            }
+        }
     
     func addPodcastFeed(_ feed: PodcastFeed) {
             isLoading = true
@@ -409,15 +446,24 @@ class PodcastViewModel: ObservableObject {
                 
                 try context.save()
                 
-                fetchPodcastFeeds()
-                
-                fetchRSSFeed(for: feed) { _ in }
+                // Save to CloudKit
+                dataStore.savePodcastFeedToCloudKit(feed) { success, recordID in
+                    DispatchQueue.main.async {
+                        if success {
+                            os_log("Saved podcast feed to CloudKit: %@", log: self.log, type: .info, feed.title)
+                        } else {
+                            os_log("Failed to save podcast feed to CloudKit: %@", log: self.log, type: .error, feed.title)
+                        }
+                        self.fetchPodcastFeeds()
+                        self.fetchRSSFeed(for: feed) { _ in }
+                        self.isLoading = false
+                    }
+                }
             } catch {
                 os_log("Failed to save new podcast feed: %@", log: log, type: .error, error.localizedDescription)
                 self.error = "Failed to save new podcast feed"
+                self.isLoading = false
             }
-            
-            isLoading = false
         }
     
     func deletePodcastFeed(_ feed: PodcastFeed) {
@@ -432,9 +478,21 @@ class PodcastViewModel: ObservableObject {
             try context.save()
             podcastFeeds.removeAll { $0.id == feed.id }
             allEpisodes.removeAll { $0.feedId == feed.id }
-            os_log("Deleted podcast feed: %@", log: log, type: .info, feed.title)
+            os_log("Deleted podcast feed from Core Data: %@", log: log, type: .info, feed.title)
+            
+            // Delete from CloudKit
+            DataStore.shared.deletePodcastFeedFromCloudKit(feed) { success in
+                DispatchQueue.main.async {
+                    if success {
+                        os_log("Deleted podcast feed from CloudKit: %@", log: self.log, type: .info, feed.title)
+                    } else {
+                        os_log("Failed to delete podcast feed from CloudKit: %@", log: self.log, type: .error, feed.title)
+                        // Consider handling this failure, perhaps by retrying or notifying the user
+                    }
+                }
+            }
         } catch {
-            os_log("Failed to delete podcast feed: %@", log: log, type: .error, error.localizedDescription)
+            os_log("Failed to delete podcast feed from Core Data: %@", log: log, type: .error, error.localizedDescription)
         }
     }
     
