@@ -13,22 +13,23 @@ import CoreData
 import AVKit
 
 struct PodcastFeed: Identifiable, Codable {
-    let id: String // This should be a UUID
+    let id: String
     var title: String
     var url: String
     var artworkUrl: String?
     var descriptionText: String?
     var iconData: String?
+    var imageData: Data?
     var episodes: [PodcastEpisode] = []
     
-    // Example initializer with UUID
-    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, episodes: [PodcastEpisode] = []) {
+    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = []) {
         self.id = id
         self.title = title
         self.url = url
         self.artworkUrl = artworkUrl
         self.descriptionText = description
         self.iconData = iconData
+        self.imageData = imageData
         self.episodes = episodes
     }
 }
@@ -437,10 +438,12 @@ class PodcastViewModel: ObservableObject {
                 let existingFeeds = try context.fetch(fetchRequest)
                 if let existingFeed = existingFeeds.first {
                     existingFeed.update(from: feed)
+                    existingFeed.imageData = feed.imageData
                     os_log("Updated existing podcast feed: %@", log: log, type: .info, feed.title)
                 } else {
                     let managedFeed = FeedModel(context: context)
                     managedFeed.update(from: feed)
+                    managedFeed.imageData = feed.imageData
                     os_log("Added new podcast feed: %@", log: log, type: .info, feed.title)
                 }
                 
@@ -587,15 +590,27 @@ class PodcastViewModel: ObservableObject {
             updatedFeed.episodes = rssParser.episodes
             
             if let artworkUrl = updatedFeed.artworkUrl, let url = URL(string: artworkUrl) {
-                self.fetchAndEncodeImage(from: url) { encodedImage in
-                    updatedFeed.iconData = encodedImage
-                    self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
-                }
-            } else {
-                self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
-            }
+                        self.fetchAndStoreImage(from: url) { imageData in
+                            updatedFeed.imageData = imageData
+                            self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
+                        }
+                    } else {
+                        self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
+                    }
         }.resume()
     }
+    
+    private func fetchAndStoreImage(from url: URL, completion: @escaping (Data?) -> Void) {
+            URLSession.shared.dataTask(with: url) { data, response, error in
+                guard let data = data, error == nil else {
+                    os_log("Error fetching image: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+                    completion(nil)
+                    return
+                }
+                
+                completion(data)
+            }.resume()
+        }
     
     private func fetchAndEncodeImage(from url: URL, completion: @escaping (String?) -> Void) {
         URLSession.shared.dataTask(with: url) { data, response, error in
@@ -618,12 +633,47 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func updateFeed(_ updatedFeed: PodcastFeed) {
+        // Update the in-memory array of podcast feeds
         if let index = podcastFeeds.firstIndex(where: { $0.id == updatedFeed.id }) {
             podcastFeeds[index] = updatedFeed
         } else {
             podcastFeeds.append(updatedFeed)
         }
         
+        // Update Core Data
+        let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", updatedFeed.id)
+        
+        do {
+            let results = try context.fetch(fetchRequest)
+            if let managedFeed = results.first {
+                managedFeed.update(from: updatedFeed)
+                managedFeed.imageData = updatedFeed.imageData
+                if let imageData = updatedFeed.imageData {
+                    os_log("Saving image data (%d bytes) for feed: %@", log: log, type: .info, imageData.count, updatedFeed.title)
+                } else {
+                    os_log("No image data to save for feed: %@", log: log, type: .info, updatedFeed.title)
+                }
+                try context.save()
+                os_log("Updated feed in Core Data: %@", log: log, type: .info, updatedFeed.title)
+            } else {
+                // If the feed doesn't exist in Core Data, create a new one
+                let newManagedFeed = FeedModel(context: context)
+                newManagedFeed.update(from: updatedFeed)
+                newManagedFeed.imageData = updatedFeed.imageData
+                if let imageData = updatedFeed.imageData {
+                    os_log("Saving image data (%d bytes) for new feed: %@", log: log, type: .info, imageData.count, updatedFeed.title)
+                } else {
+                    os_log("No image data to save for new feed: %@", log: log, type: .info, updatedFeed.title)
+                }
+                try context.save()
+                os_log("Created new feed in Core Data: %@", log: log, type: .info, updatedFeed.title)
+            }
+        } catch {
+            os_log("Failed to update/create feed in Core Data: %@", log: log, type: .error, error.localizedDescription)
+        }
+        
+        // Update episodes
         for episode in updatedFeed.episodes {
             if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
                 allEpisodes[index] = episode
@@ -632,8 +682,14 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
+        // Update currentEpisodes if necessary
         if currentEpisodes.first?.feedId == updatedFeed.id {
             currentEpisodes = allEpisodes.filter { $0.feedId == updatedFeed.id }
+        }
+        
+        // Trigger UI update
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
         }
     }
     

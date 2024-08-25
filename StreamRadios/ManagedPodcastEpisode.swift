@@ -10,22 +10,24 @@ import CoreData
 extension FeedModel {
 
     func update(from feed: PodcastFeed) {
-        id = feed.id
-        title = feed.title
-        url = feed.url
-        artworkUrl = feed.artworkUrl
-        descriptionText = feed.descriptionText
-        iconData = feed.iconData
-    }
-    
-    func toPodcastFeed() -> PodcastFeed {
-        return PodcastFeed(id: id ?? UUID().uuidString,
-                           title: title ?? "",
-                           url: url ?? "",
-                           artworkUrl: artworkUrl,
-                           description: descriptionText,
-                           iconData: iconData)
-    }
+            id = feed.id
+            title = feed.title
+            url = feed.url
+            artworkUrl = feed.artworkUrl
+            descriptionText = feed.descriptionText
+            iconData = feed.iconData
+        }
+        
+        func toPodcastFeed() -> PodcastFeed {
+            return PodcastFeed(
+                id: id ?? UUID().uuidString,
+                title: title ?? "",
+                url: url ?? "",
+                artworkUrl: artworkUrl,
+                description: descriptionText,
+                iconData: iconData
+            )
+        }
 }
 
 extension PodcastModel {
