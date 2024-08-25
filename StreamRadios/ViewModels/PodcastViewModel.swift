@@ -258,6 +258,15 @@ class PodcastViewModel: ObservableObject {
             group.leave()
         }
         
+        // 4. Clear all saved episode progress from UserDefaults or other storage
+               group.enter()
+               clearEpisodeProgressData { result in
+                   if !result {
+                       success = false
+                   }
+                   group.leave()
+               }
+        
         group.notify(queue: .main) {
             // Reset view model properties
             self.podcastFeeds = []
@@ -270,6 +279,19 @@ class PodcastViewModel: ObservableObject {
             completion(success)
         }
     }
+    
+    private func clearEpisodeProgressData(completion: @escaping (Bool) -> Void) {
+           let userDefaults = UserDefaults.standard
+           
+           // Remove all keys that start with "PodcastProgress_"
+           for key in userDefaults.dictionaryRepresentation().keys {
+               if key.hasPrefix("PodcastProgress_") {
+                   userDefaults.removeObject(forKey: key)
+               }
+           }
+           
+           completion(true)
+       }
     
     private func clearAllUserDefaultsData(completion: @escaping (Bool) -> Void) {
         let userDefaults = UserDefaults.standard
@@ -369,34 +391,34 @@ class PodcastViewModel: ObservableObject {
     }
     
     func addPodcastFeed(_ feed: PodcastFeed) {
-        isLoading = true
-        
-        let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@ OR url == %@", feed.id, feed.url)
-        
-        do {
-            let existingFeeds = try context.fetch(fetchRequest)
-            if let existingFeed = existingFeeds.first {
-                existingFeed.update(from: feed)
-                os_log("Updated existing podcast feed: %@", log: log, type: .info, feed.title)
-            } else {
-                let managedFeed = FeedModel(context: context)
-                managedFeed.update(from: feed)
-                os_log("Added new podcast feed: %@", log: log, type: .info, feed.title)
+            isLoading = true
+            
+            let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@ OR url == %@", feed.id, feed.url)
+            
+            do {
+                let existingFeeds = try context.fetch(fetchRequest)
+                if let existingFeed = existingFeeds.first {
+                    existingFeed.update(from: feed)
+                    os_log("Updated existing podcast feed: %@", log: log, type: .info, feed.title)
+                } else {
+                    let managedFeed = FeedModel(context: context)
+                    managedFeed.update(from: feed)
+                    os_log("Added new podcast feed: %@", log: log, type: .info, feed.title)
+                }
+                
+                try context.save()
+                
+                fetchPodcastFeeds()
+                
+                fetchRSSFeed(for: feed) { _ in }
+            } catch {
+                os_log("Failed to save new podcast feed: %@", log: log, type: .error, error.localizedDescription)
+                self.error = "Failed to save new podcast feed"
             }
             
-            try context.save()
-            
-            fetchPodcastFeeds()
-            
-            fetchRSSFeed(for: feed) { _ in }
-        } catch {
-            os_log("Failed to save new podcast feed: %@", log: log, type: .error, error.localizedDescription)
-            self.error = "Failed to save new podcast feed"
+            isLoading = false
         }
-        
-        isLoading = false
-    }
     
     func deletePodcastFeed(_ feed: PodcastFeed) {
         let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()

@@ -382,7 +382,7 @@ struct SettingsView: View {
                         self.isCleaningPodcasts = false
                         if success {
                             self.podcastCleanupComplete = true
-                            self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data has been successfully cleared, including downloads, stored episodes, and bookmarks.")
+                            self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data, including downloads, episode progress and bookmarks, has been cleared.")
                         } else {
                             self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
                         }
