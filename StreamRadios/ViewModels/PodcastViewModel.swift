@@ -403,15 +403,22 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func loadPodcastFeeds() {
-        let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-        do {
-            let managedFeeds = try context.fetch(fetchRequest)
-            podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
-            os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
-        } catch {
-            os_log("Failed to load podcast feeds: %@", log: log, type: .error, error.localizedDescription)
+            let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+            do {
+                let managedFeeds = try context.fetch(fetchRequest)
+                podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
+                
+                // Update podcastFeedOrder
+                let existingIds = Set(podcastFeedOrder)
+                for feed in podcastFeeds where !existingIds.contains(feed.id) {
+                    podcastFeedOrder.append(feed.id)
+                }
+                
+                os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
+            } catch {
+                os_log("Failed to load podcast feeds: %@", log: log, type: .error, error.localizedDescription)
+            }
         }
-    }
     
     func loadAllEpisodes() {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
