@@ -23,17 +23,15 @@ struct PodcastListView: View {
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     
     var filteredPodcasts: [PodcastFeed] {
-        let sortedPodcasts = viewModel.podcastFeeds.sorted { $0.episodes.first?.publicationDate ?? Date() > $1.episodes.first?.publicationDate ?? Date() }
-        
-        if searchText.isEmpty {
-            return sortedPodcasts
-        } else {
-            return sortedPodcasts.filter { feed in
-                feed.title.lowercased().contains(searchText.lowercased()) ||
-                (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
+            if searchText.isEmpty {
+                return viewModel.podcastFeeds
+            } else {
+                return viewModel.podcastFeeds.filter { feed in
+                    feed.title.lowercased().contains(searchText.lowercased()) ||
+                    (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
+                }
             }
         }
-    }
     
     var body: some View {
         NavigationView {
@@ -44,15 +42,16 @@ struct PodcastListView: View {
                     .padding(.horizontal, 16)
                 searchBar
                 PodcastList(
-                    feeds: filteredPodcasts,
-                    podcastPlayer: podcastPlayer,
-                    onPlay: { playLatestEpisode(for: $0) },
-                    onDelete: { feed in
-                        podcastToDelete = feed
-                        showingDeleteConfirmation = true
-                    },
-                    selectedPodcast: $selectedPodcast
-                )
+                                    feeds: filteredPodcasts,
+                                    viewModel: viewModel,  // Add this line
+                                    podcastPlayer: podcastPlayer,
+                                    onPlay: { playLatestEpisode(for: $0) },
+                                    onDelete: { feed in
+                                        podcastToDelete = feed
+                                        showingDeleteConfirmation = true
+                                    },
+                                    selectedPodcast: $selectedPodcast
+                                )
             }
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
                 Button("Cancel", role: .cancel) {}
@@ -739,15 +738,16 @@ struct PodcastPlayerView: View {
 
 struct PodcastList: View {
     let feeds: [PodcastFeed]
+    @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
     let onPlay: (PodcastFeed) -> Void
     let onDelete: (PodcastFeed) -> Void
     @Binding var selectedPodcast: PodcastFeed?
-    @State private var expandedFeedId: String? // Track the currently expanded feed
-    
+    @State private var expandedFeedId: String?
+
     var body: some View {
         List {
-            ForEach(feeds) { feed in
+            ForEach(orderedFeeds, id: \.id) { feed in
                 PodcastRowView(
                     feed: feed,
                     isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
@@ -772,8 +772,12 @@ struct PodcastList: View {
         }
         .listStyle(PlainListStyle())
     }
+    
+    private var orderedFeeds: [PodcastFeed] {
+        let orderedIds = Set(viewModel.podcastFeedOrder)
+        let orderedFeeds = feeds.filter { orderedIds.contains($0.id) }
+            .sorted { viewModel.podcastFeedOrder.firstIndex(of: $0.id)! < viewModel.podcastFeedOrder.firstIndex(of: $1.id)! }
+        let remainingFeeds = feeds.filter { !orderedIds.contains($0.id) }
+        return orderedFeeds + remainingFeeds
+    }
 }
-
-
-
-
