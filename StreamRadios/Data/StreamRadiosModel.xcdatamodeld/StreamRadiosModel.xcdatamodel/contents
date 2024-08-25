@@ -17,6 +17,7 @@
         <attribute name="iconData" optional="YES" attributeType="String"/>
         <attribute name="id" optional="YES" attributeType="String"/>
         <attribute name="imageData" optional="YES" attributeType="Binary"/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="title" optional="YES" attributeType="String"/>
         <attribute name="url" optional="YES" attributeType="String"/>
         <relationship name="episodes" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="PodcastModel" inverseName="feed" inverseEntity="PodcastModel"/>

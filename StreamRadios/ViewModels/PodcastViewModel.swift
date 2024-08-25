@@ -12,7 +12,7 @@ import OSLog
 import CoreData
 import AVKit
 
-struct PodcastFeed: Identifiable, Codable {
+struct PodcastFeed: Identifiable, Codable, Equatable {
     let id: String
     var title: String
     var url: String
@@ -21,8 +21,9 @@ struct PodcastFeed: Identifiable, Codable {
     var iconData: String?
     var imageData: Data?
     var episodes: [PodcastEpisode] = []
+    var sortOrder: Int
     
-    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = []) {
+    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = [], sortOrder: Int) {
         self.id = id
         self.title = title
         self.url = url
@@ -31,7 +32,12 @@ struct PodcastFeed: Identifiable, Codable {
         self.iconData = iconData
         self.imageData = imageData
         self.episodes = episodes
+        self.sortOrder = sortOrder
     }
+    
+    var mostRecentEpisodeDate: Date {
+           return episodes.map { $0.publicationDate }.max() ?? Date.distantPast
+       }
 }
 
 struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
@@ -94,6 +100,7 @@ class PodcastViewModel: ObservableObject {
     private let episodeStatesKey = "PodcastEpisodeStates"
     private let favoritesKey = "FavoritePodcastEpisodes"
     private let progressKey = "PodcastProgress"
+    private var feedUpdateQueue = DispatchQueue(label: "com.yourapp.feedUpdateQueue")
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastViewModel")
     @Published var isLoading = false
     @Published var error: String?
@@ -373,58 +380,166 @@ class PodcastViewModel: ObservableObject {
     }
     
     func fetchPodcastFeeds() {
-            isLoading = true
+        isLoading = true
+        
+        // Fetch from CoreData
+        let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "sortOrder", ascending: false)]
+        
+        do {
+            let managedFeeds = try context.fetch(fetchRequest)
+            let feeds = managedFeeds.map { $0.toPodcastFeed() }
+            updateFeeds(feeds)
+            os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, feeds.count)
+        } catch {
+            os_log("Failed to load podcast feeds from Core Data: %@", log: log, type: .error, error.localizedDescription)
+        }
+        
+        // Fetch from CloudKit
+        dataStore.fetchPodcastFeedsFromCloudKit { [weak self] (cloudFeeds, error) in
+            guard let self = self else { return }
             
-            // Fetch from CoreData
-            let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-            
-            do {
-                let managedFeeds = try context.fetch(fetchRequest)
-                podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
-                os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
-            } catch {
-                os_log("Failed to load podcast feeds from Core Data: %@", log: log, type: .error, error.localizedDescription)
-            }
-            
-            // Fetch from CloudKit
-            dataStore.fetchPodcastFeedsFromCloudKit { [weak self] (cloudFeeds, error) in
-                guard let self = self else { return }
+            DispatchQueue.main.async {
+                if let cloudFeeds = cloudFeeds {
+                    self.mergeFeedsFromCloudKit(cloudFeeds)
+                    os_log("Merged %d podcast feeds from CloudKit", log: self.log, type: .info, cloudFeeds.count)
+                } else if let error = error {
+                    os_log("Failed to fetch podcast feeds from CloudKit: %@", log: self.log, type: .error, error.localizedDescription)
+                }
                 
+                self.fetchRSSForAllFeeds()
+                self.isLoading = false
+            }
+        }
+    }
+    
+    private func updateFeeds(_ newFeeds: [PodcastFeed]) {
+        feedUpdateQueue.async {
+            var updatedFeeds = self.podcastFeeds
+
+            for var newFeed in newFeeds {
+                if let index = updatedFeeds.firstIndex(where: { $0.id == newFeed.id }) {
+                    // Update existing feed while maintaining its position
+                    updatedFeeds[index] = newFeed
+                } else {
+                    // Add new feed to the top
+                    newFeed.sortOrder = (updatedFeeds.map { $0.sortOrder }.max() ?? 0) + 1
+                    updatedFeeds.insert(newFeed, at: 0)
+                }
+            }
+
+            // Ensure feeds are sorted by sortOrder in descending order
+            updatedFeeds.sort { $0.sortOrder > $1.sortOrder }
+
+            DispatchQueue.main.async {
+                self.podcastFeeds = updatedFeeds
+                self.objectWillChange.send()
+            }
+        }
+    }
+    
+    private func updateFeedsStably(_ newFeeds: [PodcastFeed]) {
+            feedUpdateQueue.async {
+                let oldFeeds = self.podcastFeeds
+                var updatedFeeds = [PodcastFeed]()
+
+                // First, add all existing feeds in their current order
+                for oldFeed in oldFeeds {
+                    if let newFeed = newFeeds.first(where: { $0.id == oldFeed.id }) {
+                        updatedFeeds.append(newFeed)
+                    }
+                }
+
+                // Then, add any new feeds that weren't in the old list
+                for newFeed in newFeeds {
+                    if !oldFeeds.contains(where: { $0.id == newFeed.id }) {
+                        updatedFeeds.append(newFeed)
+                    }
+                }
+
                 DispatchQueue.main.async {
-                    if let cloudFeeds = cloudFeeds {
-                        // Merge CloudKit feeds with CoreData feeds
-                        self.mergeFeedsFromCloudKit(cloudFeeds)
-                        os_log("Merged %d podcast feeds from CloudKit", log: self.log, type: .info, cloudFeeds.count)
-                    } else if let error = error {
-                        os_log("Failed to fetch podcast feeds from CloudKit: %@", log: self.log, type: .error, error.localizedDescription)
-                    }
-                    
-                    for feed in self.podcastFeeds {
-                        self.fetchRSSFeed(for: feed) { _ in }
-                    }
-                    
-                    self.isLoading = false
+                    self.podcastFeeds = updatedFeeds
+                    self.objectWillChange.send()
                 }
             }
         }
     
-    private func mergeFeedsFromCloudKit(_ cloudFeeds: [PodcastFeed]) {
-            let existingFeedIds = Set(podcastFeeds.map { $0.id })
-            
-            for cloudFeed in cloudFeeds {
-                if !existingFeedIds.contains(cloudFeed.id) {
-                    // Add new feed from CloudKit to CoreData
-                    let managedFeed = FeedModel(context: context)
-                    managedFeed.update(from: cloudFeed)
-                    podcastFeeds.append(cloudFeed)
-                }
+    
+    
+    private func sortFeedsByMostRecent() {
+            let sortedFeeds = podcastFeeds.sorted { $0.mostRecentEpisodeDate > $1.mostRecentEpisodeDate }
+            if sortedFeeds != podcastFeeds {
+                podcastFeeds = sortedFeeds
+                updateSortOrderInCoreData(sortedFeeds)
+                objectWillChange.send()
             }
+        }
+    
+    private func updateSortOrderInCoreData(_ feeds: [PodcastFeed]) {
+        for (index, feed) in feeds.enumerated() {
+            let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
             
             do {
-                try context.save()
-                os_log("Merged CloudKit feeds with Core Data", log: log, type: .info)
+                let results = try context.fetch(fetchRequest)
+                if let managedFeed = results.first {
+                    managedFeed.sortOrder = Int16(index)
+                }
             } catch {
-                os_log("Failed to save merged feeds to Core Data: %@", log: log, type: .error, error.localizedDescription)
+                os_log("Failed to update feed order in Core Data: %@", log: log, type: .error, error.localizedDescription)
+            }
+        }
+        
+        do {
+            try context.save()
+            os_log("Updated feed order in Core Data", log: log, type: .info)
+        } catch {
+            os_log("Failed to save updated feed order to Core Data: %@", log: log, type: .error, error.localizedDescription)
+        }
+    }
+    
+    private func mergeFeedsFromCloudKit(_ cloudFeeds: [PodcastFeed]) {
+            feedUpdateQueue.async {
+                var updatedFeeds = self.podcastFeeds
+
+                for cloudFeed in cloudFeeds {
+                    if let index = updatedFeeds.firstIndex(where: { $0.id == cloudFeed.id }) {
+                        // Update existing feed while maintaining its position
+                        var updatedFeed = updatedFeeds[index]
+                        updatedFeed.title = cloudFeed.title
+                        updatedFeed.url = cloudFeed.url
+                        updatedFeed.artworkUrl = cloudFeed.artworkUrl
+                        updatedFeed.iconData = cloudFeed.iconData
+                        updatedFeeds[index] = updatedFeed
+                    } else {
+                        // Add new feed to the end
+                        var newFeed = cloudFeed
+                        newFeed.sortOrder = updatedFeeds.count
+                        updatedFeeds.append(newFeed)
+                    }
+                }
+
+                // Ensure feeds are sorted by sortOrder
+                updatedFeeds.sort { $0.sortOrder < $1.sortOrder }
+
+                self.updateFeeds(updatedFeeds)
+            }
+        }
+    
+    private func sortFeedsIfNeeded() {
+        let sortedFeeds = self.podcastFeeds.sorted { $0.mostRecentEpisodeDate > $1.mostRecentEpisodeDate }
+        if sortedFeeds != self.podcastFeeds {
+            self.podcastFeeds = sortedFeeds
+            self.updateSortOrderInCoreData(sortedFeeds)
+            DispatchQueue.main.async {
+                self.objectWillChange.send()
+            }
+        }
+    }
+    
+    private func fetchRSSForAllFeeds() {
+            for feed in podcastFeeds {
+                fetchRSSFeed(for: feed) { _ in }
             }
         }
     
@@ -442,9 +557,12 @@ class PodcastViewModel: ObservableObject {
                     os_log("Updated existing podcast feed: %@", log: log, type: .info, feed.title)
                 } else {
                     let managedFeed = FeedModel(context: context)
-                    managedFeed.update(from: feed)
-                    managedFeed.imageData = feed.imageData
-                    os_log("Added new podcast feed: %@", log: log, type: .info, feed.title)
+                    var newFeed = feed
+                    newFeed.sortOrder = podcastFeeds.count // Set sortOrder to the end of the list
+                    managedFeed.update(from: newFeed)
+                    managedFeed.imageData = newFeed.imageData
+                    podcastFeeds.append(newFeed)
+                    os_log("Added new podcast feed: %@", log: log, type: .info, newFeed.title)
                 }
                 
                 try context.save()
@@ -457,11 +575,13 @@ class PodcastViewModel: ObservableObject {
                         } else {
                             os_log("Failed to save podcast feed to CloudKit: %@", log: self.log, type: .error, feed.title)
                         }
-                        self.fetchPodcastFeeds()
                         self.fetchRSSFeed(for: feed) { _ in }
                         self.isLoading = false
                     }
                 }
+                
+                sortFeedsByMostRecent()
+                
             } catch {
                 os_log("Failed to save new podcast feed: %@", log: log, type: .error, error.localizedDescription)
                 self.error = "Failed to save new podcast feed"
@@ -565,7 +685,9 @@ class PodcastViewModel: ObservableObject {
             return
         }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
             if let error = error {
                 os_log("Error fetching RSS feed for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
                 completion(.failure(error))
@@ -583,20 +705,28 @@ class PodcastViewModel: ObservableObject {
             let rssParser = RSSParser(data: data, feedId: feed.id)
             rssParser.parse()
             
-            var updatedFeed = feed
-            updatedFeed.title = feed.title
-            updatedFeed.descriptionText = rssParser.podcastDescription
-            updatedFeed.artworkUrl = rssParser.artworkUrl ?? feed.artworkUrl
-            updatedFeed.episodes = rssParser.episodes
-            
-            if let artworkUrl = updatedFeed.artworkUrl, let url = URL(string: artworkUrl) {
+            self.feedUpdateQueue.async {
+                if let index = self.podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
+                    var updatedFeed = self.podcastFeeds[index]
+                    updatedFeed.descriptionText = rssParser.podcastDescription
+                    updatedFeed.artworkUrl = rssParser.artworkUrl ?? updatedFeed.artworkUrl
+                    updatedFeed.episodes = rssParser.episodes
+                    
+                    if let artworkUrl = updatedFeed.artworkUrl, let url = URL(string: artworkUrl) {
                         self.fetchAndStoreImage(from: url) { imageData in
                             updatedFeed.imageData = imageData
-                            self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
+                            self.completeRSSFeedUpdate(updatedFeed: updatedFeed, atIndex: index, completion: completion)
                         }
                     } else {
-                        self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
+                        self.completeRSSFeedUpdate(updatedFeed: updatedFeed, atIndex: index, completion: completion)
                     }
+                } else {
+                    os_log("Feed not found in podcastFeeds array: %@", log: self.log, type: .error, feed.title)
+                    DispatchQueue.main.async {
+                        completion(.failure(NSError(domain: "Feed not found", code: 0, userInfo: nil)))
+                    }
+                }
+            }
         }.resume()
     }
     
@@ -625,12 +755,46 @@ class PodcastViewModel: ObservableObject {
         }.resume()
     }
     
-    private func completeRSSFeedUpdate(updatedFeed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
-        DispatchQueue.main.async {
-            self.updateFeed(updatedFeed)
-            completion(.success(updatedFeed))
+    private func completeRSSFeedUpdate(updatedFeed: PodcastFeed, atIndex index: Int, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
+            self.feedUpdateQueue.async { [weak self] in
+                guard let self = self else { return }
+                
+                // Perform non-UI updates on the background queue
+                self.updateFeedInCoreData(updatedFeed)
+                
+                DispatchQueue.main.async {
+                    // Perform UI updates and publish changes on the main queue
+                    self.podcastFeeds[index] = updatedFeed
+                    self.objectWillChange.send()
+                    completion(.success(updatedFeed))
+                }
+            }
         }
-    }
+    
+    private func updateFeedInCoreData(_ feed: PodcastFeed) {
+            context.performAndWait {
+                let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
+                
+                do {
+                    let results = try context.fetch(fetchRequest)
+                    if let managedFeed = results.first {
+                        managedFeed.title = feed.title
+                        managedFeed.url = feed.url
+                        managedFeed.descriptionText = feed.descriptionText
+                        managedFeed.artworkUrl = feed.artworkUrl
+                        managedFeed.imageData = feed.imageData
+                        // Update other properties as needed
+                        
+                        try context.save()
+                        print("Updated feed in Core Data: \(feed.title)")
+                    }
+                } catch {
+                    print("Failed to update feed in Core Data: \(error)")
+                }
+            }
+        }
+    
     
     private func updateFeed(_ updatedFeed: PodcastFeed) {
         // Update the in-memory array of podcast feeds

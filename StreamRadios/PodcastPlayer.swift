@@ -228,7 +228,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             play()
         } else {
             // If it's a different episode, play it from the beginning
-            playEpisode(episode, feed: viewModel?.podcastFeeds.first { $0.id == episode.feedId } ?? PodcastFeed(id: "", title: "", url: ""))
+            playEpisode(episode, feed: viewModel?.podcastFeeds.first { $0.id == episode.feedId } ?? PodcastFeed(id: "", title: "", url: "", sortOrder: 0))
         }
         isPlaying = true
     }
