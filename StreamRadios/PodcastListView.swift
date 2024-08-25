@@ -551,6 +551,8 @@ struct PodcastPlayerView: View {
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var selectedTab = 0 // Start with "All" tab
     @State private var seekPosition: Double = 0
+    @State private var isSeekingManually = false
+    @State private var debounceTimer: Timer?
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastPlayerView")
     
     var body: some View {
@@ -613,7 +615,13 @@ struct PodcastPlayerView: View {
         .onAppear {
             os_log("PodcastPlayerView appeared for feed: %@", log: log, type: .info, feed.title)
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+            seekPosition = podcastPlayer.currentTime
         }
+        .onReceive(podcastPlayer.$currentTime) { newTime in
+                   if !isSeekingManually {
+                       seekPosition = newTime
+                   }
+               }
         .navigationBarHidden(true)
     }
     
@@ -664,15 +672,16 @@ struct PodcastPlayerView: View {
     }
     
     private var progressSlider: some View {
-        Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1), onEditingChanged: { editing in
-            if !editing {
-                podcastPlayer.seek(to: seekPosition)
-            }
-        })
-        .onChange(of: podcastPlayer.currentTime) { newValue in
-            seekPosition = newValue
-        }
-    }
+           Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1), onEditingChanged: { editing in
+               isSeekingManually = editing
+               if !editing {
+                   debounceTimer?.invalidate()
+                   debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { _ in
+                       podcastPlayer.seek(to: seekPosition)
+                   }
+               }
+           })
+       }
     
     private var timeLabels: some View {
         HStack {
