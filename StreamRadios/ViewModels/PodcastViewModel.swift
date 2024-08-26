@@ -118,6 +118,36 @@ class PodcastViewModel: ObservableObject {
         loadAllEpisodesProgress()
     }
     
+    func sortFeedsAlphabetically() {
+            let sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() < $1.title.lowercased() }
+            podcastFeedOrder = sortedFeeds.map { $0.id }
+            saveFeedOrder()
+        }
+
+    func moveFeed(from source: IndexSet, to destination: Int) {
+        podcastFeedOrder.move(fromOffsets: source, toOffset: destination)
+        saveFeedOrder()
+    }
+    
+    private func saveFeedOrder() {
+        do {
+            let orderData = try JSONEncoder().encode(podcastFeedOrder)
+            UserDefaults.standard.set(orderData, forKey: "PodcastFeedOrder")
+        } catch {
+            print("Failed to save feed order to UserDefaults: \(error)")
+        }
+    }
+    
+    func loadFeedOrder() {
+        if let orderData = UserDefaults.standard.data(forKey: "PodcastFeedOrder"),
+           let order = try? JSONDecoder().decode([String].self, from: orderData) {
+            podcastFeedOrder = order
+        } else {
+            // If no saved order, create initial order based on current feeds
+            podcastFeedOrder = podcastFeeds.map { $0.id }
+        }
+    }
+
     func updateEpisodeDuration(_ episode: PodcastEpisode) {
         guard let player = PodcastPlayer.shared.player,
               let currentItem = player.currentItem else { return }
