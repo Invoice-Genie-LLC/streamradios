@@ -118,6 +118,53 @@ class PodcastViewModel: ObservableObject {
         loadAllEpisodesProgress()
     }
     
+    func calculateAndUpdateFileSizeForDownloadedEpisodes() {
+            for index in downloadedEpisodes.indices {
+                if let localFilePath = downloadedEpisodes[index].localFilePath {
+                    let fileSize = getFileSize(at: localFilePath)
+                    downloadedEpisodes[index].fileSize = fileSize
+                    
+                    // Update the episode in allEpisodes and currentEpisodes
+                    if let allIndex = allEpisodes.firstIndex(where: { $0.id == downloadedEpisodes[index].id }) {
+                        allEpisodes[allIndex].fileSize = fileSize
+                    }
+                    if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == downloadedEpisodes[index].id }) {
+                        currentEpisodes[currentIndex].fileSize = fileSize
+                    }
+                    
+                    // Update in Core Data
+                    updateEpisodeFileSize(downloadedEpisodes[index], fileSize: fileSize)
+                }
+            }
+            objectWillChange.send()
+        }
+    
+    private func getFileSize(at path: String) -> Int64 {
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: path)
+                return attributes[.size] as? Int64 ?? 0
+            } catch {
+                print("Error getting file size: \(error)")
+                return 0
+            }
+        }
+        
+        private func updateEpisodeFileSize(_ episode: PodcastEpisode, fileSize: Int64) {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+            
+            do {
+                let results = try context.fetch(fetchRequest)
+                if let managedEpisode = results.first {
+                    managedEpisode.fileSize = Int64(fileSize)
+                    try context.save()
+                    print("Updated file size for episode \(episode.title): \(fileSize) bytes")
+                }
+            } catch {
+                print("Failed to update episode file size in Core Data: \(error)")
+            }
+        }
+    
     func sortFeedsAlphabetically() {
             let sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() < $1.title.lowercased() }
             podcastFeedOrder = sortedFeeds.map { $0.id }
@@ -1023,26 +1070,35 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
-        currentTab = selectedTab
-        
-        refreshEpisodeStates() // Refresh states before filtering
-        
-        let allFeedEpisodes = allEpisodes.filter { $0.feedId == feedId }
-        
-        switch selectedTab {
-        case 0: // All
-            currentEpisodes = allFeedEpisodes
-        case 1: // Favorite
-            currentEpisodes = favoriteEpisodes.filter { $0.feedId == feedId }
-        case 2: // Downloads
-            currentEpisodes = downloadedEpisodes.filter { $0.feedId == feedId }
-        default:
-            currentEpisodes = allFeedEpisodes
+            currentTab = selectedTab
+            
+            refreshEpisodeStates() // Refresh states before filtering
+            
+            let allFeedEpisodes = allEpisodes.filter { $0.feedId == feedId }
+            
+            switch selectedTab {
+            case 0: // All
+                currentEpisodes = allFeedEpisodes
+            case 1: // Favorite
+                currentEpisodes = favoriteEpisodes.filter { $0.feedId == feedId }
+            case 2: // Downloads
+                currentEpisodes = downloadedEpisodes.filter { $0.feedId == feedId }
+                calculateAndUpdateFileSizeForDownloadedEpisodes() // Calculate file sizes for downloaded episodes
+            default:
+                currentEpisodes = allFeedEpisodes
+            }
+            
+            currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
+            
+            // Debug print
+            if selectedTab == 2 {
+                for episode in currentEpisodes {
+                    print("Episode: \(episode.title), File Size: \(episode.fileSize ?? 0) bytes")
+                }
+            }
+            
+            objectWillChange.send() // Ensure UI update
         }
-        
-        currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
-        objectWillChange.send() // Ensure UI update
-    }
     
     func loadAllEpisodesProgress() {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()

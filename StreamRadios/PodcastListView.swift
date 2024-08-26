@@ -391,10 +391,17 @@ struct EpisodeRowView: View {
                     // Display file size if available and time remaining
                     HStack {
                         if let fileSize = episode.fileSize, fileSize > 0 {
-                                            Text(formatFileSize(fileSize))
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
+                                Text(formatFileSize(fileSize))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                                if let localFilePath = episode.localFilePath,
+                                   let fileSize = getFileSize(at: localFilePath) {
+                                    Text(formatFileSize(fileSize))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
                         
                         Spacer()
                         
@@ -541,6 +548,16 @@ struct EpisodeRowView: View {
         }
     }
     
+    private func getFileSize(at path: String) -> Int64? {
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: path)
+                return attributes[.size] as? Int64
+            } catch {
+                print("Error getting file size: \(error)")
+                return nil
+            }
+        }
+    
     private func showBannerAlert(message: String) {
         bannerAlertMessage = message
         showingBannerAlert = true
@@ -557,7 +574,7 @@ struct EpisodeRowView: View {
     // Helper method to format file size
     private func formatFileSize(_ size: Int64) -> String {
         let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useMB]
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: size)
     }
