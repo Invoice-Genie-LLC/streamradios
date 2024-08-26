@@ -304,6 +304,7 @@ struct EpisodeRowView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
+    @State private var showProgressView: Bool = false
     private let buttonSize: CGFloat = 30
     
     init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
@@ -389,11 +390,11 @@ struct EpisodeRowView: View {
                     
                     // Display file size if available and time remaining
                     HStack {
-                        if let fileSize = episode.fileSize {
-                            Text(formatFileSize(fileSize))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                        if let fileSize = episode.fileSize, fileSize > 0 {
+                                            Text(formatFileSize(fileSize))
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
                         
                         Spacer()
                         
@@ -407,10 +408,10 @@ struct EpisodeRowView: View {
                     }
                     
                     // Progress bar
-                    if episode.duration > 0 {
-                        ProgressView(value: min(max(podcastPlayer.getCurrentProgress(for: episode), 0), 1))
-                            .accentColor(.blue)
-                    }
+                    if showProgressView && episode.duration > 0 {
+                                            ProgressView(value: min(max(podcastPlayer.getCurrentProgress(for: episode), 0), 1))
+                                                .accentColor(.blue)
+                                        }
                 }
                 
                 Spacer()
