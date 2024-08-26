@@ -120,9 +120,16 @@ struct PodcastListView: View {
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 
                 if podcastPlayer.currentEpisode != nil {
-                    MiniPlayerView(podcastPlayer: podcastPlayer, viewModel: viewModel, selectedPodcast: $selectedPodcast)
-                        .transition(.move(edge: .bottom))
-                }
+                                    MiniPlayerView(
+                                        podcastPlayer: podcastPlayer,
+                                        viewModel: viewModel,
+                                        selectedPodcast: $selectedPodcast,
+                                        onListButtonTap: {
+                                            selectedPodcast = podcastPlayer.currentFeed
+                                        }
+                                    )
+                                    .transition(.move(edge: .bottom))
+                                }
             }
         }
     }
