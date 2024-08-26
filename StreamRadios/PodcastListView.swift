@@ -15,23 +15,24 @@ struct PodcastListView: View {
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
-    @State private var selectedPodcast: PodcastFeed? // Binding for selectedPodcast
+    @State private var selectedPodcast: PodcastFeed?
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
+    @State private var expandedFeedId: String? // Add this line
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     
     var filteredPodcasts: [PodcastFeed] {
-            if searchText.isEmpty {
-                return viewModel.podcastFeeds
-            } else {
-                return viewModel.podcastFeeds.filter { feed in
-                    feed.title.lowercased().contains(searchText.lowercased()) ||
-                    (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
-                }
+        if searchText.isEmpty {
+            return viewModel.podcastFeeds
+        } else {
+            return viewModel.podcastFeeds.filter { feed in
+                feed.title.lowercased().contains(searchText.lowercased()) ||
+                (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
             }
         }
+    }
     
     var body: some View {
         NavigationView {
@@ -41,17 +42,36 @@ struct PodcastListView: View {
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 16)
                 searchBar
-                PodcastList(
-                                    feeds: filteredPodcasts,
-                                    viewModel: viewModel,  // Add this line
-                                    podcastPlayer: podcastPlayer,
-                                    onPlay: { playLatestEpisode(for: $0) },
-                                    onDelete: { feed in
-                                        podcastToDelete = feed
-                                        showingDeleteConfirmation = true
-                                    },
-                                    selectedPodcast: $selectedPodcast
+                List {
+                    ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
+                        if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
+                           filteredPodcasts.contains(where: { $0.id == feedId }) {
+                            PodcastRowView(
+                                feed: feed,
+                                isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                                onPlay: { playLatestEpisode(for: feed) },
+                                onStop: { podcastPlayer.togglePlayPause() },
+                                onTap: { selectedPodcast = feed },
+                                isExpanded: Binding(
+                                    get: { expandedFeedId == feed.id },
+                                    set: { isExpanded in
+                                        expandedFeedId = isExpanded ? feed.id : nil
+                                    }
                                 )
+                            )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    podcastToDelete = feed
+                                    showingDeleteConfirmation = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                    .onMove(perform: viewModel.moveFeed)
+                }
+                .listStyle(PlainListStyle())
             }
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
                 Button("Cancel", role: .cancel) {}
@@ -63,6 +83,14 @@ struct PodcastListView: View {
             }
             .navigationTitle("Podcasts")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    EditButton()
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: viewModel.sortFeedsAlphabetically) {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { showingAddPodcast = true }) {
                         Image(systemName: "plus")
@@ -71,6 +99,7 @@ struct PodcastListView: View {
             }
             .onAppear {
                 os_log("PodcastListView appeared", log: log, type: .info)
+                viewModel.loadFeedOrder()
                 viewModel.fetchPodcastFeeds()
             }
             .sheet(isPresented: $showingAddPodcast) {
@@ -79,7 +108,6 @@ struct PodcastListView: View {
             .sheet(item: $selectedPodcast) { podcast in
                 PodcastPlayerView(viewModel: viewModel, feed: podcast, podcastPlayer: podcastPlayer)
             }
-            
         }
     }
     
@@ -90,12 +118,12 @@ struct PodcastListView: View {
     }
     
     private func addPodcast() {
-            let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
-            viewModel.addPodcastFeed(newFeed)
-            newPodcastTitle = ""
-            newPodcastURL = ""
-            showingAddPodcast = false
-        }
+        let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
+        viewModel.addPodcastFeed(newFeed)
+        newPodcastTitle = ""
+        newPodcastURL = ""
+        showingAddPodcast = false
+    }
     
     private func playLatestEpisode(for feed: PodcastFeed) {
         viewModel.fetchEpisodes(for: feed) { result in
