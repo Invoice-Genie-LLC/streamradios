@@ -19,7 +19,8 @@ struct PodcastListView: View {
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
-    @State private var expandedFeedId: String? // Add this line
+    @State private var expandedFeedId: String?
+    @State private var isEditing = false
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     
@@ -36,77 +37,92 @@ struct PodcastListView: View {
     
     var body: some View {
         NavigationView {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Tap on a podcast image to explore its episodes and discover more content.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 16)
-                searchBar
-                List {
-                    ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
-                        if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
-                           filteredPodcasts.contains(where: { $0.id == feedId }) {
-                            PodcastRowView(
-                                feed: feed,
-                                isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                                onPlay: { playLatestEpisode(for: feed) },
-                                onStop: { podcastPlayer.togglePlayPause() },
-                                onTap: { selectedPodcast = feed },
-                                isExpanded: Binding(
-                                    get: { expandedFeedId == feed.id },
-                                    set: { isExpanded in
-                                        expandedFeedId = isExpanded ? feed.id : nil
-                                    }
+            ZStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tap on a podcast image to explore its episodes and discover more content.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 16)
+                    searchBar
+                    List {
+                        ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
+                            if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
+                               filteredPodcasts.contains(where: { $0.id == feedId }) {
+                                PodcastRowView(
+                                    feed: feed,
+                                    isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                                    onPlay: { playLatestEpisode(for: feed) },
+                                    onStop: { podcastPlayer.togglePlayPause() },
+                                    onTap: { selectedPodcast = feed },
+                                    isExpanded: Binding(
+                                        get: { expandedFeedId == feed.id },
+                                        set: { isExpanded in
+                                            expandedFeedId = isExpanded ? feed.id : nil
+                                        }
+                                    )
                                 )
-                            )
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    podcastToDelete = feed
-                                    showingDeleteConfirmation = true
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        podcastToDelete = feed
+                                        showingDeleteConfirmation = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
+                        .onMove(perform: viewModel.moveFeed)
+                        Spacer()
+                            .frame(height: 80)
+                            .listRowInsets(EdgeInsets())
                     }
-                    .onMove(perform: viewModel.moveFeed)
+                    .listStyle(PlainListStyle())
                 }
-                .listStyle(PlainListStyle())
-            }
-            .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    viewModel.deletePodcastFeed(podcast)
+                .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
+                    Button("Cancel", role: .cancel) {}
+                    Button("Delete", role: .destructive) {
+                        viewModel.deletePodcastFeed(podcast)
+                    }
+                } message: { podcast in
+                    Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
                 }
-            } message: { podcast in
-                Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
-            }
-            .navigationTitle("Podcasts")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    EditButton()
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: viewModel.sortFeedsAlphabetically) {
-                        Image(systemName: "arrow.up.arrow.down")
+                .navigationTitle("Podcasts")
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: {
+                            isEditing.toggle()
+                        }) {
+                            Text(isEditing ? "Done" : "Edit")
+                        }
+                    }
+                    ToolbarItemGroup(placement: .navigationBarTrailing) {
+                        if !isEditing {
+                            Button(action: viewModel.sortFeedsAlphabetically) {
+                                Image(systemName: "arrow.up.arrow.down")
+                            }
+                            Button(action: { showingAddPodcast = true }) {
+                                Image(systemName: "plus")
+                            }
+                        }
                     }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showingAddPodcast = true }) {
-                        Image(systemName: "plus")
-                    }
+                .onAppear {
+                    os_log("PodcastListView appeared", log: log, type: .info)
+                    viewModel.loadFeedOrder()
+                    viewModel.fetchPodcastFeeds()
                 }
-            }
-            .onAppear {
-                os_log("PodcastListView appeared", log: log, type: .info)
-                viewModel.loadFeedOrder()
-                viewModel.fetchPodcastFeeds()
-            }
-            .sheet(isPresented: $showingAddPodcast) {
-                AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
-            }
-            .sheet(item: $selectedPodcast) { podcast in
-                PodcastPlayerView(viewModel: viewModel, feed: podcast, podcastPlayer: podcastPlayer)
+                .sheet(isPresented: $showingAddPodcast) {
+                    AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
+                }
+                .sheet(item: $selectedPodcast) { podcast in
+                    PodcastPlayerView(viewModel: viewModel, feed: podcast, podcastPlayer: podcastPlayer)
+                }
+                .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+                
+                if podcastPlayer.currentEpisode != nil {
+                    MiniPlayerView(podcastPlayer: podcastPlayer, viewModel: viewModel, selectedPodcast: $selectedPodcast)
+                        .transition(.move(edge: .bottom))
+                }
             }
         }
     }
@@ -115,6 +131,8 @@ struct PodcastListView: View {
         TextField("Search podcasts", text: $searchText)
             .textFieldStyle(RoundedBorderTextFieldStyle())
             .padding(.horizontal)
+            .autocapitalization(.none)
+            .disableAutocorrection(true)
     }
     
     private func addPodcast() {
@@ -136,6 +154,44 @@ struct PodcastListView: View {
                 os_log("Failed to fetch episodes: %@", log: log, type: .error, error.localizedDescription)
             }
         }
+    }
+}
+
+struct FeedImageView: View {
+    let feed: PodcastFeed
+    
+    var body: some View {
+        Group {
+            if let imageData = feed.imageData, let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
+                AsyncImage(url: url) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ProgressView()
+                }
+            } else {
+                Image(systemName: "music.note")
+                    .font(.system(size: 24))
+                    .foregroundColor(.secondary)
+                    .frame(width: 48, height: 48)
+                    .background(Color.gray.opacity(0.3))
+            }
+        }
+    }
+}
+
+struct BlurView: UIViewRepresentable {
+    let style: UIBlurEffect.Style
+    
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        return UIVisualEffectView(effect: UIBlurEffect(style: style))
+    }
+    
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        uiView.effect = UIBlurEffect(style: style)
     }
 }
 
@@ -391,17 +447,17 @@ struct EpisodeRowView: View {
                     // Display file size if available and time remaining
                     HStack {
                         if let fileSize = episode.fileSize, fileSize > 0 {
+                            Text(formatFileSize(fileSize))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                            if let localFilePath = episode.localFilePath,
+                               let fileSize = getFileSize(at: localFilePath) {
                                 Text(formatFileSize(fileSize))
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                            } else if viewModel.currentTab == 2 && episode.state.isDownloaded {
-                                if let localFilePath = episode.localFilePath,
-                                   let fileSize = getFileSize(at: localFilePath) {
-                                    Text(formatFileSize(fileSize))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
                             }
+                        }
                         
                         Spacer()
                         
@@ -416,9 +472,9 @@ struct EpisodeRowView: View {
                     
                     // Progress bar
                     if showProgressView && episode.duration > 0 {
-                                            ProgressView(value: min(max(podcastPlayer.getCurrentProgress(for: episode), 0), 1))
-                                                .accentColor(.blue)
-                                        }
+                        ProgressView(value: min(max(podcastPlayer.getCurrentProgress(for: episode), 0), 1))
+                            .accentColor(.blue)
+                    }
                 }
                 
                 Spacer()
@@ -488,15 +544,15 @@ struct EpisodeRowView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .alert(isPresented: $showingDeleteConfirmation) {
-                                Alert(
-                                    title: Text("Delete Downloaded Episode"),
-                                    message: Text("Are you sure you want to delete this downloaded episode? This will not affect its favorite status."),
-                                    primaryButton: .destructive(Text("Delete")) {
-                                        viewModel.deleteDownloadedEpisode(episode)
-                                    },
-                                    secondaryButton: .cancel()
-                                )
-                            }
+                    Alert(
+                        title: Text("Delete Downloaded Episode"),
+                        message: Text("Are you sure you want to delete this downloaded episode? This will not affect its favorite status."),
+                        primaryButton: .destructive(Text("Delete")) {
+                            viewModel.deleteDownloadedEpisode(episode)
+                        },
+                        secondaryButton: .cancel()
+                    )
+                }
                 // Play/Pause button
                 Button(action: {
                     if isPlaying {
@@ -549,14 +605,14 @@ struct EpisodeRowView: View {
     }
     
     private func getFileSize(at path: String) -> Int64? {
-            do {
-                let attributes = try FileManager.default.attributesOfItem(atPath: path)
-                return attributes[.size] as? Int64
-            } catch {
-                print("Error getting file size: \(error)")
-                return nil
-            }
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: path)
+            return attributes[.size] as? Int64
+        } catch {
+            print("Error getting file size: \(error)")
+            return nil
         }
+    }
     
     private func showBannerAlert(message: String) {
         bannerAlertMessage = message
@@ -608,11 +664,10 @@ struct PodcastPlayerView: View {
     @Environment(\.presentationMode) var presentationMode
     let feed: PodcastFeed
     @ObservedObject var podcastPlayer: PodcastPlayer
-    @State private var selectedTab = 0 // Start with "All" tab
+    @State private var selectedTab = 0
     @State private var seekPosition: Double = 0
     @State private var isSeekingManually = false
     @State private var debounceTimer: Timer?
-    private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastPlayerView")
     
     var body: some View {
         VStack(spacing: 0) {
@@ -643,45 +698,50 @@ struct PodcastPlayerView: View {
             .padding(.vertical, 10)
             .background(Color(UIColor.systemBackground))
             .shadow(color: Color.gray.opacity(0.3), radius: 2, x: 0, y: 1)
-        }
-        
-        VStack(spacing: 10) {
-            if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
-                AsyncImage(url: url) { image in
-                    image.resizable()
-                } placeholder: {
-                    Color.gray
+            
+            VStack(spacing: 10) {
+                if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
+                    AsyncImage(url: url) { image in
+                        image.resizable()
+                    } placeholder: {
+                        Color.gray
+                    }
+                    .frame(width: 150, height: 150)
+                    .cornerRadius(10)
                 }
-                .frame(width: 150, height: 150)
-                .cornerRadius(10)
+                
+                nowPlayingView
+                
+                Picker("", selection: $selectedTab) {
+                    Text("All").tag(0)
+                    Text("Favorites").tag(1)
+                    Text("Downloads").tag(2)
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal)
+                .onChange(of: selectedTab) { newValue in
+                    viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
+                }
+                
+                // Wrap the episode list in ScrollViewReader
+                ScrollViewReader { proxy in
+                    episodeList
+                        .onAppear {
+                            scrollToCurrentEpisode(proxy: proxy)
+                        }
+                }
             }
-            
-            nowPlayingView
-            
-            Picker("", selection: $selectedTab) {
-                Text("All").tag(0)
-                Text("Favorites").tag(1)
-                Text("Downloads").tag(2)
+            .onAppear {
+                viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+                seekPosition = podcastPlayer.currentTime
             }
-            .pickerStyle(SegmentedPickerStyle())
-            .padding(.horizontal)
-            .onChange(of: selectedTab) { newValue in
-                viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
+            .onReceive(podcastPlayer.$currentTime) { newTime in
+                if !isSeekingManually {
+                    seekPosition = newTime
+                }
             }
-            
-            episodeList
+            .navigationBarHidden(true)
         }
-        .onAppear {
-            os_log("PodcastPlayerView appeared for feed: %@", log: log, type: .info, feed.title)
-            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-            seekPosition = podcastPlayer.currentTime
-        }
-        .onReceive(podcastPlayer.$currentTime) { newTime in
-                   if !isSeekingManually {
-                       seekPosition = newTime
-                   }
-               }
-        .navigationBarHidden(true)
     }
     
     private var nowPlayingView: some View {
@@ -731,16 +791,16 @@ struct PodcastPlayerView: View {
     }
     
     private var progressSlider: some View {
-           Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1), onEditingChanged: { editing in
-               isSeekingManually = editing
-               if !editing {
-                   debounceTimer?.invalidate()
-                   debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { _ in
-                       podcastPlayer.seek(to: seekPosition)
-                   }
-               }
-           })
-       }
+        Slider(value: $seekPosition, in: 0...max(podcastPlayer.duration, 1), onEditingChanged: { editing in
+            isSeekingManually = editing
+            if !editing {
+                debounceTimer?.invalidate()
+                debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { _ in
+                    podcastPlayer.seek(to: seekPosition)
+                }
+            }
+        })
+    }
     
     private var timeLabels: some View {
         HStack {
@@ -762,6 +822,7 @@ struct PodcastPlayerView: View {
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
                 )
+                .id(episode.compositeID) // Ensure each row has a unique ID
             }
         }
         .listStyle(PlainListStyle())
@@ -780,6 +841,14 @@ struct PodcastPlayerView: View {
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
+    
+    private func scrollToCurrentEpisode(proxy: ScrollViewProxy) {
+        if let currentEpisode = podcastPlayer.currentEpisode {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // slight delay to ensure the view has appeared
+                proxy.scrollTo(currentEpisode.compositeID, anchor: .center)
+            }
+        }
+    }
 }
 
 struct PodcastList: View {
@@ -790,7 +859,7 @@ struct PodcastList: View {
     let onDelete: (PodcastFeed) -> Void
     @Binding var selectedPodcast: PodcastFeed?
     @State private var expandedFeedId: String?
-
+    
     var body: some View {
         List {
             ForEach(orderedFeeds, id: \.id) { feed in

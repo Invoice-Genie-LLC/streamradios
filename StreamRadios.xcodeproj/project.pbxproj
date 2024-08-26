@@ -74,6 +74,7 @@
 		77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC82C64725600187488 /* AddPodcastView.swift */; };
 		77F50BCB2C647AEF00187488 /* PodcastListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BCA2C647AEF00187488 /* PodcastListView.swift */; };
 		77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F6689E2C7A56CF00E2618C /* BannerAlert.swift */; };
+		77F668A32C7CCEB400E2618C /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F668A22C7CCEB400E2618C /* MiniPlayerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -166,6 +167,7 @@
 		77F50BC82C64725600187488 /* AddPodcastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastView.swift; sourceTree = "<group>"; };
 		77F50BCA2C647AEF00187488 /* PodcastListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastListView.swift; sourceTree = "<group>"; };
 		77F6689E2C7A56CF00E2618C /* BannerAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerAlert.swift; sourceTree = "<group>"; };
+		77F668A22C7CCEB400E2618C /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -254,6 +256,7 @@
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
 				77F50BC82C64725600187488 /* AddPodcastView.swift */,
 				77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */,
+				77F668A22C7CCEB400E2618C /* MiniPlayerView.swift */,
 				7780E9702C3F2110009CCF6F /* CustomAlertView.swift */,
 				7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
@@ -483,6 +486,7 @@
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,
+				77F668A32C7CCEB400E2618C /* MiniPlayerView.swift in Sources */,
 				7715BD962C4C3AD700FA7CB1 /* DocumentPicker.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
 				7746A4932C6BE2130025C215 /* ManagedPodcastEpisode.swift in Sources */,
