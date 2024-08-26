@@ -30,6 +30,8 @@ struct ContentView: View {
     @EnvironmentObject var podcastViewModel: PodcastViewModel
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     @State private var selectedPodcast: PodcastFeed? = nil
+    @State private var showPodcastListView = false
+
 
     init() {
         if let savedTab = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
@@ -246,26 +248,27 @@ struct ContentView: View {
                 
                     // Podcast MiniPlayerView
                     ScrollViewReader { proxy in
-                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
-                            MiniPlayerView(
-                                podcastPlayer: podcastPlayer,
-                                viewModel: podcastViewModel,
-                                selectedPodcast: $selectedPodcast
-                            )
-                            .transition(.move(edge: .bottom))
-                            .padding(.bottom, 10)
-                            .contentShape(Rectangle()) // Make the whole view tappable
-                            .onTapGesture {
-                                // Set the selectedPodcast to show the episode list
-                                selectedPodcast = podcastPlayer.currentFeed
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                    withAnimation {
-                                        proxy.scrollTo(episode.compositeID, anchor: .center)
+                                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
+                                            MiniPlayerView(
+                                                podcastPlayer: podcastPlayer,
+                                                viewModel: podcastViewModel,
+                                                selectedPodcast: $selectedPodcast
+                                            )
+                                            .transition(.move(edge: .bottom))
+                                            .padding(.bottom, 10)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture {
+                                                selectedPodcast = podcastPlayer.currentFeed
+                                                showPodcastListView = true
+                                            }
+                                        }
                                     }
+                    .sheet(isPresented: $showPodcastListView) {
+                                if let podcast = selectedPodcast {
+                                    PodcastPlayerView(viewModel: podcastViewModel, feed: podcast, podcastPlayer: podcastPlayer)
                                 }
                             }
-                        }
-                    }
+                                
                 }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 

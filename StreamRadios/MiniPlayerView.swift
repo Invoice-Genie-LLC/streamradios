@@ -13,6 +13,7 @@ struct MiniPlayerView: View {
     @ObservedObject var viewModel: PodcastViewModel
     @Environment(\.colorScheme) var colorScheme
     @Binding var selectedPodcast: PodcastFeed?
+    var onListButtonTap: (() -> Void)?
 
     private let height: CGFloat = 64
 
@@ -58,7 +59,16 @@ struct MiniPlayerView: View {
                 Spacer()
 
                 // Playback controls
-                HStack(spacing: 20) {
+                HStack(spacing: 15) {
+                    // New list button
+                    Button(action: {
+                        onListButtonTap?()
+                    }) {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 22))
+                            .foregroundColor(.primary)
+                    }
+
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
                             .font(.system(size: 22))
@@ -94,9 +104,6 @@ struct MiniPlayerView: View {
                     .foregroundColor(Color.primary.opacity(0.2))
                     .offset(y: -height / 2)
             )
-            .onTapGesture {
-                selectedPodcast = feed
-            }
         }
     }
 
