@@ -28,6 +28,8 @@ struct ContentView: View {
     @State private var selectedTab: Tab = .all
     @EnvironmentObject var alertManager: AlertManager
     @EnvironmentObject var podcastViewModel: PodcastViewModel
+    @StateObject private var podcastPlayer = PodcastPlayer.shared
+    @State private var selectedPodcast: PodcastFeed? = nil
 
     init() {
         if let savedTab = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
@@ -217,6 +219,7 @@ struct ContentView: View {
                                         }
                                     }
                                     Spacer()
+                                    
                                 }
                                 .padding(.leading, 10)
                             }
@@ -240,6 +243,29 @@ struct ContentView: View {
                     .padding(.bottom, UIApplication.shared.connectedScenes
                         .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
                         .first ?? 0)
+                
+                    // Podcast MiniPlayerView
+                    ScrollViewReader { proxy in
+                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
+                            MiniPlayerView(
+                                podcastPlayer: podcastPlayer,
+                                viewModel: podcastViewModel,
+                                selectedPodcast: $selectedPodcast
+                            )
+                            .transition(.move(edge: .bottom))
+                            .padding(.bottom, 10)
+                            .contentShape(Rectangle()) // Make the whole view tappable
+                            .onTapGesture {
+                                // Set the selectedPodcast to show the episode list
+                                selectedPodcast = podcastPlayer.currentFeed
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                    withAnimation {
+                                        proxy.scrollTo(episode.compositeID, anchor: .center)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
