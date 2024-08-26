@@ -43,13 +43,13 @@ struct MiniPlayerView: View {
 
                                 Rectangle()
                                     .fill(Color.accentColor)
-                                    .frame(width: geometry.size.width * CGFloat(viewModel.getProgress(for: episode)), height: 3)
+                                    .frame(width: geometry.size.width * CGFloat(podcastPlayer.currentProgress), height: 3)
                             }
                         }
                         .frame(height: 3)
 
                         // Time remaining
-                        Text(formatTimeRemaining(currentTime: podcastPlayer.currentTime, duration: episode.duration))
+                        Text(formatTimeRemaining(currentTime: podcastPlayer.currentTime, duration: podcastPlayer.duration))
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
                     }
