@@ -172,19 +172,19 @@ struct ContentView: View {
                     
                     VStack {
                         RadioStationListView(isEditing: $isEditingMode,
-                                                 isEditingStation: $isEditingStation,
-                                                 selectedStationForEdit: $selectedStationForEdit,
-                                                 selectedTab: $selectedTab, activeSheet: $activeSheet)
-                            .environmentObject(viewModel)
-                            .environmentObject(radioPlayer)
-                            .frame(width: sizeClass == .regular ? 615 : isIPhoneSE || isIPhoneSE2 ? 350 : 385)
-                            .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(16)
-                            .modifier(NeumorphicShadow())
-                            .padding(.top, isIPhoneSE || isIPhoneSE2 ? 5 : 10)
-                        }
-                        .padding(.bottom, isIPhoneSE || isIPhoneSE2 ? 20 : 35)
-                        .padding(.bottom, sizeClass == .regular ? 5 : 0)
+                                             isEditingStation: $isEditingStation,
+                                             selectedStationForEdit: $selectedStationForEdit,
+                                             selectedTab: $selectedTab, activeSheet: $activeSheet)
+                        .environmentObject(viewModel)
+                        .environmentObject(radioPlayer)
+                        .frame(width: sizeClass == .regular ? 615 : isIPhoneSE || isIPhoneSE2 ? 350 : 385)
+                        .background(Color(UIColor.secondarySystemBackground))
+                        .cornerRadius(16)
+                        .modifier(NeumorphicShadow())
+                        .padding(.top, isIPhoneSE || isIPhoneSE2 ? 5 : 10)
+                    }
+                    .padding(.bottom, isIPhoneSE || isIPhoneSE2 ? 20 : 35)
+                    .padding(.bottom, sizeClass == .regular ? 5 : 0)
                     
                     Spacer()
                     
@@ -245,31 +245,33 @@ struct ContentView: View {
                     .padding(.bottom, UIApplication.shared.connectedScenes
                         .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
                         .first ?? 0)
-                
+                    
                     // Podcast MiniPlayerView
                     ScrollViewReader { proxy in
-                                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
-                                            MiniPlayerView(
-                                                podcastPlayer: podcastPlayer,
-                                                viewModel: podcastViewModel,
-                                                selectedPodcast: $selectedPodcast
-                                            )
-                                            .transition(.move(edge: .bottom))
-                                            .padding(.bottom, 10)
-                                            .contentShape(Rectangle())
-                                            .onTapGesture {
-                                                selectedPodcast = podcastPlayer.currentFeed
-                                                showPodcastListView = true
-                                            }
-                                        }
-                                    }
-                    .sheet(isPresented: $showPodcastListView) {
+                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
+                            MiniPlayerView(
+                                podcastPlayer: podcastPlayer,
+                                viewModel: podcastViewModel,
+                                selectedPodcast: $selectedPodcast,
+                                onListButtonTap: {
+                                    selectedPodcast = podcastPlayer.currentFeed
+                                }
+                            )
+                            .transition(.move(edge: .bottom))
+                            .padding(.bottom, 10)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedPodcast = podcastPlayer.currentFeed
+                                showPodcastListView = true
+                            }
+                            .sheet(isPresented: $showPodcastListView) {
                                 if let podcast = selectedPodcast {
                                     PodcastPlayerView(viewModel: podcastViewModel, feed: podcast, podcastPlayer: podcastPlayer)
                                 }
                             }
-                                
-                }
+                    }
+                        }
+                    }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
                 // Side Menu
