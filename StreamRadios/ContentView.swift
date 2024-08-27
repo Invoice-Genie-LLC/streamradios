@@ -295,8 +295,8 @@ struct ContentView: View {
                                         PodcastPlayerView(
                                             viewModel: podcastViewModel,
                                             feed: podcast,
-                                            podcastPlayer: podcastPlayer,
-                                            initialScrollToEpisodeID: scrollToEpisodeID
+                                            podcastPlayer: podcastPlayer
+                                           // initialScrollToEpisodeID: scrollToEpisodeID
                                         )
                                     }
                                 }
