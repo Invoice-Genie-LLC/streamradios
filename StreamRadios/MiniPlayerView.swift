@@ -15,7 +15,9 @@ struct MiniPlayerView: View {
     @Binding var selectedPodcast: PodcastFeed?
     var onListButtonTap: (() -> Void)?
 
-    private let height: CGFloat = 64
+    private let height: CGFloat = 70 // Increased height
+    private let cornerRadius: CGFloat = 20
+    private let horizontalPadding: CGFloat = 16
 
     var body: some View {
         if let episode = podcastPlayer.currentEpisode,
@@ -23,24 +25,24 @@ struct MiniPlayerView: View {
             HStack(spacing: 12) {
                 // Feed image
                 FeedImageView(feed: feed)
-                    .frame(width: height - 16, height: height - 16)
+                    .frame(width: height - 20, height: height - 20)
                     .cornerRadius(6)
 
                 VStack(alignment: .leading, spacing: 4) {
                     // Episode title
                     Text(episode.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(1)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(2) // Allow two lines for the title
                         .foregroundColor(.primary)
 
-                    // Progress and time remaining
+                    // Progress bar and time remaining
                     HStack(spacing: 8) {
                         // Progress bar
                         GeometryReader { geometry in
                             ZStack(alignment: .leading) {
                                 Rectangle()
                                     .fill(Color.gray.opacity(0.3))
-                                    .frame(width: geometry.size.width, height: 3)
+                                    .frame(height: 3)
 
                                 Rectangle()
                                     .fill(Color.accentColor)
@@ -51,59 +53,57 @@ struct MiniPlayerView: View {
 
                         // Time remaining
                         Text(formatTimeRemaining(currentTime: podcastPlayer.currentTime, duration: podcastPlayer.duration))
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.secondary)
                     }
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Playback controls
-                HStack(spacing: 15) {
-                    // New list button
+                HStack(spacing: 12) {
                     Button(action: {
                         onListButtonTap?()
                     }) {
                         Image(systemName: "list.bullet")
-                            .font(.system(size: 22))
-                            .foregroundColor(.primary)
+                            .font(.system(size: 18))
                     }
 
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
-                            .font(.system(size: 22))
-                            .foregroundColor(.primary)
+                            .font(.system(size: 18))
                     }
 
                     Button(action: podcastPlayer.togglePlayPause) {
                         Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 36))
+                            .font(.system(size: 32))
                             .foregroundColor(.accentColor)
                     }
 
                     Button(action: podcastPlayer.skipForward) {
                         Image(systemName: "goforward.30")
-                            .font(.system(size: 22))
-                            .foregroundColor(.primary)
+                            .font(.system(size: 18))
                     }
                 }
+                .foregroundColor(.primary)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, horizontalPadding)
             .frame(height: height)
             .background(
                 ZStack {
-                    BlurView(style: .systemThinMaterialDark)
+                    BlurView(style: .systemThinMaterial)
                         .opacity(colorScheme == .dark ? 0.8 : 1.0)
 
                     Color.black.opacity(colorScheme == .dark ? 0.4 : 0.2)
                 }
             )
+            .cornerRadius(cornerRadius)
             .overlay(
-                Rectangle()
-                    .frame(height: 0.5)
-                    .foregroundColor(Color.primary.opacity(0.2))
-                    .offset(y: -height / 2)
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
             )
+            .frame(maxWidth: UIScreen.main.bounds.width - 32)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
         }
     }
 
