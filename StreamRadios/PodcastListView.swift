@@ -739,6 +739,7 @@ struct PodcastPlayerView: View {
                 }
             }
             .onAppear {
+                viewModel.fetchAllEpisodes(for: feed)
                 viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
                 seekPosition = podcastPlayer.currentTime
             }

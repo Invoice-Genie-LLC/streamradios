@@ -14,32 +14,55 @@ extension UIApplication {
 }
 
 struct ContentView: View {
-    @StateObject private var radioPlayer = RadioPlayer.shared
+    @StateObject private var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
-    @State private var isAddStationViewPresented = false
-    @State private var isPlayerSheetPresented = false
-    @State private var showSideMenu = false
-    @State private var isEditingMode = false
-    @State private var isEditingStation = false
+    @State private var isAddStationViewPresented: Bool
+    @State private var isPlayerSheetPresented: Bool
+    @State private var showSideMenu: Bool
+    @State private var isEditingMode: Bool
+    @State private var isEditingStation: Bool
     @State private var selectedStationForEdit: RadioStation?
-    @State private var bitrateMessage = "Loading bitrate information..."
-    @State private var showAlertForCountryBeforeAddingStation = false
+    @State private var bitrateMessage: String
+    @State private var showAlertForCountryBeforeAddingStation: Bool
     @State private var activeSheet: ActiveSheet?
-    @State private var selectedTab: Tab = .all
+    @State private var selectedTab: Tab
     @EnvironmentObject var alertManager: AlertManager
-    @EnvironmentObject var podcastViewModel: PodcastViewModel
+    @StateObject private var podcastViewModel: PodcastViewModel
     @StateObject private var podcastPlayer = PodcastPlayer.shared
-    @State private var selectedPodcast: PodcastFeed? = nil
-    @State private var showPodcastListView = false
-
-
+    @State private var selectedPodcast: PodcastFeed?
+    @State private var showPodcastListView: Bool
+    @State private var seekPosition: Double
+    @State private var showPodcastPlayerSheet = false
+    @State private var showAllEpisodes = false
+    
     init() {
-        if let savedTab = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
-           let tab = Tab(rawValue: savedTab) {
-            _selectedTab = State(initialValue: tab)
+        let savedTab: Tab
+        if let savedTabRawValue = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
+           let tab = Tab(rawValue: savedTabRawValue) {
+            savedTab = tab
         } else {
-            _selectedTab = State(initialValue: .all)
+            savedTab = .all
         }
+        
+        // Initialize @StateObject properties
+        self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
+        self._podcastViewModel = StateObject(wrappedValue: PodcastViewModel())
+        self._podcastPlayer = StateObject(wrappedValue: PodcastPlayer.shared)
+        
+        // Initialize @State properties
+        self._isAddStationViewPresented = State(initialValue: false)
+        self._isPlayerSheetPresented = State(initialValue: false)
+        self._showSideMenu = State(initialValue: false)
+        self._isEditingMode = State(initialValue: false)
+        self._isEditingStation = State(initialValue: false)
+        self._selectedStationForEdit = State(initialValue: nil)
+        self._bitrateMessage = State(initialValue: "Loading bitrate information...")
+        self._showAlertForCountryBeforeAddingStation = State(initialValue: false)
+        self._activeSheet = State(initialValue: nil)
+        self._selectedTab = State(initialValue: savedTab)
+        self._selectedPodcast = State(initialValue: nil)
+        self._showPodcastListView = State(initialValue: false)
+        self._seekPosition = State(initialValue: 0)
     }
     
     @Environment(\.horizontalSizeClass) var sizeClass
@@ -50,20 +73,20 @@ struct ContentView: View {
     }
     
     private var isIPhoneSE2: Bool {
-          UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1334
-      }
+        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1334
+    }
     
     private var isIPhone11: Bool {
-           UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1792
-       }
+        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1792
+    }
     
     private var isIPhone13: Bool {
-           UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2532
-       }
+        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2532
+    }
     
     private var isIPhone14Plus: Bool {
-           UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2778
-       }
+        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2778
+    }
     
     private var isIPhone15: Bool {
         UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2556
@@ -247,31 +270,30 @@ struct ContentView: View {
                         .first ?? 0)
                     
                     // Podcast MiniPlayerView
-                    ScrollViewReader { proxy in
-                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
-                            MiniPlayerView(
-                                podcastPlayer: podcastPlayer,
-                                viewModel: podcastViewModel,
-                                selectedPodcast: $selectedPodcast,
-                                onListButtonTap: {
-                                    selectedPodcast = podcastPlayer.currentFeed
+                    if podcastPlayer.currentEpisode != nil {
+                                        MiniPlayerView(
+                                            podcastPlayer: podcastPlayer,
+                                            viewModel: podcastViewModel,
+                                            selectedPodcast: $selectedPodcast,
+                                            onListButtonTap: {
+                                                if let currentFeed = podcastPlayer.currentFeed {
+                                                    selectedPodcast = currentFeed
+                                                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                                    showPodcastPlayerSheet = true
+                                                }
+                                            }
+                                        )
+                                        .transition(.move(edge: .bottom))
+                                        .zIndex(1)
+                                    }
                                 }
-                            )
-                            .transition(.move(edge: .bottom))
-                            .padding(.bottom, 10)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedPodcast = podcastPlayer.currentFeed
-                                showPodcastListView = true
-                            }
-                            .sheet(isPresented: $showPodcastListView) {
-                                if let podcast = selectedPodcast {
-                                    PodcastPlayerView(viewModel: podcastViewModel, feed: podcast, podcastPlayer: podcastPlayer)
+                                .sheet(isPresented: $showPodcastPlayerSheet) {
+                                    if let podcast = selectedPodcast {
+                                        PodcastPlayerView(viewModel: podcastViewModel, feed: podcast, podcastPlayer: podcastPlayer)
+                                    }
                                 }
-                            }
-                    }
-                        }
-                    }
+                
+                
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
                 // Side Menu
@@ -328,7 +350,7 @@ struct ContentView: View {
                 case .addStation:
                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
                         viewModel.selectedCountry = savedCountry
-                                    selectedTab = .all
+                        selectedTab = .all
                     }
                     .environmentObject(viewModel)
                 case .editStation:
@@ -359,9 +381,10 @@ struct ContentView: View {
             }
         }
         .onDisappear {
-                    podcastViewModel.saveContextIfNeeded()
-                }
+            podcastViewModel.saveContextIfNeeded()
+        }
         .navigationViewStyle(StackNavigationViewStyle())
+        
         .onAppear {
             UIApplication.shared.addTapGestureRecognizer()
         }
@@ -369,14 +392,14 @@ struct ContentView: View {
             selectedTab = .all
         }
         .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
-                    self.viewModel.objectWillChange.send()
-                }
+            self.viewModel.objectWillChange.send()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
             viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
         }
     }
     
-    private func saveSelectedTab(_ tab: Tab) {
+     func saveSelectedTab(_ tab: Tab) {
         UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
     }
 }

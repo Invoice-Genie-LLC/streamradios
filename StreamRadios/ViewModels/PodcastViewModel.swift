@@ -1064,41 +1064,59 @@ class PodcastViewModel: ObservableObject {
         return path
     }
     
+    func fetchAllEpisodes(for feed: PodcastFeed) {
+            isLoading = true
+            fetchRSSFeed(for: feed) { result in
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    switch result {
+                    case .success(let updatedFeed):
+                        self.updateFeed(updatedFeed)
+                        self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
+                    case .failure(let error):
+                        print("Failed to fetch episodes: \(error)")
+                        // Handle error appropriately
+                    }
+                }
+            }
+        }
+
+    
     private func sanitizeFileName(_ fileName: String) -> String {
         let invalidCharacters = CharacterSet(charactersIn: "\\/:*?\"<>|")
         return fileName.components(separatedBy: invalidCharacters).joined(separator: "_")
     }
     
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
-            currentTab = selectedTab
-            
-            refreshEpisodeStates() // Refresh states before filtering
-            
-            let allFeedEpisodes = allEpisodes.filter { $0.feedId == feedId }
-            
-            switch selectedTab {
-            case 0: // All
-                currentEpisodes = allFeedEpisodes
-            case 1: // Favorite
-                currentEpisodes = favoriteEpisodes.filter { $0.feedId == feedId }
-            case 2: // Downloads
-                currentEpisodes = downloadedEpisodes.filter { $0.feedId == feedId }
-                calculateAndUpdateFileSizeForDownloadedEpisodes() // Calculate file sizes for downloaded episodes
-            default:
-                currentEpisodes = allFeedEpisodes
-            }
-            
-            currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
-            
-            // Debug print
-            if selectedTab == 2 {
-                for episode in currentEpisodes {
-                    print("Episode: \(episode.title), File Size: \(episode.fileSize ?? 0) bytes")
-                }
-            }
-            
-            objectWillChange.send() // Ensure UI update
+        currentTab = selectedTab
+        
+      //  refreshEpisodeStates() // Refresh states before filtering
+        
+        let allFeedEpisodes = allEpisodes.filter { $0.feedId == feedId }
+        
+        switch selectedTab {
+        case 0: // All
+            currentEpisodes = allFeedEpisodes
+        case 1: // Favorite
+            currentEpisodes = favoriteEpisodes.filter { $0.feedId == feedId }
+        case 2: // Downloads
+            currentEpisodes = downloadedEpisodes.filter { $0.feedId == feedId }
+            calculateAndUpdateFileSizeForDownloadedEpisodes() // Calculate file sizes for downloaded episodes
+        default:
+            currentEpisodes = allFeedEpisodes
         }
+        
+        currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
+        
+        // Debug print
+        if selectedTab == 2 {
+            for episode in currentEpisodes {
+                print("Episode: \(episode.title), File Size: \(episode.fileSize ?? 0) bytes")
+            }
+        }
+        
+        objectWillChange.send() // Ensure UI update
+    }
     
     func loadAllEpisodesProgress() {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
