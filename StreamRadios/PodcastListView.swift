@@ -675,6 +675,14 @@ struct PodcastPlayerView: View {
     @State private var seekPosition: Double = 0
     @State private var isSeekingManually = false
     @State private var debounceTimer: Timer?
+    @State private var scrollToEpisodeID: String?
+    
+    init(viewModel: PodcastViewModel, feed: PodcastFeed, podcastPlayer: PodcastPlayer, initialScrollToEpisodeID: String? = nil) {
+            self.viewModel = viewModel
+            self.feed = feed
+            self.podcastPlayer = podcastPlayer
+            self._scrollToEpisodeID = State(initialValue: initialScrollToEpisodeID)
+        }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -739,15 +747,14 @@ struct PodcastPlayerView: View {
                 }
             }
             .onAppear {
-                viewModel.fetchAllEpisodes(for: feed)
-                viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
-                seekPosition = podcastPlayer.currentTime
-            }
-            .onReceive(podcastPlayer.$currentTime) { newTime in
-                if !isSeekingManually {
-                    seekPosition = newTime
-                }
-            }
+                            viewModel.fetchAllEpisodes(for: feed)
+                            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+                            seekPosition = podcastPlayer.currentTime
+                            scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                        }
+                        .onReceive(podcastPlayer.$currentEpisode) { newEpisode in
+                            scrollToEpisodeID = newEpisode?.id
+                        }
             .navigationBarHidden(true)
         }
     }
@@ -820,21 +827,21 @@ struct PodcastPlayerView: View {
     }
     
     private var episodeList: some View {
-        List {
-            ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
-                EpisodeRowView(
-                    episode: episode,
-                    isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                    onPlay: { playEpisode(episode, feed: feed) },
-                    onStop: { podcastPlayer.togglePlayPause() },
-                    viewModel: viewModel,
-                    podcastPlayer: podcastPlayer
-                )
-                .id(episode.compositeID) // Ensure each row has a unique ID
+            List {
+                ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
+                    EpisodeRowView(
+                        episode: episode,
+                        isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                        onPlay: { playEpisode(episode, feed: feed) },
+                        onStop: { podcastPlayer.togglePlayPause() },
+                        viewModel: viewModel,
+                        podcastPlayer: podcastPlayer
+                    )
+                    .id(episode.compositeID)
+                }
             }
+            .listStyle(PlainListStyle())
         }
-        .listStyle(PlainListStyle())
-    }
     
     private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         if podcastPlayer.currentEpisode?.id == episode.id {
@@ -851,12 +858,13 @@ struct PodcastPlayerView: View {
     }
     
     private func scrollToCurrentEpisode(proxy: ScrollViewProxy) {
-        if let currentEpisode = podcastPlayer.currentEpisode {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // slight delay to ensure the view has appeared
-                proxy.scrollTo(currentEpisode.compositeID, anchor: .center)
+            if let id = scrollToEpisodeID,
+               let episode = viewModel.currentEpisodes.first(where: { $0.id == id }) {
+                withAnimation {
+                    proxy.scrollTo(episode.compositeID, anchor: .center)
+                }
             }
         }
-    }
 }
 
 struct PodcastList: View {

@@ -34,6 +34,8 @@ struct ContentView: View {
     @State private var seekPosition: Double
     @State private var showPodcastPlayerSheet = false
     @State private var showAllEpisodes = false
+    @State private var scrollToEpisodeID: String?
+
     
     init() {
         let savedTab: Tab
@@ -279,6 +281,7 @@ struct ContentView: View {
                                                 if let currentFeed = podcastPlayer.currentFeed {
                                                     selectedPodcast = currentFeed
                                                     podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                                    scrollToEpisodeID = podcastPlayer.currentEpisode?.id
                                                     showPodcastPlayerSheet = true
                                                 }
                                             }
@@ -289,7 +292,12 @@ struct ContentView: View {
                                 }
                                 .sheet(isPresented: $showPodcastPlayerSheet) {
                                     if let podcast = selectedPodcast {
-                                        PodcastPlayerView(viewModel: podcastViewModel, feed: podcast, podcastPlayer: podcastPlayer)
+                                        PodcastPlayerView(
+                                            viewModel: podcastViewModel,
+                                            feed: podcast,
+                                            podcastPlayer: podcastPlayer,
+                                            initialScrollToEpisodeID: scrollToEpisodeID
+                                        )
                                     }
                                 }
                 
