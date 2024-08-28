@@ -8,6 +8,7 @@
 import SwiftUI
 import Combine
 import os
+import AVKit
 
 struct PodcastListView: View {
     @StateObject private var viewModel = PodcastViewModel()
@@ -612,18 +613,12 @@ struct PodcastPlayerView: View {
                         .foregroundColor(.primary)
                 }
                 Spacer()
-                Text(feed.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                Button(action: {}) {
-                    Image(systemName: "ellipsis")
-                        .foregroundColor(.primary)
-                }
-            }
-            .padding(.horizontal)
-            .frame(height: 44)
-            .background(Color(UIColor.systemBackground))
+                AirPlayButton()
+                                   .frame(width: 30, height: 30)
+                           }
+                           .padding(.horizontal)
+                           .frame(height: 44)
+                           .background(Color(UIColor.systemBackground))
 
             // Pinned player area
             VStack(spacing: 12) {
@@ -673,7 +668,7 @@ struct PodcastPlayerView: View {
                 .padding(.horizontal)
 
                 // Playback controls
-                HStack(spacing: 40) {
+                HStack(spacing: 20) {
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
                             .font(.system(size: 20))
@@ -693,7 +688,7 @@ struct PodcastPlayerView: View {
                 .foregroundColor(.primary)
                 .padding(.bottom, 8)
             }
-            .padding(.vertical, 12)
+            .padding(.vertical, 6)
             .background(Color(UIColor.secondarySystemBackground))
 
             // Episode filter tabs
@@ -806,6 +801,26 @@ struct ProgressSlider: View {
             }
         }
     }
+}
+
+struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let routePickerView = AVRoutePickerView()
+        routePickerView.activeTintColor = .blue
+        routePickerView.tintColor = .gray
+        
+        // Customize the button appearance
+        if let button = routePickerView.subviews.first(where: { $0 is UIButton }) as? UIButton {
+            button.setImage(UIImage(systemName: "airplayaudio"), for: .normal)
+            button.contentVerticalAlignment = .fill
+            button.contentHorizontalAlignment = .fill
+            button.imageEdgeInsets = UIEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
+        }
+        
+        return routePickerView
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
 struct PodcastList: View {

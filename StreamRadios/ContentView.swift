@@ -272,7 +272,7 @@ struct ContentView: View {
                         .first ?? 0)
                     
                     // Podcast MiniPlayerView
-                    if podcastPlayer.currentEpisode != nil {
+                    if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
                                         MiniPlayerView(
                                             podcastPlayer: podcastPlayer,
                                             viewModel: podcastViewModel,
