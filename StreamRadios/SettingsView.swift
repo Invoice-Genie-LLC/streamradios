@@ -5,13 +5,6 @@
 
 import SwiftUI
 
-// SettingsView.swift
-// StreamRadios
-//
-// Created by Kley Sulo on 6/9/24.
-
-import SwiftUI
-
 struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
@@ -32,13 +25,18 @@ struct SettingsView: View {
     @EnvironmentObject var alertManager: AlertManager
     var onImportComplete: ((String) -> Void)?
     @StateObject private var podcastViewModel = PodcastViewModel()
-    @State private var isCleaningPodcasts = false
-    @State private var podcastCleanupComplete = false
+        @State private var isCleaningPodcasts = false
+        @State private var podcastCleanupComplete = false
     @StateObject private var podcastPlayer = PodcastPlayer.shared
-    @State private var selectedPodcast: PodcastFeed? = nil
+    @State private var selectedPodcast: PodcastFeed?
+    @State private var scrollToEpisodeID: String?
+    @State private var showPodcastPlayerSheet = false
+    @State private var miniPlayerHeight: CGFloat = 0
+    @State private var safeAreaBottom: CGFloat = 0
 
+    
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     playbackSettingsSection
@@ -47,7 +45,7 @@ struct SettingsView: View {
                     dataManagementSection
                     podcastDataManagementSection
                 }
-                .padding(.bottom, 100)
+                .padding()
             }
             .navigationTitle("Settings")
             .navigationBarBackButtonHidden(true)
@@ -77,22 +75,38 @@ struct SettingsView: View {
                 guard let url = url else { return }
                 handleImport(url: url)
             }
-
-            // Mini player at the bottom, non-scrollable
-            if podcastPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
-                MiniPlayerView(
-                    podcastPlayer: podcastPlayer,
-                    viewModel: podcastViewModel,
-                    selectedPodcast: $selectedPodcast
-                )
-                .transition(.move(edge: .bottom))
-                .padding(.bottom, 10)
-                .contentShape(Rectangle()) // Make the whole view tappable
-                .onTapGesture {
-                    // Handle the tap to show the podcast player or list
+            .sheet(isPresented: $showPodcastPlayerSheet) {
+                if let podcast = selectedPodcast {
+                    PodcastPlayerView(
+                        viewModel: podcastViewModel,
+                        feed: podcast,
+                        podcastPlayer: podcastPlayer
+                        // initialScrollToEpisodeID: scrollToEpisodeID
+                    )
                 }
             }
-
+            VStack {
+                Spacer()
+                if podcastPlayer.currentEpisode != nil {
+                    MiniPlayerView(
+                        podcastPlayer: podcastPlayer,
+                        viewModel: podcastViewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            if let currentFeed = podcastPlayer.currentFeed {
+                                selectedPodcast = currentFeed
+                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                showPodcastPlayerSheet = true
+                            }
+                        }
+                    )
+                    .transition(.move(edge: .bottom))
+                }
+            }
+            .zIndex(1)
+        
+            
             if alertManager.showCustomAlert {
                 Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
                 CustomAlertView(
@@ -109,73 +123,71 @@ struct SettingsView: View {
                         alertManager.customAlertSecondaryAction?()
                     }
                 )
-                .frame(maxWidth: 300)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.4), radius: 20, x: 0, y: 10)
-                .padding()
-                .zIndex(2)
                 .transition(.opacity)
-                .centered()
             }
+        
+                
         }
     }
-
+    
+    
     private var podcastDataManagementSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Podcast Data Management")
-                .font(.headline)
-                .padding(.top)
-
-            VStack(alignment: .leading, spacing: 15) {
-                Button("Clear All Podcast Episodes") {
-                    showAlert(for: .clearAllPodcasts)
-                }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-
-                if isCleaningPodcasts {
-                    ProgressView("Clearing podcast data...")
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Podcast Data Management")
+                        .font(.headline)
+                        .padding(.top)
+                    
+                    VStack(alignment: .leading, spacing: 15) {
+                        Button("Clear All Podcast Episodes") {
+                            showAlert(for: .clearAllPodcasts)
+                        }
                         .padding()
-                } else if podcastCleanupComplete {
-                    Text("All podcast episodes have been cleared.")
-                        .foregroundColor(.green)
-                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.systemBackground))
+                        .cornerRadius(12)
+                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        
+                        if isCleaningPodcasts {
+                            ProgressView("Clearing podcast data...")
+                                .padding()
+                        } else if podcastCleanupComplete {
+                            Text("All podcast episodes have been cleared.")
+                                .foregroundColor(.green)
+                                .padding()
+                        }
+                        
+                        podcastCleanupWarningText
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                    )
                 }
-
-                podcastCleanupWarningText
+                .padding(.bottom, 100)
+                .animation(.default, value: isCleaningPodcasts)
+                .animation(.default, value: podcastCleanupComplete)
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-            )
-        }
-        .animation(.default, value: isCleaningPodcasts)
-        .animation(.default, value: podcastCleanupComplete)
-    }
-
+    
     private var podcastCleanupWarningText: some View {
-        Text("Warning: ")
-            .fontWeight(.bold)
-            .foregroundColor(.red)
-            .font(.footnote) +
-        Text("Clearing all podcast episodes will permanently erase all downloaded episodes and their associated information from your device's local storage. This includes playback progress and favorites. This action cannot be undone.")
-            .font(.footnote)
-            .foregroundColor(.gray)
-    }
-
+            Text("Warning: ")
+                .fontWeight(.bold)
+                .foregroundColor(.red)
+                .font(.footnote) +
+            Text("Clearing all podcast episodes will permanently erase all downloaded episodes and their associated information from your device's local storage. This includes playback progress and favorites. This action cannot be undone.")
+                .font(.footnote)
+                .foregroundColor(.gray)
+        }
+    
+    
     private var playbackSettingsSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Playback Settings")
                 .font(.headline)
                 .padding(.top)
-
+            
             VStack(alignment: .leading, spacing: 15) {
                 Toggle("Auto-Play Last Station", isOn: $autoPlayLastStation)
                     .padding()
@@ -192,13 +204,13 @@ struct SettingsView: View {
             )
         }
     }
-
+    
     private var displaySettingsSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Display Settings")
                 .font(.headline)
                 .padding(.top)
-
+            
             VStack(alignment: .leading, spacing: 15) {
                 Toggle("Dark Mode", isOn: $isDarkMode)
                     .padding()
@@ -215,13 +227,13 @@ struct SettingsView: View {
             )
         }
     }
-
+    
     private var streamFileUploadSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Station Playlist Export/Import")
                 .font(.headline)
                 .padding(.top)
-
+            
             VStack(alignment: .leading, spacing: 20) {
                 countrySelectionView
                 fileExportView
@@ -236,7 +248,7 @@ struct SettingsView: View {
             )
         }
     }
-
+    
     private var countrySelectionView: some View {
         VStack(alignment: .leading) {
             Text("Select Country")
@@ -244,16 +256,17 @@ struct SettingsView: View {
                 .foregroundColor(.primary)
             StyledPickerView(selectedCountry: $viewModel.selectedCountry, countries: viewModel.countries)
                 .onChange(of: viewModel.selectedCountry) { newValue in
-                    // This will trigger the didSet in the ViewModel, which will post the notification
-                    viewModel.selectedCountry = newValue
-                }
+                                // This will trigger the didSet in the ViewModel, which will post the notification
+                                viewModel.selectedCountry = newValue
+                            }
                 .padding()
                 .background(Color(.systemBackground))
                 .cornerRadius(12)
                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                
         }
     }
-
+    
     private var fileExportView: some View {
         VStack(alignment: .leading) {
             Text("Playlist Export")
@@ -276,7 +289,7 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private var fileImportView: some View {
         VStack(alignment: .leading) {
             Text("Playlist Import")
@@ -312,13 +325,13 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private var dataManagementSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Data Management")
                 .font(.headline)
                 .padding(.top)
-
+            
             VStack(alignment: .leading, spacing: 15) {
                 Button("Delete All Data") {
                     showAlert(for: .deleteAllData)
@@ -328,7 +341,7 @@ struct SettingsView: View {
                 .background(Color(.systemBackground))
                 .cornerRadius(12)
                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-
+                
                 if viewModel.isDeletingData {
                     ProgressView("Deleting data...")
                         .padding()
@@ -337,7 +350,7 @@ struct SettingsView: View {
                         .foregroundColor(.green)
                         .padding()
                 }
-
+                
                 deletionWarningText
             }
             .padding()
@@ -351,7 +364,7 @@ struct SettingsView: View {
         .animation(.default, value: viewModel.isDeletingData)
         .animation(.default, value: viewModel.deletionComplete)
     }
-
+    
     private var deletionWarningText: some View {
         Text("Warning: ")
             .fontWeight(.bold)
@@ -367,7 +380,7 @@ struct SettingsView: View {
             .font(.footnote)
             .foregroundColor(.gray)
     }
-
+    
     private var backButton: some View {
         Button(action: {
             presentationMode.wrappedValue.dismiss()
@@ -379,55 +392,55 @@ struct SettingsView: View {
             .foregroundColor(.primary)
         }
     }
-
+    
     private func updateDarkMode(to newValue: Bool) {
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
             windowScene.windows.first?.overrideUserInterfaceStyle = newValue ? .dark : .light
         }
         UserDefaults.standard.set(true, forKey: "isDarkModeSet")
     }
-
+    
     private func showAlert(for alertType: AlertType) {
-        alertManager.showCustomAlert(for: alertType, deleteAction: {
-            switch alertType {
-            case .deleteAllData:
-                initiateDataDeletion()
-            case .clearAllPodcasts:
-                initiatePodcastCleanup()
-            default:
-                break
-            }
-        })
-    }
-
+            alertManager.showCustomAlert(for: alertType, deleteAction: {
+                switch alertType {
+                case .deleteAllData:
+                    initiateDataDeletion()
+                case .clearAllPodcasts:
+                    initiatePodcastCleanup()
+                default:
+                    break
+                }
+            })
+        }
+    
     private func initiatePodcastCleanup() {
-        isCleaningPodcasts = true
-        podcastCleanupComplete = false
+                isCleaningPodcasts = true
+                podcastCleanupComplete = false
 
-        podcastViewModel.clearAllPodcastData { success in
-            DispatchQueue.main.async {
-                self.isCleaningPodcasts = false
-                if success {
-                    self.podcastCleanupComplete = true
-                    self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data, including downloads, episode progress and bookmarks, has been cleared.")
-                } else {
-                    self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
+                podcastViewModel.clearAllPodcastData { success in
+                    DispatchQueue.main.async {
+                        self.isCleaningPodcasts = false
+                        if success {
+                            self.podcastCleanupComplete = true
+                            self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data, including downloads, episode progress and bookmarks, has been cleared.")
+                        } else {
+                            self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
+                        }
+                    }
                 }
             }
-        }
-    }
-
+    
     private func initiateDataDeletion() {
         if viewModel.isCloudKitOperationRunning {
             notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
         } else {
             notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from iCloud and local storage has started.")
-
+            
             DispatchQueue.main.async {
                 viewModel.isDeletingData = true
                 viewModel.deletionComplete = false
             }
-
+            
             viewModel.deleteAllData { success, error in
                 DispatchQueue.main.async {
                     viewModel.isDeletingData = false
@@ -443,7 +456,7 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private func exportAction() {
         if viewModel.selectedCountry == "Select Country" {
             showAlert(for: .exportWithoutCountry)
@@ -455,7 +468,7 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     private func importAction() {
         if viewModel.selectedCountry == "Select Country" {
             showAlert(for: .importWithoutCountry)
@@ -463,32 +476,23 @@ struct SettingsView: View {
             showDocumentPicker = true
         }
     }
-
+    
     private func handleImport(url: URL) {
-        isImporting = true
-        importProgress = 0.0
-
-        viewModel.importStationsFromFile(url: url) { progress in
-            DispatchQueue.main.async {
-                importProgress = progress
-            }
-        } completion: {
-            DispatchQueue.main.async {
-                isImporting = false
-                importURL = nil
-                onImportComplete?(viewModel.selectedCountry)
+            isImporting = true
+            importProgress = 0.0
+            
+            viewModel.importStationsFromFile(url: url) { progress in
+                DispatchQueue.main.async {
+                    importProgress = progress
+                }
+            } completion: {
+                DispatchQueue.main.async {
+                    isImporting = false
+                    importURL = nil
+                    onImportComplete?(viewModel.selectedCountry)
+                }
             }
         }
-    }
-}
-
-extension View {
-    func centered() -> some View {
-        GeometryReader { geometry in
-            self
-                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
-        }
-    }
 }
 
 struct SettingsView_Previews: PreviewProvider {
