@@ -125,3 +125,42 @@ struct MiniPlayerView: View {
         }
     }
 }
+
+
+struct FeedImageView: View {
+    let feed: PodcastFeed
+
+    var body: some View {
+        Group {
+            if let imageData = feed.imageData, let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
+                AsyncImage(url: url) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ProgressView()
+                }
+            } else {
+                Image(systemName: "music.note")
+                    .font(.system(size: 24))
+                    .foregroundColor(.secondary)
+                    .frame(width: 48, height: 48)
+                    .background(Color.gray.opacity(0.3))
+            }
+        }
+    }
+}
+
+struct BlurView: UIViewRepresentable {
+    let style: UIBlurEffect.Style
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        return UIVisualEffectView(effect: UIBlurEffect(style: style))
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        uiView.effect = UIBlurEffect(style: style)
+    }
+}

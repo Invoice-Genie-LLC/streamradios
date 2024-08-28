@@ -118,52 +118,22 @@ class PodcastViewModel: ObservableObject {
         loadAllEpisodesProgress()
     }
     
-    func calculateAndUpdateFileSizeForDownloadedEpisodes() {
-            for index in downloadedEpisodes.indices {
-                if let localFilePath = downloadedEpisodes[index].localFilePath {
-                    let fileSize = getFileSize(at: localFilePath)
-                    downloadedEpisodes[index].fileSize = fileSize
-                    
-                    // Update the episode in allEpisodes and currentEpisodes
-                    if let allIndex = allEpisodes.firstIndex(where: { $0.id == downloadedEpisodes[index].id }) {
-                        allEpisodes[allIndex].fileSize = fileSize
-                    }
-                    if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == downloadedEpisodes[index].id }) {
-                        currentEpisodes[currentIndex].fileSize = fileSize
-                    }
-                    
-                    // Update in Core Data
-                    updateEpisodeFileSize(downloadedEpisodes[index], fileSize: fileSize)
-                }
-            }
-            objectWillChange.send()
-        }
-    
-    private func getFileSize(at path: String) -> Int64 {
-            do {
-                let attributes = try FileManager.default.attributesOfItem(atPath: path)
-                return attributes[.size] as? Int64 ?? 0
-            } catch {
-                print("Error getting file size: \(error)")
-                return 0
-            }
-        }
-        
-        private func updateEpisodeFileSize(_ episode: PodcastEpisode, fileSize: Int64) {
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-            
-            do {
-                let results = try context.fetch(fetchRequest)
-                if let managedEpisode = results.first {
-                    managedEpisode.fileSize = Int64(fileSize)
-                    try context.save()
-                    print("Updated file size for episode \(episode.title): \(fileSize) bytes")
-                }
-            } catch {
-                print("Failed to update episode file size in Core Data: \(error)")
-            }
-        }
+    func fetchAllEpisodes(for feed: PodcastFeed) {
+              isLoading = true
+              fetchRSSFeed(for: feed) { result in
+                  DispatchQueue.main.async {
+                      self.isLoading = false
+                      switch result {
+                      case .success(let updatedFeed):
+                          self.updateFeed(updatedFeed)
+                          self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
+                      case .failure(let error):
+                          print("Failed to fetch episodes: \(error)")
+                          // Handle error appropriately
+                      }
+                  }
+              }
+          }
     
     func sortFeedsAlphabetically() {
             let sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() < $1.title.lowercased() }
@@ -626,39 +596,38 @@ class PodcastViewModel: ObservableObject {
     
     
     private func updateEpisodes(for feed: PodcastFeed) {
-        var updatedEpisodes = [PodcastEpisode]()
-        var seenIds = Set<String>()
-        
-        for var episode in feed.episodes {
-            if seenIds.contains(episode.id) {
-                // If we've seen this ID before, generate a new unique ID
-                episode.id = UUID().uuidString
-            }
-            seenIds.insert(episode.id)
+            var updatedEpisodes = [PodcastEpisode]()
+            var seenIds = Set<String>()
             
-            if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                // Preserve download-related information
-                var existingEpisode = allEpisodes[existingIndex]
-                if existingEpisode.state.isDownloaded {
-                    episode.state.isDownloaded = true
-                    episode.localFilePath = existingEpisode.localFilePath
+            for var episode in feed.episodes {
+                if seenIds.contains(episode.id) {
+                    episode.id = UUID().uuidString
                 }
+                seenIds.insert(episode.id)
                 
-                // Update existing episode
-                existingEpisode = episode
-                allEpisodes[existingIndex] = existingEpisode
-                updatedEpisodes.append(existingEpisode)
-            } else {
-                // Add new episode
-                allEpisodes.append(episode)
-                updatedEpisodes.append(episode)
+                // Validate and correct duration
+                episode.duration = max(episode.duration, 0)
+                
+                if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    var existingEpisode = allEpisodes[existingIndex]
+                    if existingEpisode.state.isDownloaded {
+                        episode.state.isDownloaded = true
+                        episode.localFilePath = existingEpisode.localFilePath
+                    }
+                    
+                    existingEpisode = episode
+                    allEpisodes[existingIndex] = existingEpisode
+                    updatedEpisodes.append(existingEpisode)
+                } else {
+                    allEpisodes.append(episode)
+                    updatedEpisodes.append(episode)
+                }
             }
+            
+            currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
+            
+            objectWillChange.send()
         }
-        
-        currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
-        
-        objectWillChange.send()
-    }
     
     
     private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
@@ -1064,24 +1033,6 @@ class PodcastViewModel: ObservableObject {
         return path
     }
     
-    func fetchAllEpisodes(for feed: PodcastFeed) {
-            isLoading = true
-            fetchRSSFeed(for: feed) { result in
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    switch result {
-                    case .success(let updatedFeed):
-                        self.updateFeed(updatedFeed)
-                        self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
-                    case .failure(let error):
-                        print("Failed to fetch episodes: \(error)")
-                        // Handle error appropriately
-                    }
-                }
-            }
-        }
-
-    
     private func sanitizeFileName(_ fileName: String) -> String {
         let invalidCharacters = CharacterSet(charactersIn: "\\/:*?\"<>|")
         return fileName.components(separatedBy: invalidCharacters).joined(separator: "_")
@@ -1090,7 +1041,7 @@ class PodcastViewModel: ObservableObject {
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
         currentTab = selectedTab
         
-      //  refreshEpisodeStates() // Refresh states before filtering
+        refreshEpisodeStates() // Refresh states before filtering
         
         let allFeedEpisodes = allEpisodes.filter { $0.feedId == feedId }
         
@@ -1101,20 +1052,11 @@ class PodcastViewModel: ObservableObject {
             currentEpisodes = favoriteEpisodes.filter { $0.feedId == feedId }
         case 2: // Downloads
             currentEpisodes = downloadedEpisodes.filter { $0.feedId == feedId }
-            calculateAndUpdateFileSizeForDownloadedEpisodes() // Calculate file sizes for downloaded episodes
         default:
             currentEpisodes = allFeedEpisodes
         }
         
         currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
-        
-        // Debug print
-        if selectedTab == 2 {
-            for episode in currentEpisodes {
-                print("Episode: \(episode.title), File Size: \(episode.fileSize ?? 0) bytes")
-            }
-        }
-        
         objectWillChange.send() // Ensure UI update
     }
     
@@ -1143,6 +1085,8 @@ class PodcastViewModel: ObservableObject {
         
         objectWillChange.send()
     }
+    
+    
 }
 
 class RSSParser: NSObject, XMLParserDelegate {
@@ -1204,33 +1148,64 @@ class RSSParser: NSObject, XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "item" {
-            if let title = currentTitle,
-               let descriptionText = currentDescription,
-               let pubDateString = currentPubDate,
-               let enclosure = currentEnclosure {
+            if elementName == "item" {
+                if let title = currentTitle,
+                   let descriptionText = currentDescription,
+                   let pubDateString = currentPubDate,
+                   let enclosure = currentEnclosure {
+                    
+                    let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
+                    let duration = parseDuration(currentDuration ?? "0")
+                    let id = currentGuid ?? UUID().uuidString
+                    
+                    let episode = PodcastEpisode(
+                        id: id,
+                        title: title,
+                        descriptionText: descriptionText,
+                        audioUrl: enclosure,
+                        publicationDate: pubDate,
+                        duration: duration,
+                        state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
+                        feedId: feedId,
+                        fileSize: currentFileSize
+                    )
+                    
+                    episodes.append(episode)
+                }
                 
-                let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
-                let duration = TimeInterval(currentDuration ?? "0") ?? 0
-                let id = currentGuid ?? UUID().uuidString
-                
-                let episode = PodcastEpisode(
-                    id: id,
-                    title: title,
-                    descriptionText: descriptionText,
-                    audioUrl: enclosure,
-                    publicationDate: pubDate,
-                    duration: duration,
-                    state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
-                    feedId: feedId,
-                    fileSize: currentFileSize // Ensure file size is set here
-                )
-                
-                episodes.append(episode)
+                isParsingItem = false
             }
-            
-            isParsingItem = false
         }
+    
+    private func parseDuration(_ durationString: String) -> TimeInterval {
+        let components = durationString.components(separatedBy: ":")
+        var duration: TimeInterval = 0
+
+        switch components.count {
+        case 3:
+            // Format: HH:MM:SS
+            let hours = Double(components[0]) ?? 0
+            let minutes = Double(components[1]) ?? 0
+            let seconds = Double(components[2]) ?? 0
+            duration = hours * 3600 + minutes * 60 + seconds
+
+        case 2:
+            // Format: MM:SS
+            let minutes = Double(components[0]) ?? 0
+            let seconds = Double(components[1]) ?? 0
+            duration = minutes * 60 + seconds
+
+        case 1:
+            // Format: Seconds
+            duration = Double(components[0]) ?? 0
+
+        default:
+            // Invalid format, return 0
+            duration = 0
+        }
+
+        // Ensure non-negative duration
+        return max(duration, 0)
     }
     
     func parser(_ parser: XMLParser, foundCharacters string: String) {
