@@ -605,7 +605,6 @@ struct PodcastPlayerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            
             // Custom navigation bar
             HStack {
                 Button(action: { presentationMode.wrappedValue.dismiss() }) {
@@ -628,52 +627,40 @@ struct PodcastPlayerView: View {
 
             // Pinned player area
             VStack(spacing: 12) {
-                HStack(spacing: 16) {
-                    FeedImageView(feed: feed)
-                        .frame(width: 60, height: 60)
-                        .cornerRadius(8)
-                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                // Centered, smaller feed image
+                FeedImageView(feed: feed)
+                    .frame(width: 120, height: 120)
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .lineLimit(2)
+                VStack(alignment: .center, spacing: 4) {
+                    Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
 
-                        if let currentEpisode = podcastPlayer.currentEpisode {
-                            Text(formatDate(currentEpisode.publicationDate))
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
+                    if let currentEpisode = podcastPlayer.currentEpisode {
+                        Text(formatDate(currentEpisode.publicationDate))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    Spacer()
                 }
                 .padding(.horizontal)
 
                 // Progress slider
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 4)
-                        
-                        Rectangle()
-                            .fill(Color.blue)
-                            .frame(width: geometry.size.width * CGFloat(seekPosition / max(podcastPlayer.duration, 1)), height: 4)
+                ProgressSlider(
+                    value: $seekPosition,
+                    inRange: 0...max(podcastPlayer.duration, 1),
+                    onEditingChanged: { editing in
+                        isSeekingManually = editing
+                        if !editing {
+                            podcastPlayer.seek(to: seekPosition)
+                        }
                     }
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                isSeekingManually = true
-                                seekPosition = min(max(0, Double(value.location.x / geometry.size.width) * podcastPlayer.duration), podcastPlayer.duration)
-                            }
-                            .onEnded { _ in
-                                isSeekingManually = false
-                                podcastPlayer.seek(to: seekPosition)
-                            }
-                    )
-                }
+                )
                 .frame(height: 4)
+                .padding(.horizontal)
 
                 // Time labels
                 HStack {
@@ -689,18 +676,18 @@ struct PodcastPlayerView: View {
                 HStack(spacing: 40) {
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
-                            .font(.system(size: 24))
+                            .font(.system(size: 20))
                     }
 
                     Button(action: podcastPlayer.togglePlayPause) {
                         Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 54))
+                            .font(.system(size: 48))
                             .foregroundColor(.blue)
                     }
 
                     Button(action: podcastPlayer.skipForward) {
                         Image(systemName: "goforward.30")
-                            .font(.system(size: 24))
+                            .font(.system(size: 20))
                     }
                 }
                 .foregroundColor(.primary)
@@ -781,6 +768,43 @@ struct PodcastPlayerView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
         return formatter.string(from: date)
+    }
+}
+
+struct ProgressSlider: View {
+    @Binding var value: Double
+    let inRange: ClosedRange<Double>
+    let onEditingChanged: (Bool) -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 4)
+
+                Rectangle()
+                    .fill(Color.blue)
+                    .frame(width: geometry.size.width * CGFloat((value - inRange.lowerBound) / (inRange.upperBound - inRange.lowerBound)), height: 4)
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 12, height: 12)
+                    .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                    .offset(x: geometry.size.width * CGFloat((value - inRange.lowerBound) / (inRange.upperBound - inRange.lowerBound)) - 6)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { gesture in
+                                let newValue = Double(gesture.location.x / geometry.size.width) * (inRange.upperBound - inRange.lowerBound) + inRange.lowerBound
+                                value = min(max(newValue, inRange.lowerBound), inRange.upperBound)
+                                onEditingChanged(true)
+                            }
+                            .onEnded { _ in
+                                onEditingChanged(false)
+                            }
+                    )
+            }
+        }
     }
 }
 
