@@ -87,7 +87,7 @@ struct SettingsView: View {
             }
             VStack {
                 Spacer()
-                if podcastPlayer.currentEpisode != nil {
+                if podcastPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
                     MiniPlayerView(
                         podcastPlayer: podcastPlayer,
                         viewModel: podcastViewModel,
