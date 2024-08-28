@@ -368,6 +368,7 @@ struct EpisodeRowView: View {
                 }
                 .frame(width: buttonSize, height: buttonSize)
 
+                // Episode info
                 VStack(alignment: .leading, spacing: 2) {
                     // Episode title (2 lines)
                     Text(episode.title)
@@ -377,74 +378,61 @@ struct EpisodeRowView: View {
                         .foregroundColor(.primary)
 
                     // Episode info and status
-                    // Episode info and status
-                    // Episode info and status
-                       HStack(spacing: 2) {
-                           episodeStatusIndicator
-                               .fixedSize()
+                    HStack(spacing: 2) {
+                        episodeStatusIndicator
+                            .fixedSize()
+                        Text("•")
+                            .fixedSize()
+                        Text(formatDate(episode.publicationDate))
+                            .lineLimit(1)
+                        Text("•")
+                            .fixedSize()
+                        Text(formatRemainingTime())
+                            .lineLimit(1)
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                           Text("•")
-                               .fixedSize()
-
-                           Text(formatDate(episode.publicationDate))
-                               .lineLimit(1)
-                               .fixedSize(horizontal: false, vertical: false)
-                              // .minimumScaleFactor(0.5)
-
-                           // Spacer(minLength: 2)
-
-                           Text("•")
-                               .fixedSize()
-
-                           Text(formatRemainingTime())
-                               .lineLimit(1)
-                               .fixedSize(horizontal: true, vertical: false)
-                       }
-                       .font(.caption2)
-                       .foregroundColor(.secondary)
-                   }
-                
-                
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
+                // Right column: File size, Bookmark button, Download button
+                VStack(alignment: .trailing, spacing: 4) {
                     // File size
                     if let fileSize = episode.fileSize, fileSize > 0 {
                         Text(formatFileSize(fileSize))
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
-                }
 
-                // Bookmark button
-                Button(action: {
-                    if isPlaying {
-                        showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
-                    } else {
-                        viewModel.toggleFavorite(for: episode)
-                    }
-                }) {
-                    Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                        .foregroundColor(episode.state.isFavorite ? .blue : .gray)
-                        .frame(width: buttonSize, height: buttonSize)
-                }
-
-                // Download button or trash can
-                Group {
-                    if viewModel.currentTab == 2 && episode.state.isDownloaded {
-                        Button(action: {
-                            showingDeleteConfirmation = true
-                        }) {
-                            Image(systemName: "trash")
-                                .foregroundColor(.red)
-                                .frame(width: buttonSize, height: buttonSize)
+                    // Bookmark button
+                    Button(action: {
+                        if isPlaying {
+                            showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
+                        } else {
+                            viewModel.toggleFavorite(for: episode)
                         }
-                    } else {
-                        downloadButton
+                    }) {
+                        Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
+                            .foregroundColor(episode.state.isFavorite ? .blue : .gray)
+                            .frame(width: buttonSize, height: buttonSize)
                     }
+
+                    // Download button or trash can
+                    Group {
+                        if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                            Button(action: {
+                                showingDeleteConfirmation = true
+                            }) {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.red)
+                                    .frame(width: buttonSize, height: buttonSize)
+                            }
+                        } else {
+                            downloadButton
+                        }
+                    }
+                    .frame(width: buttonSize, height: buttonSize)
                 }
-                .frame(width: buttonSize, height: buttonSize)
             }
             .frame(height: rowHeight)
             .padding(.horizontal, 10)
