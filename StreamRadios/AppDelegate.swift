@@ -57,10 +57,43 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func applicationWillTerminate(_ application: UIApplication) {
         PodcastPlayer.shared.handleAppWillTerminate()
         podcastViewModel.saveContextIfNeeded()
+        updatePodcastStateAndSave()
     }
+    
+    func applicationWillResignActive(_ application: UIApplication) {
+            updatePodcastStateAndSave()
+        }
+
+        func updatePodcastStateAndSave() {
+            if let currentEpisode = podcastPlayer.currentEpisode {
+                // Update progress
+                podcastViewModel.updateProgress(for: currentEpisode, progress: podcastPlayer.currentProgress)
+                
+                // Update favorite (bookmark) state
+                if currentEpisode.state.isFavorite != podcastViewModel.favoriteEpisodes.contains(where: { $0.id == currentEpisode.id }) {
+                    podcastViewModel.toggleFavorite(for: currentEpisode)
+                }
+                
+                // Update download state
+                let isDownloaded = podcastViewModel.downloadedEpisodes.contains(where: { $0.id == currentEpisode.id })
+                if currentEpisode.state.isDownloaded != isDownloaded {
+                    if isDownloaded {
+                        var updatedEpisode = currentEpisode
+                        updatedEpisode.state.isDownloaded = true
+                        podcastViewModel.updateEpisode(updatedEpisode)
+                    } else {
+                        podcastViewModel.deleteDownloadedEpisode(currentEpisode)
+                    }
+                }
+            }
+            
+            // Save context
+            podcastViewModel.saveContextIfNeeded()
+        }
 
      func applicationDidEnterBackground(_ application: UIApplication) {
          PodcastPlayer.shared.handleAppWillTerminate()
+         updatePodcastStateAndSave()
      }
     
     lazy var persistentContainer: NSPersistentContainer = {

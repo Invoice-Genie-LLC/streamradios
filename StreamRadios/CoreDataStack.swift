@@ -40,8 +40,54 @@ class CoreDataStack {
             print("CoreData: No changes to save in context.")
         }
     }
+
+    // New methods for podcast episode management
+    func fetchAllEpisodes() -> [PodcastEpisode] {
+        let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        do {
+            let results = try context.fetch(request)
+            return results.map { $0.toPodcastEpisode() }
+        } catch {
+            print("CoreData: Error fetching episodes: \(error)")
+            return []
+        }
+    }
+
+    func saveEpisodes(_ episodes: [PodcastEpisode]) {
+        for episode in episodes {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+            
+            do {
+                let results = try context.fetch(fetchRequest)
+                if let existingEpisode = results.first {
+                    existingEpisode.update(from: episode)
+                } else {
+                    let newEpisode = PodcastModel(context: context)
+                    newEpisode.update(from: episode)
+                }
+            } catch {
+                print("CoreData: Error saving episode: \(error)")
+            }
+        }
+        
+        saveContext()
+    }
+
+    func deleteAllEpisodes() {
+        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
+        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        
+        do {
+            try context.execute(deleteRequest)
+            saveContext()
+        } catch {
+            print("CoreData: Error deleting all episodes: \(error)")
+        }
+    }
 }
 
+// Existing extension for syncing stations from CloudKit
 extension CoreDataStack {
     
     func syncStationsFromCloudKit(completion: @escaping (Error?) -> Void) {
