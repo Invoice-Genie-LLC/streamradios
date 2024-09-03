@@ -562,10 +562,7 @@ class PodcastViewModel: ObservableObject {
                 switch result {
                 case .success(let parsedFeed):
                     self.updateEpisodes(for: parsedFeed)
-                    DispatchQueue.main.async {
-                        self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
-                        completion(.success(self.currentEpisodes))
-                    }
+                    completion(.success(parsedFeed.episodes))
                 case .failure(let error):
                     completion(.failure(error))
                 }
@@ -576,7 +573,7 @@ class PodcastViewModel: ObservableObject {
     private func updateEpisodes(for feed: PodcastFeed) {
             var updatedEpisodes = [PodcastEpisode]()
             
-            for episode in feed.episodes {
+            for var episode in feed.episodes {
                 if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
                     var existingEpisode = allEpisodes[existingIndex]
                     existingEpisode.title = episode.title

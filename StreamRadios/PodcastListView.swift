@@ -365,10 +365,10 @@ struct EpisodeRowView: View {
                         onPlay()
                     }
                 }) {
-                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    Image(systemName: playButtonImageName)
                         .resizable()
                         .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(isPlaying ? .blue : .green)
+                        .foregroundColor(playButtonColor)
                 }
                 .frame(width: buttonSize, height: buttonSize)
                 
@@ -480,7 +480,25 @@ struct EpisodeRowView: View {
         }
     }
     
+    private var playButtonImageName: String {
+        if episode.state.isPlayed || progress >= 0.99 {
+            return "arrow.clockwise.circle.fill"
+        } else if isPlaying {
+            return "pause.circle.fill"
+        } else {
+            return "play.circle.fill"
+        }
+    }
     
+    private var playButtonColor: Color {
+        if episode.state.isPlayed || progress >= 0.99 {
+            return .blue
+        } else if isPlaying {
+            return .blue
+        } else {
+            return .green
+        }
+    }
     
     private var episodeStatusIndicator: some View {
         Group {
