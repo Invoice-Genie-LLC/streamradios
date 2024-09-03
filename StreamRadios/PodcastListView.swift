@@ -121,16 +121,16 @@ struct PodcastListView: View {
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 
                 if podcastPlayer.currentEpisode != nil {
-                                    MiniPlayerView(
-                                        podcastPlayer: podcastPlayer,
-                                        viewModel: viewModel,
-                                        selectedPodcast: $selectedPodcast,
-                                        onListButtonTap: {
-                                            selectedPodcast = podcastPlayer.currentFeed
-                                        }
-                                    )
-                                    .transition(.move(edge: .bottom))
-                                }
+                    MiniPlayerView(
+                        podcastPlayer: podcastPlayer,
+                        viewModel: viewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            selectedPodcast = podcastPlayer.currentFeed
+                        }
+                    )
+                    .transition(.move(edge: .bottom))
+                }
             }
         }
     }
@@ -330,7 +330,7 @@ struct EpisodeRowView: View {
     @State private var bannerAlertMessage = ""
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
-
+    
     init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
         self.isPlaying = isPlaying
@@ -340,10 +340,10 @@ struct EpisodeRowView: View {
         self.podcastPlayer = podcastPlayer
         _progress = State(initialValue: viewModel.getProgress(for: episode))
     }
-
+    
     var body: some View {
         VStack(spacing: 0) {
-
+            
             if showingBannerAlert {
                 Text(bannerAlertMessage)
                     .font(.caption)
@@ -352,11 +352,14 @@ struct EpisodeRowView: View {
                     .frame(maxWidth: .infinity)
                     .background(Color.red)
             }
-
+            
             HStack(alignment: .center, spacing: 10) {
                 // Play/Pause button
                 Button(action: {
-                    if isPlaying {
+                    let progress = podcastPlayer.getCurrentProgress(for: episode)
+                    if episode.state.isPlayed || progress >= 0.99 {
+                        podcastPlayer.rewindAndPlay(episode: episode)
+                    } else if isPlaying {
                         onStop()
                     } else {
                         onPlay()
@@ -365,10 +368,10 @@ struct EpisodeRowView: View {
                     Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .resizable()
                         .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(.blue)
+                        .foregroundColor(isPlaying ? .blue : .green)
                 }
                 .frame(width: buttonSize, height: buttonSize)
-
+                
                 // Episode info
                 VStack(alignment: .leading, spacing: 2) {
                     // Episode title (2 lines)
@@ -377,7 +380,7 @@ struct EpisodeRowView: View {
                         .fontWeight(.medium)
                         .lineLimit(2)
                         .foregroundColor(.primary)
-
+                    
                     // Episode info and status
                     HStack(spacing: 2) {
                         episodeStatusIndicator
@@ -395,7 +398,7 @@ struct EpisodeRowView: View {
                     .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-
+                
                 // Right column: File size, Bookmark button, Download button
                 VStack(alignment: .trailing, spacing: 4) {
                     // File size
@@ -404,7 +407,7 @@ struct EpisodeRowView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
-
+                    
                     // Bookmark button
                     Button(action: {
                         if isPlaying {
@@ -417,7 +420,7 @@ struct EpisodeRowView: View {
                             .foregroundColor(episode.state.isFavorite ? .blue : .gray)
                             .frame(width: buttonSize, height: buttonSize)
                     }
-
+                    
                     // Download button or trash can
                     Group {
                         if viewModel.currentTab == 2 && episode.state.isDownloaded {
@@ -437,7 +440,7 @@ struct EpisodeRowView: View {
             }
             .frame(height: rowHeight)
             .padding(.horizontal, 10)
-
+            
             // Progress bar (only for playing episode)
             if isPlaying {
                 GeometryReader { geometry in
@@ -445,7 +448,7 @@ struct EpisodeRowView: View {
                         Rectangle()
                             .fill(Color.gray.opacity(0.2))
                             .frame(height: 3)
-
+                        
                         Rectangle()
                             .fill(Color.blue)
                             .frame(width: geometry.size.width * CGFloat(progress), height: 3)
@@ -469,14 +472,16 @@ struct EpisodeRowView: View {
         }
         .onReceive(podcastPlayer.$currentProgress) { _ in
             if podcastPlayer.currentEpisode?.id == episode.id {
-                progress = min(max(podcastPlayer.currentProgress, 0), 1)
+                progress = podcastPlayer.currentProgress
             }
         }
         .onReceive(viewModel.$episodeProgress) { _ in
-            progress = min(max(viewModel.getProgress(for: episode), 0), 1)
+            progress = viewModel.getProgress(for: episode)
         }
     }
-
+    
+    
+    
     private var episodeStatusIndicator: some View {
         Group {
             if episode.state.isPlayed || progress >= 0.99 {
@@ -496,7 +501,7 @@ struct EpisodeRowView: View {
         .font(.caption2)
         .fontWeight(.semibold)
     }
-
+    
     private var downloadButton: some View {
         Button(action: {
             if isPlaying {
@@ -514,7 +519,7 @@ struct EpisodeRowView: View {
                 Circle()
                     .stroke(Color.gray.opacity(0.3), lineWidth: 2)
                     .frame(width: buttonSize, height: buttonSize)
-
+                
                 if episode.state.isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
                         .resizable()
@@ -526,7 +531,7 @@ struct EpisodeRowView: View {
                         .stroke(Color.blue, lineWidth: 2)
                         .rotationEffect(.degrees(-90))
                         .frame(width: buttonSize, height: buttonSize)
-
+                    
                     Image(systemName: "arrow.down")
                         .font(.system(size: buttonSize * 0.5))
                         .foregroundColor(.blue)
@@ -539,7 +544,7 @@ struct EpisodeRowView: View {
             }
         }
     }
-
+    
     private func showBannerAlert(message: String) {
         bannerAlertMessage = message
         showingBannerAlert = true
@@ -547,50 +552,50 @@ struct EpisodeRowView: View {
             showingBannerAlert = false
         }
     }
-
+    
     private func formatDate(_ date: Date) -> String {
-           let formatter = DateFormatter()
-           formatter.dateStyle = .medium
-           formatter.timeStyle = .none
-           return formatter.string(from: date)
-       }
-
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+    
     private func formatDuration(_ duration: TimeInterval) -> String {
-           let minutes = Int(duration) / 60
-           let seconds = Int(duration) % 60
-           return String(format: "%d:%02d", minutes, seconds)
-       }
-       
-
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    
     private func formatFileSize(_ size: Int64) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: size)
     }
-
+    
     private func formatRemainingTime() -> String {
         guard episode.duration > 0 else {
             return "Unknown duration"
         }
-
+        
         let remainingTime: TimeInterval
         if isPlaying {
             remainingTime = max(episode.duration - podcastPlayer.currentTime, 0)
         } else {
             remainingTime = max((1 - progress) * episode.duration, 0)
         }
-
+        
         if remainingTime == 0 {
             return "0:00 remaining"
         }
-
+        
         let minutes = Int(remainingTime) / 60
         let seconds = Int(remainingTime) % 60
         return String(format: "%d:%02d remaining", minutes, seconds)
     }
-
-   
+    
+    
 }
 
 struct PodcastPlayerView: View {
@@ -603,23 +608,28 @@ struct PodcastPlayerView: View {
     @State private var isSeekingManually = false
     @State private var debounceTimer: Timer?
     @State private var scrollToEpisodeID: String?
-
+    
     var body: some View {
         VStack(spacing: 0) {
             // Custom navigation bar
             HStack {
-                Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                Button(action: updateViewModelAndDismiss) {
                     Image(systemName: "chevron.left")
                         .foregroundColor(.primary)
+                    
                 }
                 Spacer()
+                Text(feed.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
                 AirPlayButton()
-                                   .frame(width: 30, height: 30)
-                           }
-                           .padding(.horizontal)
-                           .frame(height: 44)
-                           .background(Color(UIColor.systemBackground))
-
+                    .frame(width: 30, height: 30)
+            }
+            .padding(.horizontal)
+            .frame(height: 44)
+            .background(Color(UIColor.systemBackground))
+            
             // Pinned player area
             VStack(spacing: 12) {
                 // Centered, smaller feed image
@@ -627,14 +637,14 @@ struct PodcastPlayerView: View {
                     .frame(width: 120, height: 120)
                     .cornerRadius(12)
                     .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
-
+                
                 VStack(alignment: .center, spacing: 4) {
                     Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
-
+                    
                     if let currentEpisode = podcastPlayer.currentEpisode {
                         Text(formatDate(currentEpisode.publicationDate))
                             .font(.caption)
@@ -642,7 +652,7 @@ struct PodcastPlayerView: View {
                     }
                 }
                 .padding(.horizontal)
-
+                
                 // Progress slider
                 ProgressSlider(
                     value: $seekPosition,
@@ -656,7 +666,7 @@ struct PodcastPlayerView: View {
                 )
                 .frame(height: 4)
                 .padding(.horizontal)
-
+                
                 // Time labels
                 HStack {
                     Text(formatTime(seekPosition))
@@ -666,20 +676,20 @@ struct PodcastPlayerView: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
                 .padding(.horizontal)
-
+                
                 // Playback controls
                 HStack(spacing: 20) {
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
                             .font(.system(size: 20))
                     }
-
+                    
                     Button(action: podcastPlayer.togglePlayPause) {
                         Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 48))
                             .foregroundColor(.blue)
                     }
-
+                    
                     Button(action: podcastPlayer.skipForward) {
                         Image(systemName: "goforward.30")
                             .font(.system(size: 20))
@@ -690,14 +700,17 @@ struct PodcastPlayerView: View {
             }
             .padding(.vertical, 6)
             .background(Color(UIColor.secondarySystemBackground))
-
+            
             // Episode filter tabs
             episodeFilterTabs
-
+            
             // Scrollable episode list
             ScrollView {
                 episodeList
             }
+        }
+        .onDisappear {
+            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
         }
         .onAppear {
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
@@ -710,7 +723,7 @@ struct PodcastPlayerView: View {
         }
         .navigationBarHidden(true)
     }
-
+    
     private var episodeFilterTabs: some View {
         Picker("", selection: $selectedTab) {
             Text("All").tag(0)
@@ -725,14 +738,14 @@ struct PodcastPlayerView: View {
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
         }
     }
-
+    
     private var episodeList: some View {
         LazyVStack(spacing: 8) {
-            ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
+            ForEach(viewModel.currentEpisodes) { episode in
                 EpisodeRowView(
                     episode: episode,
                     isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                    onPlay: { playEpisode(episode, feed: feed) },
+                    onPlay: { playEpisode(episode) },
                     onStop: { podcastPlayer.togglePlayPause() },
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
@@ -743,45 +756,82 @@ struct PodcastPlayerView: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
     }
-
-    private func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+    
+    private func updateViewModelAndDismiss() {
+        if let currentEpisode = podcastPlayer.currentEpisode {
+            // Update progress
+            viewModel.updateProgress(for: currentEpisode, progress: podcastPlayer.currentProgress)
+            
+            // Update favorite (bookmark) state
+            if currentEpisode.state.isFavorite != viewModel.favoriteEpisodes.contains(where: { $0.id == currentEpisode.id }) {
+                viewModel.toggleFavorite(for: currentEpisode)
+            }
+            
+            // Update download state
+            let isDownloaded = viewModel.downloadedEpisodes.contains(where: { $0.id == currentEpisode.id })
+            if currentEpisode.state.isDownloaded != isDownloaded {
+                if isDownloaded {
+                    // If it's downloaded in the viewModel but not in the current episode state, update the current episode
+                    var updatedEpisode = currentEpisode
+                    updatedEpisode.state.isDownloaded = true
+                    viewModel.updateEpisode(updatedEpisode)
+                } else {
+                    // If it's not downloaded in the viewModel but is in the current episode state, remove it from downloads
+                    viewModel.deleteDownloadedEpisode(currentEpisode)
+                }
+            }
+        }
+        
+        // Update filtered episodes
+        viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
+        
+        // Dismiss the view
+        presentationMode.wrappedValue.dismiss()
+    }
+    
+    private func playEpisode(_ episode: PodcastEpisode) {
         if podcastPlayer.currentEpisode?.id == episode.id {
-            podcastPlayer.togglePlayPause()
+            if episode.state.isPlayed || podcastPlayer.currentProgress >= 0.99 {
+                podcastPlayer.rewindAndPlay(episode: episode)
+            } else {
+                podcastPlayer.togglePlayPause()
+            }
         } else {
             podcastPlayer.playEpisode(episode, feed: feed)
         }
     }
-
-    private func formatTime(_ time: Double) -> String {
-        let minutes = Int(time) / 60
-        let seconds = Int(time) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
 }
+
+private func formatTime(_ time: Double) -> String {
+    let minutes = Int(time) / 60
+    let seconds = Int(time) % 60
+    return String(format: "%02d:%02d", minutes, seconds)
+}
+
+private func formatDate(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    return formatter.string(from: date)
+}
+
 
 struct ProgressSlider: View {
     @Binding var value: Double
     let inRange: ClosedRange<Double>
     let onEditingChanged: (Bool) -> Void
-
+    
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Rectangle()
                     .fill(Color.gray.opacity(0.2))
                     .frame(height: 4)
-
+                
                 Rectangle()
                     .fill(Color.blue)
                     .frame(width: geometry.size.width * CGFloat((value - inRange.lowerBound) / (inRange.upperBound - inRange.lowerBound)), height: 4)
-
+                
                 Circle()
                     .fill(Color.white)
                     .frame(width: 12, height: 12)
@@ -819,7 +869,7 @@ struct AirPlayButton: UIViewRepresentable {
         
         return routePickerView
     }
-
+    
     func updateUIView(_ uiView: UIView, context: Context) {}
 }
 

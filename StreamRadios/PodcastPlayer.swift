@@ -31,6 +31,18 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     private init() {}
     
+    func rewindAndPlay(episode: PodcastEpisode) {
+        if currentEpisode?.id == episode.id {
+            // If it's the same episode, rewind and play immediately
+            seek(to: 0)
+            play()
+        } else {
+            // If it's a different episode, play it from the beginning
+            playEpisode(episode, feed: viewModel?.podcastFeeds.first { $0.id == episode.feedId } ?? PodcastFeed(id: "", title: "", url: ""))
+        }
+        isPlaying = true
+    }
+    
     func configure(with viewModel: PodcastViewModel) {
         self.viewModel = viewModel
     }
@@ -221,18 +233,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         seek(to: newTime)
     }
     
-    func rewindAndPlay(episode: PodcastEpisode) {
-        if currentEpisode?.id == episode.id {
-            // If it's the same episode, rewind and play immediately
-            seek(to: 0)
-            play()
-        } else {
-            // If it's a different episode, play it from the beginning
-            playEpisode(episode, feed: viewModel?.podcastFeeds.first { $0.id == episode.feedId } ?? PodcastFeed(id: "", title: "", url: ""))
-        }
-        isPlaying = true
-    }
-    
     private func setupTimeObserver() {
         if let existingObserver = timeObserver {
             player?.removeTimeObserver(existingObserver)
@@ -240,46 +240,46 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self = self else { return }
-            self.currentTime = time.seconds
-            self.updateProgress()
-        }
+                    guard let self = self else { return }
+                    self.currentTime = time.seconds
+                    self.updateProgress()
+                }
     }
     
     func getCurrentProgress(for episode: PodcastEpisode) -> Double {
-        if currentEpisode?.id == episode.id {
-            return min(max(currentProgress, 0), 1)
-        } else {
-            return min(max(viewModel?.getProgress(for: episode) ?? 0, 0), 1)
-        }
-    }
+           if currentEpisode?.id == episode.id {
+               return min(max(currentProgress, 0), 1)
+           } else {
+               return min(max(viewModel?.getProgress(for: episode) ?? 0, 0), 1)
+           }
+       }
     
     private func updateProgress() {
-        guard let currentEpisode = currentEpisode, duration > 0 else { return }
-        let progress = currentTime / duration
-        
-        self.currentProgress = progress
-        
-        // Calculate remaining time
-        let remainingTime = max(duration - currentTime, 0)
-        
-        // If the remaining time is less than 1 second or progress is >= 0.99, mark the episode as completed
-        if remainingTime < 1 || progress >= 0.99 {
-            viewModel?.markEpisodeAsCompleted(currentEpisode)
-            os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
-        } else {
-            // Only save progress if it has changed significantly
-            if abs(progress - lastSavedProgress) >= saveThreshold {
-                viewModel?.updateProgress(for: currentEpisode, progress: progress)
-                lastSavedProgress = progress
-                os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
+            guard let currentEpisode = currentEpisode, duration > 0 else { return }
+            let progress = currentTime / duration
+            
+            self.currentProgress = progress
+            
+            // Calculate remaining time
+            let remainingTime = max(duration - currentTime, 0)
+            
+            // If the remaining time is less than 1 second or progress is >= 0.99, mark the episode as completed
+            if remainingTime < 1 || progress >= 0.99 {
+                viewModel?.markEpisodeAsCompleted(currentEpisode)
+                os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
+            } else {
+                // Only save progress if it has changed significantly
+                if abs(progress - lastSavedProgress) >= saveThreshold {
+                    viewModel?.updateProgress(for: currentEpisode, progress: progress)
+                    lastSavedProgress = progress
+                    os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
+                }
+            }
+            
+            DispatchQueue.main.async {
+                self.objectWillChange.send()
             }
         }
-        
-        DispatchQueue.main.async {
-            self.objectWillChange.send()
-        }
-    }
     
     private func formatRemainingTime(_ time: TimeInterval) -> String {
         let minutes = Int(time) / 60

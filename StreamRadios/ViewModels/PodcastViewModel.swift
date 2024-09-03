@@ -808,13 +808,13 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateProgress(for episode: PodcastEpisode, progress: Double) {
-        episodeProgress[episode.id] = progress
-        var updatedEpisode = episode
-        updatedEpisode.state.progress = progress
-        updateEpisodeInLists(updatedEpisode)
-        saveEpisodeToCoreData(updatedEpisode)
-        saveContextIfNeeded()
-    }
+          episodeProgress[episode.id] = progress
+          var updatedEpisode = episode
+          updatedEpisode.state.progress = progress
+          updateEpisodeInLists(updatedEpisode)
+          saveEpisodeToCoreData(updatedEpisode)
+          saveContextIfNeeded()
+      }
     
     func markEpisodeAsCompleted(_ episode: PodcastEpisode) {
         var updatedEpisode = episode
