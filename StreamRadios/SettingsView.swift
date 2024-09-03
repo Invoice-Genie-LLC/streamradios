@@ -414,21 +414,21 @@ struct SettingsView: View {
         }
     
     private func initiatePodcastCleanup() {
-                isCleaningPodcasts = true
-                podcastCleanupComplete = false
+        isCleaningPodcasts = true
+        podcastCleanupComplete = false
 
-                podcastViewModel.clearAllPodcastData { success in
-                    DispatchQueue.main.async {
-                        self.isCleaningPodcasts = false
-                        if success {
-                            self.podcastCleanupComplete = true
-                            self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data, including downloads, episode progress and bookmarks, has been cleared.")
-                        } else {
-                            self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
-                        }
-                    }
+        podcastViewModel.clearAllPodcastData { success in
+            DispatchQueue.main.async {
+                self.isCleaningPodcasts = false
+                if success {
+                    self.podcastCleanupComplete = true
+                    self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data, including downloads, episode progress and bookmarks, has been cleared.")
+                } else {
+                    self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
                 }
             }
+        }
+    }
     
     private func initiateDataDeletion() {
         if viewModel.isCloudKitOperationRunning {
