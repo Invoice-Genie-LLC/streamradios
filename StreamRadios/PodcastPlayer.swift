@@ -107,33 +107,72 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func setupPlayerItemObserver() {
-        playerItemObserver?.invalidate()
-        playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
-            guard let self = self else { return }
-            if playerItem.status == .readyToPlay {
-                self.duration = playerItem.duration.seconds
-                self.seekToSavedProgress()
+           playerItemObserver?.invalidate()
+           playerItemObserver = player?.currentItem?.observe(\.status, options: [.new, .initial]) { [weak self] playerItem, _ in
+               guard let self = self else { return }
+               if playerItem.status == .readyToPlay {
+                   self.duration = playerItem.duration.seconds
+                   self.seekToSavedProgress()
+               }
+           }
+           
+           NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+           NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
+               guard let self = self, let currentEpisode = self.currentEpisode else { return }
+               
+               // Mark the episode as "Played"
+               self.viewModel?.markEpisodeAsCompleted(currentEpisode)
+               
+               // Update the progress and now playing info
+               self.updateProgress()
+               self.updateNowPlayingInfo()
+               
+               // Play the next episode
+               self.playNextEpisode()
+               
+               // Notify observers of the change
+               self.objectWillChange.send()
+           }
+       }
+    
+    private func playNextEpisode() {
+            guard let viewModel = viewModel,
+                  let currentFeed = currentFeed,
+                  let currentEpisodeIndex = viewModel.currentEpisodes.firstIndex(where: { $0.id == currentEpisode?.id }) else {
+                return
+            }
+            
+            let nextIndex = currentEpisodeIndex + 1
+            if nextIndex < viewModel.currentEpisodes.count {
+                let nextEpisode = viewModel.currentEpisodes[nextIndex]
+                playEpisode(nextEpisode, feed: currentFeed)
+            } else {
+                // If we've reached the end of the current feed's episodes, move to the next feed
+                playNextFeed()
             }
         }
         
-        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
-            guard let self = self, let currentEpisode = self.currentEpisode else { return }
+        private func playNextFeed() {
+            guard let viewModel = viewModel,
+                  let currentFeedIndex = viewModel.podcastFeeds.firstIndex(where: { $0.id == currentFeed?.id }) else {
+                return
+            }
             
-            // Mark the episode as "Played"
-            self.viewModel?.markEpisodeAsCompleted(currentEpisode)
+            let nextFeedIndex = (currentFeedIndex + 1) % viewModel.podcastFeeds.count
+            let nextFeed = viewModel.podcastFeeds[nextFeedIndex]
             
-            // Stop the playback but don't reset current time
-            self.pause()
-            
-            // Update the progress and now playing info
-            self.updateProgress()
-            self.updateNowPlayingInfo()
-            
-            // Notify observers of the change
-            self.objectWillChange.send()
+            viewModel.fetchEpisodes(for: nextFeed) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let episodes):
+                    if let firstEpisode = episodes.first {
+                        self.playEpisode(firstEpisode, feed: nextFeed)
+                    }
+                case .failure(let error):
+                    os_log("Failed to fetch episodes for next feed: %@", log: self.log, type: .error, error.localizedDescription)
+                }
+            }
         }
-    }
     
     
     private func seekToSavedProgress() {
