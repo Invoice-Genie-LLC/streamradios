@@ -109,6 +109,7 @@ class PodcastViewModel: ObservableObject {
     private var backgroundContext: NSManagedObjectContext
     private let dataStore = DataStore.shared
     @Published var podcastFeedOrder: [String] = []
+    private let coreDataStack = CoreDataStack.shared
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
@@ -235,15 +236,12 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateEpisode(_ updatedEpisode: PodcastEpisode) {
-        if let index = allEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
-            allEpisodes[index] = updatedEpisode
-        }
-        if let index = currentEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
-            currentEpisodes[index] = updatedEpisode
-        }
-        saveEpisodeToCoreData(updatedEpisode)
-        objectWillChange.send()
-    }
+           if let index = allEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+               allEpisodes[index] = updatedEpisode
+           }
+           coreDataStack.saveEpisodes([updatedEpisode])
+           updateFilteredEpisodes()
+       }
     
     func refreshEpisodeStates() {
         for index in allEpisodes.indices {
@@ -306,6 +304,7 @@ class PodcastViewModel: ObservableObject {
         loadDownloadedEpisodes()
         loadFavoriteEpisodes()
         loadAllEpisodes()
+        updateFilteredEpisodes()
     }
     
     private func loadDownloadedEpisodes() {
@@ -450,39 +449,24 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func loadPodcastFeeds() {
-            let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-            do {
-                let managedFeeds = try context.fetch(fetchRequest)
-                podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
-                
-                // Update podcastFeedOrder
-                let existingIds = Set(podcastFeedOrder)
-                for feed in podcastFeeds where !existingIds.contains(feed.id) {
-                    podcastFeedOrder.append(feed.id)
-                }
-                
-                os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
-            } catch {
-                os_log("Failed to load podcast feeds: %@", log: log, type: .error, error.localizedDescription)
-            }
-        }
+           let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+           do {
+               let managedFeeds = try coreDataStack.context.fetch(fetchRequest)
+               podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
+           } catch {
+               print("Failed to load podcast feeds: \(error)")
+           }
+       }
     
     func loadAllEpisodes() {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        do {
-            let managedEpisodes = try context.fetch(fetchRequest)
-            self.allEpisodes = managedEpisodes.map { managedEpisode in
-                var episode = managedEpisode.toPodcastEpisode()
-                episode.state.isPlayed = managedEpisode.isPlayed
-                episode.state.progress = managedEpisode.progress
-                return episode
-            }
-            self.downloadedEpisodeIds = Set(managedEpisodes.compactMap { $0.isDownloaded ? $0.id : nil })
-            print("Loaded \(self.allEpisodes.count) episodes, \(self.downloadedEpisodeIds.count) downloaded")
-        } catch {
-            print("Failed to load episodes: \(error)")
+            allEpisodes = coreDataStack.fetchAllEpisodes()
+            updateFilteredEpisodes()
         }
-    }
+    
+    func updateFilteredEpisodes() {
+           downloadedEpisodes = allEpisodes.filter { $0.state.isDownloaded }
+           favoriteEpisodes = allEpisodes.filter { $0.state.isFavorite }
+       }
     
     func fetchPodcastFeeds() {
             isLoading = true
@@ -574,59 +558,37 @@ class PodcastViewModel: ObservableObject {
     }
     
     func fetchEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
-        os_log("Fetching episodes for feed: %@", log: log, type: .info, feed.title)
-        isLoading = true
-        fetchRSSFeed(for: feed) { result in
-            DispatchQueue.main.async {
-                self.isLoading = false
+            fetchRSSFeed(for: feed) { result in
                 switch result {
                 case .success(let parsedFeed):
-                    os_log("Successfully fetched episodes for feed: %@", log: self.log, type: .info, feed.title)
                     self.updateEpisodes(for: parsedFeed)
-                    self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
                     completion(.success(parsedFeed.episodes))
                 case .failure(let error):
-                    os_log("Failed to fetch episodes for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
-                    self.error = error.localizedDescription
                     completion(.failure(error))
                 }
             }
         }
-    }
     
     
     private func updateEpisodes(for feed: PodcastFeed) {
             var updatedEpisodes = [PodcastEpisode]()
-            var seenIds = Set<String>()
             
             for var episode in feed.episodes {
-                if seenIds.contains(episode.id) {
-                    episode.id = UUID().uuidString
-                }
-                seenIds.insert(episode.id)
-                
-                // Validate and correct duration
-                episode.duration = max(episode.duration, 0)
-                
                 if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
                     var existingEpisode = allEpisodes[existingIndex]
-                    if existingEpisode.state.isDownloaded {
-                        episode.state.isDownloaded = true
-                        episode.localFilePath = existingEpisode.localFilePath
-                    }
-                    
-                    existingEpisode = episode
-                    allEpisodes[existingIndex] = existingEpisode
+                    existingEpisode.title = episode.title
+                    existingEpisode.descriptionText = episode.descriptionText
+                    existingEpisode.audioUrl = episode.audioUrl
+                    existingEpisode.publicationDate = episode.publicationDate
+                    existingEpisode.duration = episode.duration
                     updatedEpisodes.append(existingEpisode)
                 } else {
-                    allEpisodes.append(episode)
                     updatedEpisodes.append(episode)
                 }
             }
             
-            currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
-            
-            objectWillChange.send()
+            coreDataStack.saveEpisodes(updatedEpisodes)
+            loadAllEpisodes()
         }
     
     
