@@ -334,55 +334,96 @@ class PodcastViewModel: ObservableObject {
     }
     
     func clearAllPodcastData(completion: @escaping (Bool) -> Void) {
-        let group = DispatchGroup()
-        var success = true
+        let context = CoreDataStack.shared.context
         
-        // 1. Delete all downloaded podcast files
-        group.enter()
-        deleteAllDownloadedPodcasts { result in
-            if !result {
-                success = false
+        context.perform {
+            do {
+                // Log initial counts
+                let initialEpisodeCount = try context.count(for: PodcastModel.fetchRequest())
+                let initialFeedCount = try context.count(for: FeedModel.fetchRequest())
+                print("Before deletion - Episode count: \(initialEpisodeCount), Feed count: \(initialFeedCount)")
+
+                // Fetch all downloaded episodes
+                let downloadedEpisodesFetch: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                downloadedEpisodesFetch.predicate = NSPredicate(format: "isDownloaded == true")
+                let downloadedEpisodes = try context.fetch(downloadedEpisodesFetch)
+
+                // Delete downloaded files
+                let fileManager = FileManager.default
+                for episode in downloadedEpisodes {
+                    if let localFilePath = episode.localFilePath, fileManager.fileExists(atPath: localFilePath) {
+                        try fileManager.removeItem(atPath: localFilePath)
+                    }
+                    episode.isDownloaded = false
+                    episode.localFilePath = nil
+                }
+
+                // Delete all PodcastModel entities (episodes)
+                let episodeFetchRequest: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
+                let episodeDeleteRequest = NSBatchDeleteRequest(fetchRequest: episodeFetchRequest)
+                episodeDeleteRequest.resultType = .resultTypeObjectIDs
+                let episodeDeleteResult = try context.execute(episodeDeleteRequest) as? NSBatchDeleteResult
+                let episodeDeletedObjectIDs = episodeDeleteResult?.result as? [NSManagedObjectID] ?? []
+                
+                // Delete all FeedModel entities
+                let feedFetchRequest: NSFetchRequest<NSFetchRequestResult> = FeedModel.fetchRequest()
+                let feedDeleteRequest = NSBatchDeleteRequest(fetchRequest: feedFetchRequest)
+                feedDeleteRequest.resultType = .resultTypeObjectIDs
+                let feedDeleteResult = try context.execute(feedDeleteRequest) as? NSBatchDeleteResult
+                let feedDeletedObjectIDs = feedDeleteResult?.result as? [NSManagedObjectID] ?? []
+                
+                // Merge changes into main context
+                NSManagedObjectContext.mergeChanges(fromRemoteContextSave: [NSDeletedObjectsKey: episodeDeletedObjectIDs + feedDeletedObjectIDs], into: [context])
+                
+                // Clear UserDefaults
+                let userDefaults = UserDefaults.standard
+                userDefaults.removeObject(forKey: "PodcastEpisodeStates")
+                userDefaults.removeObject(forKey: "FavoritePodcastEpisodes")
+
+                // Remove all keys that start with "PodcastProgress_"
+                for key in userDefaults.dictionaryRepresentation().keys {
+                    if key.hasPrefix("PodcastProgress_") {
+                        userDefaults.removeObject(forKey: key)
+                    }
+                }
+
+                // Delete the entire PodcastEpisodes directory
+                if let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+                    let podcastDirectory = documentsPath.appendingPathComponent("PodcastEpisodes")
+                    if fileManager.fileExists(atPath: podcastDirectory.path) {
+                        try fileManager.removeItem(at: podcastDirectory)
+                    }
+                }
+
+                // Save changes
+                try context.save()
+
+                // Verification step
+                DispatchQueue.main.async {
+                    let episodeCount = try? context.count(for: PodcastModel.fetchRequest())
+                    let feedCount = try? context.count(for: FeedModel.fetchRequest())
+                    print("Final count - Episodes: \(episodeCount ?? 0), Feeds: \(feedCount ?? 0)")
+                    
+                    if episodeCount == 0 && feedCount == 0 {
+                        self.podcastFeeds.removeAll()
+                        self.allEpisodes.removeAll()
+                        self.currentEpisodes.removeAll()
+                        self.downloadedEpisodes.removeAll()
+                        self.favoriteEpisodes.removeAll()
+                        self.episodeProgress.removeAll()
+                        self.objectWillChange.send()
+                        completion(true)
+                    } else {
+                        print("Warning: Not all data was deleted from CoreData")
+                        completion(false)
+                    }
+                }
+            } catch {
+                print("Failed to clear all podcast data: \(error)")
+                DispatchQueue.main.async {
+                    completion(false)
+                }
             }
-            group.leave()
-        }
-        
-        // 2. Delete all podcast episodes from Core Data
-        group.enter()
-        deleteAllPodcastEpisodesFromCoreData { result in
-            if !result {
-                success = false
-            }
-            group.leave()
-        }
-        
-        // 3. Clear all bookmarks, favorites, and progress from UserDefaults
-        group.enter()
-        clearAllUserDefaultsData { result in
-            if !result {
-                success = false
-            }
-            group.leave()
-        }
-        
-        // 4. Clear all saved episode progress from UserDefaults or other storage
-               group.enter()
-               clearEpisodeProgressData { result in
-                   if !result {
-                       success = false
-                   }
-                   group.leave()
-               }
-        
-        group.notify(queue: .main) {
-            // Reset view model properties
-            self.podcastFeeds = []
-            self.allEpisodes = []
-            self.currentEpisodes = []
-            self.downloadedEpisodes = []
-            self.favoriteEpisodes = []
-            self.episodeProgress = [:]
-            
-            completion(success)
         }
     }
     
