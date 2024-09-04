@@ -902,24 +902,43 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+        // Create a new background context
+        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
         
-        do {
-            let results = try context.fetch(fetchRequest)
-            let managedEpisode: PodcastModel
+        // Perform the save operation on the background context
+        backgroundContext.perform {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
             
-            if let existingEpisode = results.first {
-                managedEpisode = existingEpisode
-            } else {
-                managedEpisode = PodcastModel(context: context)
+            do {
+                let results = try backgroundContext.fetch(fetchRequest)
+                let managedEpisode: PodcastModel
+                
+                if let existingEpisode = results.first {
+                    managedEpisode = existingEpisode
+                } else {
+                    managedEpisode = PodcastModel(context: backgroundContext)
+                }
+                
+                // Update the managed object
+                managedEpisode.update(from: episode)
+                
+                // Save the background context
+                try backgroundContext.save()
+                
+                // Perform UI updates on the main thread
+                DispatchQueue.main.async {
+                    print("Successfully saved episode state to Core Data: \(episode.title)")
+                    // Notify the main context of the changes
+                    CoreDataStack.shared.context.perform {
+                        try? CoreDataStack.shared.context.save()
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("Failed to save episode to Core Data: \(error)")
+                }
             }
-            
-            managedEpisode.update(from: episode)
-            try context.save()
-            print("Successfully saved episode state to Core Data: \(episode.title)")
-        } catch {
-            print("Failed to save episode to Core Data: \(error)")
         }
     }
     
