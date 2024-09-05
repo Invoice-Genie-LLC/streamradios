@@ -55,9 +55,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     
     func applicationWillTerminate(_ application: UIApplication) {
+        updatePodcastStateAndSave()
         PodcastPlayer.shared.handleAppWillTerminate()
         podcastViewModel.saveContextIfNeeded()
-        updatePodcastStateAndSave()
     }
     
     func applicationWillResignActive(_ application: UIApplication) {
@@ -67,8 +67,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         func updatePodcastStateAndSave() {
             if let currentEpisode = podcastPlayer.currentEpisode {
                 // Update progress
-                podcastViewModel.updateProgress(for: currentEpisode, progress: podcastPlayer.currentProgress)
-                
+                PodcastViewModel().updateProgress(for: currentEpisode, progress: PodcastPlayer.shared.currentProgress)
+
                 // Update favorite (bookmark) state
                 if currentEpisode.state.isFavorite != podcastViewModel.favoriteEpisodes.contains(where: { $0.id == currentEpisode.id }) {
                     podcastViewModel.toggleFavorite(for: currentEpisode)

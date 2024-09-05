@@ -110,6 +110,7 @@ class PodcastViewModel: ObservableObject {
     private let dataStore = DataStore.shared
     @Published var podcastFeedOrder: [String] = []
     private let coreDataStack = CoreDataStack.shared
+    private var episodesByFeed: [String: Set<String>] = [:]
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
@@ -614,8 +615,19 @@ class PodcastViewModel: ObservableObject {
     private func updateEpisodes(for feed: PodcastFeed) {
             var updatedEpisodes = [PodcastEpisode]()
             
+            // Initialize the set for this feed if it doesn't exist
+            if episodesByFeed[feed.id] == nil {
+                episodesByFeed[feed.id] = Set<String>()
+            }
+            
             for var episode in feed.episodes {
-                if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                // Check if the episode is already in the set for this feed
+                if !episodesByFeed[feed.id]!.contains(episode.id) {
+                    // New episode, add it to the set and the updated episodes list
+                    episodesByFeed[feed.id]!.insert(episode.id)
+                    updatedEpisodes.append(episode)
+                } else if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id && $0.feedId == feed.id }) {
+                    // Existing episode, update its properties
                     var existingEpisode = allEpisodes[existingIndex]
                     existingEpisode.title = episode.title
                     existingEpisode.descriptionText = episode.descriptionText
@@ -623,58 +635,72 @@ class PodcastViewModel: ObservableObject {
                     existingEpisode.publicationDate = episode.publicationDate
                     existingEpisode.duration = episode.duration
                     updatedEpisodes.append(existingEpisode)
+                }
+            }
+            
+            // Remove episodes that are no longer in the feed
+            allEpisodes.removeAll { episode in
+                episode.feedId == feed.id && !episodesByFeed[feed.id]!.contains(episode.id)
+            }
+            
+            // Add or update episodes
+            for episode in updatedEpisodes {
+                if let index = allEpisodes.firstIndex(where: { $0.id == episode.id && $0.feedId == feed.id }) {
+                    allEpisodes[index] = episode
                 } else {
-                    updatedEpisodes.append(episode)
+                    allEpisodes.append(episode)
                 }
             }
             
             coreDataStack.saveEpisodes(updatedEpisodes)
-            loadAllEpisodes()
+            updateFilteredEpisodes(for: feed.id, selectedTab: currentTab)
         }
     
     
-    private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
-        os_log("Starting RSS feed fetch for feed: %@", log: log, type: .info, feed.title)
-        guard let url = URL(string: feed.url) else {
-            os_log("Invalid URL for feed: %@", log: log, type: .error, feed.url)
-            completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
-            return
-        }
-        
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            if let error = error {
-                os_log("Error fetching RSS feed for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
-                completion(.failure(error))
+    func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
+            os_log("Starting RSS feed fetch for feed: %@", log: log, type: .info, feed.title)
+            guard let url = URL(string: feed.url) else {
+                os_log("Invalid URL for feed: %@", log: log, type: .error, feed.url)
+                completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
                 return
             }
             
-            guard let data = data else {
-                os_log("No data received for RSS feed: %@", log: self.log, type: .error, feed.title)
-                completion(.failure(NSError(domain: "No data received", code: 0, userInfo: nil)))
-                return
-            }
-            
-            os_log("RSS feed data received for feed: %@", log: self.log, type: .info, feed.title)
-            
-            let rssParser = RSSParser(data: data, feedId: feed.id)
-            rssParser.parse()
-            
-            var updatedFeed = feed
-            updatedFeed.title = feed.title
-            updatedFeed.descriptionText = rssParser.podcastDescription
-            updatedFeed.artworkUrl = rssParser.artworkUrl ?? feed.artworkUrl
-            updatedFeed.episodes = rssParser.episodes
-            
-            if let artworkUrl = updatedFeed.artworkUrl, let url = URL(string: artworkUrl) {
-                        self.fetchAndStoreImage(from: url) { imageData in
-                            updatedFeed.imageData = imageData
-                            self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
-                        }
-                    } else {
+            URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    os_log("Error fetching RSS feed for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                    completion(.failure(error))
+                    return
+                }
+                
+                guard let data = data else {
+                    os_log("No data received for RSS feed: %@", log: self.log, type: .error, feed.title)
+                    completion(.failure(NSError(domain: "No data received", code: 0, userInfo: nil)))
+                    return
+                }
+                
+                os_log("RSS feed data received for feed: %@", log: self.log, type: .info, feed.title)
+                
+                let rssParser = RSSParser(data: data, feedId: feed.id)
+                rssParser.parse()
+                
+                var updatedFeed = feed
+                updatedFeed.title = rssParser.podcastTitle ?? feed.title
+                updatedFeed.descriptionText = rssParser.podcastDescription
+                updatedFeed.artworkUrl = rssParser.artworkUrl ?? feed.artworkUrl
+                updatedFeed.episodes = rssParser.episodes
+                
+                if let artworkUrl = updatedFeed.artworkUrl, let url = URL(string: artworkUrl) {
+                    self.fetchAndStoreImage(from: url) { imageData in
+                        updatedFeed.imageData = imageData
                         self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
                     }
-        }.resume()
-    }
+                } else {
+                    self.completeRSSFeedUpdate(updatedFeed: updatedFeed, completion: completion)
+                }
+            }.resume()
+        }
     
     private func fetchAndStoreImage(from url: URL, completion: @escaping (Data?) -> Void) {
             URLSession.shared.dataTask(with: url) { data, response, error in
@@ -702,11 +728,12 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func completeRSSFeedUpdate(updatedFeed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
-        DispatchQueue.main.async {
-            self.updateFeed(updatedFeed)
-            completion(.success(updatedFeed))
-        }
-    }
+           DispatchQueue.main.async {
+               self.updateFeed(updatedFeed)
+               self.updateEpisodes(for: updatedFeed)
+               completion(.success(updatedFeed))
+           }
+       }
     
     private func updateFeed(_ updatedFeed: PodcastFeed) {
         // Update the in-memory array of podcast feeds
@@ -810,14 +837,45 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    func updateProgress(for episode: PodcastEpisode, progress: Double) {
-          episodeProgress[episode.id] = progress
-          var updatedEpisode = episode
-          updatedEpisode.state.progress = progress
-          updateEpisodeInLists(updatedEpisode)
-          saveEpisodeToCoreData(updatedEpisode)
-          saveContextIfNeeded()
-      }
+    func loadEpisodesForFeed(_ feed: PodcastFeed) {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+            
+            do {
+                let results = try context.fetch(fetchRequest)
+                let episodes = results.map { $0.toPodcastEpisode() }
+                DispatchQueue.main.async {
+                    self.allEpisodes = episodes
+                    self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
+                }
+            } catch {
+                print("Failed to load episodes for feed: \(error)")
+            }
+        }
+    
+    func updateProgress(for episode: PodcastEpisode, progress: Double, shouldSave: Bool = false) {
+            episodeProgress[episode.id] = progress
+            var updatedEpisode = episode
+            updatedEpisode.state.progress = progress
+            
+            // If progress is more than 0 but less than 99%, mark as "In Progress"
+            if progress > 0 && progress < 0.99 {
+                updatedEpisode.state.isPlayed = false
+            } else if progress >= 0.99 {
+                updatedEpisode.state.isPlayed = true
+            }
+            
+            updateEpisodeInLists(updatedEpisode)
+            
+            if shouldSave {
+                saveEpisodeToCoreData(updatedEpisode)
+            }
+            
+            // Trigger UI update
+            DispatchQueue.main.async {
+                self.objectWillChange.send()
+            }
+        }
     
     func markEpisodeAsCompleted(_ episode: PodcastEpisode) {
         var updatedEpisode = episode
@@ -829,11 +887,12 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateEpisodePlayStatus(_ episode: PodcastEpisode, isPlayed: Bool) {
-        var updatedEpisode = episode
-        updatedEpisode.state.isPlayed = isPlayed
-        updateEpisodeInLists(updatedEpisode)
-        saveEpisodeToCoreData(updatedEpisode)
-    }
+            var updatedEpisode = episode
+            updatedEpisode.state.isPlayed = isPlayed
+            updateEpisodeInLists(updatedEpisode)
+            saveEpisodeToCoreData(updatedEpisode)
+            objectWillChange.send()
+        }
     
     func resetEpisodeProgress(_ episode: PodcastEpisode) -> PodcastEpisode {
         var updatedEpisode = episode
@@ -1061,26 +1120,26 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
-        currentTab = selectedTab
-        
-        refreshEpisodeStates() // Refresh states before filtering
-        
-        let allFeedEpisodes = allEpisodes.filter { $0.feedId == feedId }
-        
-        switch selectedTab {
-        case 0: // All
-            currentEpisodes = allFeedEpisodes
-        case 1: // Favorite
-            currentEpisodes = favoriteEpisodes.filter { $0.feedId == feedId }
-        case 2: // Downloads
-            currentEpisodes = downloadedEpisodes.filter { $0.feedId == feedId }
-        default:
-            currentEpisodes = allFeedEpisodes
+            currentTab = selectedTab
+            
+            refreshEpisodeStates() // Refresh states before filtering
+            
+            let allFeedEpisodes = allEpisodes.filter { $0.feedId == feedId }
+            
+            switch selectedTab {
+            case 0: // All
+                currentEpisodes = allFeedEpisodes
+            case 1: // Favorite
+                currentEpisodes = favoriteEpisodes.filter { $0.feedId == feedId }
+            case 2: // Downloads
+                currentEpisodes = downloadedEpisodes.filter { $0.feedId == feedId }
+            default:
+                currentEpisodes = allFeedEpisodes
+            }
+            
+            currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
+            objectWillChange.send() // Ensure UI update
         }
-        
-        currentEpisodes.sort { $0.publicationDate > $1.publicationDate }
-        objectWillChange.send() // Ensure UI update
-    }
     
     func loadAllEpisodesProgress() {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
@@ -1119,6 +1178,8 @@ class RSSParser: NSObject, XMLParserDelegate {
     var episodes: [PodcastEpisode] = []
     private let feedId: String
     private var currentFileSize: Int64?
+    private var currentEpisodeId: String?
+        private var seenEpisodeIds: Set<String> = []
     
     private var currentElement = ""
     private var currentTitle: String?
@@ -1141,33 +1202,38 @@ class RSSParser: NSObject, XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        currentElement = elementName
-        
-        switch elementName {
-        case "item":
-            isParsingItem = true
-            currentTitle = nil
-            currentDescription = nil
-            currentPubDate = nil
-            currentDuration = nil
-            currentEnclosure = nil
-            currentGuid = nil
-            currentFileSize = nil
-        case "enclosure":
-            if isParsingItem {
-                currentEnclosure = attributeDict["url"]
-                if let fileSizeString = attributeDict["length"], let fileSize = Int64(fileSizeString) {
-                    currentFileSize = fileSize
+            currentElement = elementName
+            
+            switch elementName {
+            case "item":
+                isParsingItem = true
+                currentTitle = nil
+                currentDescription = nil
+                currentPubDate = nil
+                currentDuration = nil
+                currentEnclosure = nil
+                currentGuid = nil
+                currentFileSize = nil
+                currentEpisodeId = nil
+            case "enclosure":
+                if isParsingItem {
+                    currentEnclosure = attributeDict["url"]
+                    if let fileSizeString = attributeDict["length"], let fileSize = Int64(fileSizeString) {
+                        currentFileSize = fileSize
+                    }
                 }
+            case "itunes:image":
+                if !isParsingItem {
+                    artworkUrl = attributeDict["href"]
+                }
+            case "guid":
+                if isParsingItem {
+                    currentEpisodeId = attributeDict["isPermaLink"] == "false" ? attributeDict[""] : nil
+                }
+            default:
+                break
             }
-        case "itunes:image":
-            if !isParsingItem {
-                artworkUrl = attributeDict["href"]
-            }
-        default:
-            break
         }
-    }
     
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
             if elementName == "item" {
@@ -1178,21 +1244,24 @@ class RSSParser: NSObject, XMLParserDelegate {
                     
                     let pubDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
                     let duration = parseDuration(currentDuration ?? "0")
-                    let id = currentGuid ?? UUID().uuidString
+                    let id = currentEpisodeId ?? currentGuid ?? UUID().uuidString
                     
-                    let episode = PodcastEpisode(
-                        id: id,
-                        title: title,
-                        descriptionText: descriptionText,
-                        audioUrl: enclosure,
-                        publicationDate: pubDate,
-                        duration: duration,
-                        state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
-                        feedId: feedId,
-                        fileSize: currentFileSize
-                    )
-                    
-                    episodes.append(episode)
+                    if !seenEpisodeIds.contains(id) {
+                        let episode = PodcastEpisode(
+                            id: id,
+                            title: title,
+                            descriptionText: descriptionText,
+                            audioUrl: enclosure,
+                            publicationDate: pubDate,
+                            duration: duration,
+                            state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
+                            feedId: feedId,
+                            fileSize: currentFileSize
+                        )
+                        
+                        episodes.append(episode)
+                        seenEpisodeIds.insert(id)
+                    }
                 }
                 
                 isParsingItem = false
