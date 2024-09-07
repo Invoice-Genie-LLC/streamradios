@@ -648,7 +648,7 @@ struct PodcastPlayerView: View {
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .multilineTextAlignment(.center)
-                        .lineLimit(2)
+                        .lineLimit(4)
                     
                     if let currentEpisode = podcastPlayer.currentEpisode {
                         Text(formatDate(currentEpisode.publicationDate))
