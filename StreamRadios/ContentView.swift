@@ -397,6 +397,9 @@ struct ContentView: View {
                 self.selectedTab = .all
             }
         }
+        .onAppear {
+                    podcastViewModel.preloadEpisodesForAllFeeds()
+                }
         .onDisappear {
             podcastViewModel.saveContextIfNeeded()
         }
