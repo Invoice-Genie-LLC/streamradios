@@ -39,17 +39,17 @@ struct MiniPlayerView: View {
                     HStack(spacing: 8) {
                         // Progress bar
                         GeometryReader { geometry in
-                            ZStack(alignment: .leading) {
-                                Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
-                                    .frame(height: 3)
+                                    ZStack(alignment: .leading) {
+                                        Rectangle()
+                                            .fill(Color.gray.opacity(0.3))
+                                            .frame(height: 3)
 
-                                Rectangle()
-                                    .fill(Color.accentColor)
-                                    .frame(width: geometry.size.width * CGFloat(podcastPlayer.currentProgress), height: 3)
-                            }
-                        }
-                        .frame(height: 3)
+                                        Rectangle()
+                                            .fill(Color.accentColor)
+                                            .frame(width: max(0, min(geometry.size.width * CGFloat(podcastPlayer.currentProgress), geometry.size.width)), height: 3)
+                                    }
+                                }
+                                .frame(height: 3)
 
                         // Time remaining
                         Text(formatTimeRemaining(currentTime: podcastPlayer.currentTime, duration: podcastPlayer.duration))
