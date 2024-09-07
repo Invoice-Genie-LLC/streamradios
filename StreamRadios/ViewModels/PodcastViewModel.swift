@@ -111,12 +111,20 @@ class PodcastViewModel: ObservableObject {
     @Published var podcastFeedOrder: [String] = []
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
-        self.context = context
-        self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
-        self.backgroundContext.parent = context
-        loadSavedData()
-        loadAllEpisodesProgress()
-    }
+            self.context = context
+            self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+            self.backgroundContext.parent = context
+            
+            // Perform initial loading asynchronously
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.loadSavedData()
+                self?.loadAllEpisodesProgress()
+                
+                DispatchQueue.main.async {
+                    self?.objectWillChange.send()
+                }
+            }
+        }
     
     func fetchAllEpisodes(for feed: PodcastFeed) {
               isLoading = true
@@ -330,30 +338,50 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func loadDownloadedEpisodes() {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "isDownloaded == YES")
-        
-        do {
-            let managedEpisodes = try context.fetch(fetchRequest)
-            downloadedEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
-            os_log("Loaded %d downloaded episodes from Core Data", log: log, type: .info, downloadedEpisodes.count)
-        } catch {
-            os_log("Failed to load downloaded episodes: %@", log: log, type: .error, error.localizedDescription)
+            backgroundContext.perform { [weak self] in
+                guard let self = self else { return }
+                
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "isDownloaded == YES")
+                
+                do {
+                    let managedEpisodes = try self.backgroundContext.fetch(fetchRequest)
+                    let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
+                    
+                    DispatchQueue.main.async {
+                        self.downloadedEpisodes = episodes
+                        os_log("Loaded %d downloaded episodes from Core Data", log: self.log, type: .info, self.downloadedEpisodes.count)
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        os_log("Failed to load downloaded episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                    }
+                }
+            }
         }
-    }
     
     func loadFavoriteEpisodes() {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "isFavorite == YES")
-        
-        do {
-            let managedEpisodes = try context.fetch(fetchRequest)
-            favoriteEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
-            print("Loaded \(favoriteEpisodes.count) favorite episodes from Core Data")
-        } catch {
-            print("Failed to load favorite episodes: \(error)")
+            backgroundContext.perform { [weak self] in
+                guard let self = self else { return }
+                
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "isFavorite == YES")
+                
+                do {
+                    let managedEpisodes = try self.backgroundContext.fetch(fetchRequest)
+                    let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
+                    
+                    DispatchQueue.main.async {
+                        self.favoriteEpisodes = episodes
+                        os_log("Loaded %d favorite episodes from Core Data", log: self.log, type: .info, self.favoriteEpisodes.count)
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        os_log("Failed to load favorite episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                    }
+                }
+            }
         }
-    }
     
     func clearAllPodcastData(completion: @escaping (Bool) -> Void) {
         let group = DispatchGroup()
@@ -471,39 +499,61 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func loadPodcastFeeds() {
-            let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-            do {
-                let managedFeeds = try context.fetch(fetchRequest)
-                podcastFeeds = managedFeeds.map { $0.toPodcastFeed() }
+            backgroundContext.perform { [weak self] in
+                guard let self = self else { return }
                 
-                // Update podcastFeedOrder
-                let existingIds = Set(podcastFeedOrder)
-                for feed in podcastFeeds where !existingIds.contains(feed.id) {
-                    podcastFeedOrder.append(feed.id)
+                let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                do {
+                    let managedFeeds = try self.backgroundContext.fetch(fetchRequest)
+                    let feeds = managedFeeds.map { $0.toPodcastFeed() }
+                    
+                    DispatchQueue.main.async {
+                        self.podcastFeeds = feeds
+                        
+                        // Update podcastFeedOrder
+                        let existingIds = Set(self.podcastFeedOrder)
+                        for feed in self.podcastFeeds where !existingIds.contains(feed.id) {
+                            self.podcastFeedOrder.append(feed.id)
+                        }
+                        
+                        os_log("Loaded %d podcast feeds from Core Data", log: self.log, type: .info, self.podcastFeeds.count)
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        os_log("Failed to load podcast feeds: %@", log: self.log, type: .error, error.localizedDescription)
+                    }
                 }
-                
-                os_log("Loaded %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
-            } catch {
-                os_log("Failed to load podcast feeds: %@", log: log, type: .error, error.localizedDescription)
             }
         }
     
-    func loadAllEpisodes() {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        do {
-            let managedEpisodes = try context.fetch(fetchRequest)
-            self.allEpisodes = managedEpisodes.map { managedEpisode in
-                var episode = managedEpisode.toPodcastEpisode()
-                episode.state.isPlayed = managedEpisode.isPlayed
-                episode.state.progress = managedEpisode.progress
-                return episode
+    private func loadAllEpisodes() {
+        backgroundContext.perform { [weak self] in
+            guard let self = self else { return }
+            
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            do {
+                let managedEpisodes = try self.backgroundContext.fetch(fetchRequest)
+                let episodes = managedEpisodes.map { managedEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    return episode
+                }
+                let downloadedIds = Set(managedEpisodes.compactMap { $0.isDownloaded ? $0.id : nil })
+                
+                DispatchQueue.main.async {
+                    self.allEpisodes = episodes
+                    self.downloadedEpisodeIds = downloadedIds
+                    os_log("Loaded %d episodes, %d downloaded", log: self.log, type: .info, self.allEpisodes.count, self.downloadedEpisodeIds.count)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    os_log("Failed to load episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                }
             }
-            self.downloadedEpisodeIds = Set(managedEpisodes.compactMap { $0.isDownloaded ? $0.id : nil })
-            print("Loaded \(self.allEpisodes.count) episodes, \(self.downloadedEpisodeIds.count) downloaded")
-        } catch {
-            print("Failed to load episodes: \(error)")
         }
     }
+    
     
     func fetchPodcastFeeds() {
             isLoading = true
@@ -1082,32 +1132,49 @@ class PodcastViewModel: ObservableObject {
     }
     
     func loadAllEpisodesProgress() {
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            for managedEpisode in results {
-                if let id = managedEpisode.id {
-                    episodeProgress[id] = managedEpisode.progress
+            backgroundContext.perform { [weak self] in
+                guard let self = self else { return }
+                
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                
+                do {
+                    let results = try self.backgroundContext.fetch(fetchRequest)
+                    var progress: [String: Double] = [:]
+                    var updatedAllEpisodes: [PodcastEpisode] = []
+                    var updatedCurrentEpisodes: [PodcastEpisode] = []
                     
-                    if let index = allEpisodes.firstIndex(where: { $0.id == id }) {
-                        allEpisodes[index].state.progress = managedEpisode.progress
+                    for managedEpisode in results {
+                        if let id = managedEpisode.id {
+                            progress[id] = managedEpisode.progress
+                            
+                            if let index = self.allEpisodes.firstIndex(where: { $0.id == id }) {
+                                var updatedEpisode = self.allEpisodes[index]
+                                updatedEpisode.state.progress = managedEpisode.progress
+                                updatedAllEpisodes.append(updatedEpisode)
+                            }
+                            
+                            if let currentIndex = self.currentEpisodes.firstIndex(where: { $0.id == id }) {
+                                var updatedEpisode = self.currentEpisodes[currentIndex]
+                                updatedEpisode.state.progress = managedEpisode.progress
+                                updatedCurrentEpisodes.append(updatedEpisode)
+                            }
+                        }
                     }
                     
-                    if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == id }) {
-                        currentEpisodes[currentIndex].state.progress = managedEpisode.progress
+                    DispatchQueue.main.async {
+                        self.episodeProgress = progress
+                        self.allEpisodes = updatedAllEpisodes
+                        self.currentEpisodes = updatedCurrentEpisodes
+                        os_log("Loaded progress for %d episodes", log: self.log, type: .info, self.episodeProgress.count)
+                        self.objectWillChange.send()
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        os_log("Failed to load episode progress: %@", log: self.log, type: .error, error.localizedDescription)
                     }
                 }
             }
-            print("Loaded progress for \(episodeProgress.count) episodes")
-        } catch {
-            print("Failed to load episode progress: \(error)")
         }
-        
-        objectWillChange.send()
-    }
-    
-    
 }
 
 class RSSParser: NSObject, XMLParserDelegate {
