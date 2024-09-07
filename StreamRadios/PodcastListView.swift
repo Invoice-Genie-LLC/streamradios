@@ -108,7 +108,7 @@ struct PodcastListView: View {
             }
             .onMove(perform: viewModel.moveFeed)
             Spacer()
-                .frame(height: 80)
+                .frame(height: 100)
                 .listRowInsets(EdgeInsets())
         }
         .listStyle(PlainListStyle())
@@ -131,6 +131,11 @@ struct PodcastListView: View {
                     selectedPodcast: $selectedPodcast,
                     onListButtonTap: {
                         selectedPodcast = podcastPlayer.currentFeed
+                    },
+                    onCloseButtonTap: {
+                        podcastPlayer.pause()
+                        podcastPlayer.currentEpisode = nil
+                        podcastPlayer.currentFeed = nil
                     }
                 )
                 .transition(.move(edge: .bottom))
@@ -651,6 +656,7 @@ struct PodcastPlayerView: View {
     @State private var scrollToEpisodeID: String?
     @Binding var episodeToScrollTo: PodcastEpisode?
     @State private var scrollProxy: ScrollViewProxy?
+    @State private var hasScrolledToInitialEpisode = false
     
     private var sliderRange: ClosedRange<Double> {
         0...max(podcastPlayer.duration, 0.01)
@@ -867,10 +873,20 @@ struct PodcastPlayerView: View {
     }
     
     private func scrollToEpisodeIfNeeded() {
-            if let episode = episodeToScrollTo {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    withAnimation {
-                        scrollProxy?.scrollTo(episode.id, anchor: .top)
+            Task {
+                // Add a short delay to ensure the view is fully loaded
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+                await MainActor.run {
+                    if let episodeToScrollTo = episodeToScrollTo {
+                        withAnimation {
+                            scrollProxy?.scrollTo(episodeToScrollTo.id, anchor: .top)
+                        }
+                    } else if let initialID = initialScrollToEpisodeID, !hasScrolledToInitialEpisode {
+                        withAnimation {
+                            scrollProxy?.scrollTo(initialID, anchor: .top)
+                        }
+                        hasScrolledToInitialEpisode = true
                     }
                 }
             }

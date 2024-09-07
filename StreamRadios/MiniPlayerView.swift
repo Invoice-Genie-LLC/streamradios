@@ -14,8 +14,9 @@ struct MiniPlayerView: View {
     @Environment(\.colorScheme) var colorScheme
     @Binding var selectedPodcast: PodcastFeed?
     var onListButtonTap: (() -> Void)?
+    var onCloseButtonTap: (() -> Void)?  // New closure for close button action
 
-    private let height: CGFloat = 70 // Increased height
+    private let height: CGFloat = 70
     private let cornerRadius: CGFloat = 20
     private let horizontalPadding: CGFloat = 16
 
@@ -32,24 +33,24 @@ struct MiniPlayerView: View {
                     // Episode title
                     Text(episode.title)
                         .font(.system(size: 15, weight: .semibold))
-                        .lineLimit(2) // Allow two lines for the title
+                        .lineLimit(2)
                         .foregroundColor(.primary)
 
                     // Progress bar and time remaining
                     HStack(spacing: 8) {
                         // Progress bar
                         GeometryReader { geometry in
-                                    ZStack(alignment: .leading) {
-                                        Rectangle()
-                                            .fill(Color.gray.opacity(0.3))
-                                            .frame(height: 3)
+                            ZStack(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(height: 3)
 
-                                        Rectangle()
-                                            .fill(Color.accentColor)
-                                            .frame(width: max(0, min(geometry.size.width * CGFloat(podcastPlayer.currentProgress), geometry.size.width)), height: 3)
-                                    }
-                                }
-                                .frame(height: 3)
+                                Rectangle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: max(0, min(geometry.size.width * CGFloat(podcastPlayer.currentProgress), geometry.size.width)), height: 3)
+                            }
+                        }
+                        .frame(height: 3)
 
                         // Time remaining
                         Text(formatTimeRemaining(currentTime: podcastPlayer.currentTime, duration: podcastPlayer.duration))
@@ -60,7 +61,7 @@ struct MiniPlayerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Playback controls
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Button(action: {
                         onListButtonTap?()
                     }) {
@@ -82,6 +83,15 @@ struct MiniPlayerView: View {
                     Button(action: podcastPlayer.skipForward) {
                         Image(systemName: "goforward.30")
                             .font(.system(size: 18))
+                    }
+
+                    // New close button
+                    Button(action: {
+                        onCloseButtonTap?()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.gray)
                     }
                 }
                 .foregroundColor(.primary)
