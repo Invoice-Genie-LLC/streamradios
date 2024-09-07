@@ -32,7 +32,18 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             max(0, duration - currentTime)
         }
     
-    private init() {}
+    private init() {
+           setupAudioSession()
+       }
+    
+    private func setupAudioSession() {
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                os_log("Failed to set up audio session: %@", log: log, type: .error, error.localizedDescription)
+            }
+        }
     
     private func updatePlaybackInfo() {
            guard let player = player else { return }
@@ -65,6 +76,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         // Stop radio playback if it's playing
         stopRadioPlayback()
+        
+        // Activate audio session for background playback
+                do {
+                    try AVAudioSession.sharedInstance().setActive(true)
+                } catch {
+                    os_log("Failed to activate audio session: %@", log: log, type: .error, error.localizedDescription)
+                }
         
         var playUrl: URL?
         
@@ -119,7 +137,27 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Now play the episode
         play()
         isPlaying = true
+        setupBackgroundPlayback()
     }
+    
+    private func setupBackgroundPlayback() {
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.defaultToSpeaker, .mixWithOthers])
+                try AVAudioSession.sharedInstance().setActive(true)
+                
+                // Enable background audio
+                let audioSession = AVAudioSession.sharedInstance()
+                do {
+                    try audioSession.setCategory(.playback, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
+                    try audioSession.setActive(true)
+                    os_log("Successfully set up background audio", log: log, type: .info)
+                } catch {
+                    os_log("Failed to set up background audio: %@", log: log, type: .error, error.localizedDescription)
+                }
+            } catch {
+                os_log("Error setting up audio session: %@", log: log, type: .error, error.localizedDescription)
+            }
+        }
     
     private func updateDuration() {
             guard let currentItem = player?.currentItem else { return }
@@ -201,6 +239,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         updateNowPlayingInfo()
         objectWillChange.send()
+        
+        do {
+                    try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                } catch {
+                    os_log("Failed to deactivate audio session: %@", log: log, type: .error, error.localizedDescription)
+                }
     }
     
     func togglePlayPause() {
