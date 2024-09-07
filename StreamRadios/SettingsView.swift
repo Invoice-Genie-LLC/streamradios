@@ -75,26 +75,9 @@ struct SettingsView: View {
                 guard let url = url else { return }
                 handleImport(url: url)
             }
-            .sheet(isPresented: $showPodcastPlayerSheet) {
-                if let podcast = selectedPodcast {
-                    PodcastPlayerView(
-                        viewModel: podcastViewModel,
-                        feed: podcast,
-                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
-                        podcastPlayer: podcastPlayer,
-                        episodeToScrollTo: Binding(
-                            get: {
-                                podcastPlayer.currentEpisode
-                            },
-                            set: { _ in }
-                        )
-                        
-                    )
-                }
-            }
             VStack {
                 Spacer()
-                if podcastPlayer.isPlaying, let episode = podcastPlayer.currentEpisode {
+                if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                     MiniPlayerView(
                         podcastPlayer: podcastPlayer,
                         viewModel: podcastViewModel,
@@ -106,27 +89,31 @@ struct SettingsView: View {
                                 scrollToEpisodeID = podcastPlayer.currentEpisode?.id
                                 showPodcastPlayerSheet = true
                             }
+                        },
+                        onCloseButtonTap: {
+                            podcastPlayer.pause()
+                            podcastPlayer.currentEpisode = nil
+                            podcastPlayer.currentFeed = nil
                         }
                     )
                     .transition(.move(edge: .bottom))
                 }
-            }
-            .zIndex(1)
+            }.zIndex(1)
 
-            .sheet(isPresented: $showPodcastPlayerSheet) {
-                if let podcast = selectedPodcast {
-                    PodcastPlayerView(
-                        viewModel: podcastViewModel,
-                        feed: podcast,
-                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
-                        podcastPlayer: podcastPlayer,
-                        episodeToScrollTo: Binding(
-                            get: { podcastPlayer.currentEpisode },
-                            set: { _ in }
+                .sheet(isPresented: $showPodcastPlayerSheet) {
+                    if let podcast = selectedPodcast {
+                        PodcastPlayerView(
+                            viewModel: podcastViewModel,
+                            feed: podcast,
+                            initialScrollToEpisodeID: scrollToEpisodeID,
+                            podcastPlayer: podcastPlayer,
+                            episodeToScrollTo: Binding(
+                                get: { podcastPlayer.currentEpisode },
+                                set: { _ in }
+                            )
                         )
-                    )
+                    }
                 }
-            }
         
             
             if alertManager.showCustomAlert {
