@@ -109,6 +109,8 @@ class PodcastViewModel: ObservableObject {
     private var backgroundContext: NSManagedObjectContext
     private let dataStore = DataStore.shared
     @Published var podcastFeedOrder: [String] = []
+    @Published var preloadedEpisodes: [String: [PodcastEpisode]] = [:]
+
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
@@ -127,6 +129,21 @@ class PodcastViewModel: ObservableObject {
             }
         }
     }
+    
+    func preloadEpisodesForAllFeeds() {
+            for feed in podcastFeeds {
+                fetchEpisodes(for: feed) { result in
+                    switch result {
+                    case .success(let episodes):
+                        DispatchQueue.main.async {
+                            self.preloadedEpisodes[feed.id] = episodes
+                        }
+                    case .failure(let error):
+                        print("Failed to preload episodes for feed \(feed.title): \(error)")
+                    }
+                }
+            }
+        }
     
     func fetchAllEpisodes(for feed: PodcastFeed) {
               isLoading = true
@@ -647,6 +664,10 @@ class PodcastViewModel: ObservableObject {
     }
     
     func fetchEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
+        if let preloadedEpisodes = preloadedEpisodes[feed.id] {
+                   completion(.success(preloadedEpisodes))
+                   return
+               }
         os_log("Fetching episodes for feed: %@", log: log, type: .info, feed.title)
         isLoading = true
         fetchRSSFeed(for: feed) { result in
