@@ -80,8 +80,15 @@ struct SettingsView: View {
                     PodcastPlayerView(
                         viewModel: podcastViewModel,
                         feed: podcast,
-                        podcastPlayer: podcastPlayer
-                        // initialScrollToEpisodeID: scrollToEpisodeID
+                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
+                        podcastPlayer: podcastPlayer,
+                        episodeToScrollTo: Binding(
+                            get: {
+                                podcastPlayer.currentEpisode
+                            },
+                            set: { _ in }
+                        )
+                        
                     )
                 }
             }
@@ -105,6 +112,21 @@ struct SettingsView: View {
                 }
             }
             .zIndex(1)
+
+            .sheet(isPresented: $showPodcastPlayerSheet) {
+                if let podcast = selectedPodcast {
+                    PodcastPlayerView(
+                        viewModel: podcastViewModel,
+                        feed: podcast,
+                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
+                        podcastPlayer: podcastPlayer,
+                        episodeToScrollTo: Binding(
+                            get: { podcastPlayer.currentEpisode },
+                            set: { _ in }
+                        )
+                    )
+                }
+            }
         
             
             if alertManager.showCustomAlert {

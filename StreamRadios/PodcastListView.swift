@@ -25,114 +25,49 @@ struct PodcastListView: View {
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     
-    var filteredPodcasts: [PodcastFeed] {
-        if searchText.isEmpty {
-            return viewModel.podcastFeeds
-        } else {
-            return viewModel.podcastFeeds.filter { feed in
-                feed.title.lowercased().contains(searchText.lowercased()) ||
-                (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
-            }
-        }
-    }
-    
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Tap on a podcast image to explore its episodes and discover more content.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 16)
+                    instructionText
                     searchBar
-                    List {
-                        ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
-                            if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
-                               filteredPodcasts.contains(where: { $0.id == feedId }) {
-                                PodcastRowView(
-                                    feed: feed,
-                                    isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                                    onPlay: { playLatestEpisode(for: feed) },
-                                    onStop: { podcastPlayer.togglePlayPause() },
-                                    onTap: { selectedPodcast = feed },
-                                    isExpanded: Binding(
-                                        get: { expandedFeedId == feed.id },
-                                        set: { isExpanded in
-                                            expandedFeedId = isExpanded ? feed.id : nil
-                                        }
-                                    )
-                                )
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        podcastToDelete = feed
-                                        showingDeleteConfirmation = true
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                            }
-                        }
-                        .onMove(perform: viewModel.moveFeed)
-                        Spacer()
-                            .frame(height: 80)
-                            .listRowInsets(EdgeInsets())
-                    }
-                    .listStyle(PlainListStyle())
-                }
-                .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
-                    Button("Cancel", role: .cancel) {}
-                    Button("Delete", role: .destructive) {
-                        viewModel.deletePodcastFeed(podcast)
-                    }
-                } message: { podcast in
-                    Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
+                    podcastList
                 }
                 .navigationTitle("Podcasts")
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(action: {
-                            isEditing.toggle()
-                        }) {
-                            Text(isEditing ? "Done" : "Edit")
-                        }
-                    }
-                    ToolbarItemGroup(placement: .navigationBarTrailing) {
-                        if !isEditing {
-                            Button(action: viewModel.sortFeedsAlphabetically) {
-                                Image(systemName: "arrow.up.arrow.down")
-                            }
-                            Button(action: { showingAddPodcast = true }) {
-                                Image(systemName: "plus")
-                            }
-                        }
-                    }
+                    ToolbarItems(isEditing: $isEditing, onAddTapped: { showingAddPodcast = true }, onSortTapped: viewModel.sortFeedsAlphabetically)
                 }
-                .onAppear {
-                    os_log("PodcastListView appeared", log: log, type: .info)
-                    viewModel.loadFeedOrder()
-                    viewModel.fetchPodcastFeeds()
-                }
+                .onAppear(perform: onAppear)
                 .sheet(isPresented: $showingAddPodcast) {
                     AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
                 }
                 .sheet(item: $selectedPodcast) { podcast in
-                    PodcastPlayerView(viewModel: viewModel, feed: podcast, podcastPlayer: podcastPlayer)
+                    PodcastPlayerView(
+                        viewModel: viewModel,
+                        feed: podcast,
+                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
+                        podcastPlayer: podcastPlayer,
+                        episodeToScrollTo: Binding(
+                            get: {
+                                podcastPlayer.currentEpisode
+                            },
+                            set: { _ in }
+                        )
+                       
+                    )
                 }
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 
-                if podcastPlayer.currentEpisode != nil {
-                    MiniPlayerView(
-                        podcastPlayer: podcastPlayer,
-                        viewModel: viewModel,
-                        selectedPodcast: $selectedPodcast,
-                        onListButtonTap: {
-                            selectedPodcast = podcastPlayer.currentFeed
-                        }
-                    )
-                    .transition(.move(edge: .bottom))
-                }
+                miniPlayer
             }
         }
+    }
+    
+    private var instructionText: some View {
+        Text("Tap on a podcast image to explore its episodes and discover more content.")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 16)
     }
     
     private var searchBar: some View {
@@ -141,6 +76,72 @@ struct PodcastListView: View {
             .padding(.horizontal)
             .autocapitalization(.none)
             .disableAutocorrection(true)
+    }
+    
+    private var podcastList: some View {
+        List {
+            ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
+                if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
+                   filteredPodcasts.contains(where: { $0.id == feedId }) {
+                    PodcastRowView(
+                        feed: feed,
+                        isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                        onPlay: { playLatestEpisode(for: feed) },
+                        onStop: { podcastPlayer.togglePlayPause() },
+                        onTap: { selectedPodcast = feed },
+                        isExpanded: Binding(
+                            get: { expandedFeedId == feed.id },
+                            set: { isExpanded in
+                                expandedFeedId = isExpanded ? feed.id : nil
+                            }
+                        )
+                    )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            podcastToDelete = feed
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .onMove(perform: viewModel.moveFeed)
+            Spacer()
+                .frame(height: 80)
+                .listRowInsets(EdgeInsets())
+        }
+        .listStyle(PlainListStyle())
+        .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                viewModel.deletePodcastFeed(podcast)
+            }
+        } message: { podcast in
+            Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
+        }
+    }
+    
+    private var miniPlayer: some View {
+        Group {
+            if podcastPlayer.currentEpisode != nil {
+                MiniPlayerView(
+                    podcastPlayer: podcastPlayer,
+                    viewModel: viewModel,
+                    selectedPodcast: $selectedPodcast,
+                    onListButtonTap: {
+                        selectedPodcast = podcastPlayer.currentFeed
+                    }
+                )
+                .transition(.move(edge: .bottom))
+            }
+        }
+    }
+    
+    private func onAppear() {
+        os_log("PodcastListView appeared", log: log, type: .info)
+        viewModel.loadFeedOrder()
+        viewModel.fetchPodcastFeeds()
     }
     
     private func addPodcast() {
@@ -160,6 +161,43 @@ struct PodcastListView: View {
                 }
             case .failure(let error):
                 os_log("Failed to fetch episodes: %@", log: log, type: .error, error.localizedDescription)
+            }
+        }
+    }
+    
+    var filteredPodcasts: [PodcastFeed] {
+        if searchText.isEmpty {
+            return viewModel.podcastFeeds
+        } else {
+            return viewModel.podcastFeeds.filter { feed in
+                feed.title.lowercased().contains(searchText.lowercased()) ||
+                (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
+            }
+        }
+    }
+}
+
+struct ToolbarItems: ToolbarContent {
+    @Binding var isEditing: Bool
+    let onAddTapped: () -> Void
+    let onSortTapped: () -> Void
+    
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button(action: {
+                isEditing.toggle()
+            }) {
+                Text(isEditing ? "Done" : "Edit")
+            }
+        }
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            if !isEditing {
+                Button(action: onSortTapped) {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                Button(action: onAddTapped) {
+                    Image(systemName: "plus")
+                }
             }
         }
     }
@@ -604,15 +642,19 @@ struct PodcastPlayerView: View {
     @ObservedObject var viewModel: PodcastViewModel
     @Environment(\.presentationMode) var presentationMode
     let feed: PodcastFeed
+    let initialScrollToEpisodeID: String?
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var selectedTab = 0
     @State private var seekPosition: Double = 0
     @State private var isSeekingManually = false
     @State private var debounceTimer: Timer?
     @State private var scrollToEpisodeID: String?
+    @Binding var episodeToScrollTo: PodcastEpisode?
+    @State private var scrollProxy: ScrollViewProxy?
+    
     private var sliderRange: ClosedRange<Double> {
-           0...max(podcastPlayer.duration, 0.01)
-       }
+        0...max(podcastPlayer.duration, 0.01)
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -621,7 +663,6 @@ struct PodcastPlayerView: View {
                 Button(action: updateViewModelAndDismiss) {
                     Image(systemName: "chevron.left")
                         .foregroundColor(.primary)
-                    
                 }
                 Spacer()
                 Text(feed.title)
@@ -660,23 +701,23 @@ struct PodcastPlayerView: View {
                 
                 // Progress slider
                 ProgressSlider(
-                               value: $seekPosition,
-                               inRange: sliderRange,
-                               onEditingChanged: { editing in
-                                   isSeekingManually = editing
-                                   if !editing {
-                                       podcastPlayer.seek(to: seekPosition)
-                                   }
-                               }
-                           )
-                           .frame(height: 4)
-                           .padding(.horizontal)
+                    value: $seekPosition,
+                    inRange: sliderRange,
+                    onEditingChanged: { editing in
+                        isSeekingManually = editing
+                        if !editing {
+                            podcastPlayer.seek(to: seekPosition)
+                        }
+                    }
+                )
+                .frame(height: 4)
+                .padding(.horizontal)
                 
                 // Time labels
                 HStack {
                     Text(formatTime(podcastPlayer.currentTime))
-                                    Spacer()
-                                    Text("-" + formatTime(podcastPlayer.remainingTime))
+                    Spacer()
+                    Text("-" + formatTime(podcastPlayer.remainingTime))
                 }
                 .font(.caption2)
                 .foregroundColor(.secondary)
@@ -711,7 +752,13 @@ struct PodcastPlayerView: View {
             
             // Scrollable episode list
             ScrollView {
-                episodeList
+                ScrollViewReader { proxy in
+                    episodeList
+                        .onAppear {
+                            scrollProxy = proxy
+                            scrollToEpisodeIfNeeded()
+                        }
+                }
             }
         }
         .onDisappear {
@@ -722,10 +769,13 @@ struct PodcastPlayerView: View {
             seekPosition = podcastPlayer.currentTime
         }
         .onReceive(podcastPlayer.$currentTime) { _ in
-                    if !isSeekingManually {
-                        seekPosition = podcastPlayer.currentTime
-                    }
-                }
+            if !isSeekingManually {
+                seekPosition = podcastPlayer.currentTime
+            }
+        }
+        .onChange(of: episodeToScrollTo) { _ in
+            scrollToEpisodeIfNeeded()
+        }
         .navigationBarHidden(true)
     }
     
@@ -755,12 +805,22 @@ struct PodcastPlayerView: View {
                     viewModel: viewModel,
                     podcastPlayer: podcastPlayer
                 )
-                .id(episode.compositeID)
+                .id(episode.id)
             }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
     }
+    
+    private func scrollToInitialEpisode() {
+            if let initialID = initialScrollToEpisodeID {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    withAnimation {
+                        scrollProxy?.scrollTo(initialID, anchor: .top)
+                    }
+                }
+            }
+        }
     
     private func updateViewModelAndDismiss() {
         if let currentEpisode = podcastPlayer.currentEpisode {
@@ -805,6 +865,16 @@ struct PodcastPlayerView: View {
             podcastPlayer.playEpisode(episode, feed: feed)
         }
     }
+    
+    private func scrollToEpisodeIfNeeded() {
+            if let episode = episodeToScrollTo {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    withAnimation {
+                        scrollProxy?.scrollTo(episode.id, anchor: .top)
+                    }
+                }
+            }
+        }
 }
 
 private func formatTime(_ time: Double) -> String {
@@ -812,6 +882,9 @@ private func formatTime(_ time: Double) -> String {
     let seconds = Int(time) % 60
     return String(format: "%02d:%02d", minutes, seconds)
 }
+
+
+
 
 private func formatDate(_ date: Date) -> String {
     let formatter = DateFormatter()
