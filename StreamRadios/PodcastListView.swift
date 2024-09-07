@@ -372,12 +372,12 @@ struct EpisodeRowView: View {
                         onPlay()
                     }
                 }) {
-                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(isPlaying ? .blue : .green)
-                }
-                .frame(width: buttonSize, height: buttonSize)
+                    Image(systemName: episode.state.isPlayed || progress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
+                            .resizable()
+                            .frame(width: buttonSize, height: buttonSize)
+                            .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .blue : (isPlaying ? .blue : .green))
+                    }
+                    .frame(width: buttonSize, height: buttonSize)
                 
                 // Episode info
                 VStack(alignment: .leading, spacing: 2) {
