@@ -109,8 +109,11 @@ class PodcastViewModel: ObservableObject {
     private var backgroundContext: NSManagedObjectContext
     private let dataStore = DataStore.shared
     @Published var podcastFeedOrder: [String] = []
-    @Published var preloadedEpisodes: [String: [PodcastEpisode]] = [:]
-
+    @Published var isLoadingEpisodes = false
+       private var episodeCache: [String: [PodcastEpisode]] = [:]
+    private let episodeListKey = "PodcastEpisodeList"
+        private let bookmarkStatusKey = "PodcastBookmarkStatus"
+        private let downloadStatusKey = "PodcastDownloadStatus"
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
@@ -129,21 +132,6 @@ class PodcastViewModel: ObservableObject {
             }
         }
     }
-    
-    func preloadEpisodesForAllFeeds() {
-            for feed in podcastFeeds {
-                fetchEpisodes(for: feed) { result in
-                    switch result {
-                    case .success(let episodes):
-                        DispatchQueue.main.async {
-                            self.preloadedEpisodes[feed.id] = episodes
-                        }
-                    case .failure(let error):
-                        print("Failed to preload episodes for feed \(feed.title): \(error)")
-                    }
-                }
-            }
-        }
     
     func fetchAllEpisodes(for feed: PodcastFeed) {
               isLoading = true
@@ -664,65 +652,152 @@ class PodcastViewModel: ObservableObject {
     }
     
     func fetchEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
-        if let preloadedEpisodes = preloadedEpisodes[feed.id] {
-                   completion(.success(preloadedEpisodes))
-                   return
-               }
-        os_log("Fetching episodes for feed: %@", log: log, type: .info, feed.title)
-        isLoading = true
-        fetchRSSFeed(for: feed) { result in
-            DispatchQueue.main.async {
-                self.isLoading = false
+            os_log("Fetching episodes for feed: %@", log: log, type: .info, feed.title)
+            isLoadingEpisodes = true
+
+            if let savedEpisodes = loadEpisodesFromUserDefaults(for: feed.id) {
+                os_log("Loaded episodes from UserDefaults for feed: %@", log: log, type: .info, feed.title)
+                let updatedEpisodes = applyStoredStatuses(to: savedEpisodes, feedId: feed.id)
+                updateEpisodes(updatedEpisodes, for: feed)
+                isLoadingEpisodes = false
+                completion(.success(updatedEpisodes))
+                
+                // Fetch new episodes in the background
+                fetchNewEpisodes(for: feed)
+            } else {
+                // If no saved episodes, fetch from RSS
+                fetchRSSFeed(for: feed) { result in
+                    DispatchQueue.main.async {
+                        self.isLoadingEpisodes = false
+                        switch result {
+                        case .success(let parsedFeed):
+                            os_log("Successfully fetched episodes for feed: %@", log: self.log, type: .info, feed.title)
+                            let updatedEpisodes = self.applyStoredStatuses(to: parsedFeed.episodes, feedId: feed.id)
+                            self.updateEpisodes(updatedEpisodes, for: feed)
+                            self.saveEpisodesToUserDefaults(updatedEpisodes, for: feed.id)
+                            self.saveEpisodeStatuses(updatedEpisodes, for: feed.id)
+                            completion(.success(updatedEpisodes))
+                        case .failure(let error):
+                            os_log("Failed to fetch episodes for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                            self.error = error.localizedDescription
+                            completion(.failure(error))
+                        }
+                    }
+                }
+            }
+        }
+    
+    private func applyStoredStatuses(to episodes: [PodcastEpisode], feedId: String) -> [PodcastEpisode] {
+            let bookmarkStatus = loadBookmarkStatus(for: feedId)
+            let downloadStatus = loadDownloadStatus(for: feedId)
+            
+            return episodes.map { episode in
+                var updatedEpisode = episode
+                updatedEpisode.state.isFavorite = bookmarkStatus[episode.id] ?? false
+                updatedEpisode.state.isDownloaded = downloadStatus[episode.id] ?? false
+                return updatedEpisode
+            }
+        }
+    
+    private func saveEpisodeStatuses(_ episodes: [PodcastEpisode], for feedId: String) {
+            let bookmarkStatus = episodes.reduce(into: [String: Bool]()) { $0[$1.id] = $1.state.isFavorite }
+            let downloadStatus = episodes.reduce(into: [String: Bool]()) { $0[$1.id] = $1.state.isDownloaded }
+            
+            saveBookmarkStatus(bookmarkStatus, for: feedId)
+            saveDownloadStatus(downloadStatus, for: feedId)
+        }
+    
+    private func loadBookmarkStatus(for feedId: String) -> [String: Bool] {
+            return userDefaults.dictionary(forKey: bookmarkStatusKey(for: feedId)) as? [String: Bool] ?? [:]
+        }
+
+        private func saveBookmarkStatus(_ status: [String: Bool], for feedId: String) {
+            userDefaults.set(status, forKey: bookmarkStatusKey(for: feedId))
+        }
+
+        private func loadDownloadStatus(for feedId: String) -> [String: Bool] {
+            return userDefaults.dictionary(forKey: downloadStatusKey(for: feedId)) as? [String: Bool] ?? [:]
+        }
+
+        private func saveDownloadStatus(_ status: [String: Bool], for feedId: String) {
+            userDefaults.set(status, forKey: downloadStatusKey(for: feedId))
+        }
+
+        private func bookmarkStatusKey(for feedId: String) -> String {
+            return "\(bookmarkStatusKey)_\(feedId)"
+        }
+
+        private func downloadStatusKey(for feedId: String) -> String {
+            return "\(downloadStatusKey)_\(feedId)"
+        }
+    
+    private func fetchNewEpisodes(for feed: PodcastFeed) {
+            fetchRSSFeed(for: feed) { result in
                 switch result {
                 case .success(let parsedFeed):
-                    os_log("Successfully fetched episodes for feed: %@", log: self.log, type: .info, feed.title)
-                    self.updateEpisodes(for: parsedFeed)
-                    self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
-                    completion(.success(parsedFeed.episodes))
-                case .failure(let error):
-                    os_log("Failed to fetch episodes for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
-                    self.error = error.localizedDescription
-                    completion(.failure(error))
-                }
-            }
-        }
-    }
-    
-    
-    private func updateEpisodes(for feed: PodcastFeed) {
-            var updatedEpisodes = [PodcastEpisode]()
-            var seenIds = Set<String>()
-            
-            for var episode in feed.episodes {
-                if seenIds.contains(episode.id) {
-                    episode.id = UUID().uuidString
-                }
-                seenIds.insert(episode.id)
-                
-                // Validate and correct duration
-                episode.duration = max(episode.duration, 0)
-                
-                if let existingIndex = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                    var existingEpisode = allEpisodes[existingIndex]
-                    if existingEpisode.state.isDownloaded {
-                        episode.state.isDownloaded = true
-                        episode.localFilePath = existingEpisode.localFilePath
+                    DispatchQueue.main.async {
+                        let newEpisodes = self.mergeNewEpisodes(parsedFeed.episodes, with: self.allEpisodes.filter { $0.feedId == feed.id })
+                        self.updateEpisodes(newEpisodes, for: feed)
+                        self.saveEpisodesToUserDefaults(newEpisodes, for: feed.id)
+                        self.objectWillChange.send()
                     }
-                    
-                    existingEpisode = episode
-                    allEpisodes[existingIndex] = existingEpisode
-                    updatedEpisodes.append(existingEpisode)
-                } else {
-                    allEpisodes.append(episode)
-                    updatedEpisodes.append(episode)
+                case .failure(let error):
+                    os_log("Failed to fetch new episodes for feed: %@, error: %@", log: self.log, type: .error, feed.title, error.localizedDescription)
                 }
             }
-            
-            currentEpisodes = allEpisodes.filter { $0.feedId == feed.id }
-            
-            objectWillChange.send()
         }
     
+    private func mergeNewEpisodes(_ newEpisodes: [PodcastEpisode], with existingEpisodes: [PodcastEpisode]) -> [PodcastEpisode] {
+            var mergedEpisodes = existingEpisodes
+            for newEpisode in newEpisodes {
+                if !mergedEpisodes.contains(where: { $0.id == newEpisode.id }) {
+                    mergedEpisodes.insert(newEpisode, at: 0)
+                }
+            }
+            return mergedEpisodes
+        }
+    
+    func clearCache(for feedId: String? = nil) {
+            if let feedId = feedId {
+                episodeCache.removeValue(forKey: feedId)
+            } else {
+                episodeCache.removeAll()
+            }
+        }
+    
+    
+    private func updateEpisodes(_ episodes: [PodcastEpisode], for feed: PodcastFeed) {
+           allEpisodes.removeAll { $0.feedId == feed.id }
+           allEpisodes.append(contentsOf: episodes)
+           updateFilteredEpisodes(for: feed.id, selectedTab: currentTab)
+       }
+    
+    private func loadEpisodesFromUserDefaults(for feedId: String) -> [PodcastEpisode]? {
+            guard let data = userDefaults.data(forKey: episodeListKey(for: feedId)) else { return nil }
+            return try? JSONDecoder().decode([PodcastEpisode].self, from: data)
+        }
+
+        private func saveEpisodesToUserDefaults(_ episodes: [PodcastEpisode], for feedId: String) {
+            guard let data = try? JSONEncoder().encode(episodes) else { return }
+            userDefaults.set(data, forKey: episodeListKey(for: feedId))
+        }
+    
+    private func episodeListKey(for feedId: String) -> String {
+            return "\(episodeListKey)_\(feedId)"
+        }
+    
+    func clearSavedEpisodes(for feedId: String? = nil) {
+            if let feedId = feedId {
+                userDefaults.removeObject(forKey: episodeListKey(for: feedId))
+                userDefaults.removeObject(forKey: bookmarkStatusKey(for: feedId))
+                userDefaults.removeObject(forKey: downloadStatusKey(for: feedId))
+            } else {
+                let allKeys = userDefaults.dictionaryRepresentation().keys
+                for key in allKeys where key.hasPrefix(episodeListKey) || key.hasPrefix(bookmarkStatusKey) || key.hasPrefix(downloadStatusKey) {
+                    userDefaults.removeObject(forKey: key)
+                }
+            }
+        }
     
     private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
         os_log("Starting RSS feed fetch for feed: %@", log: log, type: .info, feed.title)
@@ -986,11 +1061,28 @@ class PodcastViewModel: ObservableObject {
     
     
     func toggleFavorite(for episode: PodcastEpisode) {
-        var updatedEpisode = episode
-        updatedEpisode.state.isFavorite.toggle()
-        updateEpisodeInLists(updatedEpisode)
-        saveEpisodeToCoreData(updatedEpisode)
-    }
+            var updatedEpisode = episode
+            updatedEpisode.state.isFavorite.toggle()
+            updateEpisodeInLists(updatedEpisode)
+            saveEpisodeToCoreData(updatedEpisode)
+            
+            // Update and save bookmark status
+            var bookmarkStatus = loadBookmarkStatus(for: episode.feedId)
+            bookmarkStatus[episode.id] = updatedEpisode.state.isFavorite
+            saveBookmarkStatus(bookmarkStatus, for: episode.feedId)
+        }
+    
+    func updateEpisodeDownloadStatus(_ episode: PodcastEpisode, isDownloaded: Bool) {
+            var updatedEpisode = episode
+            updatedEpisode.state.isDownloaded = isDownloaded
+            updateEpisodeInLists(updatedEpisode)
+            saveEpisodeToCoreData(updatedEpisode)
+            
+            // Update and save download status
+            var downloadStatus = loadDownloadStatus(for: episode.feedId)
+            downloadStatus[episode.id] = isDownloaded
+            saveDownloadStatus(downloadStatus, for: episode.feedId)
+        }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
         backgroundContext.perform { [weak self] in

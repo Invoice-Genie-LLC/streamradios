@@ -705,7 +705,6 @@ struct PodcastPlayerView: View {
                 }
                 .padding(.horizontal)
                 
-                
                 // Progress slider
                 ProgressSlider(
                     value: $seekPosition,
@@ -757,33 +756,31 @@ struct PodcastPlayerView: View {
             // Episode filter tabs
             episodeFilterTabs
             
-            // Scrollable episode list
-            ScrollView {
-                            ScrollViewReader { proxy in
-                                VStack {
-                                    if let episodes = viewModel.preloadedEpisodes[feed.id] {
-                                        episodeList(episodes: episodes)
-                                    } else {
-                                        ProgressView()
+            Group {
+                            if viewModel.isLoadingEpisodes {
+                                ProgressView("Loading episodes...")
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                ScrollView {
+                                    ScrollViewReader { proxy in
+                                        episodeList
                                             .onAppear {
-                                                viewModel.fetchEpisodes(for: feed) { result in
-                                                    switch result {
-                                                    case .success(let fetchedEpisodes):
-                                                        viewModel.preloadedEpisodes[feed.id] = fetchedEpisodes
-                                                    case .failure(let error):
-                                                        print("Failed to fetch episodes: \(error)")
-                                                    }
-                                                }
+                                                scrollProxy = proxy
+                                                scrollToEpisodeIfNeeded()
                                             }
                                     }
-                                }
-                                .onAppear {
-                                    scrollProxy = proxy
-                                    scrollToEpisodeIfNeeded()
                                 }
                             }
                         }
                     }
+                    .onDisappear {
+                        viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
+                    }
+                    .onAppear {
+                        loadEpisodes()
+                    }
+            
+        
         .onAppear {
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
             seekPosition = podcastPlayer.currentTime
@@ -798,24 +795,17 @@ struct PodcastPlayerView: View {
         }
         .navigationBarHidden(true)
     }
-    
-    @ViewBuilder
-        private func episodeList(episodes: [PodcastEpisode]) -> some View {
-            LazyVStack(spacing: 8) {
-                ForEach(episodes) { episode in
-                    EpisodeRowView(
-                        episode: episode,
-                        isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                        onPlay: { playEpisode(episode) },
-                        onStop: { podcastPlayer.togglePlayPause() },
-                        viewModel: viewModel,
-                        podcastPlayer: podcastPlayer
-                    )
-                    .id(episode.id)
+
+    private func loadEpisodes() {
+            viewModel.fetchEpisodes(for: feed) { result in
+                switch result {
+                case .success(let episodes):
+                    // Episodes are now automatically updated in the viewModel with correct statuses
+                    print("Loaded \(episodes.count) episodes with bookmark and download statuses")
+                case .failure(let error):
+                    print("Failed to load episodes: \(error.localizedDescription)")
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
         }
     
     private var episodeFilterTabs: some View {
