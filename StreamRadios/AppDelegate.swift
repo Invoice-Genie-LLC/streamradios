@@ -38,9 +38,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             
             checkBackgroundRefreshStatus()
             
-            radioPlayer.podcastPlayer = podcastPlayer
-            podcastPlayer.radioPlayer = radioPlayer
-            
             // Check if the app was launched due to an alarm
             if let launchOptions = launchOptions,
                launchOptions[UIApplication.LaunchOptionsKey.location] != nil {
