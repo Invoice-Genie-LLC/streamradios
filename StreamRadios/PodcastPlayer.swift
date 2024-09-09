@@ -28,12 +28,20 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var playerItemObserver: NSKeyValueObservation?
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastPlayer")
     weak var viewModel: PodcastViewModel?
+    private var reachability: Reachability?
+    @Published var isAttemptingReconnection: Bool = false
+    private var reconnectionTimer: Timer?
+        private let maxReconnectionAttempts = 5
+        private var currentReconnectionAttempt = 0
     var remainingTime: Double {
             max(0, duration - currentTime)
         }
     
     private init() {
-           setupAudioSession()
+        setupAudioSession()
+               setupReachability()
+               setupRemoteCommandCenter()
+               setupInterruptionHandling()
        }
     
     private func setupAudioSession() {
@@ -44,6 +52,206 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 os_log("Failed to set up audio session: %@", log: log, type: .error, error.localizedDescription)
             }
         }
+    
+    private func setupReachability() {
+           do {
+               reachability = try Reachability()
+               reachability?.whenReachable = { [weak self] _ in
+                   self?.handleNetworkReconnection()
+               }
+               try reachability?.startNotifier()
+           } catch {
+               os_log("Unable to start reachability notifier: %@", log: log, type: .error, error.localizedDescription)
+           }
+       }
+    
+    private func setupInterruptionHandling() {
+            NotificationCenter.default.addObserver(self,
+                                                   selector: #selector(handleInterruption),
+                                                   name: AVAudioSession.interruptionNotification,
+                                                   object: nil)
+        }
+    
+    @objc private func handleInterruption(notification: Notification) {
+            guard let userInfo = notification.userInfo,
+                  let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+                return
+            }
+            
+            switch type {
+            case .began:
+                pause()
+            case .ended:
+                guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if options.contains(.shouldResume) {
+                    play()
+                }
+            @unknown default:
+                break
+            }
+        }
+    
+    private func handleNetworkReconnection() {
+            guard isPlaying else { return }
+            
+            isAttemptingReconnection = true
+            currentReconnectionAttempt = 0
+            attemptReconnection()
+        }
+    
+    private func attemptReconnection() {
+            guard currentReconnectionAttempt < maxReconnectionAttempts else {
+                stopReconnectionAttempts()
+                return
+            }
+            
+            currentReconnectionAttempt += 1
+            os_log("Attempting to reconnect (attempt %d of %d)", log: log, type: .info, currentReconnectionAttempt, maxReconnectionAttempts)
+            
+            play()
+            
+            reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+                self?.checkPlaybackStatus()
+            }
+        }
+    
+    private func checkPlaybackStatus() {
+            if player?.timeControlStatus == .playing {
+                stopReconnectionAttempts()
+            } else {
+                attemptReconnection()
+            }
+        }
+    
+    private func stopReconnectionAttempts() {
+           reconnectionTimer?.invalidate()
+           reconnectionTimer = nil
+           isAttemptingReconnection = false
+           currentReconnectionAttempt = 0
+           
+           if player?.timeControlStatus != .playing {
+               os_log("Failed to reconnect after %d attempts", log: log, type: .error, maxReconnectionAttempts)
+               pause()
+           }
+       }
+    
+    func setupRemoteCommandCenter() {
+            let commandCenter = MPRemoteCommandCenter.shared()
+            
+            commandCenter.playCommand.isEnabled = true
+            commandCenter.playCommand.addTarget { [weak self] _ in
+                self?.play()
+                return .success
+            }
+            
+            commandCenter.pauseCommand.isEnabled = true
+            commandCenter.pauseCommand.addTarget { [weak self] _ in
+                self?.pause()
+                return .success
+            }
+            
+            commandCenter.nextTrackCommand.isEnabled = true
+            commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+                self?.skipToNextEpisode()
+                return .success
+            }
+            
+            commandCenter.previousTrackCommand.isEnabled = true
+            commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+                self?.skipToPreviousEpisode()
+                return .success
+            }
+            
+            commandCenter.changePlaybackPositionCommand.isEnabled = true
+            commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+                guard let self = self,
+                      let event = event as? MPChangePlaybackPositionCommandEvent else {
+                    return .commandFailed
+                }
+                self.seek(to: event.positionTime)
+                return .success
+            }
+        }
+    
+    func skipToNextEpisode() {
+        os_log("Attempting to skip to next episode", log: log, type: .debug)
+        guard let currentEpisode = currentEpisode else {
+            os_log("No current episode", log: log, type: .error)
+            return
+        }
+        guard let currentFeed = currentFeed else {
+            os_log("No current feed", log: log, type: .error)
+            return
+        }
+        guard let viewModel = viewModel else {
+            os_log("ViewModel is not set", log: log, type: .error)
+            return
+        }
+        
+        let episodes = viewModel.allEpisodes.filter { $0.feedId == currentFeed.id }
+        os_log("Found %d episodes for current feed", log: log, type: .debug, episodes.count)
+        
+        guard let currentIndex = episodes.firstIndex(where: { $0.id == currentEpisode.id }) else {
+            os_log("Current episode not found in episodes list", log: log, type: .error)
+            return
+        }
+        
+        guard currentIndex + 1 < episodes.count else {
+            os_log("Already at the last episode", log: log, type: .debug)
+            return
+        }
+        
+        let nextEpisode = episodes[currentIndex + 1]
+        os_log("Skipping to next episode: %@", log: log, type: .info, nextEpisode.title)
+        changeToEpisode(nextEpisode, in: currentFeed)
+    }
+
+
+    func skipToPreviousEpisode() {
+        os_log("Attempting to skip to previous episode", log: log, type: .debug)
+        guard let currentEpisode = currentEpisode else {
+            os_log("No current episode", log: log, type: .error)
+            return
+        }
+        guard let currentFeed = currentFeed else {
+            os_log("No current feed", log: log, type: .error)
+            return
+        }
+        guard let viewModel = viewModel else {
+            os_log("ViewModel is not set", log: log, type: .error)
+            return
+        }
+        
+        let episodes = viewModel.allEpisodes.filter { $0.feedId == currentFeed.id }
+        os_log("Found %d episodes for current feed", log: log, type: .debug, episodes.count)
+        
+        guard let currentIndex = episodes.firstIndex(where: { $0.id == currentEpisode.id }) else {
+            os_log("Current episode not found in episodes list", log: log, type: .error)
+            return
+        }
+        
+        guard currentIndex > 0 else {
+            os_log("Already at the first episode", log: log, type: .debug)
+            return
+        }
+        
+        let previousEpisode = episodes[currentIndex - 1]
+        os_log("Skipping to previous episode: %@", log: log, type: .info, previousEpisode.title)
+        changeToEpisode(previousEpisode, in: currentFeed)
+    }
+    
+    private func changeToEpisode(_ episode: PodcastEpisode, in feed: PodcastFeed) {
+        os_log("Changing to episode: %@", log: log, type: .info, episode.title)
+        saveProgressIfNeeded() // Save progress of the current episode
+        playEpisode(episode, feed: feed)
+        updateNowPlayingInfo()
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+        }
+    }
+
     
     private func updatePlaybackInfo() {
            guard let player = player else { return }
@@ -230,6 +438,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         objectWillChange.send()
     }
     
+    
     func pause() {
         guard let player = player, let currentEpisode = currentEpisode else { return }
         
@@ -378,12 +587,36 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
-    private func updateNowPlayingInfo() {
-        guard var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-    }
+    func updateNowPlayingInfo() {
+            guard let currentEpisode = currentEpisode,
+                  let currentFeed = currentFeed else {
+                return
+            }
+            
+            var nowPlayingInfo = [String: Any]()
+            nowPlayingInfo[MPMediaItemPropertyTitle] = currentEpisode.title
+            nowPlayingInfo[MPMediaItemPropertyArtist] = currentFeed.title
+            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+            nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+            nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+            nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+            
+            if let artworkUrlString = currentFeed.artworkUrl,
+               let artworkUrl = URL(string: artworkUrlString) {
+                URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
+                    if let data = data, let image = UIImage(data: data) {
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                        nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                        DispatchQueue.main.async {
+                            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+                        }
+                    }
+                }.resume()
+            } else {
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+            }
+        }
     
     deinit {
         playerItemObserver?.invalidate()

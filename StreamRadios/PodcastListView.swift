@@ -793,6 +793,7 @@ struct PodcastPlayerView: View {
         .onChange(of: episodeToScrollTo) { _ in
             scrollToEpisodeIfNeeded()
         }
+       // ReconnectingIndicatorView(isAttemptingReconnection: $podcastPlayer.isAttemptingReconnection)
         .navigationBarHidden(true)
     }
 
