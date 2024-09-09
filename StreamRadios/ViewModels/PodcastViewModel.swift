@@ -1085,35 +1085,26 @@ class PodcastViewModel: ObservableObject {
         }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
-        backgroundContext.perform { [weak self] in
-            guard let self = self else { return }
-            
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
             
             do {
-                let results = try self.backgroundContext.fetch(fetchRequest)
+                let results = try context.fetch(fetchRequest)
                 let managedEpisode: PodcastModel
                 
                 if let existingEpisode = results.first {
                     managedEpisode = existingEpisode
                 } else {
-                    managedEpisode = PodcastModel(context: self.backgroundContext)
+                    managedEpisode = PodcastModel(context: context)
                 }
                 
                 managedEpisode.update(from: episode)
-                try self.backgroundContext.save()
-                
-                DispatchQueue.main.async {
-                    print("Successfully saved episode state to Core Data: \(episode.title)")
-                }
+                try context.save()
+                print("Successfully saved episode state to Core Data: \(episode.title)")
             } catch {
-                DispatchQueue.main.async {
-                    print("Failed to save episode to Core Data: \(error)")
-                }
+                print("Failed to save episode to Core Data: \(error)")
             }
         }
-    }
     
     func getProgress(for episode: PodcastEpisode) -> Double {
         return episodeProgress[episode.id] ?? 0.0
