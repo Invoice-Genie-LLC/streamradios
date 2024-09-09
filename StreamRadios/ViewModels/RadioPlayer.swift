@@ -56,6 +56,12 @@ class RadioPlayer: NSObject, ObservableObject {
             configureAudioSession()
             addInterruptionObserver()
             autoPlayLastStationSetup()
+        
+        DispatchQueue.main.async {
+                   self.podcastPlayer = PodcastPlayer.shared
+                   self.podcastPlayer?.setRadioPlayer(self)
+               }
+        
             monitor.pathUpdateHandler = { [weak self] path in
                 guard let self = self else { return }
                 self.isOnCellularNetwork = path.isExpensive
@@ -64,12 +70,6 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             let queue = DispatchQueue(label: "NetworkMonitor")
             monitor.start(queue: queue)
-                
-        DispatchQueue.main.async {
-                   self.podcastPlayer = PodcastPlayer.shared
-                   self.podcastPlayer?.setRadioPlayer(self)
-               }
-
         }
 
     
