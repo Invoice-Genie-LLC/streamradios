@@ -33,6 +33,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var reconnectionTimer: Timer?
         private let maxReconnectionAttempts = 5
         private var currentReconnectionAttempt = 0
+    private var remoteCommandCenter: MPRemoteCommandCenter?
+    @Published var currentEpisodeIndex: Int?
+    private var allEpisodesInFeed: [PodcastEpisode] = []
+    @Published var isPodcastActive: Bool = false
+
+    
+
     var remainingTime: Double {
             max(0, duration - currentTime)
         }
@@ -138,31 +145,35 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        }
     
     func setupRemoteCommandCenter() {
-            let commandCenter = MPRemoteCommandCenter.shared()
-            
-            commandCenter.playCommand.isEnabled = true
-            commandCenter.playCommand.addTarget { [weak self] _ in
-                self?.play()
-                return .success
-            }
-            
-            commandCenter.pauseCommand.isEnabled = true
-            commandCenter.pauseCommand.addTarget { [weak self] _ in
-                self?.pause()
-                return .success
-            }
-            
-            commandCenter.nextTrackCommand.isEnabled = true
-            commandCenter.nextTrackCommand.addTarget { [weak self] _ in
-                self?.skipToNextEpisode()
-                return .success
-            }
-            
-            commandCenter.previousTrackCommand.isEnabled = true
-            commandCenter.previousTrackCommand.addTarget { [weak self] _ in
-                self?.skipToPreviousEpisode()
-                return .success
-            }
+           let commandCenter = MPRemoteCommandCenter.shared()
+           
+           commandCenter.playCommand.isEnabled = true
+           commandCenter.playCommand.addTarget { [weak self] _ in
+               os_log("Remote command: Play", log: self?.log ?? .default, type: .info)
+               self?.play()
+               return .success
+           }
+           
+           commandCenter.pauseCommand.isEnabled = true
+           commandCenter.pauseCommand.addTarget { [weak self] _ in
+               os_log("Remote command: Pause", log: self?.log ?? .default, type: .info)
+               self?.pause()
+               return .success
+           }
+           
+           commandCenter.nextTrackCommand.isEnabled = true
+           commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+               os_log("Remote command: Next Track", log: self?.log ?? .default, type: .info)
+               self?.skipToNextEpisode()
+               return .success
+           }
+           
+           commandCenter.previousTrackCommand.isEnabled = true
+           commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+               os_log("Remote command: Previous Track", log: self?.log ?? .default, type: .info)
+               self?.skipToPreviousEpisode()
+               return .success
+           }
             
             commandCenter.changePlaybackPositionCommand.isEnabled = true
             commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
@@ -173,74 +184,84 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 self.seek(to: event.positionTime)
                 return .success
             }
+            
+            os_log("Remote command center set up", log: log, type: .debug)
+        }
+    
+    private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
+            guard let viewModel = viewModel else {
+                os_log("ViewModel is not set", log: log, type: .error)
+                return
+            }
+            
+            allEpisodesInFeed = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+            allEpisodesInFeed.sort { $0.publicationDate > $1.publicationDate } // Sort by newest first
+            os_log("Loaded %d episodes for feed: %{public}@", log: log, type: .info, allEpisodesInFeed.count, feed.title)
+            
+            // Verify that all episodes are loaded
+            if allEpisodesInFeed.isEmpty {
+                os_log("No episodes loaded for feed. Attempting to fetch episodes.", log: log, type: .error)
+                fetchEpisodesForFeed(feed)
+            }
+        }
+    
+    private func fetchEpisodesForFeed(_ feed: PodcastFeed) {
+            viewModel?.fetchEpisodes(for: feed) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let episodes):
+                    self.allEpisodesInFeed = episodes.sorted { $0.publicationDate > $1.publicationDate }
+                    os_log("Fetched and sorted %d episodes for feed: %{public}@", log: self.log, type: .info, self.allEpisodesInFeed.count, feed.title)
+                    DispatchQueue.main.async {
+                        self.objectWillChange.send()
+                    }
+                case .failure(let error):
+                    os_log("Failed to fetch episodes: %{public}@", log: self.log, type: .error, error.localizedDescription)
+                }
+            }
         }
     
     func skipToNextEpisode() {
-        os_log("Attempting to skip to next episode", log: log, type: .debug)
-        guard let currentEpisode = currentEpisode else {
-            os_log("No current episode", log: log, type: .error)
-            return
+            os_log("Attempting to skip to next episode", log: log, type: .info)
+            guard let currentIndex = currentEpisodeIndex else {
+                os_log("Current episode index is nil", log: log, type: .error)
+                return
+            }
+            
+            os_log("Current episode index: %d", log: log, type: .info, currentIndex)
+            os_log("Total episodes in feed: %d", log: log, type: .info, allEpisodesInFeed.count)
+            
+            let nextIndex = currentIndex + 1
+            guard nextIndex < allEpisodesInFeed.count else {
+                os_log("Already at the last episode", log: log, type: .info)
+                return
+            }
+            
+            let nextEpisode = allEpisodesInFeed[nextIndex]
+            os_log("Skipping to next episode: %{public}@", log: log, type: .info, nextEpisode.title)
+            playEpisode(nextEpisode, feed: currentFeed!)
         }
-        guard let currentFeed = currentFeed else {
-            os_log("No current feed", log: log, type: .error)
-            return
-        }
-        guard let viewModel = viewModel else {
-            os_log("ViewModel is not set", log: log, type: .error)
-            return
-        }
-        
-        let episodes = viewModel.allEpisodes.filter { $0.feedId == currentFeed.id }
-        os_log("Found %d episodes for current feed", log: log, type: .debug, episodes.count)
-        
-        guard let currentIndex = episodes.firstIndex(where: { $0.id == currentEpisode.id }) else {
-            os_log("Current episode not found in episodes list", log: log, type: .error)
-            return
-        }
-        
-        guard currentIndex + 1 < episodes.count else {
-            os_log("Already at the last episode", log: log, type: .debug)
-            return
-        }
-        
-        let nextEpisode = episodes[currentIndex + 1]
-        os_log("Skipping to next episode: %@", log: log, type: .info, nextEpisode.title)
-        changeToEpisode(nextEpisode, in: currentFeed)
-    }
-
-
+    
     func skipToPreviousEpisode() {
-        os_log("Attempting to skip to previous episode", log: log, type: .debug)
-        guard let currentEpisode = currentEpisode else {
-            os_log("No current episode", log: log, type: .error)
-            return
+            os_log("Attempting to skip to previous episode", log: log, type: .info)
+            guard let currentIndex = currentEpisodeIndex else {
+                os_log("Current episode index is nil", log: log, type: .error)
+                return
+            }
+            
+            os_log("Current episode index: %d", log: log, type: .info, currentIndex)
+            os_log("Total episodes in feed: %d", log: log, type: .info, allEpisodesInFeed.count)
+            
+            let previousIndex = currentIndex - 1
+            guard previousIndex >= 0 else {
+                os_log("Already at the first episode", log: log, type: .info)
+                return
+            }
+            
+            let previousEpisode = allEpisodesInFeed[previousIndex]
+            os_log("Skipping to previous episode: %{public}@", log: log, type: .info, previousEpisode.title)
+            playEpisode(previousEpisode, feed: currentFeed!)
         }
-        guard let currentFeed = currentFeed else {
-            os_log("No current feed", log: log, type: .error)
-            return
-        }
-        guard let viewModel = viewModel else {
-            os_log("ViewModel is not set", log: log, type: .error)
-            return
-        }
-        
-        let episodes = viewModel.allEpisodes.filter { $0.feedId == currentFeed.id }
-        os_log("Found %d episodes for current feed", log: log, type: .debug, episodes.count)
-        
-        guard let currentIndex = episodes.firstIndex(where: { $0.id == currentEpisode.id }) else {
-            os_log("Current episode not found in episodes list", log: log, type: .error)
-            return
-        }
-        
-        guard currentIndex > 0 else {
-            os_log("Already at the first episode", log: log, type: .debug)
-            return
-        }
-        
-        let previousEpisode = episodes[currentIndex - 1]
-        os_log("Skipping to previous episode: %@", log: log, type: .info, previousEpisode.title)
-        changeToEpisode(previousEpisode, in: currentFeed)
-    }
     
     private func changeToEpisode(_ episode: PodcastEpisode, in feed: PodcastFeed) {
         os_log("Changing to episode: %@", log: log, type: .info, episode.title)
@@ -282,71 +303,80 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-        // Stop radio playback if it's playing
-        stopRadioPlayback()
-        
-        // Activate audio session for background playback
-                do {
-                    try AVAudioSession.sharedInstance().setActive(true)
-                } catch {
-                    os_log("Failed to activate audio session: %@", log: log, type: .error, error.localizedDescription)
+           stopRadioPlayback()
+           
+           do {
+               try AVAudioSession.sharedInstance().setActive(true)
+           } catch {
+               os_log("Failed to activate audio session: %@", log: log, type: .error, error.localizedDescription)
+           }
+           
+           // Load all episodes for the feed
+           loadAllEpisodesForFeed(feed)
+           
+           var playUrl: URL?
+           
+           if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
+               playUrl = URL(fileURLWithPath: localFilePath)
+           } else if let url = URL(string: episode.audioUrl) {
+               playUrl = url
+           } else {
+               os_log("Failed to get playable URL for episode: %@", log: log, type: .error, episode.title)
+               return
+           }
+           
+           guard let url = playUrl else { return }
+           
+           let playerItem = AVPlayerItem(url: url)
+           if player == nil {
+               player = AVPlayer(playerItem: playerItem)
+           } else {
+               player?.replaceCurrentItem(with: playerItem)
+           }
+           
+           saveProgressIfNeeded()
+           
+           currentEpisode = episode
+           currentFeed = feed
+        isPodcastActive = true
+           
+           // Update currentEpisodeIndex
+        if let index = allEpisodesInFeed.firstIndex(where: { $0.id == episode.id }) {
+                    currentEpisodeIndex = index
+                    os_log("Set current episode index to %d", log: log, type: .info, index)
+                } else {
+                    os_log("Failed to find index for current episode", log: log, type: .error)
                 }
-        
-        var playUrl: URL?
-        
-        if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
-            playUrl = URL(fileURLWithPath: localFilePath)
-        } else if let url = URL(string: episode.audioUrl) {
-            playUrl = url
-        } else {
-            return
-        }
-        
-        guard let url = playUrl else { return }
-        
-        let playerItem = AVPlayerItem(url: url)
-        if player == nil {
-            player = AVPlayer(playerItem: playerItem)
-        } else {
-            player?.replaceCurrentItem(with: playerItem)
-        }
-        
-        // Save progress of the previous episode before switching
-        saveProgressIfNeeded()
-        
-        // Set the current episode and feed before playing
-        currentEpisode = episode
-        currentFeed = feed
-        
-        // Mark the episode as "In Progress" immediately
-        if viewModel?.getProgress(for: episode) == 0 {
-            viewModel?.updateProgress(for: episode, progress: 0.001)
-        }
-        
-        // Load the saved progress
-        if let savedProgress = viewModel?.episodeProgress[episode.id] {
-            let targetTime = savedProgress * episode.duration
-            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1))
-            currentTime = targetTime
-        } else {
-            currentTime = 0
-                    duration = episode.duration
-                    currentProgress = 0
-        }
-        
-        // Set up observers
-        setupPlayerItemObserver()
-        setupTimeObserver()
-        
-        if let playerItem = player?.currentItem {
-                duration = playerItem.asset.duration.seconds
-            }
-        
-        // Now play the episode
-        play()
+           
+           if viewModel?.getProgress(for: episode) == 0 {
+               viewModel?.updateProgress(for: episode, progress: 0.001)
+           }
+           
+           if let savedProgress = viewModel?.episodeProgress[episode.id] {
+               let targetTime = savedProgress * episode.duration
+               player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1))
+               currentTime = targetTime
+           } else {
+               currentTime = 0
+               duration = episode.duration
+               currentProgress = 0
+           }
+           
+           setupPlayerItemObserver()
+           setupTimeObserver()
+           
+           if let playerItem = player?.currentItem {
+               duration = playerItem.asset.duration.seconds
+           }
+           
+           play()
         isPlaying = true
-        setupBackgroundPlayback()
-    }
+           isPlaying = true
+           setupBackgroundPlayback()
+           updateNowPlayingInfo()
+           
+           os_log("Started playing episode: %@", log: log, type: .info, episode.title)
+       }
     
     private func setupBackgroundPlayback() {
             do {
@@ -428,15 +458,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         
         player.play()
-        isPlaying = true
-        
-        // Set up now playing information, observers, etc.
-        setupNowPlaying(for: currentEpisode, feed: currentFeed)
-        setupTimeObserver()
-        updateNowPlayingInfo()
-        
-        objectWillChange.send()
-    }
+               isPlaying = true
+               
+               updateNowPlayingInfo()
+               setupTimeObserver()
+               
+               objectWillChange.send()
+            }
     
     
     func pause() {
@@ -587,9 +615,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
-    func updateNowPlayingInfo() {
+    private func updateNowPlayingInfo() {
             guard let currentEpisode = currentEpisode,
                   let currentFeed = currentFeed else {
+                os_log("Unable to update now playing info: current episode or feed is nil", log: log, type: .error)
                 return
             }
             
@@ -611,11 +640,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         DispatchQueue.main.async {
                             MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
                         }
+                    } else {
+                        os_log("Failed to load artwork: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
                     }
                 }.resume()
             } else {
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
             }
+            
+            os_log("Updated now playing info for episode: %@", log: log, type: .debug, currentEpisode.title)
         }
     
     deinit {
