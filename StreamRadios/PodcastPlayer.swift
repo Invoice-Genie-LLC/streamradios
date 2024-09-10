@@ -145,48 +145,44 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        }
     
     func setupRemoteCommandCenter() {
-           let commandCenter = MPRemoteCommandCenter.shared()
-           
-           commandCenter.playCommand.isEnabled = true
-           commandCenter.playCommand.addTarget { [weak self] _ in
-               os_log("Remote command: Play", log: self?.log ?? .default, type: .info)
-               self?.play()
-               return .success
-           }
-           
-           commandCenter.pauseCommand.isEnabled = true
-           commandCenter.pauseCommand.addTarget { [weak self] _ in
-               os_log("Remote command: Pause", log: self?.log ?? .default, type: .info)
-               self?.pause()
-               return .success
-           }
-           
-           commandCenter.nextTrackCommand.isEnabled = true
-           commandCenter.nextTrackCommand.addTarget { [weak self] _ in
-               os_log("Remote command: Next Track", log: self?.log ?? .default, type: .info)
-               self?.skipToNextEpisode()
-               return .success
-           }
-           
-           commandCenter.previousTrackCommand.isEnabled = true
-           commandCenter.previousTrackCommand.addTarget { [weak self] _ in
-               os_log("Remote command: Previous Track", log: self?.log ?? .default, type: .info)
-               self?.skipToPreviousEpisode()
-               return .success
-           }
-            
-            commandCenter.changePlaybackPositionCommand.isEnabled = true
-            commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
-                guard let self = self,
-                      let event = event as? MPChangePlaybackPositionCommandEvent else {
-                    return .commandFailed
-                }
-                self.seek(to: event.positionTime)
+        let commandCenter = MPRemoteCommandCenter.shared()
+        
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.play()
                 return .success
             }
-            
-            os_log("Remote command center set up", log: log, type: .debug)
+            return .commandFailed
         }
+        
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.pause()
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.skipToNextEpisode()
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        commandCenter.previousTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.skipToPreviousEpisode()
+                return .success
+            }
+            return .commandFailed
+        }
+    }
     
     private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
             guard let viewModel = viewModel else {
@@ -368,13 +364,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            if let playerItem = player?.currentItem {
                duration = playerItem.asset.duration.seconds
            }
-           
-           play()
+        play()
         isPlaying = true
-           isPlaying = true
-           setupBackgroundPlayback()
-           updateNowPlayingInfo()
-           
+        updateNowPlayingInfo()
+        setupBackgroundPlayback()
+
            os_log("Started playing episode: %@", log: log, type: .info, episode.title)
        }
     
@@ -446,16 +440,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         stopRadioPlayback()
         
         guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else {
-            os_log("No current episode or feed available", log: OSLog.default, type: .error)
-            return
-        }
+                os_log("No current episode or feed available", log: OSLog.default, type: .error)
+                return
+            }
         
         // Only reset progress if the episode was completed
         if viewModel?.getProgress(for: currentEpisode) == 1.0 {
-            currentTime = 0
-            player.seek(to: .zero)
-            viewModel?.updateProgress(for: currentEpisode, progress: 0.0)
-        }
+                currentTime = 0
+                player.seek(to: .zero)
+                viewModel?.updateProgress(for: currentEpisode, progress: 0.0)
+            }
         
         player.play()
                isPlaying = true
@@ -464,6 +458,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                setupTimeObserver()
                
                objectWillChange.send()
+        
+                PlaybackManager.shared.setActivePlayer(.podcast)
             }
     
     

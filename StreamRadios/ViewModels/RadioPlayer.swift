@@ -346,7 +346,7 @@ class RadioPlayer: NSObject, ObservableObject {
             guard let player = player else { return }
             
             // Ensure the player is properly set up with the current station URL
-            if player.currentItem?.asset as? AVURLAsset == nil,
+        if player.currentItem?.asset as? AVURLAsset == nil,
                let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
                 setStationURL(lastStationURL)
             }
@@ -357,6 +357,9 @@ class RadioPlayer: NSObject, ObservableObject {
             updateNowPlayingInfo()
             updateWidget()
             scheduleAppRefresh()
+        
+        // Set radio as the active player
+            PlaybackManager.shared.setActivePlayer(.radio)
         }
     
     private func stopPodcastPlayback() {
@@ -533,31 +536,41 @@ class RadioPlayer: NSObject, ObservableObject {
         let commandCenter = MPRemoteCommandCenter.shared()
         
         commandCenter.playCommand.isEnabled = true
-        commandCenter.playCommand.addTarget { [weak self] event in
-            self?.play()
-            return .success
-        }
-        
-        commandCenter.pauseCommand.isEnabled = true
-        commandCenter.pauseCommand.addTarget { [weak self] event in
-            self?.pause()
-            return .success
-        }
-        
-        commandCenter.nextTrackCommand.isEnabled = true
-        commandCenter.nextTrackCommand.addTarget { [weak self] event in
-            if let self = self, let viewModel = self.viewModel {
-                self.nextStation(from: viewModel.stations)
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .radio {
+                self?.play()
                 return .success
             }
             return .commandFailed
         }
         
-        commandCenter.previousTrackCommand.isEnabled = true
-        commandCenter.previousTrackCommand.addTarget { [weak self] event in
-            if let self = self, let viewModel = self.viewModel {
-                self.previousStation(from: viewModel.stations)
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .radio {
+                self?.pause()
                 return .success
+            }
+            return .commandFailed
+        }
+        
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .radio {
+                if let self = self, let viewModel = self.viewModel {
+                    self.nextStation(from: viewModel.stations)
+                    return .success
+                }
+            }
+            return .commandFailed
+        }
+        
+        commandCenter.previousTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .radio {
+                if let self = self, let viewModel = self.viewModel {
+                    self.previousStation(from: viewModel.stations)
+                    return .success
+                }
             }
             return .commandFailed
         }
