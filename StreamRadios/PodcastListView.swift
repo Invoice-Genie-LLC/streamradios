@@ -61,6 +61,13 @@ struct PodcastListView: View {
                 miniPlayer
             }
         }
+        .alert(isPresented: $viewModel.showNoEpisodesAlert) {
+                    Alert(
+                        title: Text("No Episodes in Progress"),
+                        message: Text(viewModel.noEpisodesAlertMessage),
+                        dismissButton: .default(Text("OK"))
+                    )
+                }
     }
     
     private var instructionText: some View {
@@ -81,23 +88,25 @@ struct PodcastListView: View {
     private var podcastList: some View {
         List {
             ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
-                           if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
-                              filteredPodcasts.contains(where: { $0.id == feedId }) {
-                               PodcastRowView(
-                                   feed: feed,
-                                   isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                                   onPlay: { podcastPlayer.playLastEpisodeForFeed(feed) },
-                                   onStop: { podcastPlayer.togglePlayPause() },
-                                   onTap: { selectedPodcast = feed },
-                                   isExpanded: Binding(
-                                       get: { expandedFeedId == feed.id },
-                                       set: { isExpanded in
-                                           expandedFeedId = isExpanded ? feed.id : nil
-                                       }
-                                   ),
-                                   viewModel: viewModel,
-                                   podcastPlayer: podcastPlayer
-                               )}}
+                if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
+                   filteredPodcasts.contains(where: { $0.id == feedId }) {
+                    PodcastRowView(
+                        feed: feed,
+                        isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                        onPlay: { podcastPlayer.playLastEpisodeForFeed(feed) },
+                        onStop: { podcastPlayer.togglePlayPause() },
+                        onTap: { selectedPodcast = feed },
+                        isExpanded: Binding(
+                            get: { expandedFeedId == feed.id },
+                            set: { isExpanded in
+                                expandedFeedId = isExpanded ? feed.id : nil
+                            }
+                        ),
+                        viewModel: viewModel,
+                        podcastPlayer: podcastPlayer
+                    )
+                }
+            }
             Spacer()
                 .frame(height: 100)
                 .listRowInsets(EdgeInsets())
@@ -273,12 +282,12 @@ struct PodcastRowView: View {
                         }
                     } else {
                         Button(action: {
-                            podcastPlayer.playLastEpisodeForFeed(feed)
+                            checkAndPlayEpisode()
                         }) {
                             HStack {
                                 Image(systemName: "play.circle.fill")
                                     .foregroundColor(.green)
-                                Text("Play")
+                                Text("Continue Listening")
                                     .font(.footnote)
                                     .foregroundColor(.green)
                             }
@@ -299,6 +308,20 @@ struct PodcastRowView: View {
             onTap()
         }
     }
+    
+    private func checkAndPlayEpisode() {
+            let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+            let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+            
+            if episodesInProgress.isEmpty {
+                viewModel.showNoEpisodesInProgressAlert(for: feed)
+                if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
+                    podcastPlayer.playEpisode(latestEpisode, feed: feed)
+                }
+            } else {
+                onPlay()
+            }
+        }
 }
 
 struct PodcastIconView: View {
