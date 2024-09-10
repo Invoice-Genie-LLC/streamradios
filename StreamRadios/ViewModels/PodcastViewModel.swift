@@ -114,6 +114,7 @@ class PodcastViewModel: ObservableObject {
     private let episodeListKey = "PodcastEpisodeList"
         private let bookmarkStatusKey = "PodcastBookmarkStatus"
         private let downloadStatusKey = "PodcastDownloadStatus"
+    @Published var lastPlayedEpisodes: [String: String] = [:]
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
@@ -132,6 +133,29 @@ class PodcastViewModel: ObservableObject {
             }
         }
     }
+    
+    func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
+            lastPlayedEpisodes[episode.feedId] = episode.id
+            saveLastPlayedEpisodes()
+        }
+    
+    func getLastPlayedOrLatestEpisode(for feed: PodcastFeed) -> PodcastEpisode? {
+           if let lastPlayedEpisodeId = lastPlayedEpisodes[feed.id],
+              let lastPlayedEpisode = allEpisodes.first(where: { $0.id == lastPlayedEpisodeId }) {
+               return lastPlayedEpisode
+           }
+           return allEpisodes.filter { $0.feedId == feed.id }.sorted(by: { $0.publicationDate > $1.publicationDate }).first
+       }
+    
+    private func saveLastPlayedEpisodes() {
+            UserDefaults.standard.set(lastPlayedEpisodes, forKey: "LastPlayedEpisodes")
+        }
+    
+    private func loadLastPlayedEpisodes() {
+            if let saved = UserDefaults.standard.dictionary(forKey: "LastPlayedEpisodes") as? [String: String] {
+                lastPlayedEpisodes = saved
+            }
+        }
     
     func fetchAllEpisodes(for feed: PodcastFeed) {
               isLoading = true
@@ -342,6 +366,7 @@ class PodcastViewModel: ObservableObject {
         loadDownloadedEpisodes()
         loadFavoriteEpisodes()
         loadAllEpisodes()
+        loadLastPlayedEpisodes()
     }
     
     private func loadDownloadedEpisodes() {
