@@ -63,6 +63,7 @@
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
 		77E23F422C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */; };
+		77E23F4E2C90A0B300CDECD9 /* PlaybackManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */; };
 		77F50BA82C62613700187488 /* SpotifyAuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */; };
 		77F50BAB2C62621A00187488 /* SpotifyiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BAA2C62621A00187488 /* SpotifyiOS */; };
 		77F50BB72C63B81800187488 /* YouTubeMusicManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */; };
@@ -162,6 +163,7 @@
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
 		77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconnectingIndicatorView.swift; sourceTree = "<group>"; };
+		77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackManager.swift; sourceTree = "<group>"; };
 		77F50BA72C62613700187488 /* SpotifyAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthorizationManager.swift; sourceTree = "<group>"; };
 		77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeMusicManager.swift; sourceTree = "<group>"; };
 		77F50BB82C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeMusicPlaylistPickerView.swift; sourceTree = "<group>"; };
@@ -242,6 +244,7 @@
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
 				77F50BB62C63B81800187488 /* YouTubeMusicManager.swift */,
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
+				77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */,
 				7741804F2C6703FC0030B459 /* PodcastPlayer.swift */,
 				77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */,
 				775D04372C28E89300E99061 /* LyricsView.swift */,
@@ -523,6 +526,7 @@
 				77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
+				77E23F4E2C90A0B300CDECD9 /* PlaybackManager.swift in Sources */,
 				7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */,
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
 				77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */,
