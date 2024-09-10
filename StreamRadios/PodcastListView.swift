@@ -81,32 +81,23 @@ struct PodcastListView: View {
     private var podcastList: some View {
         List {
             ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
-                if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
-                   filteredPodcasts.contains(where: { $0.id == feedId }) {
-                    PodcastRowView(
-                        feed: feed,
-                        isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                        onPlay: { playLatestEpisode(for: feed) },
-                        onStop: { podcastPlayer.togglePlayPause() },
-                        onTap: { selectedPodcast = feed },
-                        isExpanded: Binding(
-                            get: { expandedFeedId == feed.id },
-                            set: { isExpanded in
-                                expandedFeedId = isExpanded ? feed.id : nil
-                            }
-                        )
-                    )
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            podcastToDelete = feed
-                            showingDeleteConfirmation = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                }
-            }
-            .onMove(perform: viewModel.moveFeed)
+                           if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
+                              filteredPodcasts.contains(where: { $0.id == feedId }) {
+                               PodcastRowView(
+                                   feed: feed,
+                                   isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                                   onPlay: { podcastPlayer.playLastEpisodeForFeed(feed) },
+                                   onStop: { podcastPlayer.togglePlayPause() },
+                                   onTap: { selectedPodcast = feed },
+                                   isExpanded: Binding(
+                                       get: { expandedFeedId == feed.id },
+                                       set: { isExpanded in
+                                           expandedFeedId = isExpanded ? feed.id : nil
+                                       }
+                                   ),
+                                   viewModel: viewModel,
+                                   podcastPlayer: podcastPlayer
+                               )}}
             Spacer()
                 .frame(height: 100)
                 .listRowInsets(EdgeInsets())
@@ -215,6 +206,9 @@ struct PodcastRowView: View {
     let onStop: () -> Void
     let onTap: () -> Void
     @Binding var isExpanded: Bool
+    @ObservedObject var viewModel: PodcastViewModel
+    @ObservedObject var podcastPlayer: PodcastPlayer
+
     
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -279,9 +273,7 @@ struct PodcastRowView: View {
                         }
                     } else {
                         Button(action: {
-                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                            impactFeedback.impactOccurred()
-                            onPlay()
+                            podcastPlayer.playLastEpisodeForFeed(feed)
                         }) {
                             HStack {
                                 Image(systemName: "play.circle.fill")
@@ -292,9 +284,7 @@ struct PodcastRowView: View {
                             }
                         }
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            onPlay()
-                        }
+                        .onTapGesture(perform: onPlay)
                     }
                 }
             }
@@ -1003,36 +993,43 @@ struct PodcastList: View {
     var body: some View {
         List {
             ForEach(orderedFeeds, id: \.id) { feed in
-                PodcastRowView(
-                    feed: feed,
-                    isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                    onPlay: { onPlay(feed) },
-                    onStop: { podcastPlayer.togglePlayPause() },
-                    onTap: { selectedPodcast = feed },
-                    isExpanded: Binding(
-                        get: { expandedFeedId == feed.id },
-                        set: { isExpanded in
-                            expandedFeedId = isExpanded ? feed.id : nil
+                            PodcastRowView(
+                                feed: feed,
+                                isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                                onPlay: {
+                                    if let episode = viewModel.getLastPlayedOrLatestEpisode(for: feed) {
+                                        podcastPlayer.playEpisode(episode, feed: feed)
+                                    }
+                                },
+                                onStop: { podcastPlayer.togglePlayPause() },
+                                onTap: { selectedPodcast = feed },
+                                isExpanded: Binding(
+                                    get: { expandedFeedId == feed.id },
+                                    set: { isExpanded in
+                                        expandedFeedId = isExpanded ? feed.id : nil
+                                    }
+                                ),
+                                viewModel: viewModel,  // Pass the viewModel here
+                                podcastPlayer: podcastPlayer
+                                
+                            )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) {
+                                    onDelete(feed)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
-                    )
-                )
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        onDelete(feed)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
                     }
-                }
-            }
-        }
-        .listStyle(PlainListStyle())
+                    .listStyle(PlainListStyle())
     }
     
     private var orderedFeeds: [PodcastFeed] {
-        let orderedIds = Set(viewModel.podcastFeedOrder)
-        let orderedFeeds = feeds.filter { orderedIds.contains($0.id) }
-            .sorted { viewModel.podcastFeedOrder.firstIndex(of: $0.id)! < viewModel.podcastFeedOrder.firstIndex(of: $1.id)! }
-        let remainingFeeds = feeds.filter { !orderedIds.contains($0.id) }
-        return orderedFeeds + remainingFeeds
-    }
+            let orderedIds = Set(viewModel.podcastFeedOrder)
+            let orderedFeeds = feeds.filter { orderedIds.contains($0.id) }
+                .sorted { viewModel.podcastFeedOrder.firstIndex(of: $0.id)! < viewModel.podcastFeedOrder.firstIndex(of: $1.id)! }
+            let remainingFeeds = feeds.filter { !orderedIds.contains($0.id) }
+            return orderedFeeds + remainingFeeds
+        }
 }

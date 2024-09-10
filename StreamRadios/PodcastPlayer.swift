@@ -329,6 +329,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            } else {
                player?.replaceCurrentItem(with: playerItem)
            }
+        
+        viewModel?.updateLastPlayedEpisode(episode)
            
            saveProgressIfNeeded()
            
@@ -371,6 +373,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
            os_log("Started playing episode: %@", log: log, type: .info, episode.title)
        }
+    
+    func playLastEpisodeForFeed(_ feed: PodcastFeed) {
+            if let episode = viewModel?.getLastPlayedOrLatestEpisode(for: feed) {
+                playEpisode(episode, feed: feed)
+            }
+        }
     
     private func setupBackgroundPlayback() {
             do {
