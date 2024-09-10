@@ -115,47 +115,79 @@ class PodcastViewModel: ObservableObject {
         private let bookmarkStatusKey = "PodcastBookmarkStatus"
         private let downloadStatusKey = "PodcastDownloadStatus"
     @Published var lastPlayedEpisodes: [String: String] = [:]
+    @Published var showNoEpisodesAlert = false
+       @Published var noEpisodesAlertMessage = ""
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
-        self.context = context
-        self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
-        self.backgroundContext.parent = context
-        
-        // Perform initial loading asynchronously
-        backgroundContext.perform { [weak self] in
-            guard let self = self else { return }
-            
-            self.loadSavedData()
-            self.loadAllEpisodesProgress()
-            
-            DispatchQueue.main.async {
-                self.objectWillChange.send()
+            self.context = context
+            self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+            self.backgroundContext.parent = context
+
+            // Perform initial loading asynchronously
+            Task {
+                await loadInitialData()
             }
+        }
+
+        @MainActor
+        private func loadInitialData() async {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { self.loadSavedData() }
+                group.addTask { self.loadAllEpisodesProgress() }
+            }
+            
+            self.objectWillChange.send()
+        }
+    
+    func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
+        DispatchQueue.main.async {
+            self.lastPlayedEpisodes[episode.feedId] = episode.id
+            self.saveLastPlayedEpisodes() // Ensure this is also on the main thread
         }
     }
     
-    func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
-            lastPlayedEpisodes[episode.feedId] = episode.id
-            saveLastPlayedEpisodes()
-        }
-    
     func getLastPlayedOrLatestEpisode(for feed: PodcastFeed) -> PodcastEpisode? {
-           if let lastPlayedEpisodeId = lastPlayedEpisodes[feed.id],
-              let lastPlayedEpisode = allEpisodes.first(where: { $0.id == lastPlayedEpisodeId }) {
-               return lastPlayedEpisode
-           }
-           return allEpisodes.filter { $0.feedId == feed.id }.sorted(by: { $0.publicationDate > $1.publicationDate }).first
-       }
-    
-    private func saveLastPlayedEpisodes() {
-            UserDefaults.standard.set(lastPlayedEpisodes, forKey: "LastPlayedEpisodes")
+            let feedEpisodes = allEpisodes.filter { $0.feedId == feed.id }
+            
+            // Check for last played episode
+            if let lastPlayedEpisodeId = lastPlayedEpisodes[feed.id],
+               let lastPlayedEpisode = feedEpisodes.first(where: { $0.id == lastPlayedEpisodeId }) {
+                return lastPlayedEpisode
+            }
+            
+            // Check for episodes in progress
+            let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+            
+            if let firstInProgressEpisode = episodesInProgress.first {
+                return firstInProgressEpisode
+            }
+            
+            // If no episodes in progress, return the latest episode
+            return feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first
         }
-    
-    private func loadLastPlayedEpisodes() {
-            if let saved = UserDefaults.standard.dictionary(forKey: "LastPlayedEpisodes") as? [String: String] {
-                lastPlayedEpisodes = saved
+
+    func showNoEpisodesInProgressAlert(for feed: PodcastFeed) {
+            DispatchQueue.main.async {
+                self.noEpisodesAlertMessage = "No episodes in progress for \(feed.title). Playing the latest episode."
+                self.showNoEpisodesAlert = true
             }
         }
+    
+    private func saveLastPlayedEpisodes() {
+        DispatchQueue.main.async {
+            UserDefaults.standard.set(self.lastPlayedEpisodes, forKey: "LastPlayedEpisodes")
+        }
+    }
+
+    
+    private func loadLastPlayedEpisodes() {
+        if let saved = UserDefaults.standard.dictionary(forKey: "LastPlayedEpisodes") as? [String: String] {
+            DispatchQueue.main.async {
+                self.lastPlayedEpisodes = saved
+            }
+        }
+    }
+
     
     func fetchAllEpisodes(for feed: PodcastFeed) {
               isLoading = true

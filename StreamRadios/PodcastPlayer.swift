@@ -376,7 +376,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func playLastEpisodeForFeed(_ feed: PodcastFeed) {
             if let episode = viewModel?.getLastPlayedOrLatestEpisode(for: feed) {
+                let feedEpisodes = viewModel?.allEpisodes.filter { $0.feedId == feed.id } ?? []
+                let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+                
+                if episodesInProgress.isEmpty {
+                    viewModel?.showNoEpisodesInProgressAlert(for: feed)
+                }
+                
                 playEpisode(episode, feed: feed)
+            } else {
+                print("No episodes available for this feed")
+                viewModel?.showNoEpisodesInProgressAlert(for: feed)
             }
         }
     
