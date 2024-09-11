@@ -53,7 +53,7 @@ struct PodcastListView: View {
                             },
                             set: { _ in }
                         )
-                       
+                        
                     )
                 }
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
@@ -62,12 +62,12 @@ struct PodcastListView: View {
             }
         }
         .alert(isPresented: $viewModel.showNoEpisodesAlert) {
-                    Alert(
-                        title: Text("No Episodes in Progress"),
-                        message: Text(viewModel.noEpisodesAlertMessage),
-                        dismissButton: .default(Text("OK"))
-                    )
-                }
+            Alert(
+                title: Text("No Episodes in Progress"),
+                message: Text(viewModel.noEpisodesAlertMessage),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
     
     private var instructionText: some View {
@@ -105,8 +105,17 @@ struct PodcastListView: View {
                         viewModel: viewModel,
                         podcastPlayer: podcastPlayer
                     )
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            podcastToDelete = feed
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
             }
+            .onMove(perform: viewModel.moveFeed)
             Spacer()
                 .frame(height: 100)
                 .listRowInsets(EdgeInsets())
@@ -217,7 +226,7 @@ struct PodcastRowView: View {
     @Binding var isExpanded: Bool
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
-
+    
     
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -310,18 +319,18 @@ struct PodcastRowView: View {
     }
     
     private func checkAndPlayEpisode() {
-            let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-            let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
-            
-            if episodesInProgress.isEmpty {
-                viewModel.showNoEpisodesInProgressAlert(for: feed)
-                if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
-                    podcastPlayer.playEpisode(latestEpisode, feed: feed)
-                }
-            } else {
-                onPlay()
+        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+        let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+        
+        if episodesInProgress.isEmpty {
+            viewModel.showNoEpisodesInProgressAlert(for: feed)
+            if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
+                podcastPlayer.playEpisode(latestEpisode, feed: feed)
             }
+        } else {
+            onPlay()
         }
+    }
 }
 
 struct PodcastIconView: View {
@@ -387,12 +396,12 @@ struct EpisodeRowView: View {
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
     private var remainingTime: Double {
-            if isPlaying {
-                return podcastPlayer.remainingTime
-            } else {
-                return episode.duration * (1 - progress)
-            }
+        if isPlaying {
+            return podcastPlayer.remainingTime
+        } else {
+            return episode.duration * (1 - progress)
         }
+    }
     
     init(episode: PodcastEpisode, isPlaying: Bool, onPlay: @escaping () -> Void, onStop: @escaping () -> Void, viewModel: PodcastViewModel, podcastPlayer: PodcastPlayer) {
         self.episode = episode
@@ -429,11 +438,11 @@ struct EpisodeRowView: View {
                     }
                 }) {
                     Image(systemName: episode.state.isPlayed || progress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
-                            .resizable()
-                            .frame(width: buttonSize, height: buttonSize)
-                            .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .blue : (isPlaying ? .blue : .green))
-                    }
-                    .frame(width: buttonSize, height: buttonSize)
+                        .resizable()
+                        .frame(width: buttonSize, height: buttonSize)
+                        .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .blue : (isPlaying ? .blue : .green))
+                }
+                .frame(width: buttonSize, height: buttonSize)
                 
                 // Episode info
                 VStack(alignment: .leading, spacing: 2) {
@@ -638,20 +647,20 @@ struct EpisodeRowView: View {
     }
     
     private func formatRemainingTime() -> String {
-           return formatTime(remainingTime)
-       }
-        
+        return formatTime(remainingTime)
+    }
+    
     private func formatTime(_ time: TimeInterval) -> String {
-            let hours = Int(time) / 3600
-            let minutes = (Int(time) % 3600) / 60
-            let seconds = Int(time) % 60
-            
-            if hours > 0 {
-                return String(format: "%d:%02d:%02d remaining", hours, minutes, seconds)
-            } else {
-                return String(format: "%d:%02d remaining", minutes, seconds)
-            }
+        let hours = Int(time) / 3600
+        let minutes = (Int(time) % 3600) / 60
+        let seconds = Int(time) % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d remaining", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d remaining", minutes, seconds)
         }
+    }
     
     
 }
@@ -770,29 +779,29 @@ struct PodcastPlayerView: View {
             episodeFilterTabs
             
             Group {
-                            if viewModel.isLoadingEpisodes {
-                                ProgressView("Loading episodes...")
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            } else {
-                                ScrollView {
-                                    ScrollViewReader { proxy in
-                                        episodeList
-                                            .onAppear {
-                                                scrollProxy = proxy
-                                                scrollToEpisodeIfNeeded()
-                                            }
-                                    }
+                if viewModel.isLoadingEpisodes {
+                    ProgressView("Loading episodes...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        ScrollViewReader { proxy in
+                            episodeList
+                                .onAppear {
+                                    scrollProxy = proxy
+                                    scrollToEpisodeIfNeeded()
                                 }
-                            }
                         }
                     }
-                    .onDisappear {
-                        viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
-                    }
-                    .onAppear {
-                        loadEpisodes()
-                    }
-            
+                }
+            }
+        }
+        .onDisappear {
+            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
+        }
+        .onAppear {
+            loadEpisodes()
+        }
+        
         
         .onAppear {
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
@@ -806,21 +815,21 @@ struct PodcastPlayerView: View {
         .onChange(of: episodeToScrollTo) { _ in
             scrollToEpisodeIfNeeded()
         }
-       // ReconnectingIndicatorView(isAttemptingReconnection: $podcastPlayer.isAttemptingReconnection)
+        // ReconnectingIndicatorView(isAttemptingReconnection: $podcastPlayer.isAttemptingReconnection)
         .navigationBarHidden(true)
     }
-
+    
     private func loadEpisodes() {
-            viewModel.fetchEpisodes(for: feed) { result in
-                switch result {
-                case .success(let episodes):
-                    // Episodes are now automatically updated in the viewModel with correct statuses
-                    print("Loaded \(episodes.count) episodes with bookmark and download statuses")
-                case .failure(let error):
-                    print("Failed to load episodes: \(error.localizedDescription)")
-                }
+        viewModel.fetchEpisodes(for: feed) { result in
+            switch result {
+            case .success(let episodes):
+                // Episodes are now automatically updated in the viewModel with correct statuses
+                print("Loaded \(episodes.count) episodes with bookmark and download statuses")
+            case .failure(let error):
+                print("Failed to load episodes: \(error.localizedDescription)")
             }
         }
+    }
     
     private var episodeFilterTabs: some View {
         Picker("", selection: $selectedTab) {
@@ -856,14 +865,14 @@ struct PodcastPlayerView: View {
     }
     
     private func scrollToInitialEpisode() {
-            if let initialID = initialScrollToEpisodeID {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    withAnimation {
-                        scrollProxy?.scrollTo(initialID, anchor: .top)
-                    }
+        if let initialID = initialScrollToEpisodeID {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation {
+                    scrollProxy?.scrollTo(initialID, anchor: .top)
                 }
             }
         }
+    }
     
     private func updateViewModelAndDismiss() {
         if let currentEpisode = podcastPlayer.currentEpisode {
@@ -910,24 +919,24 @@ struct PodcastPlayerView: View {
     }
     
     private func scrollToEpisodeIfNeeded() {
-            Task {
-                // Add a short delay to ensure the view is fully loaded
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-
-                await MainActor.run {
-                    if let episodeToScrollTo = episodeToScrollTo {
-                        withAnimation {
-                            scrollProxy?.scrollTo(episodeToScrollTo.id, anchor: .top)
-                        }
-                    } else if let initialID = initialScrollToEpisodeID, !hasScrolledToInitialEpisode {
-                        withAnimation {
-                            scrollProxy?.scrollTo(initialID, anchor: .top)
-                        }
-                        hasScrolledToInitialEpisode = true
+        Task {
+            // Add a short delay to ensure the view is fully loaded
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            
+            await MainActor.run {
+                if let episodeToScrollTo = episodeToScrollTo {
+                    withAnimation {
+                        scrollProxy?.scrollTo(episodeToScrollTo.id, anchor: .top)
                     }
+                } else if let initialID = initialScrollToEpisodeID, !hasScrolledToInitialEpisode {
+                    withAnimation {
+                        scrollProxy?.scrollTo(initialID, anchor: .top)
+                    }
+                    hasScrolledToInitialEpisode = true
                 }
             }
         }
+    }
 }
 
 private func formatTime(_ time: Double) -> String {
@@ -1016,43 +1025,43 @@ struct PodcastList: View {
     var body: some View {
         List {
             ForEach(orderedFeeds, id: \.id) { feed in
-                            PodcastRowView(
-                                feed: feed,
-                                isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                                onPlay: {
-                                    if let episode = viewModel.getLastPlayedOrLatestEpisode(for: feed) {
-                                        podcastPlayer.playEpisode(episode, feed: feed)
-                                    }
-                                },
-                                onStop: { podcastPlayer.togglePlayPause() },
-                                onTap: { selectedPodcast = feed },
-                                isExpanded: Binding(
-                                    get: { expandedFeedId == feed.id },
-                                    set: { isExpanded in
-                                        expandedFeedId = isExpanded ? feed.id : nil
-                                    }
-                                ),
-                                viewModel: viewModel,  // Pass the viewModel here
-                                podcastPlayer: podcastPlayer
-                                
-                            )
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    onDelete(feed)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                PodcastRowView(
+                    feed: feed,
+                    isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                    onPlay: {
+                        if let episode = viewModel.getLastPlayedOrLatestEpisode(for: feed) {
+                            podcastPlayer.playEpisode(episode, feed: feed)
                         }
+                    },
+                    onStop: { podcastPlayer.togglePlayPause() },
+                    onTap: { selectedPodcast = feed },
+                    isExpanded: Binding(
+                        get: { expandedFeedId == feed.id },
+                        set: { isExpanded in
+                            expandedFeedId = isExpanded ? feed.id : nil
+                        }
+                    ),
+                    viewModel: viewModel,  // Pass the viewModel here
+                    podcastPlayer: podcastPlayer
+                    
+                )
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        onDelete(feed)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
-                    .listStyle(PlainListStyle())
+                }
+            }
+        }
+        .listStyle(PlainListStyle())
     }
     
     private var orderedFeeds: [PodcastFeed] {
-            let orderedIds = Set(viewModel.podcastFeedOrder)
-            let orderedFeeds = feeds.filter { orderedIds.contains($0.id) }
-                .sorted { viewModel.podcastFeedOrder.firstIndex(of: $0.id)! < viewModel.podcastFeedOrder.firstIndex(of: $1.id)! }
-            let remainingFeeds = feeds.filter { !orderedIds.contains($0.id) }
-            return orderedFeeds + remainingFeeds
-        }
+        let orderedIds = Set(viewModel.podcastFeedOrder)
+        let orderedFeeds = feeds.filter { orderedIds.contains($0.id) }
+            .sorted { viewModel.podcastFeedOrder.firstIndex(of: $0.id)! < viewModel.podcastFeedOrder.firstIndex(of: $1.id)! }
+        let remainingFeeds = feeds.filter { !orderedIds.contains($0.id) }
+        return orderedFeeds + remainingFeeds
+    }
 }
