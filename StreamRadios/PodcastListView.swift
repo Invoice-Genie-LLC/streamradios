@@ -227,91 +227,94 @@ struct PodcastRowView: View {
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
     
+    private let iconSize: CGFloat = 88 // Adjusted to match 4 lines of text plus some padding
+    private let arrowSize: CGFloat = 20 // New constant for arrow size
     
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            PodcastIconView(iconData: feed.iconData, artworkUrl: feed.artworkUrl)
-                .frame(width: 70, height: 70)
-                .cornerRadius(10)
-                .padding(.top, 10)
-                .padding(.trailing, 8)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(feed.title)
+                .font(.headline)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text(feed.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .alignmentGuide(.top) { d in d[.top] }
+            HStack(alignment: .top, spacing: 12) {
+                PodcastIconView(iconData: feed.iconData, artworkUrl: feed.artworkUrl)
+                    .frame(width: iconSize, height: iconSize)
                 
-                if isExpanded {
-                    Text(feed.descriptionText ?? "No description available")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Text(feed.descriptionText ?? "No description available")
-                        .font(.subheadline)
-                        .foregroundColor(.gray)
-                        .lineLimit(4)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                
-                HStack {
-                    if !isExpanded && (feed.descriptionText?.count ?? 0) > 100 {
-                        Button(action: {
-                            isExpanded.toggle()
-                        }) {
-                            Text("Read More")
-                                .font(.footnote)
-                                .foregroundColor(.blue)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    
-                    Spacer()
-                    
-                    if isPlaying {
-                        Button(action: {
-                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                            impactFeedback.impactOccurred()
-                            onStop()
-                        }) {
-                            HStack {
-                                Image(systemName: "pause.circle.fill")
-                                    .foregroundColor(.blue)
-                                Text("Pause")
-                                    .font(.footnote)
-                                    .foregroundColor(.blue)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            onStop()
-                        }
+                VStack(alignment: .leading, spacing: 4) {
+                    if isExpanded {
+                        Text(feed.descriptionText ?? "No description available")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else {
-                        Button(action: {
-                            checkAndPlayEpisode()
-                        }) {
-                            HStack {
-                                Image(systemName: "play.circle.fill")
-                                    .foregroundColor(.green)
-                                Text("Continue Listening")
+                        Text(feed.descriptionText ?? "No description available")
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                            .lineLimit(4)
+                            .frame(height: iconSize, alignment: .top)
+                    }
+                    
+                    HStack {
+                        if !isExpanded && (feed.descriptionText?.count ?? 0) > 100 {
+                            Button(action: {
+                                isExpanded.toggle()
+                            }) {
+                                Text("Read More")
                                     .font(.footnote)
-                                    .foregroundColor(.green)
+                                    .foregroundColor(.blue)
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: onPlay)
+                        
+                        Spacer()
+                        
+                        if isPlaying {
+                            Button(action: {
+                                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                                impactFeedback.impactOccurred()
+                                onStop()
+                            }) {
+                                HStack {
+                                    Image(systemName: "pause.circle.fill")
+                                        .foregroundColor(.blue)
+                                    Text("Pause")
+                                        .font(.footnote)
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onStop()
+                            }
+                        } else {
+                            Button(action: {
+                                checkAndPlayEpisode()
+                            }) {
+                                HStack {
+                                    Image(systemName: "play.circle.fill")
+                                        .foregroundColor(.green)
+                                    Text("Resume Podcast")
+                                        .font(.footnote)
+                                        .foregroundColor(.green)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture(perform: onPlay)
+                        }
                     }
                 }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: arrowSize))
+                    .foregroundColor(.gray)
+                    .frame(width: arrowSize, height: iconSize)
             }
-            .padding(.vertical, 6)
-            .alignmentGuide(.top) { d in d[.top] }
-            
-            Spacer()
         }
-        .padding(.horizontal, 8)
+      //  .padding(.horizontal, 10)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture {
             onTap()
@@ -343,7 +346,6 @@ struct PodcastIconView: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 70, height: 70)
                     .cornerRadius(10)
             } else if let artworkUrl = artworkUrl, let url = URL(string: artworkUrl) {
                 AsyncImage(url: url) { phase in
@@ -354,13 +356,11 @@ struct PodcastIconView: View {
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 70, height: 70)
                             .cornerRadius(10)
                     case .failure:
                         Image(systemName: "photo")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 70, height: 70)
                             .cornerRadius(10)
                             .foregroundColor(.gray)
                     @unknown default:
@@ -371,7 +371,6 @@ struct PodcastIconView: View {
                 Image(systemName: "mic.fill")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 70, height: 70)
                     .padding(16)
                     .background(Color.blue.opacity(0.3))
                     .foregroundColor(.white)
