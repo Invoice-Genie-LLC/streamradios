@@ -876,31 +876,60 @@ struct PodcastPlayerView: View {
     
     private func updateViewModelAndDismiss() {
         if let currentEpisode = podcastPlayer.currentEpisode {
-            // Update progress
-            viewModel.updateProgress(for: currentEpisode, progress: podcastPlayer.currentProgress)
+            // Save progress and update episode state
+            podcastPlayer.saveProgressIfNeeded()
+            
+            let progress = podcastPlayer.getCurrentProgress(for: currentEpisode)
+            var updatedEpisode = currentEpisode
+            
+            if progress >= 0.99 {
+                // Mark as played if progress is 99% or more
+                updatedEpisode.state.isPlayed = true
+                updatedEpisode.state.progress = 1.0
+            } else if progress > 0 {
+                // Mark as in progress
+                updatedEpisode.state.isPlayed = false
+                updatedEpisode.state.progress = progress
+            }
+            
+            // Update the episode in the view model
+            viewModel.updateEpisode(updatedEpisode)
             
             // Update favorite (bookmark) state
-            if currentEpisode.state.isFavorite != viewModel.favoriteEpisodes.contains(where: { $0.id == currentEpisode.id }) {
-                viewModel.toggleFavorite(for: currentEpisode)
+            if updatedEpisode.state.isFavorite != viewModel.favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
+                viewModel.toggleFavorite(for: updatedEpisode)
             }
             
             // Update download state
-            let isDownloaded = viewModel.downloadedEpisodes.contains(where: { $0.id == currentEpisode.id })
-            if currentEpisode.state.isDownloaded != isDownloaded {
+            let isDownloaded = viewModel.downloadedEpisodes.contains(where: { $0.id == updatedEpisode.id })
+            if updatedEpisode.state.isDownloaded != isDownloaded {
                 if isDownloaded {
-                    // If it's downloaded in the viewModel but not in the current episode state, update the current episode
-                    var updatedEpisode = currentEpisode
                     updatedEpisode.state.isDownloaded = true
                     viewModel.updateEpisode(updatedEpisode)
                 } else {
-                    // If it's not downloaded in the viewModel but is in the current episode state, remove it from downloads
-                    viewModel.deleteDownloadedEpisode(currentEpisode)
+                    viewModel.deleteDownloadedEpisode(updatedEpisode)
+                }
+            }
+            
+            // Update progress state for all played episodes
+            for episode in viewModel.currentEpisodes {
+                let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
+                if episodeProgress > 0 {
+                    var updatedPlayedEpisode = episode
+                    updatedPlayedEpisode.state.progress = episodeProgress
+                    updatedPlayedEpisode.state.isPlayed = episodeProgress >= 0.99
+                    viewModel.updateEpisode(updatedPlayedEpisode)
                 }
             }
         }
         
         // Update filtered episodes
         viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
+        
+        // Trigger a UI update
+        DispatchQueue.main.async {
+            self.viewModel.objectWillChange.send()
+        }
         
         // Dismiss the view
         presentationMode.wrappedValue.dismiss()

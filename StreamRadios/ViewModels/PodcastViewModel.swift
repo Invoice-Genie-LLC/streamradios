@@ -326,17 +326,6 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    func updateEpisode(_ updatedEpisode: PodcastEpisode) {
-        if let index = allEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
-            allEpisodes[index] = updatedEpisode
-        }
-        if let index = currentEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
-            currentEpisodes[index] = updatedEpisode
-        }
-        saveEpisodeToCoreData(updatedEpisode)
-        objectWillChange.send()
-    }
-    
     func refreshEpisodeStates() {
         for index in allEpisodes.indices {
             let episode = allEpisodes[index]
@@ -1051,29 +1040,45 @@ class PodcastViewModel: ObservableObject {
         objectWillChange.send()
     }
     
-    func updateEpisodePlayStatus(_ episode: PodcastEpisode, isPlayed: Bool) {
-        var updatedEpisode = episode
-        updatedEpisode.state.isPlayed = isPlayed
-        updateEpisodeInLists(updatedEpisode)
+    func updateEpisode(_ updatedEpisode: PodcastEpisode) {
+        if let index = allEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+            allEpisodes[index] = updatedEpisode
+        }
+        if let index = currentEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+            currentEpisodes[index] = updatedEpisode
+        }
         saveEpisodeToCoreData(updatedEpisode)
+        
+        // Update favorite episodes
+        if updatedEpisode.state.isFavorite {
+            if !favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
+                favoriteEpisodes.append(updatedEpisode)
+            } else if let index = favoriteEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+                favoriteEpisodes[index] = updatedEpisode
+            }
+        } else {
+            favoriteEpisodes.removeAll { $0.id == updatedEpisode.id }
+        }
+        
+        // Update downloaded episodes
+        if updatedEpisode.state.isDownloaded {
+            if !downloadedEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
+                downloadedEpisodes.append(updatedEpisode)
+            } else if let index = downloadedEpisodes.firstIndex(where: { $0.id == updatedEpisode.id }) {
+                downloadedEpisodes[index] = updatedEpisode
+            }
+        } else {
+            downloadedEpisodes.removeAll { $0.id == updatedEpisode.id }
+        }
+        
+        // Update episodeProgress dictionary
+        episodeProgress[updatedEpisode.id] = updatedEpisode.state.progress
+        
+        // Trigger a UI update
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+        }
     }
-    
-    func resetEpisodeProgress(_ episode: PodcastEpisode) -> PodcastEpisode {
-        var updatedEpisode = episode
-        updatedEpisode.state.progress = 0.0
-        updatedEpisode.state.isPlayed = false
-        
-        updateEpisodeInLists(updatedEpisode)
-        saveEpisodeToCoreData(updatedEpisode)
-        episodeProgress[episode.id] = 0.0
-        
-        updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
-        
-        objectWillChange.send()
-        
-        return updatedEpisode
-    }
-    
     
     private func saveEpisodeCompletedState(_ episode: PodcastEpisode) {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
