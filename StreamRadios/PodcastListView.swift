@@ -282,19 +282,6 @@ struct PodcastRowView: View {
                     }
                     
                     HStack {
-                        if !isExpanded && (feed.descriptionText?.count ?? 0) > 100 {
-                            Button(action: {
-                                isExpanded.toggle()
-                            }) {
-                                Text("Read More")
-                                    .font(.footnote)
-                                    .foregroundColor(.blue)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
-                        
-                        Spacer()
-                        
                         if isPlaying {
                             Button(action: {
                                 let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
@@ -709,7 +696,7 @@ struct PodcastPlayerView: View {
         0...max(podcastPlayer.duration, 0.01)
     }
     
-    var body: some View {
+    private var playerHeader: some View {
         VStack(spacing: 0) {
             // Custom navigation bar
             HStack {
@@ -729,29 +716,47 @@ struct PodcastPlayerView: View {
             .frame(height: 44)
             .background(Color(UIColor.systemBackground))
             
-            // Pinned player area
-            VStack(spacing: 12) {
-                // Centered, smaller feed image
+            // Redesigned feed info area
+            HStack(alignment: .top, spacing: 16) {
+                // Left-aligned feed image
                 FeedImageView(feed: feed)
                     .frame(width: 120, height: 120)
                     .cornerRadius(12)
                     .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
                 
-                VStack(alignment: .center, spacing: 4) {
-                    Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(4)
-                    
-                    if let currentEpisode = podcastPlayer.currentEpisode {
-                        Text(formatDate(currentEpisode.publicationDate))
+                // Right side: feed description and current episode info
+                VStack(alignment: .leading, spacing: 8) {
+                    // Scrollable feed description
+                    ScrollView {
+                        Text(feed.descriptionText ?? "No description available")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            .padding(.top, 6)
+                    }
+                    .frame(height: 80) // Adjust this value to control the height of the scrollable area
+                    
+                    Divider()
+                    
+                    // Current episode info
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .lineLimit(2)
+                        
+                        if let currentEpisode = podcastPlayer.currentEpisode {
+                            Text(formatDate(currentEpisode.publicationDate))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
-                .padding(.horizontal)
-                
+            }
+            .padding()
+            .background(Color(UIColor.secondarySystemBackground))
+            
+            // Player controls
+            VStack(spacing: 12) {
                 // Progress slider
                 ProgressSlider(
                     value: $seekPosition,
@@ -799,6 +804,13 @@ struct PodcastPlayerView: View {
             }
             .padding(.vertical, 6)
             .background(Color(UIColor.secondarySystemBackground))
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Custom navigation bar
+            playerHeader
             
             // Episode filter tabs
             episodeFilterTabs
