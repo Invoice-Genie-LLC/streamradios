@@ -299,80 +299,94 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-           stopRadioPlayback()
-           
-           do {
-               try AVAudioSession.sharedInstance().setActive(true)
-           } catch {
-               os_log("Failed to activate audio session: %@", log: log, type: .error, error.localizedDescription)
-           }
-           
-           // Load all episodes for the feed
-           loadAllEpisodesForFeed(feed)
-           
-           var playUrl: URL?
-           
-           if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
-               playUrl = URL(fileURLWithPath: localFilePath)
-           } else if let url = URL(string: episode.audioUrl) {
-               playUrl = url
-           } else {
-               os_log("Failed to get playable URL for episode: %@", log: log, type: .error, episode.title)
-               return
-           }
-           
-           guard let url = playUrl else { return }
-           
-           let playerItem = AVPlayerItem(url: url)
-           if player == nil {
-               player = AVPlayer(playerItem: playerItem)
-           } else {
-               player?.replaceCurrentItem(with: playerItem)
-           }
+        stopRadioPlayback()
         
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            os_log("Failed to activate audio session: %@", log: log, type: .error, error.localizedDescription)
+        }
+        
+        // Save progress of the current episode if there is one
+        if let currentEpisode = currentEpisode {
+            saveProgressIfNeeded()
+        }
+
+        // Load all episodes for the feed
+        loadAllEpisodesForFeed(feed)
+        
+        var playUrl: URL?
+        
+        if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
+            playUrl = URL(fileURLWithPath: localFilePath)
+        } else if let url = URL(string: episode.audioUrl) {
+            playUrl = url
+        } else {
+            os_log("Failed to get playable URL for episode: %@", log: log, type: .error, episode.title)
+            return
+        }
+        
+        guard let url = playUrl else { return }
+        
+        let playerItem = AVPlayerItem(url: url)
+        if player == nil {
+            player = AVPlayer(playerItem: playerItem)
+        } else {
+            player?.replaceCurrentItem(with: playerItem)
+        }
+
+        // Save last played episode in the view model
         viewModel?.updateLastPlayedEpisode(episode)
-           
-           saveProgressIfNeeded()
-           
-           currentEpisode = episode
-           currentFeed = feed
+        
+        currentEpisode = episode
+        currentFeed = feed
         isPodcastActive = true
-           
-           // Update currentEpisodeIndex
+        
+        // Update currentEpisodeIndex
         if let index = allEpisodesInFeed.firstIndex(where: { $0.id == episode.id }) {
-                    currentEpisodeIndex = index
-                    os_log("Set current episode index to %d", log: log, type: .info, index)
-                } else {
-                    os_log("Failed to find index for current episode", log: log, type: .error)
-                }
-           
-           if viewModel?.getProgress(for: episode) == 0 {
-               viewModel?.updateProgress(for: episode, progress: 0.001)
-           }
-           
-           if let savedProgress = viewModel?.episodeProgress[episode.id] {
-               let targetTime = savedProgress * episode.duration
-               player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1))
-               currentTime = targetTime
-           } else {
-               currentTime = 0
-               duration = episode.duration
-               currentProgress = 0
-           }
-           
-           setupPlayerItemObserver()
-           setupTimeObserver()
-           
-           if let playerItem = player?.currentItem {
-               duration = playerItem.asset.duration.seconds
-           }
+            currentEpisodeIndex = index
+            os_log("Set current episode index to %d", log: log, type: .info, index)
+        } else {
+            os_log("Failed to find index for current episode", log: log, type: .error)
+        }
+        
+        // Update episode progress
+        var updatedEpisode = episode
+        if viewModel?.getProgress(for: episode) == 0 {
+            updatedEpisode.state.progress = 0.001
+            viewModel?.updateEpisode(updatedEpisode)
+        }
+        
+        if let savedProgress = viewModel?.episodeProgress[episode.id] {
+            let targetTime = savedProgress * episode.duration
+            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1))
+            currentTime = targetTime
+            updatedEpisode.state.progress = savedProgress
+            viewModel?.updateEpisode(updatedEpisode)
+        } else {
+            currentTime = 0
+            duration = episode.duration
+            currentProgress = 0
+        }
+        
+        setupPlayerItemObserver()
+        setupTimeObserver()
+        
+        if let playerItem = player?.currentItem {
+            duration = playerItem.asset.duration.seconds
+        }
         play()
         isPlaying = true
         updateNowPlayingInfo()
         setupBackgroundPlayback()
 
-           os_log("Started playing episode: %@", log: log, type: .info, episode.title)
-       }
+        os_log("Started playing episode: %@", log: log, type: .info, episode.title)
+        
+        // Trigger a UI update
+        DispatchQueue.main.async {
+            self.viewModel?.objectWillChange.send()
+        }
+    }
     
     func playLastEpisodeForFeed(_ feed: PodcastFeed) {
             if let episode = viewModel?.getLastPlayedOrLatestEpisode(for: feed) {
@@ -520,7 +534,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         currentTime = time
     }
     
-    private func saveProgressIfNeeded() {
+    func saveProgressIfNeeded() {
         guard let currentEpisode = currentEpisode, duration > 0 else { return }
         let progress = currentTime / duration
         viewModel?.updateProgress(for: currentEpisode, progress: progress)
