@@ -78,11 +78,37 @@ struct PodcastListView: View {
     }
     
     private var searchBar: some View {
-        TextField("Search podcasts", text: $searchText)
-            .textFieldStyle(RoundedBorderTextFieldStyle())
-            .padding(.horizontal)
-            .autocapitalization(.none)
-            .disableAutocorrection(true)
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.gray)
+                .padding(.leading, 8)
+            
+            ZStack(alignment: .trailing) {
+                TextField("Search podcasts", text: $searchText)
+                    .padding(.vertical, 8)
+                    .padding(.trailing, 30)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                    .onChange(of: searchText) { newValue in
+                        searchText = String(newValue.prefix(100))  // Limit to 100 characters
+                    }
+                
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                            .padding(.trailing, 8)
+                    }
+                    .transition(.opacity)
+                    .animation(.default, value: searchText)
+                }
+            }
+        }
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
+        .padding(.horizontal)
     }
     
     private var podcastList: some View {
