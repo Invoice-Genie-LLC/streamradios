@@ -3,6 +3,11 @@
 //
 // Created by Kley Sulo on 6/25/24.
 
+// EditStationView.swift
+// StreamRadios
+//
+// Created by Kley Sulo on 6/25/24.
+
 import SwiftUI
 
 struct EditStationView: View {
@@ -34,7 +39,7 @@ struct EditStationView: View {
         ZStack {
             NavigationView {
                 VStack {
-                    // Custom toolbar with title and cancel button
+                    // Custom toolbar with title, cancel button, and save button
                     HStack {
                         Button(action: {
                             isPresented = nil
@@ -47,10 +52,9 @@ struct EditStationView: View {
                             .font(.headline)
                             .foregroundColor(.primary)
                         Spacer()
-                        // Placeholder to balance the HStack
-                        Button(action: {}) {
-                            Text("")
-                                .foregroundColor(.clear)
+                        Button(action: saveStation) {
+                            Text("Save")
+                                .foregroundColor(.green)
                         }
                     }
                     .padding()
@@ -127,14 +131,6 @@ struct EditStationView: View {
                                 ImagePicker(image: $iconImage)
                             }
                         }
-                        
-                        Button(action: saveStation) {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                Text("Save Changes")
-                            }
-                        }
-                        .foregroundColor(.green)
                     }
                     .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
                         Alert(
