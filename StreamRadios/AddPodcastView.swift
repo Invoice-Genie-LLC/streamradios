@@ -19,6 +19,7 @@ struct AddPodcastView: View {
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
+    @StateObject private var radioPlayer = RadioPlayer.shared
     
     let onAdd: () -> Void
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
@@ -89,7 +90,7 @@ struct AddPodcastView: View {
                             }
                         }
                         
-                        if podcastPlayer.currentEpisode != nil {
+                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                             MiniPlayerView(
                                 podcastPlayer: podcastPlayer,
                                 viewModel: podcastViewModel,
@@ -134,7 +135,8 @@ struct AddPodcastView: View {
                     episodeToScrollTo: Binding(
                         get: { podcastPlayer.currentEpisode },
                         set: { _ in }
-                    )
+                    ),
+                                    selectedPodcast: $selectedPodcast
                 )
             }
         }

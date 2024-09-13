@@ -228,7 +228,8 @@ struct AlarmConfigurationView: View {
                     episodeToScrollTo: Binding(
                         get: { podcastPlayer.currentEpisode },
                         set: { _ in }
-                    )
+                    ),
+                    selectedPodcast: $selectedPodcast
                 )
             }
         }

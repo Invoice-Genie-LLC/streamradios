@@ -22,6 +22,7 @@ struct AddStationView: View {
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
+    @StateObject private var radioPlayer = RadioPlayer.shared
 
     var station: RadioStation?
     var onSave: ((String) -> Void)?
@@ -149,7 +150,7 @@ struct AddStationView: View {
                             }
                         }
                         
-                        if podcastPlayer.currentEpisode != nil {
+                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                             MiniPlayerView(
                                 podcastPlayer: podcastPlayer,
                                 viewModel: podcastViewModel,
@@ -204,7 +205,8 @@ struct AddStationView: View {
                     episodeToScrollTo: Binding(
                         get: { podcastPlayer.currentEpisode },
                         set: { _ in }
-                    )
+                    ),
+                    selectedPodcast: $selectedPodcast
                 )
             }
         }
