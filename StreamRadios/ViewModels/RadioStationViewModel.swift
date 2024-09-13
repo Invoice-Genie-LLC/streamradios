@@ -15,6 +15,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var countries: [Country] = [
         Country(name: "Select Country", flag: ""),
         Country(name: "Albania", flag: "AL"),
+        Country(name: "Algeria", flag: "DZ"),
         Country(name: "Angola", flag: "AO"),
         Country(name: "Argentina", flag: "AR"),
         Country(name: "Australia", flag: "AU"),
