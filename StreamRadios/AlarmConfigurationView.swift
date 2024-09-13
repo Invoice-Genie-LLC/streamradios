@@ -179,7 +179,8 @@ struct AlarmConfigurationView: View {
                                 }
                             }
                         }
-                        .padding(.bottom, 100)  // Add padding to prevent content from being hidden behind the mini player
+                        // Add padding to prevent content from being hidden behind the mini player
+                        .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 100 : 0)
                     }
                 
                 // Fixed Mini Player

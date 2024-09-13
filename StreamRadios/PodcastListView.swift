@@ -58,7 +58,7 @@ struct PodcastListView: View {
                         )
                     )
                 }
-                .padding(.bottom, 40)
+                .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 
                 // Fixed Mini Player
