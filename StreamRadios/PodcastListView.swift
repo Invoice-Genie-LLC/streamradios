@@ -763,59 +763,12 @@ struct PodcastPlayerView: View {
                .frame(height: 180)
                .background(Color(UIColor.secondarySystemBackground))
             
-            // Player controls
-            VStack(spacing: 12) {
-                // Progress slider
-                ProgressSlider(
-                    value: $seekPosition,
-                    inRange: sliderRange,
-                    onEditingChanged: { editing in
-                        isSeekingManually = editing
-                        if !editing {
-                            podcastPlayer.seek(to: seekPosition)
-                        }
-                    }
-                )
-                .frame(height: 4)
-                .padding(.horizontal)
-                
-                // Time labels
-                HStack {
-                    Text(formatTime(podcastPlayer.currentTime))
-                    Spacer()
-                    Text("-" + formatTime(podcastPlayer.remainingTime))
-                }
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .padding(.horizontal)
-                
-                // Playback controls
-                HStack(spacing: 20) {
-                    Button(action: podcastPlayer.skipBackward) {
-                        Image(systemName: "gobackward.15")
-                            .font(.system(size: 20))
-                    }
-                    
-                    Button(action: podcastPlayer.togglePlayPause) {
-                        Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 48))
-                            .foregroundColor(.blue)
-                    }
-                    
-                    Button(action: podcastPlayer.skipForward) {
-                        Image(systemName: "goforward.30")
-                            .font(.system(size: 20))
-                    }
-                }
-                .foregroundColor(.primary)
-                .padding(.bottom, 8)
-            }
-            .padding(.vertical, 6)
-            .background(Color(UIColor.secondarySystemBackground))
+           
         }
     }
     
     var body: some View {
+        ZStack(alignment: .bottom) {
         VStack(spacing: 0) {
             // Custom navigation bar
             playerHeader
@@ -840,6 +793,7 @@ struct PodcastPlayerView: View {
                 }
             }
         }
+    }
         .onDisappear {
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
         }
@@ -862,6 +816,22 @@ struct PodcastPlayerView: View {
         }
         // ReconnectingIndicatorView(isAttemptingReconnection: $podcastPlayer.isAttemptingReconnection)
         .navigationBarHidden(true)
+        // Mini player at the bottom
+                    if podcastPlayer.currentEpisode != nil {
+                        MiniPlayerView(
+                            podcastPlayer: podcastPlayer,
+                            viewModel: viewModel,
+                            selectedPodcast: .constant(feed),
+                            onListButtonTap: {},
+                            onCloseButtonTap: {
+                                podcastPlayer.pause()
+                                podcastPlayer.currentEpisode = nil
+                                podcastPlayer.currentFeed = nil
+                            }
+                        )
+                        .transition(.move(edge: .bottom))
+                    }
+        
     }
     
     private func loadEpisodes() {
