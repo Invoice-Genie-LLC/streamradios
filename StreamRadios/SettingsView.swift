@@ -108,7 +108,8 @@ struct SettingsView: View {
                        episodeToScrollTo: Binding(
                            get: { podcastPlayer.currentEpisode },
                            set: { _ in }
-                       )
+                       ),
+                       selectedPodcast: $selectedPodcast
                    )
                }
            }

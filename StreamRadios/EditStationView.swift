@@ -17,9 +17,9 @@ struct EditStationView: View {
     @EnvironmentObject var permissionManager: PermissionManager
     @Binding var isPresented: RadioStation?
     var station: RadioStation
-    
     @StateObject private var podcastViewModel = PodcastViewModel()
     @StateObject private var podcastPlayer = PodcastPlayer.shared
+    @StateObject private var radioPlayer = RadioPlayer.shared
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
@@ -142,7 +142,7 @@ struct EditStationView: View {
                             }
                         }
                         
-                        if podcastPlayer.currentEpisode != nil {
+                        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                             MiniPlayerView(
                                 podcastPlayer: podcastPlayer,
                                 viewModel: podcastViewModel,
@@ -197,7 +197,8 @@ struct EditStationView: View {
                     episodeToScrollTo: Binding(
                         get: { podcastPlayer.currentEpisode },
                         set: { _ in }
-                    )
+                    ),
+                    selectedPodcast: $selectedPodcast
                 )
             }
         }

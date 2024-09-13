@@ -48,17 +48,18 @@ struct PodcastListView: View {
                     AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
                 }
                 .sheet(item: $selectedPodcast) { podcast in
-                    PodcastPlayerView(
-                        viewModel: viewModel,
-                        feed: podcast,
-                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
-                        podcastPlayer: podcastPlayer,
-                        episodeToScrollTo: Binding(
-                            get: { podcastPlayer.currentEpisode },
-                            set: { _ in }
-                        )
-                    )
-                }
+                            PodcastPlayerView(
+                                viewModel: viewModel,
+                                feed: podcast,
+                                initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
+                                podcastPlayer: podcastPlayer,
+                                episodeToScrollTo: Binding(
+                                    get: { podcastPlayer.currentEpisode },
+                                    set: { _ in }
+                                ),
+                                selectedPodcast: $selectedPodcast
+                            )
+                        }
                 .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 
@@ -696,7 +697,9 @@ struct PodcastPlayerView: View {
     @Binding var episodeToScrollTo: PodcastEpisode?
     @State private var scrollProxy: ScrollViewProxy?
     @State private var hasScrolledToInitialEpisode = false
+    @State private var showingCurrentlyPlayingFeed = false
     @StateObject private var radioPlayer = RadioPlayer.shared
+    @Binding var selectedPodcast: PodcastFeed?
     
     private var sliderRange: ClosedRange<Double> {
         0...max(podcastPlayer.duration, 0.01)
@@ -826,21 +829,25 @@ struct PodcastPlayerView: View {
        
         // Mini player at the bottom
         if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                        MiniPlayerView(
-                            podcastPlayer: podcastPlayer,
-                            viewModel: viewModel,
-                            selectedPodcast: .constant(feed),
-                            onListButtonTap: {},
-                            onCloseButtonTap: {
-                                podcastPlayer.pause()
-                                podcastPlayer.currentEpisode = nil
-                                podcastPlayer.currentFeed = nil
-                            }
-                        )
-                        .transition(.move(edge: .bottom))
-                    }
-        
-    }
+                       MiniPlayerView(
+                           podcastPlayer: podcastPlayer,
+                           viewModel: viewModel,
+                           selectedPodcast: $selectedPodcast,
+                           onListButtonTap: {
+                               if let currentFeed = podcastPlayer.currentFeed {
+                                   showingCurrentlyPlayingFeed = true
+                                   selectedPodcast = currentFeed
+                               }
+                           },
+                           onCloseButtonTap: {
+                               podcastPlayer.pause()
+                               podcastPlayer.currentEpisode = nil
+                               podcastPlayer.currentFeed = nil
+                           }
+                       )
+                       .transition(.move(edge: .bottom))
+                   }
+               }
     
     private func loadEpisodes() {
         viewModel.fetchEpisodes(for: feed) { result in
