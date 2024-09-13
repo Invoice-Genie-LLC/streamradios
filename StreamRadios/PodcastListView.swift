@@ -25,6 +25,7 @@ struct PodcastListView: View {
     @State private var podcastToDelete: PodcastFeed?
     @State private var expandedFeedId: String?
     @State private var isEditing = false
+    @StateObject private var radioPlayer = RadioPlayer.shared
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
@@ -62,7 +63,7 @@ struct PodcastListView: View {
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 
                 // Fixed Mini Player
-                if podcastPlayer.currentEpisode != nil {
+                if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                     MiniPlayerView(
                         podcastPlayer: podcastPlayer,
                         viewModel: viewModel,
@@ -695,6 +696,7 @@ struct PodcastPlayerView: View {
     @Binding var episodeToScrollTo: PodcastEpisode?
     @State private var scrollProxy: ScrollViewProxy?
     @State private var hasScrolledToInitialEpisode = false
+    @StateObject private var radioPlayer = RadioPlayer.shared
     
     private var sliderRange: ClosedRange<Double> {
         0...max(podcastPlayer.duration, 0.01)
@@ -821,8 +823,9 @@ struct PodcastPlayerView: View {
         }
         // ReconnectingIndicatorView(isAttemptingReconnection: $podcastPlayer.isAttemptingReconnection)
         .navigationBarHidden(true)
+       
         // Mini player at the bottom
-                    if podcastPlayer.currentEpisode != nil {
+        if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                         MiniPlayerView(
                             podcastPlayer: podcastPlayer,
                             viewModel: viewModel,
