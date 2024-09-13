@@ -14,76 +14,128 @@ struct AddPodcastView: View {
     @State private var showAlert = false
     @State private var alertMessage: String = ""
     @EnvironmentObject var permissionManager: PermissionManager
+    @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var podcastPlayer = PodcastPlayer.shared
+    @State private var selectedPodcast: PodcastFeed?
+    @State private var scrollToEpisodeID: String?
+    @State private var showPodcastPlayerSheet = false
     
     let onAdd: () -> Void
+    private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
 
     var body: some View {
-        ZStack {
-            NavigationView {
-                VStack {
-                    HStack {
-                        Button(action: {
-                            isPresented = false
-                        }) {
-                            Text("Cancel")
+        GeometryReader { geometry in
+            ZStack {
+                NavigationView {
+                    VStack(spacing: 0) {
+                        // Custom toolbar
+                        HStack {
+                            Button(action: {
+                                isPresented = false
+                            }) {
+                                Text("Cancel")
+                                    .foregroundColor(.primary)
+                            }
+                            Spacer()
+                            Text("Add Podcast")
+                                .font(.headline)
                                 .foregroundColor(.primary)
+                            Spacer()
+                            Button(action: validateAndSavePodcast) {
+                                Text("Add")
+                                    .foregroundColor(.green)
+                            }
                         }
-                        Spacer()
-                        Text("Add Podcast")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Button(action: validateAndSavePodcast) {
-                            Text("Add")
-                                .foregroundColor(.green)
-                        }
-                    }
-                    .padding()
-                    Divider()
-                    
-                    Form {
-                        Section(header: Text("Podcast Details")) {
-                            HStack {
-                                TextField("Podcast Title", text: $title)
-                                    .onChange(of: title) { newValue in
-                                        if newValue.count >= 40 {
-                                            title = String(newValue.prefix(40))
+                        .padding()
+                        Divider()
+                        
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                Form {
+                                    Section(header: Text("Podcast Details")) {
+                                        HStack {
+                                            TextField("Podcast Title", text: $title)
+                                                .onChange(of: title) { newValue in
+                                                    if newValue.count >= 40 {
+                                                        title = String(newValue.prefix(40))
+                                                    }
+                                                }
+                                            if !title.isEmpty {
+                                                Button(action: {
+                                                    title = ""
+                                                }) {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundColor(.gray)
+                                                }
+                                                .padding(.trailing, 8)
+                                            }
+                                        }
+                                        
+                                        HStack {
+                                            TextField("RSS Feed URL", text: $url)
+                                            if !url.isEmpty {
+                                                Button(action: {
+                                                    url = ""
+                                                }) {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundColor(.gray)
+                                                }
+                                                .padding(.trailing, 8)
+                                            }
                                         }
                                     }
-                                if !title.isEmpty {
-                                    Button(action: {
-                                        title = ""
-                                    }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.gray)
-                                    }
-                                    .padding(.trailing, 8)
                                 }
-                            }
-                            
-                            HStack {
-                                TextField("RSS Feed URL", text: $url)
-                                if !url.isEmpty {
-                                    Button(action: {
-                                        url = ""
-                                    }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.gray)
-                                    }
-                                    .padding(.trailing, 8)
-                                }
+                                .frame(minHeight: geometry.size.height - (podcastPlayer.currentEpisode != nil ? miniPlayerHeight + 44 : 44))
                             }
                         }
+                        
+                        if podcastPlayer.currentEpisode != nil {
+                            MiniPlayerView(
+                                podcastPlayer: podcastPlayer,
+                                viewModel: podcastViewModel,
+                                selectedPodcast: $selectedPodcast,
+                                onListButtonTap: {
+                                    if let currentFeed = podcastPlayer.currentFeed {
+                                        selectedPodcast = currentFeed
+                                        podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                        scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                        showPodcastPlayerSheet = true
+                                    }
+                                },
+                                onCloseButtonTap: {
+                                    podcastPlayer.pause()
+                                    podcastPlayer.currentEpisode = nil
+                                    podcastPlayer.currentFeed = nil
+                                }
+                            )
+                            .transition(.move(edge: .bottom))
+                            .frame(height: miniPlayerHeight)
+                        }
                     }
+                    .navigationBarHidden(true)
                 }
-                .navigationBarHidden(true) // Hide the default navigation bar
+                
+                if showAlert {
+                    Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                    CustomAlertView(title: "Validation Error", message: alertMessage, buttonText: "OK") {
+                        self.showAlert = false
+                    }
+                    .transition(.opacity)
+                }
             }
-            if showAlert {
-                Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
-                CustomAlertView(title: "Validation Error", message: alertMessage, buttonText: "OK") {
-                    self.showAlert = false
-                }
-                .transition(.opacity)
+        }
+        .sheet(isPresented: $showPodcastPlayerSheet) {
+            if let podcast = selectedPodcast {
+                PodcastPlayerView(
+                    viewModel: podcastViewModel,
+                    feed: podcast,
+                    initialScrollToEpisodeID: scrollToEpisodeID,
+                    podcastPlayer: podcastPlayer,
+                    episodeToScrollTo: Binding(
+                        get: { podcastPlayer.currentEpisode },
+                        set: { _ in }
+                    )
+                )
             }
         }
     }
@@ -116,5 +168,6 @@ struct AddPodcastView_Previews: PreviewProvider {
             print("Podcast added")
         })
         .environmentObject(PermissionManager())
+        .environmentObject(PodcastViewModel())
     }
 }

@@ -47,7 +47,8 @@ struct SettingsView: View {
                        }
                       
                    }
-                   .padding(.bottom, 40) // Add padding at the bottom to prevent content from being hidden behind the mini player
+                   .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
+
                    // Fixed Mini Player
                    if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                        MiniPlayerView(
