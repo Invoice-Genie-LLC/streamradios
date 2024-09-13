@@ -3,6 +3,11 @@
 //
 // Created by Kley Sulo on 6/9/24.
 
+// AddStationView.swift
+// StreamRadios
+//
+// Created by Kley Sulo on 6/9/24.
+
 import SwiftUI
 
 struct AddStationView: View {
@@ -54,10 +59,9 @@ struct AddStationView: View {
                             .font(.headline)
                             .foregroundColor(.primary)
                         Spacer()
-                        // Placeholder to balance the HStack
-                        Button(action: {}) {
-                            Text("")
-                                .foregroundColor(.clear)
+                        Button(action: saveStation) {
+                            Text("Add")
+                                .foregroundColor(.green)
                         }
                     }
                     .padding()
@@ -134,14 +138,6 @@ struct AddStationView: View {
                                 ImagePicker(image: $iconImage)
                             }
                         }
-                        
-                        Button(action: saveStation) {
-                            HStack {
-                                Image(systemName: "plus.circle.fill")
-                                Text("Add Station")
-                            }
-                        }
-                        .foregroundColor(.green)
                     }
                     .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
                         Alert(
@@ -200,4 +196,3 @@ struct AddStationView_Previews: PreviewProvider {
             .environmentObject(RadioStationViewModel())
     }
 }
-

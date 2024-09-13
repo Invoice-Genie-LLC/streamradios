@@ -33,10 +33,9 @@ struct AddPodcastView: View {
                             .font(.headline)
                             .foregroundColor(.primary)
                         Spacer()
-                        // Placeholder to balance the HStack
-                        Button(action: {}) {
-                            Text("")
-                                .foregroundColor(.clear)
+                        Button(action: validateAndSavePodcast) {
+                            Text("Add")
+                                .foregroundColor(.green)
                         }
                     }
                     .padding()
@@ -75,16 +74,6 @@ struct AddPodcastView: View {
                                 }
                             }
                         }
-                         
-                        Button(action: validateAndSavePodcast) {
-                            HStack {
-                                Spacer()
-                                Image(systemName: "plus.circle.fill")
-                                Text("Add Podcast")
-                                Spacer()
-                            }
-                        }
-                        .foregroundColor(.green)
                     }
                 }
                 .navigationBarHidden(true) // Hide the default navigation bar
