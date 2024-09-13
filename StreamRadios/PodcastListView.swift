@@ -255,15 +255,15 @@ struct PodcastRowView: View {
     private let arrowSize: CGFloat = 20 // New constant for arrow size
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(feed.title)
-                .font(.headline)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            HStack(alignment: .top, spacing: 12) {
-                PodcastIconView(iconData: feed.iconData, artworkUrl: feed.artworkUrl)
-                    .frame(width: iconSize, height: iconSize)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(feed.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                HStack(alignment: .top, spacing: 12) {
+                    PodcastIconView(iconData: feed.iconData, imageData: feed.imageData, artworkUrl: feed.artworkUrl)
+                        .frame(width: iconSize, height: iconSize)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     if isExpanded {
@@ -349,11 +349,17 @@ struct PodcastRowView: View {
 
 struct PodcastIconView: View {
     let iconData: String?
+    let imageData: Data?
     let artworkUrl: String?
     
     var body: some View {
         Group {
-            if let iconData = iconData, let uiImage = UIImage(data: Data(base64Encoded: iconData) ?? Data()) {
+            if let imageData = imageData, let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .cornerRadius(10)
+            } else if let iconData = iconData, let data = Data(base64Encoded: iconData), let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)

@@ -279,14 +279,18 @@ class PodcastViewModel: ObservableObject {
             let existingFeeds = try context.fetch(fetchRequest)
             if let existingFeed = existingFeeds.first {
                 existingFeed.update(from: feed)
-                existingFeed.imageData = feed.imageData
+                if let imageData = feed.imageData {
+                    existingFeed.iconData = imageData.base64EncodedString()
+                }
                 os_log("Updated existing podcast feed: %@", log: log, type: .info, feed.title)
             } else {
                 let managedFeed = FeedModel(context: context)
                 managedFeed.update(from: feed)
-                managedFeed.imageData = feed.imageData
+                if let imageData = feed.imageData {
+                    managedFeed.iconData = imageData.base64EncodedString()
+                }
                 podcastFeeds.append(feed)
-                podcastFeedOrder.append(feed.id) // Add new feed ID to the order
+                podcastFeedOrder.append(feed.id)
                 os_log("Added new podcast feed: %@", log: log, type: .info, feed.title)
             }
             
