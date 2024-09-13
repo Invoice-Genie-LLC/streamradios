@@ -14,30 +14,35 @@ struct MiniPlayerView: View {
     @Environment(\.colorScheme) var colorScheme
     @Binding var selectedPodcast: PodcastFeed?
     var onListButtonTap: (() -> Void)?
-    var onCloseButtonTap: (() -> Void)?  // New closure for close button action
+    var onCloseButtonTap: (() -> Void)?
+
+    @State private var isDragging = false
+    @State private var sliderProgress: Double = 0
 
     private let height: CGFloat = 70
     private let cornerRadius: CGFloat = 20
-    private let horizontalPadding: CGFloat = 16
+    private let horizontalPadding: CGFloat = 12
+    private let sliderWidth: CGFloat = 130 // Further reduced width for the slider
+    private let imageSize: CGFloat = 50 // Slightly reduced size for the feed image
 
     var body: some View {
         if let episode = podcastPlayer.currentEpisode,
            let feed = podcastPlayer.currentFeed {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 // Feed image
                 FeedImageView(feed: feed)
-                    .frame(width: height - 20, height: height - 20)
+                    .frame(width: imageSize, height: imageSize)
                     .cornerRadius(6)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     // Episode title
                     Text(episode.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .lineLimit(2)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
                         .foregroundColor(.primary)
 
                     // Progress bar and time remaining
-                    HStack(spacing: 8) {
+                    HStack(spacing: 4) {
                         // Progress bar
                         GeometryReader { geometry in
                             ZStack(alignment: .leading) {
@@ -47,50 +52,70 @@ struct MiniPlayerView: View {
 
                                 Rectangle()
                                     .fill(Color.accentColor)
-                                    .frame(width: max(0, min(geometry.size.width * CGFloat(podcastPlayer.currentProgress), geometry.size.width)), height: 3)
+                                    .frame(width: max(0, min(geometry.size.width * CGFloat(sliderProgress), geometry.size.width)), height: 3)
+
+                                // Draggable circle
+                                Circle()
+                                    .fill(Color.white)
+                                    .frame(width: 12, height: 12)
+                                    .shadow(radius: 2)
+                                    .offset(x: max(0, min(geometry.size.width * CGFloat(sliderProgress) - 6, geometry.size.width - 12)))
+                                    .gesture(
+                                        DragGesture(minimumDistance: 0)
+                                            .onChanged { value in
+                                                isDragging = true
+                                                sliderProgress = min(max(Double(value.location.x / geometry.size.width), 0), 1)
+                                            }
+                                            .onEnded { _ in
+                                                isDragging = false
+                                                podcastPlayer.seek(to: sliderProgress * podcastPlayer.duration)
+                                            }
+                                    )
                             }
                         }
-                        .frame(height: 3)
+                        .frame(width: sliderWidth, height: 12)
 
                         // Time remaining
-                        Text(formatTimeRemaining(currentTime: podcastPlayer.currentTime, duration: podcastPlayer.duration))
+                        Text(formatTimeRemaining(currentTime: isDragging ? sliderProgress * podcastPlayer.duration : podcastPlayer.currentTime, duration: podcastPlayer.duration))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.secondary)
+                            .frame(width: 40, alignment: .trailing)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Playback controls
-                HStack(spacing: 10) {
-                    Button(action: {
-                        onListButtonTap?()
-                    }) {
-                        Image(systemName: "list.bullet")
-                            .font(.system(size: 18))
-                    }
-
+                HStack(spacing: 6) {
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
-                            .font(.system(size: 18))
+                            .font(.system(size: 14))
                     }
 
                     Button(action: podcastPlayer.togglePlayPause) {
                         Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 32))
+                            .font(.system(size: 26))
                             .foregroundColor(.accentColor)
                     }
 
                     Button(action: podcastPlayer.skipForward) {
                         Image(systemName: "goforward.30")
-                            .font(.system(size: 18))
+                            .font(.system(size: 14))
                     }
 
-                    // New close button
+                    // List button
+                    Button(action: {
+                        onListButtonTap?()
+                    }) {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 14))
+                    }
+
+                    // Close button
                     Button(action: {
                         onCloseButtonTap?()
                     }) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
+                            .font(.system(size: 14))
                             .foregroundColor(.gray)
                     }
                 }
@@ -111,9 +136,14 @@ struct MiniPlayerView: View {
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
             )
-            .frame(maxWidth: UIScreen.main.bounds.width - 32)
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+            .onReceive(podcastPlayer.$currentProgress) { progress in
+                if !isDragging {
+                    sliderProgress = progress
+                }
+            }
         }
     }
 

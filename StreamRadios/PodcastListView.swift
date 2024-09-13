@@ -697,63 +697,71 @@ struct PodcastPlayerView: View {
     }
     
     private var playerHeader: some View {
-        VStack(spacing: 0) {
-            // Custom navigation bar
-            HStack {
-                Button(action: updateViewModelAndDismiss) {
-                    Image(systemName: "chevron.left")
-                        .foregroundColor(.primary)
-                }
-                Spacer()
-                Text(feed.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                AirPlayButton()
-                    .frame(width: 30, height: 30)
-            }
-            .padding(.horizontal)
-            .frame(height: 44)
-            .background(Color(UIColor.systemBackground))
-            
-            // Redesigned feed info area
-            HStack(alignment: .top, spacing: 16) {
-                // Left-aligned feed image
-                FeedImageView(feed: feed)
-                    .frame(width: 120, height: 120)
-                    .cornerRadius(12)
-                    .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
-                
-                // Right side: feed description and current episode info
-                VStack(alignment: .leading, spacing: 8) {
-                    // Scrollable feed description
-                    ScrollView {
-                        Text(feed.descriptionText ?? "No description available")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 6)
-                    }
-                    .frame(height: 80) // Adjust this value to control the height of the scrollable area
-                    
-                    Divider()
-                    
-                    // Current episode info
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .lineLimit(2)
-                        
-                        if let currentEpisode = podcastPlayer.currentEpisode {
-                            Text(formatDate(currentEpisode.publicationDate))
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-            }
-            .padding()
-            .background(Color(UIColor.secondarySystemBackground))
+           VStack(spacing: 0) {
+               // Custom navigation bar
+               HStack {
+                   Button(action: updateViewModelAndDismiss) {
+                       Image(systemName: "chevron.left")
+                           .foregroundColor(.primary)
+                   }
+                   Spacer()
+                   Text(feed.title)
+                       .font(.headline)
+                       .lineLimit(1)
+                   Spacer()
+                   AirPlayButton()
+                       .frame(width: 30, height: 30)
+               }
+               .padding(.horizontal)
+               .frame(height: 44)
+               .background(Color(UIColor.systemBackground))
+
+               // Redesigned feed info area
+               GeometryReader { geometry in
+                   HStack(alignment: .top, spacing: 16) {
+                       // Left-aligned feed image
+                       FeedImageView(feed: feed)
+                           .frame(width: min(120, geometry.size.width * 0.3))
+                           .aspectRatio(contentMode: .fit)
+                           .cornerRadius(12)
+                           .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
+
+                       // Right side: feed description and current episode info
+                       VStack(alignment: .leading, spacing: 8) {
+                           // Scrollable feed description
+                           ScrollView {
+                               Text(feed.descriptionText ?? "No description available")
+                                   .font(.caption)
+                                   .foregroundColor(.secondary)
+                                   .padding(.top, 6)
+                           }
+                           .frame(height: 60)
+
+                           Divider()
+
+                           // Current episode info
+                           VStack(alignment: .leading, spacing: 4) {
+                               ScrollView(.vertical, showsIndicators: false) {
+                                   Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
+                                       .font(.subheadline)
+                                       .fontWeight(.semibold)
+                                       .fixedSize(horizontal: false, vertical: true)
+                               }
+                               .frame(height: 60)  // Adjust this value as needed
+
+                               if let currentEpisode = podcastPlayer.currentEpisode {
+                                   Text(formatDate(currentEpisode.publicationDate))
+                                       .font(.caption2)
+                                       .foregroundColor(.secondary)
+                               }
+                           }
+                       }
+                       .frame(width: geometry.size.width - min(120, geometry.size.width * 0.3) - 32)
+                   }
+                   .padding()
+               }
+               .frame(height: 180)
+               .background(Color(UIColor.secondarySystemBackground))
             
             // Player controls
             VStack(spacing: 12) {
