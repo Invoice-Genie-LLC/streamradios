@@ -27,6 +27,14 @@ struct AlarmConfigurationView: View {
     @State private var calendarAccessStatus = "Not requested"
     @AppStorage("isSingleTimeAlert") private var isSingleTimeAlert = false
     
+    @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var podcastPlayer = PodcastPlayer.shared
+    @State private var selectedPodcast: PodcastFeed?
+    @State private var scrollToEpisodeID: String?
+    @State private var showPodcastPlayerSheet = false
+    
+    private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
+    
     let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     
     init() {
@@ -40,137 +48,162 @@ struct AlarmConfigurationView: View {
     
     var body: some View {
         NavigationView {
-            Form {
-                Section(header: Text("Setup Station")) {
-                    if isAlarmEnabled && hasFavoriteStations {
-                        let favoriteStations = viewModel.stations.filter { $0.isFavorite }
-                        if favoriteStations.indices.contains(selectedStationIndex) {
-                            Picker("Favorite Station", selection: $selectedStationIndex) {
-                                ForEach(favoriteStations.indices, id: \.self) { index in
-                                    Text(favoriteStations[index].name).tag(index)
-                                }
-                            }
-                            .onChange(of: selectedStationIndex) { _ in
-                                saveAlarm()
-                            }
-                        } else {
-                            Text("Please select a favorite station")
-                                .foregroundColor(.red)
-                        }
-                    } else if !hasFavoriteStations {
-                        ButtonWithNonClickableText(
-                            text: "No favorite stations have been configured. Please add a station to your favorites in the 'Favorites' tab before scheduling an alert.",
-                            buttonText: "Go to All Stations"
-                        ) {
-                            self.presentationMode.wrappedValue.dismiss()
-                            DispatchQueue.main.async {
-                                NotificationCenter.default.post(name: .switchToAllTab, object: nil)
-                            }
-                            
-                        }
-                        
-                    } else {
-                        Text("Enable alert to select a station")
-                            .foregroundColor(.gray)
-                    }
-                }
-                Section {
-                    Toggle("Enable Alert", isOn: $isAlarmEnabled)
-                        .onChange(of: isAlarmEnabled) { newValue in
-                            if newValue {
-                                if hasFavoriteStations {
-                                    requestCalendarAccess()
+            ZStack(alignment: .bottom) {
+                    VStack(spacing: 0) {
+                        Form {
+                            Section(header: Text("Setup Station")) {
+                                if isAlarmEnabled && hasFavoriteStations {
+                                    let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+                                    if favoriteStations.indices.contains(selectedStationIndex) {
+                                        Picker("Favorite Station", selection: $selectedStationIndex) {
+                                            ForEach(favoriteStations.indices, id: \.self) { index in
+                                                Text(favoriteStations[index].name).tag(index)
+                                            }
+                                        }
+                                        .onChange(of: selectedStationIndex) { _ in
+                                            saveAlarm()
+                                        }
+                                    } else {
+                                        Text("Please select a favorite station")
+                                            .foregroundColor(.red)
+                                    }
+                                } else if !hasFavoriteStations {
+                                    ButtonWithNonClickableText(
+                                        text: "No favorite stations have been configured. Please add a station to your favorites in the 'Favorites' tab before scheduling an alert.",
+                                        buttonText: "Go to All Stations"
+                                    ) {
+                                        self.presentationMode.wrappedValue.dismiss()
+                                        DispatchQueue.main.async {
+                                            NotificationCenter.default.post(name: .switchToAllTab, object: nil)
+                                        }
+                                    }
                                 } else {
-                                    isAlarmEnabled = false
-                                }
-                            } else {
-                                cancelAlarm()
-                            }
-                        }
-                        .disabled(!hasFavoriteStations)
-                    
-                }
-                Section(header: Text("Alert Type")) {
-                    Picker("Alert Type", selection: $isSingleTimeAlert) {
-                        Text("Repeating").tag(false)
-                        Text("Single Time").tag(true)
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .disabled(!isAlarmEnabled || !hasFavoriteStations)
-                    .onChange(of: isSingleTimeAlert) { newValue in
-                        saveAlarm()
-                    }
-                }
-                Section(header: Text("Radio Program Alert Time")) {
-                    DatePicker("Setup Alert Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
-                        .onChange(of: alarmTime) { _ in
-                            saveAlarm()
-                        }
-                        .disabled(!isAlarmEnabled || !hasFavoriteStations)
-                }
-                if !isSingleTimeAlert {
-                    Section(header: Text("Select day of the week to repeat alert")) {
-                        ForEach(0..<7) { index in
-                            Toggle(daysOfWeek[index], isOn: $selectedDays[index])
-                                .onChange(of: selectedDays[index]) { _ in
-                                    saveAlarm()
-                                }
-                                .disabled(!isAlarmEnabled || !hasFavoriteStations)
-                        }
-                    }
-                }
-                
-                Section(header: Text("Show Name")) {
-                    if isAlarmEnabled {
-                        HStack {
-                            TextField("Enter Show Name", text: $showName)
-                                .padding(.trailing, 30)
-                            
-                            if !showName.isEmpty {
-                                Button(action: {
-                                    showName = ""
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
+                                    Text("Enable alert to select a station")
                                         .foregroundColor(.gray)
                                 }
-                                .padding(.trailing, 8)
                             }
-                        }
-                        .onAppear {
-                            updateSelectedStationIndex()
-                        }
-                        .onChange(of: viewModel.stations) { _ in
-                            updateSelectedStationIndex()
-                        }
-                        .onChange(of: showName) { _ in
-                            saveAlarm()
-                        }
-                        .onChange(of: shouldRequestCalendarAccess) { newValue in
-                            if newValue {
-                                requestCalendarAccess { granted in
-                                    if granted {
-                                        saveAlarm()
-                                    } else {
-                                        isAlarmEnabled = false
+                            Section {
+                                Toggle("Enable Alert", isOn: $isAlarmEnabled)
+                                    .onChange(of: isAlarmEnabled) { newValue in
+                                        if newValue {
+                                            if hasFavoriteStations {
+                                                requestCalendarAccess()
+                                            } else {
+                                                isAlarmEnabled = false
+                                            }
+                                        } else {
+                                            cancelAlarm()
+                                        }
                                     }
-                                    shouldRequestCalendarAccess = false
+                                    .disabled(!hasFavoriteStations)
+                            }
+                            Section(header: Text("Alert Type")) {
+                                Picker("Alert Type", selection: $isSingleTimeAlert) {
+                                    Text("Repeating").tag(false)
+                                    Text("Single Time").tag(true)
+                                }
+                                .pickerStyle(SegmentedPickerStyle())
+                                .disabled(!isAlarmEnabled || !hasFavoriteStations)
+                                .onChange(of: isSingleTimeAlert) { newValue in
+                                    saveAlarm()
+                                }
+                            }
+                            Section(header: Text("Radio Program Alert Time")) {
+                                DatePicker("Setup Alert Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
+                                    .onChange(of: alarmTime) { _ in
+                                        saveAlarm()
+                                    }
+                                    .disabled(!isAlarmEnabled || !hasFavoriteStations)
+                            }
+                            if !isSingleTimeAlert {
+                                Section(header: Text("Select day of the week to repeat alert")) {
+                                    ForEach(0..<7) { index in
+                                        Toggle(daysOfWeek[index], isOn: $selectedDays[index])
+                                            .onChange(of: selectedDays[index]) { _ in
+                                                saveAlarm()
+                                            }
+                                            .disabled(!isAlarmEnabled || !hasFavoriteStations)
+                                    }
+                                }
+                            }
+                            Section(header: Text("Show Name")) {
+                                if isAlarmEnabled {
+                                    HStack {
+                                        TextField("Enter Show Name", text: $showName)
+                                            .padding(.trailing, 30)
+                                        
+                                        if !showName.isEmpty {
+                                            Button(action: {
+                                                showName = ""
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.gray)
+                                            }
+                                            .padding(.trailing, 8)
+                                        }
+                                    }
+                                    .onAppear {
+                                        updateSelectedStationIndex()
+                                    }
+                                    .onChange(of: viewModel.stations) { _ in
+                                        updateSelectedStationIndex()
+                                    }
+                                    .onChange(of: showName) { _ in
+                                        saveAlarm()
+                                    }
+                                    .onChange(of: shouldRequestCalendarAccess) { newValue in
+                                        if newValue {
+                                            requestCalendarAccess { granted in
+                                                if granted {
+                                                    saveAlarm()
+                                                } else {
+                                                    isAlarmEnabled = false
+                                                }
+                                                shouldRequestCalendarAccess = false
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Text("Enable alert to enter show name")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                            .disabled(!isAlarmEnabled || !hasFavoriteStations)
+                            
+                            if showSavedIndicator {
+                                HStack {
+                                    Spacer()
+                                    Text("Changes saved")
+                                        .foregroundColor(.green)
+                                    Spacer()
                                 }
                             }
                         }
-                    } else {
-                        Text("Enable alert to enter show name")
-                            .foregroundColor(.gray)
+                        .padding(.bottom, 100)  // Add padding to prevent content from being hidden behind the mini player
                     }
-                }
-                .disabled(!isAlarmEnabled || !hasFavoriteStations)
                 
-                if showSavedIndicator {
-                    HStack {
-                        Spacer()
-                        Text("Changes saved")
-                            .foregroundColor(.green)
-                        Spacer()
-                    }
+                // Fixed Mini Player
+                if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
+                    MiniPlayerView(
+                        podcastPlayer: podcastPlayer,
+                        viewModel: podcastViewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            if let currentFeed = podcastPlayer.currentFeed {
+                                selectedPodcast = currentFeed
+                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                showPodcastPlayerSheet = true
+                            }
+                        },
+                        onCloseButtonTap: {
+                            podcastPlayer.pause()
+                            podcastPlayer.currentEpisode = nil
+                            podcastPlayer.currentFeed = nil
+                        }
+                    )
+                    .transition(.move(edge: .bottom))
+                    .frame(height: miniPlayerHeight)
                 }
             }
             .navigationTitle("Set Program Alert")
@@ -183,6 +216,20 @@ struct AlarmConfigurationView: View {
                 primaryButton: .default(Text("Settings"), action: openSettings),
                 secondaryButton: .cancel()
             )
+        }
+        .sheet(isPresented: $showPodcastPlayerSheet) {
+            if let podcast = selectedPodcast {
+                PodcastPlayerView(
+                    viewModel: podcastViewModel,
+                    feed: podcast,
+                    initialScrollToEpisodeID: scrollToEpisodeID,
+                    podcastPlayer: podcastPlayer,
+                    episodeToScrollTo: Binding(
+                        get: { podcastPlayer.currentEpisode },
+                        set: { _ in }
+                    )
+                )
+            }
         }
     }
     

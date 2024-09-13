@@ -31,113 +31,113 @@ struct SettingsView: View {
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
-    @State private var miniPlayerHeight: CGFloat = 0
     @State private var safeAreaBottom: CGFloat = 0
-
+    @State private var miniPlayerHeight: CGFloat = 60
     
     var body: some View {
-        ZStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    playbackSettingsSection
-                    displaySettingsSection
-                    streamFileUploadSection
-                    dataManagementSection
-                    podcastDataManagementSection
-                }
-                .padding()
-            }
-            .navigationTitle("Settings")
-            .navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    backButton
-                }
-            }
-            .onChange(of: isDarkMode) { newValue in
-                updateDarkMode(to: newValue)
-            }
-            .onAppear {
-                if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
-                    notificationManager.requestAuthorization()
-                    UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
-                if viewModel.selectedCountry != "Select Country" {
-                    showAlertForCountrySelection = false
-                }
-            }
-            .sheet(isPresented: $showDocumentPicker) {
-                DocumentPicker(url: $importURL)
-            }
-            .onChange(of: importURL) { url in
-                guard let url = url else { return }
-                handleImport(url: url)
-            }
-            VStack {
-                Spacer()
-                if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                    MiniPlayerView(
-                        podcastPlayer: podcastPlayer,
-                        viewModel: podcastViewModel,
-                        selectedPodcast: $selectedPodcast,
-                        onListButtonTap: {
-                            if let currentFeed = podcastPlayer.currentFeed {
-                                selectedPodcast = currentFeed
-                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                showPodcastPlayerSheet = true
-                            }
-                        },
-                        onCloseButtonTap: {
-                            podcastPlayer.pause()
-                            podcastPlayer.currentEpisode = nil
-                            podcastPlayer.currentFeed = nil
-                        }
-                    )
-                    .transition(.move(edge: .bottom))
-                }
-            }.zIndex(1)
-
-                .sheet(isPresented: $showPodcastPlayerSheet) {
-                    if let podcast = selectedPodcast {
-                        PodcastPlayerView(
-                            viewModel: podcastViewModel,
-                            feed: podcast,
-                            initialScrollToEpisodeID: scrollToEpisodeID,
-                            podcastPlayer: podcastPlayer,
-                            episodeToScrollTo: Binding(
-                                get: { podcastPlayer.currentEpisode },
-                                set: { _ in }
-                            )
-                        )
-                    }
-                }
-        
-            
-            if alertManager.showCustomAlert {
-                Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
-                CustomAlertView(
-                    title: alertManager.customAlertTitle,
-                    message: alertManager.customAlertMessage,
-                    buttonText: alertManager.customAlertPrimaryButtonText,
-                    buttonAction: {
-                        alertManager.dismissAlert()
-                        alertManager.customAlertPrimaryAction?()
-                    },
-                    secondaryButtonText: alertManager.customAlertSecondaryButtonText,
-                    secondaryButtonAction: {
-                        alertManager.dismissAlert()
-                        alertManager.customAlertSecondaryAction?()
-                    }
-                )
-                .transition(.opacity)
-            }
-        
-                
-        }
-    }
+           NavigationView {
+               VStack(spacing: 0) {
+                   ScrollView {
+                       VStack(alignment: .leading, spacing: 20) {
+                           playbackSettingsSection
+                           displaySettingsSection
+                           streamFileUploadSection
+                           dataManagementSection
+                           podcastDataManagementSection
+                       }
+                      
+                   }
+                   .padding(.bottom, 40) // Add padding at the bottom to prevent content from being hidden behind the mini player
+                   // Fixed Mini Player
+                   if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
+                       MiniPlayerView(
+                           podcastPlayer: podcastPlayer,
+                           viewModel: podcastViewModel,
+                           selectedPodcast: $selectedPodcast,
+                           onListButtonTap: {
+                               if let currentFeed = podcastPlayer.currentFeed {
+                                   selectedPodcast = currentFeed
+                                   podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                   scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                   showPodcastPlayerSheet = true
+                               }
+                           },
+                           onCloseButtonTap: {
+                               podcastPlayer.pause()
+                               podcastPlayer.currentEpisode = nil
+                               podcastPlayer.currentFeed = nil
+                           }
+                       )
+                       .transition(.move(edge: .bottom))
+                       .frame(height: miniPlayerHeight)
+                   }
+               }
+               .navigationTitle("Settings")
+               .navigationBarBackButtonHidden(true)
+               .toolbar {
+                   ToolbarItem(placement: .navigationBarLeading) {
+                       backButton
+                   }
+               }
+               .onChange(of: isDarkMode) { newValue in
+                   updateDarkMode(to: newValue)
+               }
+               .onAppear {
+                   if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
+                       notificationManager.requestAuthorization()
+                       UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+                   }
+               }
+               .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
+                   if viewModel.selectedCountry != "Select Country" {
+                       showAlertForCountrySelection = false
+                   }
+               }
+               .sheet(isPresented: $showDocumentPicker) {
+                   DocumentPicker(url: $importURL)
+               }
+               .onChange(of: importURL) { url in
+                   guard let url = url else { return }
+                   handleImport(url: url)
+               }
+           }
+           .sheet(isPresented: $showPodcastPlayerSheet) {
+               if let podcast = selectedPodcast {
+                   PodcastPlayerView(
+                       viewModel: podcastViewModel,
+                       feed: podcast,
+                       initialScrollToEpisodeID: scrollToEpisodeID,
+                       podcastPlayer: podcastPlayer,
+                       episodeToScrollTo: Binding(
+                           get: { podcastPlayer.currentEpisode },
+                           set: { _ in }
+                       )
+                   )
+               }
+           }
+           .overlay(
+               Group {
+                   if alertManager.showCustomAlert {
+                       Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                       CustomAlertView(
+                           title: alertManager.customAlertTitle,
+                           message: alertManager.customAlertMessage,
+                           buttonText: alertManager.customAlertPrimaryButtonText,
+                           buttonAction: {
+                               alertManager.dismissAlert()
+                               alertManager.customAlertPrimaryAction?()
+                           },
+                           secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                           secondaryButtonAction: {
+                               alertManager.dismissAlert()
+                               alertManager.customAlertSecondaryAction?()
+                           }
+                       )
+                       .transition(.opacity)
+                   }
+               }
+           )
+       }
     
     
     private var podcastDataManagementSection: some View {
