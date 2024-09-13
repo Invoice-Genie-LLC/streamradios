@@ -74,11 +74,7 @@ struct SettingsView: View {
                }
                .navigationTitle("Settings")
                .navigationBarBackButtonHidden(true)
-               .toolbar {
-                   ToolbarItem(placement: .navigationBarLeading) {
-                       backButton
-                   }
-               }
+              
                .onChange(of: isDarkMode) { newValue in
                    updateDarkMode(to: newValue)
                }

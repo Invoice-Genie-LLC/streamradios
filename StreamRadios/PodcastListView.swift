@@ -10,6 +10,9 @@ import Combine
 import os
 import AVKit
 
+import SwiftUI
+import os
+
 struct PodcastListView: View {
     @StateObject private var viewModel = PodcastViewModel()
     @StateObject private var podcastPlayer = PodcastPlayer.shared
@@ -24,14 +27,16 @@ struct PodcastListView: View {
     @State private var isEditing = false
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
+    private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
     
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(spacing: 0) {
                     instructionText
                     searchBar
                     podcastList
+                        .padding(.bottom, podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
                 }
                 .navigationTitle("Podcasts")
                 .toolbar {
@@ -48,17 +53,31 @@ struct PodcastListView: View {
                         initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
                         podcastPlayer: podcastPlayer,
                         episodeToScrollTo: Binding(
-                            get: {
-                                podcastPlayer.currentEpisode
-                            },
+                            get: { podcastPlayer.currentEpisode },
                             set: { _ in }
                         )
-                        
                     )
                 }
+                .padding(.bottom, 40)
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 
-                miniPlayer
+                // Fixed Mini Player
+                if podcastPlayer.currentEpisode != nil {
+                    MiniPlayerView(
+                        podcastPlayer: podcastPlayer,
+                        viewModel: viewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            selectedPodcast = podcastPlayer.currentFeed
+                        },
+                        onCloseButtonTap: {
+                            podcastPlayer.pause()
+                            podcastPlayer.currentEpisode = nil
+                            podcastPlayer.currentFeed = nil
+                        }
+                    )
+                    .transition(.move(edge: .bottom))
+                }
             }
         }
         .alert(isPresented: $viewModel.showNoEpisodesAlert) {
@@ -68,6 +87,7 @@ struct PodcastListView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
+
     }
     
     private var instructionText: some View {
@@ -75,6 +95,7 @@ struct PodcastListView: View {
             .font(.subheadline)
             .foregroundColor(.secondary)
             .padding(.horizontal, 16)
+            .padding(.top, 8)
     }
     
     private var searchBar: some View {
@@ -109,6 +130,7 @@ struct PodcastListView: View {
         .background(Color(.systemGray6))
         .cornerRadius(10)
         .padding(.horizontal)
+        .padding(.vertical, 8)
     }
     
     private var podcastList: some View {
@@ -142,9 +164,6 @@ struct PodcastListView: View {
                 }
             }
             .onMove(perform: viewModel.moveFeed)
-            Spacer()
-                .frame(height: 100)
-                .listRowInsets(EdgeInsets())
         }
         .listStyle(PlainListStyle())
         .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
@@ -154,27 +173,6 @@ struct PodcastListView: View {
             }
         } message: { podcast in
             Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
-        }
-    }
-    
-    private var miniPlayer: some View {
-        Group {
-            if podcastPlayer.currentEpisode != nil {
-                MiniPlayerView(
-                    podcastPlayer: podcastPlayer,
-                    viewModel: viewModel,
-                    selectedPodcast: $selectedPodcast,
-                    onListButtonTap: {
-                        selectedPodcast = podcastPlayer.currentFeed
-                    },
-                    onCloseButtonTap: {
-                        podcastPlayer.pause()
-                        podcastPlayer.currentEpisode = nil
-                        podcastPlayer.currentFeed = nil
-                    }
-                )
-                .transition(.move(edge: .bottom))
-            }
         }
     }
     
