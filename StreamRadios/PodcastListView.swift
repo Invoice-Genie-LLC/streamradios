@@ -753,6 +753,7 @@ struct PodcastPlayerView: View {
                                        .foregroundColor(.secondary)
                                }
                            }
+                           .padding(.trailing, 10)
                        }
                        .frame(width: geometry.size.width - min(120, geometry.size.width * 0.3) - 32)
                    }
