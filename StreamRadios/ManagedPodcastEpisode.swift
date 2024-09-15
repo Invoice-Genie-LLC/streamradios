@@ -9,62 +9,61 @@ import CoreData
 
 extension FeedModel {
     func update(from feed: PodcastFeed) {
-        id = feed.id
-        title = feed.title
-        url = feed.url
-        artworkUrl = feed.artworkUrl
-        descriptionText = feed.descriptionText
-        iconData = feed.iconData
-        imageData = feed.imageData
+        self.id = feed.id
+        self.title = feed.title
+        self.url = feed.url
+        self.artworkUrl = feed.artworkUrl
+        self.descriptionText = feed.descriptionText
+        self.iconData = feed.iconData
+        self.imageData = feed.imageData
     }
     
     func toPodcastFeed() -> PodcastFeed {
         return PodcastFeed(
-            id: id ?? UUID().uuidString,
-            title: title ?? "",
-            url: url ?? "",
-            artworkUrl: artworkUrl,
-            description: descriptionText,
-            iconData: iconData,
-            imageData: imageData 
+            id: self.id ?? UUID().uuidString,
+            title: self.title ?? "",
+            url: self.url ?? "",
+            artworkUrl: self.artworkUrl,
+            description: self.descriptionText,
+            iconData: self.iconData,
+            imageData: self.imageData
         )
     }
 }
 
 extension PodcastModel {
     func update(from episode: PodcastEpisode) {
-        id = episode.id
-        title = episode.title
-        descriptionText = episode.descriptionText
-        audioUrl = episode.audioUrl
-        publicationDate = episode.publicationDate
-        duration = episode.duration
-        feedId = episode.feedId
-        localFilePath = episode.localFilePath
-        fileSize = episode.fileSize ?? 0
-        isDownloaded = episode.state.isDownloaded
-        isFavorite = episode.state.isFavorite
-        progress = episode.state.progress
-        isPlayed = episode.state.isPlayed  // Make sure this line is present
+        self.id = episode.id
+        self.title = episode.title
+        self.descriptionText = episode.descriptionText
+        self.audioUrl = episode.audioUrl
+        self.publicationDate = episode.publicationDate
+        self.duration = episode.duration
+        self.isPlayed = episode.state.isPlayed
+        self.isFavorite = episode.state.isFavorite
+        self.progress = episode.state.progress
+        self.isDownloaded = episode.state.isDownloaded
+        self.feedId = episode.feedId
+        self.localFilePath = episode.localFilePath
     }
-
+    
     func toPodcastEpisode() -> PodcastEpisode {
         return PodcastEpisode(
-            id: id ?? UUID().uuidString,
-            title: title ?? "",
-            descriptionText: descriptionText ?? "",
-            audioUrl: audioUrl ?? "",
-            publicationDate: publicationDate ?? Date(),
-            duration: duration,
+            id: self.id ?? UUID().uuidString,
+            title: self.title ?? "",
+            descriptionText: self.descriptionText ?? "",
+            audioUrl: self.audioUrl ?? "",
+            publicationDate: self.publicationDate ?? Date(),
+            duration: self.duration,
             state: EpisodeState(
-                isPlayed: isPlayed,  // Make sure this line is present
-                isFavorite: isFavorite,
-                progress: progress,
-                isDownloaded: isDownloaded
+                isPlayed: self.isPlayed,
+                isFavorite: self.isFavorite,
+                progress: self.progress,
+                isDownloaded: self.isDownloaded
             ),
-            feedId: feedId ?? "",
-            localFilePath: localFilePath,
-            fileSize: fileSize
+            feedId: self.feedId ?? "",
+            localFilePath: self.localFilePath,
+            fileSize: self.fileSize
         )
     }
 }

@@ -37,6 +37,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var currentEpisodeIndex: Int?
     private var allEpisodesInFeed: [PodcastEpisode] = []
     @Published var isPodcastActive: Bool = false
+    private var nowPlayingUpdateTimer: Timer?
 
     
 
@@ -561,15 +562,59 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func setupTimeObserver() {
-           if let existingObserver = timeObserver {
-               player?.removeTimeObserver(existingObserver)
-           }
-           
-           let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-           timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
-               self?.updatePlaybackInfo()
-           }
-       }
+        if let existingObserver = timeObserver {
+            player?.removeTimeObserver(existingObserver)
+        }
+        
+        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
+            self?.updatePlaybackInfo()
+            self?.updateNowPlayingInfoDebounced()
+        }
+    }
+    
+    private func updateNowPlayingInfoDebounced() {
+        nowPlayingUpdateTimer?.invalidate()
+        nowPlayingUpdateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            self?.updateNowPlayingInfo()
+        }
+    }
+    
+    private func updateNowPlayingInfo() {
+        guard let currentEpisode = currentEpisode,
+              let currentFeed = currentFeed else {
+            os_log("Unable to update now playing info: current episode or feed is nil", log: log, type: .error)
+            return
+        }
+        
+        var nowPlayingInfo = [String: Any]()
+        nowPlayingInfo[MPMediaItemPropertyTitle] = currentEpisode.title
+        nowPlayingInfo[MPMediaItemPropertyArtist] = currentFeed.title
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+        
+        if let artworkUrlString = currentFeed.artworkUrl,
+           let artworkUrl = URL(string: artworkUrlString) {
+            URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
+                if let data = data, let image = UIImage(data: data) {
+                    let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                    nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                    DispatchQueue.main.async {
+                        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+                    }
+                } else {
+                    os_log("Failed to load artwork: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+                }
+            }.resume()
+        } else {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        }
+        
+        os_log("Updated now playing info for episode: %@", log: log, type: .debug, currentEpisode.title)
+    }
     
     func getCurrentProgress(for episode: PodcastEpisode) -> Double {
            if currentEpisode?.id == episode.id {
@@ -642,42 +687,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         }
     }
-    
-    private func updateNowPlayingInfo() {
-            guard let currentEpisode = currentEpisode,
-                  let currentFeed = currentFeed else {
-                os_log("Unable to update now playing info: current episode or feed is nil", log: log, type: .error)
-                return
-            }
-            
-            var nowPlayingInfo = [String: Any]()
-            nowPlayingInfo[MPMediaItemPropertyTitle] = currentEpisode.title
-            nowPlayingInfo[MPMediaItemPropertyArtist] = currentFeed.title
-            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
-            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-            nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
-            nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
-            nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
-            
-            if let artworkUrlString = currentFeed.artworkUrl,
-               let artworkUrl = URL(string: artworkUrlString) {
-                URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
-                    if let data = data, let image = UIImage(data: data) {
-                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-                        nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-                        DispatchQueue.main.async {
-                            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-                        }
-                    } else {
-                        os_log("Failed to load artwork: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
-                    }
-                }.resume()
-            } else {
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-            }
-            
-            os_log("Updated now playing info for episode: %@", log: log, type: .debug, currentEpisode.title)
-        }
     
     deinit {
         playerItemObserver?.invalidate()
