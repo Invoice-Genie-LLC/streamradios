@@ -117,9 +117,12 @@ class PodcastViewModel: ObservableObject {
     @Published var lastPlayedEpisodes: [String: String] = [:]
     @Published var showNoEpisodesAlert = false
        @Published var noEpisodesAlertMessage = ""
+     var notificationCenter: NotificationCenterProtocol
     
-    init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
+    init(context: NSManagedObjectContext = CoreDataStack.shared.context,
+            notificationCenter: NotificationCenterProtocol = UNUserNotificationCenter.current()) {
             self.context = context
+        self.notificationCenter = notificationCenter
             self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
             self.backgroundContext.parent = context
 
@@ -138,6 +141,70 @@ class PodcastViewModel: ObservableObject {
             
             self.objectWillChange.send()
         }
+    
+    func checkForNewEpisodes(for feed: PodcastFeed, completion: @escaping (Bool, [PodcastEpisode]) -> Void) {
+        fetchRSSFeed(for: feed) { result in
+            switch result {
+            case .success(let updatedFeed):
+                let existingEpisodes = Set(self.allEpisodes.filter { $0.feedId == feed.id }.map { $0.id })
+                let newEpisodes = updatedFeed.episodes.filter { !existingEpisodes.contains($0.id) }
+                
+                if !newEpisodes.isEmpty {
+                    DispatchQueue.main.async {
+                        self.allEpisodes.append(contentsOf: newEpisodes)
+                        self.updateFilteredEpisodes(for: feed.id, selectedTab: self.currentTab)
+                        self.saveEpisodesToUserDefaults(self.allEpisodes.filter { $0.feedId == feed.id }, for: feed.id)
+                        self.objectWillChange.send()
+                    }
+                    completion(true, newEpisodes)
+                } else {
+                    completion(false, [])
+                }
+                
+            case .failure(let error):
+                os_log("Failed to check for new episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                completion(false, [])
+            }
+        }
+    }
+    
+    func scheduleEpisodeChecks() {
+        for feed in podcastFeeds {
+            scheduleCheck(for: feed)
+        }
+    }
+
+     func scheduleCheck(for feed: PodcastFeed) {
+        let checkInterval: TimeInterval = 3600 // Check every hour, adjust as needed
+        
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + checkInterval) { [weak self] in
+            guard let self = self else { return }
+            
+            self.checkForNewEpisodes(for: feed) { hasNewEpisodes, newEpisodes in
+                if hasNewEpisodes {
+                    self.sendNotification(for: feed, newEpisodes: newEpisodes)
+                }
+                self.scheduleCheck(for: feed) // Schedule next check
+            }
+        }
+    }
+    
+    func sendNotification(for feed: PodcastFeed, newEpisodes: [PodcastEpisode]) {
+        let content = UNMutableNotificationContent()
+        content.title = "New Episodes Available"
+        content.body = "\(newEpisodes.count) new episode(s) available for \(feed.title)"
+        content.sound = .default
+        content.userInfo = ["feedId": feed.id]
+           
+           let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+           
+           notificationCenter.add(request) { error in
+               if let error = error {
+                   print("Error sending notification: \(error.localizedDescription)")
+               }
+           }
+       }
+    
     
     func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
         DispatchQueue.main.async {
@@ -850,7 +917,7 @@ class PodcastViewModel: ObservableObject {
             }
         }
     
-    private func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
+     func fetchRSSFeed(for feed: PodcastFeed, completion: @escaping (Result<PodcastFeed, Error>) -> Void) {
         os_log("Starting RSS feed fetch for feed: %@", log: log, type: .info, feed.title)
         guard let url = URL(string: feed.url) else {
             os_log("Invalid URL for feed: %@", log: log, type: .error, feed.url)

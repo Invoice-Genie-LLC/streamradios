@@ -1124,3 +1124,21 @@ struct PodcastList: View {
         return orderedFeeds + remainingFeeds
     }
 }
+
+struct PodcastFeedView: View {
+    let feed: PodcastFeed
+    @EnvironmentObject var viewModel: PodcastViewModel
+    
+    var body: some View {
+        List {
+            Section(header: Text(feed.title)) {
+                ForEach(viewModel.currentEpisodes.filter { $0.feedId == feed.id }) { episode in
+                    Text(episode.title)
+                }
+            }
+        }
+        .onAppear {
+            viewModel.fetchEpisodes(for: feed) { _ in }
+        }
+    }
+}
