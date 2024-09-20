@@ -16,40 +16,40 @@ import SpotifyiOS
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     
     var window: UIWindow?
-    var radioPlayer = RadioPlayer.shared
-    var podcastPlayer = PodcastPlayer.shared
-    var viewModel = RadioStationViewModel.shared
-    var podcastViewModel = PodcastViewModel()
+       var radioPlayer = RadioPlayer.shared
+       var podcastPlayer = PodcastPlayer.shared
+       var viewModel = RadioStationViewModel.shared
+        var podcastViewModel = PodcastViewModel()
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        if isFirstLaunch() {
-            deleteLocalCoreDataStore()
+            if isFirstLaunch() {
+                deleteLocalCoreDataStore()
+            }
+            
+            UNUserNotificationCenter.current().delegate = self
+            requestNotificationAuthorization()
+            registerBackgroundTasks()
+            configureAudioSession()
+            
+            let alarmCategory = UNNotificationCategory(identifier: "ALARM_CATEGORY", actions: [], intentIdentifiers: [], options: [])
+            UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
+            
+            application.registerForRemoteNotifications()
+            
+            checkBackgroundRefreshStatus()
+            
+            // Check if the app was launched due to an alarm
+            if let launchOptions = launchOptions,
+               launchOptions[UIApplication.LaunchOptionsKey.location] != nil {
+                // App was launched due to an alarm, play the alarm station
+                radioPlayer.playFavoriteStationForAlarm()
+            } else {
+                // Normal app launch, load the last played station
+                radioPlayer.autoPlayLastStationSetup()
+            }
+            
+            return true
         }
-        
-        UNUserNotificationCenter.current().delegate = self
-        requestNotificationAuthorization()
-        registerBackgroundTasks()
-        configureAudioSession()
-        
-        let alarmCategory = UNNotificationCategory(identifier: "ALARM_CATEGORY", actions: [], intentIdentifiers: [], options: [])
-        UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
-        
-        application.registerForRemoteNotifications()
-        
-        checkBackgroundRefreshStatus()
-        
-        // Check if the app was launched due to an alarm
-        if let launchOptions = launchOptions,
-           launchOptions[UIApplication.LaunchOptionsKey.location] != nil {
-            // App was launched due to an alarm, play the alarm station
-            radioPlayer.playFavoriteStationForAlarm()
-        } else {
-            // Normal app launch, load the last played station
-            radioPlayer.autoPlayLastStationSetup()
-        }
-        
-        return true
-    }
     
     func applicationWillTerminate(_ application: UIApplication) {
         updatePodcastStateAndSave()
@@ -58,42 +58,71 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func applicationWillResignActive(_ application: UIApplication) {
-        updatePodcastStateAndSave()
-    }
+            updatePodcastStateAndSave()
+        }
 
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        PodcastPlayer.shared.handleAppWillTerminate()
-        updatePodcastStateAndSave()
-    }
+        func updatePodcastStateAndSave() {
+            if let currentEpisode = podcastPlayer.currentEpisode {
+                // Update progress
+                PodcastViewModel().updateProgress(for: currentEpisode, progress: PodcastPlayer.shared.currentProgress)
+
+                // Update favorite (bookmark) state
+                if currentEpisode.state.isFavorite != podcastViewModel.favoriteEpisodes.contains(where: { $0.id == currentEpisode.id }) {
+                    podcastViewModel.toggleFavorite(for: currentEpisode)
+                }
+                
+                // Update download state
+                let isDownloaded = podcastViewModel.downloadedEpisodes.contains(where: { $0.id == currentEpisode.id })
+                if currentEpisode.state.isDownloaded != isDownloaded {
+                    if isDownloaded {
+                        var updatedEpisode = currentEpisode
+                        updatedEpisode.state.isDownloaded = true
+                        podcastViewModel.updateEpisode(updatedEpisode)
+                    } else {
+                        podcastViewModel.deleteDownloadedEpisode(currentEpisode)
+                    }
+                }
+            }
+            
+            // Save context
+            podcastViewModel.saveContextIfNeeded()
+        }
+
+     func applicationDidEnterBackground(_ application: UIApplication) {
+         PodcastPlayer.shared.handleAppWillTerminate()
+         updatePodcastStateAndSave()
+     }
     
     lazy var persistentContainer: NSPersistentContainer = {
-        let container = NSPersistentContainer(name: "PodcastModel")
-        container.loadPersistentStores { (storeDescription, error) in
-            if let error = error as NSError? {
-                fatalError("Unresolved error \(error), \(error.userInfo)")
+            let container = NSPersistentContainer(name: "PodcastModel")
+            container.loadPersistentStores { (storeDescription, error) in
+                if let error = error as NSError? {
+                    fatalError("Unresolved error \(error), \(error.userInfo)")
+                }
             }
-        }
-        return container
-    }()
+            return container
+        }()
     
     func saveContext() {
-        let context = persistentContainer.viewContext
-        if context.hasChanges {
-            do {
-                try context.save()
-            } catch {
-                let nserror = error as NSError
-                fatalError("Unresolved error \(nserror), \(nserror.userInfo)")
+            let context = persistentContainer.viewContext
+            if context.hasChanges {
+                do {
+                    try context.save()
+                } catch {
+                    let nserror = error as NSError
+                    fatalError("Unresolved error \(nserror), \(nserror.userInfo)")
+                }
             }
         }
-    }
     
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        if let aps = userInfo["aps"] as? [String: AnyObject], aps["content-available"] as? Int == 1 {
-            checkAndPlayAlarm()
-            completionHandler(.newData)
-        } else {
-            completionHandler(.noData)
+        if let aps = userInfo["aps"] as? [String: AnyObject] {
+            if aps["content-available"] as? Int == 1 {
+                checkAndPlayAlarm()
+                completionHandler(.newData)
+            } else {
+                completionHandler(.noData)
+            }
         }
     }
     
@@ -140,7 +169,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func handleAlarmNotification(_ notification: [String: AnyObject]) {
-        if let alarmIdentifier = notification["alarmIdentifier"] as? String, alarmIdentifier.starts(with: "wakeUpAlarm") {
+        if let alarmIdentifier = notification["alarmIdentifier"] as? String,
+           alarmIdentifier.starts(with: "wakeUpAlarm") {
             openAppAndPlayStation()
         }
     }
@@ -154,54 +184,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
-        
-        if let feedId = userInfo["feedId"] as? String {
-            // Handle podcast feed notification
+        if userInfo["alarmType"] as? String == "streamRadiosAlarm" {
+            // Present AlarmTriggeredView
             DispatchQueue.main.async {
-                self.handlePodcastNotification(feedId: feedId)
-            }
-        } else if let alarmType = userInfo["alarmType"] as? String, alarmType == "streamRadiosAlarm" {
-            // Handle alarm notification
-            DispatchQueue.main.async {
-                self.handleAlarmNotificationAndPresentView()
+                if let rootViewController = UIApplication.shared.windows.first?.rootViewController {
+                    let alarmTriggeredView = AlarmTriggeredView()
+                        .environmentObject(RadioPlayer.shared)
+                        .environmentObject(RadioStationViewModel.shared)
+                    let hostingController = UIHostingController(rootView: alarmTriggeredView)
+                    rootViewController.present(hostingController, animated: true, completion: nil)
+                }
             }
         }
-        
         completionHandler()
-    }
-    
-    @objc func handlePodcastNotification(feedId: String) {
-        NotificationCenter.default.post(name: NSNotification.Name("OpenPodcastFeed"), object: nil, userInfo: ["feedId": feedId])
-        
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController {
-            
-            if let feed = podcastViewModel.podcastFeeds.first(where: { $0.id == feedId }) {
-                let podcastPlayerView = PodcastPlayerView(
-                    viewModel: podcastViewModel,
-                    feed: feed,
-                    initialScrollToEpisodeID: nil,
-                    podcastPlayer: podcastPlayer,
-                    episodeToScrollTo: .constant(nil),
-                    selectedPodcast: .constant(feed)
-                )
-                
-                let hostingController = UIHostingController(rootView: podcastPlayerView)
-                rootViewController.present(hostingController, animated: true, completion: nil)
-            }
-        }
-    }
-
-    
-    func handleAlarmNotificationAndPresentView() {
-        if let rootViewController = UIApplication.shared.windows.first?.rootViewController {
-            let alarmTriggeredView = AlarmTriggeredView()
-                .environmentObject(RadioPlayer.shared)
-                .environmentObject(RadioStationViewModel.shared)
-            let hostingController = UIHostingController(rootView: alarmTriggeredView)
-            rootViewController.present(hostingController, animated: true, completion: nil)
-        }
     }
     
     func presentAlarmTriggeredView() {
@@ -305,30 +300,4 @@ extension AppDelegate {
         }
     }
 
-     func updatePodcastStateAndSave() {
-        if let currentEpisode = podcastPlayer.currentEpisode {
-            // Update progress
-            podcastViewModel.updateProgress(for: currentEpisode, progress: PodcastPlayer.shared.currentProgress)
-
-            // Update favorite (bookmark) state
-            if currentEpisode.state.isFavorite != podcastViewModel.favoriteEpisodes.contains(where: { $0.id == currentEpisode.id }) {
-                podcastViewModel.toggleFavorite(for: currentEpisode)
-            }
-            
-            // Update download state
-            let isDownloaded = podcastViewModel.downloadedEpisodes.contains(where: { $0.id == currentEpisode.id })
-            if currentEpisode.state.isDownloaded != isDownloaded {
-                if isDownloaded {
-                    var updatedEpisode = currentEpisode
-                    updatedEpisode.state.isDownloaded = true
-                    podcastViewModel.updateEpisode(updatedEpisode)
-                } else {
-                    podcastViewModel.deleteDownloadedEpisode(currentEpisode)
-                }
-            }
-        }
-        
-        // Save context
-        podcastViewModel.saveContextIfNeeded()
-    }
 }
