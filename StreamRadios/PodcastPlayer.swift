@@ -38,8 +38,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var allEpisodesInFeed: [PodcastEpisode] = []
     @Published var isPodcastActive: Bool = false
     private var nowPlayingUpdateTimer: Timer?
-
-    
+    private var updateTimer: Timer?
+        private let updateInterval: TimeInterval = 0.5
+    private var lastReportedProgress: Double = 0
 
     var remainingTime: Double {
             max(0, duration - currentTime)
@@ -272,12 +273,22 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
     
     private func updatePlaybackInfo() {
-           guard let player = player else { return }
-           currentTime = max(0, player.currentTime().seconds)
-           duration = max(0.01, player.currentItem?.duration.seconds ?? 0.01)
-           currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
-           objectWillChange.send()
-       }
+            guard let player = player else { return }
+            currentTime = max(0, player.currentTime().seconds)
+            duration = max(0.01, player.currentItem?.duration.seconds ?? 0.01)
+            currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
+            
+            // Only update UI if there's a significant change
+            if abs(currentProgress - lastReportedProgress) > 0.01 {
+                lastReportedProgress = currentProgress
+                DispatchQueue.main.async {
+                    self.objectWillChange.send()
+                }
+            }
+            
+            // Update now playing info less frequently
+            updateNowPlayingInfoDebounced()
+        }
     
     func rewindAndPlay(episode: PodcastEpisode) {
         if currentEpisode?.id == episode.id {
@@ -388,6 +399,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             self.viewModel?.objectWillChange.send()
         }
     }
+    
+    private func setupUpdateTimer() {
+           updateTimer?.invalidate()
+           updateTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
+               self?.updatePlaybackInfo()
+           }
+       }
     
     func playLastEpisodeForFeed(_ feed: PodcastFeed) {
             if let episode = viewModel?.getLastPlayedOrLatestEpisode(for: feed) {
@@ -690,9 +708,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     deinit {
         playerItemObserver?.invalidate()
-        if let observer = timeObserver {
-            player?.removeTimeObserver(observer)
-        }
+        updateTimer?.invalidate()
     }
 }
 

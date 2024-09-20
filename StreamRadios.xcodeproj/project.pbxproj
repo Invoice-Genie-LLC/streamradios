@@ -62,7 +62,6 @@
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
 		77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE95A2C161E910098EE74 /* SideMenuView.swift */; };
 		77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CCE9622C1632380098EE74 /* ImagePicker.swift */; };
-		77DD9D112C96655C00C7BA3C /* PodcastAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77DD9D102C96655C00C7BA3C /* PodcastAppTests.swift */; };
 		77DD9D182C96698000C7BA3C /* NotificationCenterProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77DD9D172C96698000C7BA3C /* NotificationCenterProtocol.swift */; };
 		77E23F422C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */; };
 		77E23F4E2C90A0B300CDECD9 /* PlaybackManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */; };
@@ -88,13 +87,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = 774617802C17411C00F442B3;
 			remoteInfo = albRadioWidgetExtension;
-		};
-		77DD9D122C96655C00C7BA3C /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 7707DA2D2C152EF2006D5EBB /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7707DA342C152EF2006D5EBB;
-			remoteInfo = StreamRadios;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -171,8 +163,6 @@
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
 		77CCE9622C1632380098EE74 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
-		77DD9D0E2C96655C00C7BA3C /* PodcastAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PodcastAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		77DD9D102C96655C00C7BA3C /* PodcastAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastAppTests.swift; sourceTree = "<group>"; };
 		77DD9D172C96698000C7BA3C /* NotificationCenterProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCenterProtocol.swift; sourceTree = "<group>"; };
 		77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconnectingIndicatorView.swift; sourceTree = "<group>"; };
 		77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackManager.swift; sourceTree = "<group>"; };
@@ -210,13 +200,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		77DD9D0B2C96655C00C7BA3C /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -227,7 +210,6 @@
 				7707DA4B2C153935006D5EBB /* Info.plist */,
 				7707DA372C152EF2006D5EBB /* StreamRadios */,
 				774617872C17411C00F442B3 /* streamRadiosWidget */,
-				77DD9D0F2C96655C00C7BA3C /* PodcastAppTests */,
 				774617822C17411C00F442B3 /* Frameworks */,
 				7707DA362C152EF2006D5EBB /* Products */,
 			);
@@ -238,7 +220,6 @@
 			children = (
 				7707DA352C152EF2006D5EBB /* StreamRadios.app */,
 				774617812C17411C00F442B3 /* StreamRadioWidgets.appex */,
-				77DD9D0E2C96655C00C7BA3C /* PodcastAppTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -393,14 +374,6 @@
 			path = FeatureSwitches;
 			sourceTree = "<group>";
 		};
-		77DD9D0F2C96655C00C7BA3C /* PodcastAppTests */ = {
-			isa = PBXGroup;
-			children = (
-				77DD9D102C96655C00C7BA3C /* PodcastAppTests.swift */,
-			);
-			path = PodcastAppTests;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -449,24 +422,6 @@
 			productReference = 774617812C17411C00F442B3 /* StreamRadioWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		77DD9D0D2C96655C00C7BA3C /* PodcastAppTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 77DD9D162C96655C00C7BA3C /* Build configuration list for PBXNativeTarget "PodcastAppTests" */;
-			buildPhases = (
-				77DD9D0A2C96655C00C7BA3C /* Sources */,
-				77DD9D0B2C96655C00C7BA3C /* Frameworks */,
-				77DD9D0C2C96655C00C7BA3C /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				77DD9D132C96655C00C7BA3C /* PBXTargetDependency */,
-			);
-			name = PodcastAppTests;
-			productName = PodcastAppTests;
-			productReference = 77DD9D0E2C96655C00C7BA3C /* PodcastAppTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -482,10 +437,6 @@
 					};
 					774617802C17411C00F442B3 = {
 						CreatedOnToolsVersion = 15.1;
-					};
-					77DD9D0D2C96655C00C7BA3C = {
-						CreatedOnToolsVersion = 15.4;
-						TestTargetID = 7707DA342C152EF2006D5EBB;
 					};
 				};
 			};
@@ -511,7 +462,6 @@
 			targets = (
 				7707DA342C152EF2006D5EBB /* StreamRadios */,
 				774617802C17411C00F442B3 /* StreamRadioWidgets */,
-				77DD9D0D2C96655C00C7BA3C /* PodcastAppTests */,
 			);
 		};
 /* End PBXProject section */
@@ -531,13 +481,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				7746178F2C17411E00F442B3 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		77DD9D0C2C96655C00C7BA3C /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -616,14 +559,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		77DD9D0A2C96655C00C7BA3C /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				77DD9D112C96655C00C7BA3C /* PodcastAppTests.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -631,11 +566,6 @@
 			isa = PBXTargetDependency;
 			target = 774617802C17411C00F442B3 /* StreamRadioWidgets */;
 			targetProxy = 774617912C17411E00F442B3 /* PBXContainerItemProxy */;
-		};
-		77DD9D132C96655C00C7BA3C /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 7707DA342C152EF2006D5EBB /* StreamRadios */;
-			targetProxy = 77DD9D122C96655C00C7BA3C /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -762,7 +692,6 @@
 		7707DA442C152EF5006D5EBB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
@@ -803,7 +732,6 @@
 		7707DA452C152EF5006D5EBB /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
@@ -899,44 +827,6 @@
 			};
 			name = Release;
 		};
-		77DD9D142C96655C00C7BA3C /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LH5V67498N;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios.PodcastAppTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamRadios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreamRadios";
-			};
-			name = Debug;
-		};
-		77DD9D152C96655C00C7BA3C /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = LH5V67498N;
-				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios.PodcastAppTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamRadios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/StreamRadios";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -963,15 +853,6 @@
 			buildConfigurations = (
 				774617952C17411E00F442B3 /* Debug */,
 				774617962C17411E00F442B3 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		77DD9D162C96655C00C7BA3C /* Build configuration list for PBXNativeTarget "PodcastAppTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				77DD9D142C96655C00C7BA3C /* Debug */,
-				77DD9D152C96655C00C7BA3C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -19,8 +19,6 @@ struct RadioStreamApp: App {
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel.shared
-    @State private var selectedFeedIdentifier: FeedIdentifier?
-
 
     var body: some Scene {
         WindowGroup {
@@ -35,26 +33,6 @@ struct RadioStreamApp: App {
                 .environmentObject(podcastViewModel)
                 .environmentObject(podcastPlayer)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
-                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("OpenPodcastFeed"))) { notification in
-                                    if let feedId = notification.userInfo?["feedId"] as? String {
-                                        selectedFeedIdentifier = FeedIdentifier(id: feedId)
-                                    }
-                                }
-                                .sheet(item: $selectedFeedIdentifier) { feedIdentifier in
-                                    if let feed = podcastViewModel.podcastFeeds.first(where: { $0.id == feedIdentifier.id }) {
-                                        PodcastPlayerView(
-                                            viewModel: podcastViewModel,
-                                            feed: feed,
-                                            initialScrollToEpisodeID: nil,
-                                            podcastPlayer: podcastPlayer,
-                                            episodeToScrollTo: .constant(nil),
-                                            selectedPodcast: Binding(
-                                                get: { feed },
-                                                set: { _ in selectedFeedIdentifier = nil }
-                                            )
-                                        )
-                                    }
-                                }
                 .onAppear {
                     setupApp()
                     PodcastPlayer.shared.configure(with: podcastViewModel)
@@ -69,9 +47,6 @@ struct RadioStreamApp: App {
     private func setupApp() {
         // Set up the remote command center
         radioPlayer.setupRemoteCommandCenter()
-        
-        // Schedule notifications when new podcast episodes are released 
-        podcastViewModel.scheduleEpisodeChecks()
 
         // Set the ViewModel for RadioPlayer
         radioPlayer.setViewModel(viewModel)
@@ -135,8 +110,4 @@ func updateWidget() {
     
     WidgetCenter.shared.reloadAllTimelines()
     print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
-}
-
-struct FeedIdentifier: Identifiable {
-    let id: String
 }
