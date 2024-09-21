@@ -36,7 +36,6 @@ struct ContentView: View {
     @State private var showAllEpisodes = false
     @State private var scrollToEpisodeID: String?
 
-    
     init() {
         let savedTab: Tab
         if let savedTabRawValue = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
@@ -46,12 +45,10 @@ struct ContentView: View {
             savedTab = .all
         }
         
-        // Initialize @StateObject properties
         self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
         self._podcastViewModel = StateObject(wrappedValue: PodcastViewModel())
         self._podcastPlayer = StateObject(wrappedValue: PodcastPlayer.shared)
         
-        // Initialize @State properties
         self._isAddStationViewPresented = State(initialValue: false)
         self._isPlayerSheetPresented = State(initialValue: false)
         self._showSideMenu = State(initialValue: false)
@@ -69,209 +66,199 @@ struct ContentView: View {
     
     @Environment(\.horizontalSizeClass) var sizeClass
     
-    // Variables to detect specific devices
-    private var isIPhoneSE: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1134
+    // MARK: - Device Detection
+    
+    private var deviceType: DeviceType {
+        let height = UIScreen.main.nativeBounds.height
+        switch height {
+        case 1136: return .iPhoneSE
+        case 1334: return .iPhoneSE2
+        case 1792: return .iPhone11
+        case 2532: return .iPhone13
+        case 2556: return .iPhone14Pro
+        case 2778: return .iPhone14Plus
+        case 2796: return .iPhone15ProMax
+        case 2340: return .iPhone15Pro
+        case 2622: return .iPhone16Pro
+        case 2266: return .iPadMini
+        case 2388: return .iPadAir
+        case 2732: return .iPadPro
+        default: return .other
+    }
     }
     
-    private var isIPhoneSE2: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1334
+    // MARK: - Layout Properties
+    
+    private var topPadding: CGFloat {
+        switch deviceType {
+        case .iPhone15ProMax, .iPhone14Plus: return 10
+        case .iPhone16Pro: return 10
+        case .iPhone14Pro, .iPhone13: return 10
+        case .iPadMini, .iPadAir, .iPadPro: return 10
+        default: return 20
+        }
     }
     
-    private var isIPhone11: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 1792
+    private var menuButtonWidth: CGFloat {
+        switch deviceType {
+        case .iPhoneSE, .iPhoneSE2: return 25
+        case .iPhone11, .iPhone13, .iPhone14Pro, .iPhone14Plus, .iPhone15ProMax, .iPhone15Pro, .iPhone16Pro: return 30
+        case .iPadMini, .iPadAir, .iPadPro: return 40
+        default: return 30
+        }
     }
     
-    private var isIPhone13: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2532
+    private var countryPickerWidth: CGFloat {
+        switch deviceType {
+        case .iPhoneSE, .iPhoneSE2: return 220
+        case .iPhone11: return 230
+        case .iPhone13, .iPhone14Pro: return 250
+        case .iPhone16Pro: return 250
+        case .iPhone14Plus, .iPhone15ProMax: return 270
+        case .iPhone15Pro: return 260
+        case .iPadMini: return 300
+        case .iPadAir, .iPadPro: return 400
+        default: return 250
+        }
     }
     
-    private var isIPhone14Plus: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2778
+    private var editButtonWidth: CGFloat {
+        switch deviceType {
+        case .iPhoneSE, .iPhoneSE2, .iPhone11, .iPhone13, .iPhone14Pro, .iPhone14Plus, .iPhone15ProMax, .iPhone15Pro, .iPhone16Pro: return 50
+        case .iPadMini: return 100
+        case .iPadAir, .iPadPro: return 150
+        default: return 50
+        }
     }
     
-    private var isIPhone15: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2556
+    private var addButtonWidth: CGFloat {
+        switch deviceType {
+        case .iPhoneSE, .iPhoneSE2, .iPhone11: return 40
+        case .iPhone16Pro: return 30
+        case .iPhone13, .iPhone14Pro, .iPhone14Plus, .iPhone15ProMax, .iPhone15Pro, .iPadMini, .iPadAir, .iPadPro: return 50
+        default: return 45
+        }
     }
     
-    private var isIPhone15ProMax: Bool {
-        UIDevice.current.userInterfaceIdiom == .phone && UIScreen.main.nativeBounds.height == 2796
+    private var playerViewWidth: CGFloat {
+        switch deviceType {
+        case .iPhoneSE, .iPhoneSE2: return 320
+        case .iPhone11, .iPhone13, .iPhone14Pro: return 340
+        case .iPhone14Plus, .iPhone15ProMax, .iPhone15Pro: return 350
+        case .iPhone16Pro: return 350
+        case .iPadMini, .iPadAir: return 500
+        case .iPadPro: return 565
+        default: return 350
+        }
     }
     
-    private var isIPadMini: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.nativeBounds.height == 2266
-    }
-    
-    private var isIPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad && UIScreen.main.nativeBounds.height == 2732
-    }
+    // MARK: - Body
     
     var body: some View {
         NavigationView {
             ZStack {
-                // Background color
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
                 
-                // Main content
-                VStack {
-                    HStack(spacing: 8) {
-                        // Main Menu
-                        HStack {
-                            Button(action: {
-                                showSideMenu.toggle()
-                            }) {
-                                Image(systemName: "line.horizontal.3")
-                                    .font(.title)
-                                    .foregroundColor(.primary)
-                                    .padding(.leading, 15)
-                                    .padding(.trailing, 2)
-                            }
-                            Spacer()
-                        }
-                        .padding(.leading, 20)
-                        .frame(width: isIPhone15ProMax ? 30 : isIPhone15 ? 30 : isIPhoneSE || isIPhoneSE2 ? 30 : isIPhone11 ? 20 : isIPhone13 ? 30 : isIPhone14Plus ? 30 : isIPadMini ? 30 : isIPad ? 30 : 30)
-                        .padding(.bottom, 5)
+                VStack(spacing: 0) {
+                                    HStack(spacing: 8) {
+                                        Button(action: {
+                                            withAnimation {
+                                                showSideMenu.toggle()
+                                            }
+                                        }) {
+                                            Image(systemName: "line.horizontal.3")
+                                                .font(.title)
+                                                .foregroundColor(.primary)
+                                                .frame(width: menuButtonWidth)
+                                        }
+                                        .padding(.leading, 15)
                         
-                        // Country Picker
-                        HStack {
-                            StyledPickerView(
-                                selectedCountry: $viewModel.selectedCountry,
-                                countries: viewModel.countries
-                            )
-                        }
-                        .frame(width: isIPhone15ProMax ? 270 : isIPhone15 ? 250 : isIPhone11 ? 220 : isIPhone13 ? 250 : isIPhoneSE || isIPhoneSE2 ? 220 : isIPhone14Plus ? 250 : isIPadMini ? 300 : isIPad ? 400 : 350)
-                        .padding(.bottom, 5)
+                        StyledPickerView(
+                            selectedCountry: $viewModel.selectedCountry,
+                            countries: viewModel.countries
+                        )
+                        .frame(width: countryPickerWidth)
                         
-                        // Done and Edit Buttons
-                        HStack {
-                            Button(action: {
-                                isEditingMode.toggle()
-                                if isEditingMode {
-                                    radioPlayer.stop()
-                                    radioPlayer.metadata = nil
-                                    radioPlayer.currentStationIndex = nil
-                                }
-                            }) {
-                                Text(isEditingMode ? "Done" : "Edit")
-                                    .font(.title3)
-                                    .foregroundColor(.primary)
+                        Button(action: {
+                            isEditingMode.toggle()
+                            if isEditingMode {
+                                radioPlayer.stop()
+                                radioPlayer.metadata = nil
+                                radioPlayer.currentStationIndex = nil
                             }
+                        }) {
+                            Text(isEditingMode ? "Done" : "Edit")
+                                .font(.title3)
+                                .foregroundColor(.primary)
                         }
-                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPhone14Plus ? 50 : isIPhone11 ? 50 : isIPhone13 ? 50 : isIPhoneSE || isIPhoneSE2 ? 50 : isIPadMini ? 100 : isIPad ? 150 : 50)
-                        .padding(.bottom, 5)
+                        .frame(width: editButtonWidth)
                         
-                        HStack {
-                            Button(action: {
-                                if viewModel.selectedCountry == "Select Country" {
-                                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                                } else {
-                                    activeSheet = .addStation
-                                }
-                            }) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.title)
-                                    .foregroundColor(.primary)
-                                    .padding(.trailing, 10)
+                        Button(action: {
+                            if viewModel.selectedCountry == "Select Country" {
+                                alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                            } else {
+                                activeSheet = .addStation
                             }
+                        }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.primary)
                         }
-                        .padding(.bottom, 5)
-                        .frame(width: isIPhone15ProMax ? 50 : isIPhone15 ? 50 : isIPhone14Plus ? 50 : isIPhone11 ? 40 : isIPhone15ProMax ? 50 : isIPhoneSE || isIPhoneSE2 ? 40 : isIPadMini ? 50 : isIPad ? 50 : 50)
+                        .frame(width: addButtonWidth)
                     }
+                    .padding(.top, topPadding)
+                    .padding(.bottom, 10)
                     
-                    HStack {
-                        Picker("", selection: $selectedTab) {
-                            Text("Recent").tag(Tab.recent)
-                            Text("Favorites").tag(Tab.favorites)
-                            Text("All").tag(Tab.all)
-                        }
-                        .pickerStyle(SegmentedPickerStyle())
-                        .onChange(of: selectedTab) { newValue in
-                            saveSelectedTab(newValue)
-                        }
-                        .padding(.horizontal)
+                    Picker("", selection: $selectedTab) {
+                        Text("Recent").tag(Tab.recent)
+                        Text("Favorites").tag(Tab.favorites)
+                        Text("All").tag(Tab.all)
                     }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.horizontal)
                     .frame(width: sizeClass == .regular ? 650 : 410)
+                    .onChange(of: selectedTab) { newValue in
+                        saveSelectedTab(newValue)
+                    }
                     
                     Spacer()
                     
-                    VStack {
-                        RadioStationListView(isEditing: $isEditingMode,
-                                             isEditingStation: $isEditingStation,
-                                             selectedStationForEdit: $selectedStationForEdit,
-                                             selectedTab: $selectedTab, activeSheet: $activeSheet)
+                    RadioStationListView(isEditing: $isEditingMode,
+                                         isEditingStation: $isEditingStation,
+                                         selectedStationForEdit: $selectedStationForEdit,
+                                         selectedTab: $selectedTab, activeSheet: $activeSheet)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
-                        .frame(width: sizeClass == .regular ? 615 : isIPhoneSE || isIPhoneSE2 ? 350 : 385)
+                        .frame(width: sizeClass == .regular ? 615 : deviceType == .iPhoneSE || deviceType == .iPhoneSE2 ? 350 : 385)
                         .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(16)
                         .modifier(NeumorphicShadow())
-                        .padding(.top, isIPhoneSE || isIPhoneSE2 ? 5 : 10)
-                    }
-                    .padding(.bottom, isIPhoneSE || isIPhoneSE2 ? 20 : 35)
-                    .padding(.bottom, sizeClass == .regular ? 5 : 0)
+                        .padding(.top, deviceType == .iPhoneSE || deviceType == .iPhoneSE2 ? 5 : 10)
+                        .padding(.bottom, deviceType == .iPhoneSE || deviceType == .iPhoneSE2 ? 20 : 35)
                     
                     Spacer()
                     
                     VStack {
                         if let currentStation = viewModel.currentlyPlayingStation {
-                            VStack {
-                                HStack(alignment: .center, spacing: 20) {
-                                    if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                                        Image(uiImage: image)
-                                            .resizable()
-                                            .frame(width: 70, height: 70)
-                                            .cornerRadius(10)
-                                    } else {
-                                        Image(systemName: "radio")
-                                            .resizable()
-                                            .frame(width: 70, height: 70)
-                                            .cornerRadius(10)
-                                            .foregroundColor(.gray)
-                                    }
-                                    
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(currentStation.name)
-                                            .font(.title2)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(.primary)
-                                        if let metadata = radioPlayer.metadata {
-                                            Text(metadata)
-                                                .font(.subheadline)
-                                                .foregroundColor(.primary)
-                                        } else {
-                                            Text("No song or album title available")
-                                                .font(.subheadline)
-                                                .foregroundColor(.primary)
-                                        }
-                                    }
-                                    Spacer()
-                                    
-                                }
-                                .padding(.leading, 10)
-                            }
+                            CurrentlyPlayingView(currentStation: currentStation, metadata: radioPlayer.metadata)
                         }
                         PlayerView()
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
                             .padding(.top, 8)
                     }
-                    .frame(width: sizeClass == .regular ? 565 : isIPhone15ProMax ? 350 : isIPhone11 ? 340 : isIPhone13 ? 350 : isIPhone14Plus ? 340 : isIPhone15 ? 350 : isIPhoneSE || isIPhoneSE2 ? 320 : 385)
+                    .frame(width: playerViewWidth)
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(12)
                     .modifier(NeumorphicShadow())
-                    .frame(maxWidth: sizeClass == .regular ? 600 : 385)
-                    .padding(.horizontal, 5)
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
                     }
                     .frame(height: 140)
-                    .padding(.bottom, UIApplication.shared.connectedScenes
-                        .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
-                        .first ?? 0)
+                    .padding(.bottom, UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0)
                     
-                    // Podcast MiniPlayerView
                     if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                         MiniPlayerView(
                             podcastPlayer: podcastPlayer,
@@ -294,76 +281,35 @@ struct ContentView: View {
                         .transition(.move(edge: .bottom))
                         .zIndex(1)
                     }
-                                }
-                .sheet(isPresented: $showPodcastPlayerSheet) {
-                    if let podcast = selectedPodcast {
-                        PodcastPlayerView(
-                            viewModel: podcastViewModel,
-                            feed: podcast,
-                            initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
-                            podcastPlayer: podcastPlayer,
-                            episodeToScrollTo: Binding(
-                                get: { podcastPlayer.currentEpisode },
-                                set: { _ in }
-                            ),
-                            selectedPodcast: $selectedPodcast
-                        )
-                    }
                 }
-                
-                
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
                 // Side Menu
-                GeometryReader { geometry in
-                    HStack {
-                        SideMenuView(showSideMenu: $showSideMenu)
-                            .frame(width: geometry.size.width / 2)
-                            .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-                        
-                        Spacer()
-                    }
-                }
-                .background(Color.black.opacity(showSideMenu ? 0.5 : 0).edgesIgnoringSafeArea(.all))
-                .onTapGesture {
-                    if showSideMenu {
-                        showSideMenu.toggle()
-                    }
-                }
-                
-                // Custom Alert
-                if alertManager.showCustomAlert {
-                    GeometryReader { geometry in
-                        Color.black.opacity(0.4)
-                            .edgesIgnoringSafeArea(.all)
-                            .onTapGesture {
-                                alertManager.dismissAlert()
-                            }
-                        
-                        CustomAlertView(
-                            title: alertManager.customAlertTitle,
-                            message: alertManager.customAlertMessage,
-                            buttonText: alertManager.customAlertPrimaryButtonText,
-                            buttonAction: {
-                                alertManager.dismissAlert()
-                                alertManager.customAlertPrimaryAction?()
-                            },
-                            secondaryButtonText: alertManager.customAlertSecondaryButtonText,
-                            secondaryButtonAction: {
-                                alertManager.dismissAlert()
-                                alertManager.customAlertSecondaryAction?()
-                            }
-                        )
-                        .frame(width: 300)
-                        .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
-                    }
-                    .transition(.opacity)
-                    .zIndex(2)
-                }
+                                GeometryReader { geometry in
+                                    HStack(spacing: 0) {
+                                        SideMenuView(showSideMenu: $showSideMenu)
+                                            .frame(width: geometry.size.width / 2)
+                                            .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
+                                        
+                                        Spacer()
+                                    }
+                                    .background(
+                                        Color.black.opacity(showSideMenu ? 0.5 : 0)
+                                            .edgesIgnoringSafeArea(.all)
+                                            .onTapGesture {
+                                                withAnimation {
+                                                    showSideMenu = false
+                                                }
+                                            }
+                                    )
+                                }
+                                .zIndex(showSideMenu ? 1 : 0)
+                                
+                                if alertManager.showCustomAlert {
+                                    CustomAlertContainer()
+                                }
             }
-            .sheet(item: $activeSheet, onDismiss: {
-                activeSheet = nil
-            }) { item in
+            .sheet(item: $activeSheet, onDismiss: { activeSheet = nil }) { item in
                 switch item {
                 case .addStation:
                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
@@ -391,6 +337,21 @@ struct ContentView: View {
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
+            .sheet(isPresented: $showPodcastPlayerSheet) {
+                if let podcast = selectedPodcast {
+                    PodcastPlayerView(
+                        viewModel: podcastViewModel,
+                        feed: podcast,
+                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
+                        podcastPlayer: podcastPlayer,
+                        episodeToScrollTo: Binding(
+                            get: { podcastPlayer.currentEpisode },
+                            set: { _ in }
+                        ),
+                        selectedPodcast: $selectedPodcast
+                    )
+                }
+            }
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                 self.bitrateMessage = newBitrateMessage
             }
@@ -398,11 +359,10 @@ struct ContentView: View {
                 self.selectedTab = .all
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .onDisappear {
             podcastViewModel.saveContextIfNeeded()
         }
-        .navigationViewStyle(StackNavigationViewStyle())
-        
         .onAppear {
             UIApplication.shared.addTapGestureRecognizer()
         }
@@ -413,19 +373,115 @@ struct ContentView: View {
             self.viewModel.objectWillChange.send()
         }
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
-            viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
+                    viewModel.loadStationsFromCoreData()
+                }
+            }
+            
+            func saveSelectedTab(_ tab: Tab) {
+                UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
+            }
         }
-    }
-    
-     func saveSelectedTab(_ tab: Tab) {
-        UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
-    }
-}
 
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-            .preferredColorScheme(.dark)
-            .environmentObject(AlertManager())
-    }
-}
+        // MARK: - Helper Views
+
+        struct CurrentlyPlayingView: View {
+            let currentStation: RadioStation
+            let metadata: String?
+            
+            var body: some View {
+                HStack(alignment: .center, spacing: 20) {
+                    if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .frame(width: 70, height: 70)
+                            .cornerRadius(10)
+                    } else {
+                        Image(systemName: "radio")
+                            .resizable()
+                            .frame(width: 70, height: 70)
+                            .cornerRadius(10)
+                            .foregroundColor(.gray)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(currentStation.name)
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+                        if let metadata = metadata {
+                            Text(metadata)
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        } else {
+                            Text("No song or album title available")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.leading, 10)
+            }
+        }
+
+        struct CustomAlertContainer: View {
+            @EnvironmentObject var alertManager: AlertManager
+            
+            var body: some View {
+                GeometryReader { geometry in
+                    Color.black.opacity(0.4)
+                        .edgesIgnoringSafeArea(.all)
+                        .onTapGesture {
+                            alertManager.dismissAlert()
+                        }
+                    
+                    CustomAlertView(
+                        title: alertManager.customAlertTitle,
+                        message: alertManager.customAlertMessage,
+                        buttonText: alertManager.customAlertPrimaryButtonText,
+                        buttonAction: {
+                            alertManager.dismissAlert()
+                            alertManager.customAlertPrimaryAction?()
+                        },
+                        secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                        secondaryButtonAction: {
+                            alertManager.dismissAlert()
+                            alertManager.customAlertSecondaryAction?()
+                        }
+                    )
+                    .frame(width: 300)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                }
+                .transition(.opacity)
+                .zIndex(2)
+            }
+        }
+
+        // MARK: - Device Type Enum
+
+        enum DeviceType {
+            case iPhoneSE
+            case iPhoneSE2
+            case iPhone11
+            case iPhone13
+            case iPhone14Pro
+            case iPhone14Plus
+            case iPhone15ProMax
+            case iPhone15Pro
+            case iPhone16Pro
+            case iPadMini
+            case iPadAir
+            case iPadPro
+            case other
+        }
+
+        // MARK: - Previews
+
+        struct ContentView_Previews: PreviewProvider {
+            static var previews: some View {
+                ContentView()
+                    .preferredColorScheme(.dark)
+                    .environmentObject(AlertManager())
+                    .environmentObject(RadioStationViewModel())
+            }
+        }
