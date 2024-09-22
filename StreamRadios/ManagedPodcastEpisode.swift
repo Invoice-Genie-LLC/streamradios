@@ -19,16 +19,23 @@ extension FeedModel {
     }
     
     func toPodcastFeed() -> PodcastFeed {
-        return PodcastFeed(
-            id: self.id ?? UUID().uuidString,
-            title: self.title ?? "",
-            url: self.url ?? "",
-            artworkUrl: self.artworkUrl,
-            description: self.descriptionText,
-            iconData: self.iconData,
-            imageData: self.imageData
-        )
-    }
+            var episodesArray: [PodcastEpisode] = []
+            
+            if let episode = self.episodes {
+                episodesArray = [episode.toPodcastEpisode()]
+            }
+            
+            return PodcastFeed(
+                id: self.id ?? UUID().uuidString,
+                title: self.title ?? "",
+                url: self.url ?? "",
+                artworkUrl: self.artworkUrl,
+                description: self.descriptionText,
+                iconData: self.iconData,
+                imageData: self.imageData,
+                episodes: episodesArray
+            )
+        }
 }
 
 extension PodcastModel {
@@ -45,25 +52,42 @@ extension PodcastModel {
         self.isDownloaded = episode.state.isDownloaded
         self.feedId = episode.feedId
         self.localFilePath = episode.localFilePath
+        self.fileSize = episode.fileSize ?? 0  // Use 0 as a default if fileSize is nil
     }
     
     func toPodcastEpisode() -> PodcastEpisode {
-        return PodcastEpisode(
-            id: self.id ?? UUID().uuidString,
-            title: self.title ?? "",
-            descriptionText: self.descriptionText ?? "",
-            audioUrl: self.audioUrl ?? "",
-            publicationDate: self.publicationDate ?? Date(),
-            duration: self.duration,
-            state: EpisodeState(
-                isPlayed: self.isPlayed,
-                isFavorite: self.isFavorite,
-                progress: self.progress,
-                isDownloaded: self.isDownloaded
-            ),
-            feedId: self.feedId ?? "",
-            localFilePath: self.localFilePath,
-            fileSize: self.fileSize
-        )
-    }
+           return PodcastEpisode(
+               id: self.id ?? UUID().uuidString,
+               title: self.title ?? "",
+               descriptionText: self.descriptionText ?? "",
+               audioUrl: self.audioUrl ?? "",
+               publicationDate: self.publicationDate ?? Date(),
+               duration: self.duration,
+               state: EpisodeState(
+                   isPlayed: self.isPlayed,
+                   isFavorite: self.isFavorite,
+                   progress: self.progress,
+                   isDownloaded: self.isDownloaded
+               ),
+               feedId: self.feedId ?? "",
+               localFilePath: self.localFilePath,
+               fileSize: self.fileSize
+           )
+       }
 }
+
+extension FeedModel {
+    @objc(addEpisodesObject:)
+    @NSManaged public func addToEpisodes(_ value: PodcastModel)
+
+    @objc(removeEpisodesObject:)
+    @NSManaged public func removeFromEpisodes(_ value: PodcastModel)
+
+    @objc(addEpisodes:)
+    @NSManaged public func addToEpisodes(_ values: NSSet)
+
+    @objc(removeEpisodes:)
+    @NSManaged public func removeFromEpisodes(_ values: NSSet)
+}
+
+

@@ -237,37 +237,35 @@ class PodcastViewModel: ObservableObject {
     }
 
     func updateEpisodeDuration(_ episode: PodcastEpisode, newDuration: Double) {
-            if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                var updatedEpisode = allEpisodes[index]
-                updatedEpisode.duration = newDuration
-                allEpisodes[index] = updatedEpisode
-                
-                // Update in currentEpisodes if present
-                if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                    currentEpisodes[currentIndex] = updatedEpisode
-                }
-                
-                // Update in Core Data
-                updateEpisodeInCoreData(updatedEpisode)
+        if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+            var updatedEpisode = allEpisodes[index]
+            updatedEpisode.duration = newDuration
+            allEpisodes[index] = updatedEpisode
+            
+            if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                currentEpisodes[currentIndex] = updatedEpisode
             }
-            objectWillChange.send()
+            
+            updateEpisodeInCoreData(updatedEpisode)
         }
+        objectWillChange.send()
+    }
     
     private func updateEpisodeInCoreData(_ episode: PodcastEpisode) {
-           let context = CoreDataStack.shared.context
-           let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-           fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+        let context = CoreDataStack.shared.context
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
 
-           do {
-               let results = try context.fetch(fetchRequest)
-               if let managedEpisode = results.first {
-                   managedEpisode.duration = episode.duration
-                   try context.save()
-               }
-           } catch {
-               print("Failed to update episode duration in Core Data: \(error)")
-           }
-       }
+        do {
+            let results = try context.fetch(fetchRequest)
+            if let managedEpisode = results.first {
+                managedEpisode.duration = episode.duration
+                try context.save()
+            }
+        } catch {
+            print("Failed to update episode duration in Core Data: \(error)")
+        }
+    }
     
     func addPodcastFeed(_ feed: PodcastFeed) {
         isLoading = true
@@ -296,7 +294,6 @@ class PodcastViewModel: ObservableObject {
             
             try context.save()
             
-            // Save to CloudKit
             dataStore.savePodcastFeedToCloudKit(feed) { [weak self] success, recordID in
                 guard let self = self else { return }
                 DispatchQueue.main.async {
@@ -306,7 +303,6 @@ class PodcastViewModel: ObservableObject {
                         os_log("Failed to save podcast feed to CloudKit: %@", log: self.log, type: .error, feed.title)
                     }
                     
-                    // Fetch RSS feed for the newly added podcast
                     self.fetchRSSFeed(for: feed) { result in
                         switch result {
                         case .success(let updatedFeed):
@@ -340,7 +336,6 @@ class PodcastViewModel: ObservableObject {
     }
     
     func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
-        // Delete the local file
         if let localFilePath = episode.localFilePath {
             do {
                 try FileManager.default.removeItem(atPath: localFilePath)
@@ -350,19 +345,15 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        // Update the episode state
         if var updatedEpisode = allEpisodes.first(where: { $0.id == episode.id }) {
             updatedEpisode.state.isDownloaded = false
             updatedEpisode.localFilePath = nil
-            // Preserve the favorite status
             updatedEpisode.state.isFavorite = episode.state.isFavorite
             updateEpisodeInLists(updatedEpisode)
         }
         
-        // Remove from downloadedEpisodes
         downloadedEpisodes.removeAll { $0.id == episode.id }
         
-        // Update Core Data
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
         
@@ -371,7 +362,6 @@ class PodcastViewModel: ObservableObject {
             if let managedEpisode = results.first {
                 managedEpisode.isDownloaded = false
                 managedEpisode.localFilePath = nil
-                // Preserve the favorite status
                 managedEpisode.isFavorite = episode.state.isFavorite
                 try context.save()
                 print("Successfully updated Core Data for episode: \(episode.title)")
@@ -380,7 +370,6 @@ class PodcastViewModel: ObservableObject {
             print("Error updating Core Data for episode \(episode.title): \(error)")
         }
         
-        // Refresh the current episodes list
         updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
         
         objectWillChange.send()
@@ -1176,32 +1165,69 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
+        guard !episode.id.isEmpty, !episode.title.isEmpty, !episode.feedId.isEmpty else {
+            print("Invalid episode data, not saving to Core Data")
+            return
+        }
+        
         // Perform Core Data operations on a background queue
         DispatchQueue.global(qos: .background).async { [weak self] in
             guard let self = self else { return }
             
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-            
-            do {
-                let results = try self.context.fetch(fetchRequest)
-                let managedEpisode: PodcastModel
+            let context = self.context
+            context.perform {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
                 
-                if let existingEpisode = results.first {
-                    managedEpisode = existingEpisode
-                } else {
-                    managedEpisode = PodcastModel(context: self.context)
+                do {
+                    let results = try context.fetch(fetchRequest)
+                    let managedEpisode: PodcastModel
+                    
+                    if let existingEpisode = results.first {
+                        managedEpisode = existingEpisode
+                    } else {
+                        managedEpisode = PodcastModel(context: context)
+                    }
+                    
+                    self.updateManagedEpisode(managedEpisode, from: episode)
+                    
+                    // Save the context
+                    try context.save()
+                    print("Successfully saved episode state to Core Data: \(episode.title)")
+                    
+                } catch {
+                    print("Failed to save episode to Core Data: \(error)")
                 }
-                
-                managedEpisode.update(from: episode)
-                
-                // Save the context on the same background thread
-                try self.context.save()
-                print("Successfully saved episode state to Core Data: \(episode.title)")
-                
-            } catch {
-                print("Failed to save episode to Core Data: \(error)")
             }
+        }
+    }
+    
+    private func updateManagedEpisode(_ managedEpisode: PodcastModel, from episode: PodcastEpisode) {
+        managedEpisode.id = episode.id
+        managedEpisode.title = episode.title
+        managedEpisode.descriptionText = episode.descriptionText
+        managedEpisode.audioUrl = episode.audioUrl
+        managedEpisode.publicationDate = episode.publicationDate
+        managedEpisode.duration = episode.duration
+        managedEpisode.isPlayed = episode.state.isPlayed
+        managedEpisode.isFavorite = episode.state.isFavorite
+        managedEpisode.progress = episode.state.progress
+        managedEpisode.isDownloaded = episode.state.isDownloaded
+        managedEpisode.feedId = episode.feedId
+        managedEpisode.localFilePath = episode.localFilePath
+        managedEpisode.fileSize = episode.fileSize ?? 0
+        
+        // Update the feed relationship
+        let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        feedFetchRequest.predicate = NSPredicate(format: "id == %@", episode.feedId)
+        
+        do {
+            let feeds = try managedEpisode.managedObjectContext?.fetch(feedFetchRequest)
+            if let feed = feeds?.first {
+                managedEpisode.feed = feed
+            }
+        } catch {
+            print("Failed to fetch feed for episode: \(error)")
         }
     }
 
