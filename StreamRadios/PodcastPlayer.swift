@@ -557,7 +557,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         guard let currentEpisode = currentEpisode, duration > 0 else { return }
         let progress = currentTime / duration
         viewModel?.updateProgress(for: currentEpisode, progress: progress)
-        os_log("Progress saved for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
     }
     
     func skipForward() {
