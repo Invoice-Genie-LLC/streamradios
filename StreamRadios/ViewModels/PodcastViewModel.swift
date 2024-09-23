@@ -345,15 +345,7 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        if var updatedEpisode = allEpisodes.first(where: { $0.id == episode.id }) {
-            updatedEpisode.state.isDownloaded = false
-            updatedEpisode.localFilePath = nil
-            updatedEpisode.state.isFavorite = episode.state.isFavorite
-            updateEpisodeInLists(updatedEpisode)
-        }
-        
-        downloadedEpisodes.removeAll { $0.id == episode.id }
-        
+        let context = CoreDataStack.shared.context
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
         
@@ -362,17 +354,20 @@ class PodcastViewModel: ObservableObject {
             if let managedEpisode = results.first {
                 managedEpisode.isDownloaded = false
                 managedEpisode.localFilePath = nil
-                managedEpisode.isFavorite = episode.state.isFavorite
                 try context.save()
-                print("Successfully updated Core Data for episode: \(episode.title)")
+                
+                var updatedEpisode = episode
+                updatedEpisode.state.isDownloaded = false
+                updatedEpisode.localFilePath = nil
+                updateEpisodeInLists(updatedEpisode)
+                
+                downloadedEpisodes.removeAll { $0.id == episode.id }
+                
+                objectWillChange.send()
             }
         } catch {
-            print("Error updating Core Data for episode \(episode.title): \(error)")
+            print("Error updating CoreData for episode \(episode.title): \(error)")
         }
-        
-        updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
-        
-        objectWillChange.send()
     }
     
     func loadSavedData() {
@@ -383,51 +378,45 @@ class PodcastViewModel: ObservableObject {
         loadLastPlayedEpisodes()
     }
     
-    private func loadDownloadedEpisodes() {
-            backgroundContext.perform { [weak self] in
-                guard let self = self else { return }
+    func loadDownloadedEpisodes() {
+        let context = CoreDataStack.shared.context
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "isDownloaded == %@", NSNumber(value: true))
+        
+        DispatchQueue.global(qos: .background).async { // Perform fetch on a background thread
+            do {
+                let results = try context.fetch(fetchRequest)
+                let episodes = results.map { $0.toPodcastEpisode() }
                 
-                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "isDownloaded == YES")
-                
-                do {
-                    let managedEpisodes = try self.backgroundContext.fetch(fetchRequest)
-                    let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
-                    
-                    DispatchQueue.main.async {
-                        self.downloadedEpisodes = episodes
-                        os_log("Loaded %d downloaded episodes from Core Data", log: self.log, type: .info, self.downloadedEpisodes.count)
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        os_log("Failed to load downloaded episodes: %@", log: self.log, type: .error, error.localizedDescription)
-                    }
+                DispatchQueue.main.async { // Update UI on the main thread
+                    self.downloadedEpisodes = episodes
+                    self.objectWillChange.send()
                 }
+            } catch {
+                print("Failed to load downloaded episodes: \(error)")
             }
         }
+    }
     
     func loadFavoriteEpisodes() {
-            backgroundContext.perform { [weak self] in
-                guard let self = self else { return }
+        let context = CoreDataStack.shared.context
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "isFavorite == %@", NSNumber(value: true))
+        
+        DispatchQueue.global(qos: .background).async { // Perform fetch on a background thread
+            do {
+                let results = try context.fetch(fetchRequest)
+                let episodes = results.map { $0.toPodcastEpisode() }
                 
-                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "isFavorite == YES")
-                
-                do {
-                    let managedEpisodes = try self.backgroundContext.fetch(fetchRequest)
-                    let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
-                    
-                    DispatchQueue.main.async {
-                        self.favoriteEpisodes = episodes
-                        os_log("Loaded %d favorite episodes from Core Data", log: self.log, type: .info, self.favoriteEpisodes.count)
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        os_log("Failed to load favorite episodes: %@", log: self.log, type: .error, error.localizedDescription)
-                    }
+                DispatchQueue.main.async { // Update UI on the main thread
+                    self.favoriteEpisodes = episodes
+                    self.objectWillChange.send()
                 }
+            } catch {
+                print("Failed to load favorite episodes: \(error)")
             }
         }
+    }
     
     func clearAllPodcastData(completion: @escaping (Bool) -> Void) {
         let group = DispatchGroup()
@@ -756,6 +745,7 @@ class PodcastViewModel: ObservableObject {
         }
 
         private func loadDownloadStatus(for feedId: String) -> [String: Bool] {
+            return userDefaults.dictionary(forKey: downloadStatusKey(for: feedId)) as? [String: Bool] ?? [:]
             return userDefaults.dictionary(forKey: downloadStatusKey(for: feedId)) as? [String: Bool] ?? [:]
         }
 
@@ -1138,49 +1128,76 @@ class PodcastViewModel: ObservableObject {
     
     
     func toggleFavorite(for episode: PodcastEpisode) {
-        var updatedEpisode = episode
-        updatedEpisode.state.isFavorite.toggle()
+        let context = CoreDataStack.shared.context
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
         
-        if updatedEpisode.state.isFavorite {
-            if !favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
-                favoriteEpisodes.append(updatedEpisode)
+        do {
+            let results = try context.fetch(fetchRequest)
+            let managedEpisode: PodcastModel
+            
+            if let existingEpisode = results.first {
+                managedEpisode = existingEpisode
+            } else {
+                // Create a new managed episode if it doesn't exist in Core Data
+                managedEpisode = PodcastModel(context: context)
+                managedEpisode.id = episode.id
+                managedEpisode.title = episode.title
+                managedEpisode.feedId = episode.feedId
+                // Set other properties as needed
             }
-        } else {
-            favoriteEpisodes.removeAll { $0.id == updatedEpisode.id }
+            
+            // Toggle the favorite status
+            managedEpisode.isFavorite.toggle()
+            
+            try context.save()
+            
+            var updatedEpisode = episode
+            updatedEpisode.state.isFavorite.toggle()
+            
+            if updatedEpisode.state.isFavorite {
+                if !favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
+                    favoriteEpisodes.append(updatedEpisode)
+                }
+            } else {
+                favoriteEpisodes.removeAll { $0.id == updatedEpisode.id }
+            }
+            
+            updateEpisodeInLists(updatedEpisode)
+            objectWillChange.send()
+        } catch {
+            print("Failed to toggle favorite status: \(error)")
         }
-        
-        updateEpisodeInLists(updatedEpisode)
-        saveEpisodeToCoreData(updatedEpisode)
-        
-        // Update and save bookmark status
-        var bookmarkStatus = loadBookmarkStatus(for: episode.feedId)
-        bookmarkStatus[episode.id] = updatedEpisode.state.isFavorite
-        saveBookmarkStatus(bookmarkStatus, for: episode.feedId)
-        
-        objectWillChange.send()
     }
     
     func updateEpisodeDownloadStatus(_ episode: PodcastEpisode, isDownloaded: Bool) {
-        var updatedEpisode = episode
-        updatedEpisode.state.isDownloaded = isDownloaded
+        let context = CoreDataStack.shared.context
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
         
-        if isDownloaded {
-            if !downloadedEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
-                downloadedEpisodes.append(updatedEpisode)
+        do {
+            let results = try context.fetch(fetchRequest)
+            if let managedEpisode = results.first {
+                managedEpisode.isDownloaded = isDownloaded
+                try context.save()
+                
+                var updatedEpisode = episode
+                updatedEpisode.state.isDownloaded = isDownloaded
+                
+                if isDownloaded {
+                    if !downloadedEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
+                        downloadedEpisodes.append(updatedEpisode)
+                    }
+                } else {
+                    downloadedEpisodes.removeAll { $0.id == updatedEpisode.id }
+                }
+                
+                updateEpisodeInLists(updatedEpisode)
+                objectWillChange.send()
             }
-        } else {
-            downloadedEpisodes.removeAll { $0.id == updatedEpisode.id }
+        } catch {
+            print("Failed to update episode download status: \(error)")
         }
-        
-        updateEpisodeInLists(updatedEpisode)
-        saveEpisodeToCoreData(updatedEpisode)
-        
-        // Update and save download status
-        var downloadStatus = loadDownloadStatus(for: episode.feedId)
-        downloadStatus[episode.id] = isDownloaded
-        saveDownloadStatus(downloadStatus, for: episode.feedId)
-        
-        objectWillChange.send()
     }
     
     private func saveEpisodeToCoreData(_ episode: PodcastEpisode) {
