@@ -362,24 +362,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("Failed to find index for current episode", log: log, type: .error)
         }
         
-        // Update episode progress
-        var updatedEpisode = episode
-        if viewModel?.getProgress(for: episode) == 0 {
-            updatedEpisode.state.progress = 0.001
-            viewModel?.updateEpisode(updatedEpisode)
-        }
-        
-        if let savedProgress = viewModel?.episodeProgress[episode.id] {
-            let targetTime = savedProgress * episode.duration
-            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1))
-            currentTime = targetTime
-            updatedEpisode.state.progress = savedProgress
-            viewModel?.updateEpisode(updatedEpisode)
-        } else {
-            currentTime = 0
-            duration = episode.duration
-            currentProgress = 0
-        }
+        // Always start from the beginning
+        currentTime = 0
+        duration = episode.duration
+        currentProgress = 0
+        player?.seek(to: .zero)
         
         setupPlayerItemObserver()
         setupTimeObserver()
