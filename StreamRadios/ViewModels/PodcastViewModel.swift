@@ -143,6 +143,28 @@ class PodcastViewModel: ObservableObject {
             self.objectWillChange.send()
         }
     
+    func loadInitialEpisodes(for feed: PodcastFeed) {
+           currentPage = 1
+           hasMoreEpisodes = true
+           currentEpisodes.removeAll()
+           fetchEpisodes(for: feed)
+       }
+    
+    func fetchEpisodes(for feed: PodcastFeed) {
+            isLoadingMoreEpisodes = true
+            let startIndex = (currentPage - 1) * episodesPerPage
+            let endIndex = startIndex + episodesPerPage
+            
+            let allEpisodesForFeed = allEpisodes.filter { $0.feedId == feed.id }
+            let episodesToLoad = Array(allEpisodesForFeed[startIndex..<min(endIndex, allEpisodesForFeed.count)])
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // Simulating loading delay
+                self.currentEpisodes.append(contentsOf: episodesToLoad)
+                self.isLoadingMoreEpisodes = false
+                self.hasMoreEpisodes = endIndex < allEpisodesForFeed.count
+            }
+        }
+    
     func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
         DispatchQueue.main.async {
             self.lastPlayedEpisodes[episode.feedId] = episode.id
@@ -670,85 +692,40 @@ class PodcastViewModel: ObservableObject {
     }
         
     func fetchEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
-        currentPage = max(1, currentPage)
-        os_log("Fetching episodes for feed: %@, page: %d", log: log, type: .info, feed.title, currentPage)
-
-        isLoadingEpisodes = true
-
-        let context = CoreDataStack.shared.context
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
-        fetchRequest.fetchLimit = episodesPerPage * currentPage
-
-        do {
-            let managedEpisodes = try context.fetch(fetchRequest)
-            os_log("Fetched %d episodes from Core Data for feed: %@", log: log, type: .info, managedEpisodes.count, feed.title)
-            
-            let allEpisodes = managedEpisodes.map { $0.toPodcastEpisode() }
+            // Adjust this method to handle pagination
+            let allEpisodesForFeed = allEpisodes.filter { $0.feedId == feed.id }
             
             let startIndex = (currentPage - 1) * episodesPerPage
-            let endIndex = min(startIndex + episodesPerPage, allEpisodes.count)
+            let endIndex = startIndex + episodesPerPage
             
-            let paginatedEpisodes: [PodcastEpisode]
-            if startIndex < allEpisodes.count {
-                paginatedEpisodes = Array(allEpisodes[startIndex..<endIndex])
-            } else {
-                paginatedEpisodes = []
+            if startIndex >= allEpisodesForFeed.count {
+                hasMoreEpisodes = false
+                return
             }
             
-            DispatchQueue.main.async {
-                self.updateEpisodes(paginatedEpisodes, for: feed, append: self.currentPage > 1)
-                self.isLoadingEpisodes = false
-                self.isLoadingMoreEpisodes = false
-                self.hasMoreEpisodes = endIndex < allEpisodes.count
-                
-                if paginatedEpisodes.isEmpty {
-                    os_log("No episodes found in Core Data, fetching from RSS", log: self.log, type: .info)
-                    self.fetchRSSFeed(for: feed) { result in
-                        switch result {
-                        case .success(let updatedFeed):
-                            let newEpisodes = updatedFeed.episodes
-                            self.saveEpisodesToCoreData(newEpisodes, for: feed)
-                            self.updateEpisodes(newEpisodes, for: feed)
-                            completion(.success(newEpisodes))
-                        case .failure(let error):
-                            os_log("Failed to fetch episodes from RSS: %@", log: self.log, type: .error, error.localizedDescription)
-                            completion(.failure(error))
-                        }
-                    }
+            let episodesToLoad = Array(allEpisodesForFeed[startIndex..<min(endIndex, allEpisodesForFeed.count)])
+            
+            // Simulate a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if self.currentPage == 1 {
+                    self.currentEpisodes = episodesToLoad
                 } else {
-                    os_log("Successfully loaded %d episodes for feed: %@", log: self.log, type: .info, paginatedEpisodes.count, feed.title)
-                    completion(.success(paginatedEpisodes))
+                    self.currentEpisodes.append(contentsOf: episodesToLoad)
                 }
-            }
-        } catch {
-            os_log("Failed to fetch episodes from Core Data: %@", log: self.log, type: .error, error.localizedDescription)
-            self.fetchRSSFeed(for: feed) { result in
-                switch result {
-                case .success(let updatedFeed):
-                    let newEpisodes = updatedFeed.episodes
-                    self.saveEpisodesToCoreData(newEpisodes, for: feed)
-                    DispatchQueue.main.async {
-                        self.updateEpisodes(newEpisodes, for: feed)
-                        completion(.success(newEpisodes))
-                    }
-                case .failure(let error):
-                    os_log("Failed to fetch episodes from RSS: %@", log: self.log, type: .error, error.localizedDescription)
-                    completion(.failure(error))
-                }
+                
+                self.isLoadingMoreEpisodes = false
+                self.hasMoreEpisodes = endIndex < allEpisodesForFeed.count
+                completion(.success(episodesToLoad))
             }
         }
-    }
+    
     
     func loadMoreEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
-        guard !isLoadingMoreEpisodes && hasMoreEpisodes else {
-            completion(.success([]))
-            return
-        }
+        guard !isLoadingMoreEpisodes && hasMoreEpisodes else { return }
         
         isLoadingMoreEpisodes = true
         currentPage += 1
+        
         fetchEpisodes(for: feed, completion: completion)
     }
     

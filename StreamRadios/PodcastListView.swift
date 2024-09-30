@@ -707,6 +707,7 @@ struct PodcastPlayerView: View {
     @State private var showPodcastPlayerSheet = false
     @State private var safeAreaBottom: CGFloat = 0
     @State private var miniPlayerHeight: CGFloat = 60
+    @State private var hasManuallyScrolled = false
     
     private var sliderRange: ClosedRange<Double> {
         0...max(podcastPlayer.duration, 0.01)
@@ -827,7 +828,17 @@ struct PodcastPlayerView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
+            if !hasScrolledToInitialEpisode {
+                    scrollToEpisodeIfNeeded()
+                }
             loadEpisodes()
+        }
+        .onChange(of: podcastPlayer.currentEpisode) { newEpisode in
+            if let newEpisode = newEpisode {
+                // Only update episodeToScrollTo if you want to scroll to it explicitly
+                episodeToScrollTo = newEpisode
+                hasScrolledToInitialEpisode = false // Reset this flag if you want to scroll again in certain cases
+            }
         }
         .sheet(isPresented: $showPodcastPlayerSheet) {
             if let podcast = selectedPodcast {
@@ -869,18 +880,15 @@ struct PodcastPlayerView: View {
                             .padding()
                     }
                     
-                    if !viewModel.hasMoreEpisodes {
-                        Text("No more episodes")
-                            .foregroundColor(.secondary)
-                            .padding()
-                    }
-                    
                     if viewModel.hasMoreEpisodes {
-                        Color.clear
-                            .frame(height: 50)
-                            .onAppear {
-                                scrollToEpisodeIfNeeded()
-                            }
+                        Button(action: {
+                            loadMoreEpisodes()
+                        }) {
+                            Text("Load more episodes")
+                                .foregroundColor(.blue)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                 }
                 .padding(.horizontal)
@@ -889,10 +897,19 @@ struct PodcastPlayerView: View {
                     scrollProxy = proxy
                     scrollToEpisodeIfNeeded()
                 }
+                .onDisappear {
+                    hasManuallyScrolled = false
+                }
             }
         }
         .coordinateSpace(name: "pullToRefresh")
         .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 30 : 0)
+        .gesture(
+            DragGesture()
+                .onChanged { _ in
+                    hasManuallyScrolled = true // User has started scrolling
+                }
+        )
     }
 
     private func checkIfShouldLoadMore() {
@@ -901,16 +918,19 @@ struct PodcastPlayerView: View {
         }
     }
     
-private func loadEpisodes() {
-    viewModel.fetchEpisodes(for: feed) { result in
-        switch result {
-        case .success(let episodes):
-            print("Loaded \(episodes.count) episodes")
-        case .failure(let error):
-            print("Failed to load episodes: \(error)")
+    private func loadEpisodes() {
+        viewModel.currentPage = 1
+        viewModel.hasMoreEpisodes = true
+        viewModel.fetchEpisodes(for: feed) { result in
+            switch result {
+            case .success(let episodes):
+                print("Loaded \(episodes.count) episodes")
+            case .failure(let error):
+                print("Failed to load episodes: \(error)")
+            }
         }
     }
-}
+
     
     private var episodeFilterTabs: some View {
         Picker("", selection: $selectedTab) {
@@ -1053,24 +1073,25 @@ private func loadMoreEpisodes() {
     }
     
     private func scrollToEpisodeIfNeeded() {
+        guard let episodeToScrollTo = episodeToScrollTo, !hasManuallyScrolled else {
+            return // Prevent automatic scrolling if the user has manually scrolled
+        }
+        
+        if hasScrolledToInitialEpisode { return } // Prevent further scrolling after the first time
+
         Task {
             // Add a short delay to ensure the view is fully loaded
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             
             await MainActor.run {
-                if let episodeToScrollTo = episodeToScrollTo {
-                    withAnimation {
-                        scrollProxy?.scrollTo(episodeToScrollTo.id, anchor: .top)
-                    }
-                } else if let initialID = initialScrollToEpisodeID, !hasScrolledToInitialEpisode {
-                    withAnimation {
-                        scrollProxy?.scrollTo(initialID, anchor: .top)
-                    }
-                    hasScrolledToInitialEpisode = true
+                withAnimation {
+                    scrollProxy?.scrollTo(episodeToScrollTo.id, anchor: .top)
                 }
+                hasScrolledToInitialEpisode = true // Set this flag to true after the initial scroll
             }
         }
     }
+
 }
 
 
