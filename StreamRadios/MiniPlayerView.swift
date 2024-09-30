@@ -22,7 +22,7 @@ struct MiniPlayerView: View {
     private let height: CGFloat = 70
     private let cornerRadius: CGFloat = 20
     private let horizontalPadding: CGFloat = 12
-    private let sliderWidth: CGFloat = 130 // Further reduced width for the slider
+    private let sliderWidth: CGFloat = 110 // Further reduced width for the slider
     private let imageSize: CGFloat = 50 // Slightly reduced size for the feed image
 
     var body: some View {
