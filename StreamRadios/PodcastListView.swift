@@ -807,52 +807,57 @@ struct PodcastPlayerView: View {
                         episodeListWithRefresh
                     }
                 }
-                .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
             }
             .trackScrollOffset(coordinateSpace: "scrollView", offset: $scrollOffset)
-                        .background(GeometryReader { geo in
-                            Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
-                        })
-                        .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
-                            viewportHeight = height
-                        }
-                        .onChange(of: scrollOffset) { _ in
-                                    checkIfShouldLoadMore()
-                                }
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
+            })
+            .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
+                viewportHeight = height
+            }
+            .onChange(of: scrollOffset) { _ in
+                checkIfShouldLoadMore()
+            }
             
             // Fixed Mini Player
             if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                MiniPlayerView(
-                    podcastPlayer: podcastPlayer,
-                    viewModel: viewModel,
-                    selectedPodcast: $selectedPodcast,
-                    onListButtonTap: {
-                        if let currentFeed = podcastPlayer.currentFeed {
-                            selectedPodcast = currentFeed
-                            viewModel.fetchAllEpisodes(for: currentFeed)
-                            scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                            showPodcastPlayerSheet = true
-                        }
-                    },
-                    onCloseButtonTap: {
-                        podcastPlayer.pause()
-                        podcastPlayer.currentEpisode = nil
-                        podcastPlayer.currentFeed = nil
-                    },
-                    isPlaylistButtonDisabled: true
-                )
-                .transition(.move(edge: .bottom))
-               // .frame(height: 40)
+                VStack(spacing: 0) {
+                    Spacer()
+                    MiniPlayerView(
+                        podcastPlayer: podcastPlayer,
+                        viewModel: viewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            if let currentFeed = podcastPlayer.currentFeed {
+                                selectedPodcast = currentFeed
+                                viewModel.fetchAllEpisodes(for: currentFeed)
+                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                showPodcastPlayerSheet = true
+                            }
+                        },
+                        onCloseButtonTap: {
+                            podcastPlayer.pause()
+                            podcastPlayer.currentEpisode = nil
+                            podcastPlayer.currentFeed = nil
+                        },
+                        isPlaylistButtonDisabled: true
+                    )
+                    .padding(.top, 15)
+                    .padding(.bottom, 20)
+                    .background(Color(UIColor.systemBackground))
+                    .transition(.move(edge: .bottom))
+                }
+                .edgesIgnoringSafeArea(.bottom)
             }
         }
         .navigationBarHidden(true)
         .onAppear {
-                loadEpisodes()
-                scrollToEpisodeIfNeeded()
-            }
+            loadEpisodes()
+            scrollToEpisodeIfNeeded()
+        }
         .onChange(of: podcastPlayer.currentEpisode) { _ in
-               scrollToEpisodeIfNeeded()
-           }
+            scrollToEpisodeIfNeeded()
+        }
            .onChange(of: viewModel.currentEpisodes) { _ in
                scrollToEpisodeIfNeeded()
            }
