@@ -809,15 +809,16 @@ struct PodcastPlayerView: View {
                 }
             }
             .trackScrollOffset(coordinateSpace: "scrollView", offset: $scrollOffset)
-            .background(GeometryReader { geo in
-                Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
-            })
-            .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
-                viewportHeight = height
-            }
-            .onChange(of: scrollOffset) { _ in
-                checkIfShouldLoadMore()
-            }
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
+                        })
+                        .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
+                            viewportHeight = height
+                        }
+                        .onChange(of: scrollOffset) { _ in
+                            checkIfShouldLoadMore()
+                            hasManuallyScrolled = true
+                        }
             
             // Fixed Mini Player
             if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
@@ -1104,24 +1105,23 @@ private func loadMoreEpisodes() {
        }
 
     private func scrollToEpisodeIfNeeded() {
-            guard !hasManuallyScrolled else {
-                return // Prevent automatic scrolling if the user has manually scrolled
-            }
-            
-            if let currentEpisodeID = podcastPlayer.currentEpisode?.id,
-               !isEpisodeVisible(currentEpisodeID) {
-                Task {
-                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds delay
-                    
-                    await MainActor.run {
-                        withAnimation {
-                            scrollProxy?.scrollTo(currentEpisodeID, anchor: .top)
-                        }
-                    }
-                }
-            }
-        }
-
+           guard !hasManuallyScrolled else {
+               return // Prevent automatic scrolling if the user has manually scrolled
+           }
+           
+           if let currentEpisodeID = podcastPlayer.currentEpisode?.id,
+              !isEpisodeVisible(currentEpisodeID) {
+               Task {
+                   try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds delay
+                   
+                   await MainActor.run {
+                       withAnimation {
+                           scrollProxy?.scrollTo(currentEpisodeID, anchor: .top)
+                       }
+                   }
+               }
+           }
+       }
 }
 
 
