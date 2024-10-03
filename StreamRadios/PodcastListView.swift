@@ -707,12 +707,15 @@ struct PodcastPlayerView: View {
     @Binding var selectedPodcast: PodcastFeed?
     @State private var isLoadingMore = false
      @State private var hasReachedBottom = false
-    @State private var scrollOffset: CGFloat = 0
     @State private var shouldLoadMore = false
     @State private var showPodcastPlayerSheet = false
     @State private var safeAreaBottom: CGFloat = 0
     @State private var miniPlayerHeight: CGFloat = 60
     @State private var hasManuallyScrolled = false
+    @State private var scrollOffset: CGPoint = .zero
+    @State private var viewportHeight: CGFloat = 0
+
+
     
     private var sliderRange: ClosedRange<Double> {
         0...max(podcastPlayer.duration, 0.01)
@@ -806,6 +809,16 @@ struct PodcastPlayerView: View {
                 }
                 .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
             }
+            .trackScrollOffset(coordinateSpace: "scrollView", offset: $scrollOffset)
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
+                        })
+                        .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
+                            viewportHeight = height
+                        }
+                        .onChange(of: scrollOffset) { _ in
+                                    checkIfShouldLoadMore()
+                                }
             
             // Fixed Mini Player
             if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
@@ -909,7 +922,11 @@ struct PodcastPlayerView: View {
     }
 
     private func checkIfShouldLoadMore() {
-        if scrollOffset < 50 && !isLoadingMore && viewModel.hasMoreEpisodes {
+        let threshold: CGFloat = 50 // Adjust this value as needed
+        let contentHeight = CGFloat(viewModel.currentEpisodes.count) * 80 // Approximate row height
+        let triggerPoint = contentHeight - viewportHeight - threshold
+
+        if -scrollOffset.y > triggerPoint && !isLoadingMore && viewModel.hasMoreEpisodes {
             loadMoreEpisodes()
         }
     }
@@ -1068,24 +1085,37 @@ private func loadMoreEpisodes() {
         }
     }
     
+    private func isEpisodeVisible(_ episodeId: String) -> Bool {
+           guard let episodeIndex = viewModel.currentEpisodes.firstIndex(where: { $0.id == episodeId }) else {
+               return false
+           }
+           
+           let approximateRowHeight: CGFloat = 80 // Adjust this value based on your actual row height
+           let episodeYPosition = CGFloat(episodeIndex) * approximateRowHeight
+           let visibleRangeStart = -scrollOffset.y
+           let visibleRangeEnd = -scrollOffset.y + viewportHeight
+
+           return episodeYPosition >= visibleRangeStart && episodeYPosition <= visibleRangeEnd
+       }
+
     private func scrollToEpisodeIfNeeded() {
-        guard !hasManuallyScrolled else {
-            return // Prevent automatic scrolling if the user has manually scrolled
-        }
-        
-        if let currentEpisodeID = podcastPlayer.currentEpisode?.id {
-            Task {
-                // Add a short delay to ensure the view is fully loaded
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                
-                await MainActor.run {
-                    withAnimation {
-                        scrollProxy?.scrollTo(currentEpisodeID, anchor: .top)
+            guard !hasManuallyScrolled else {
+                return // Prevent automatic scrolling if the user has manually scrolled
+            }
+            
+            if let currentEpisodeID = podcastPlayer.currentEpisode?.id,
+               !isEpisodeVisible(currentEpisodeID) {
+                Task {
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds delay
+                    
+                    await MainActor.run {
+                        withAnimation {
+                            scrollProxy?.scrollTo(currentEpisodeID, anchor: .top)
+                        }
                     }
                 }
             }
         }
-    }
 
 }
 
@@ -1141,12 +1171,7 @@ struct ProgressSlider: View {
     }
 }
 
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
+
 
 struct RefreshControl: View {
 var coordinateSpace: CoordinateSpace
