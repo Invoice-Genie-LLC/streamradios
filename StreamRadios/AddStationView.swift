@@ -167,7 +167,8 @@ struct AddStationView: View {
                                     podcastPlayer.pause()
                                     podcastPlayer.currentEpisode = nil
                                     podcastPlayer.currentFeed = nil
-                                }
+                                },
+                                isPlaylistButtonDisabled: false
                             )
                             .transition(.move(edge: .bottom))
                             .frame(height: miniPlayerHeight)

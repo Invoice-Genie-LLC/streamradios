@@ -76,7 +76,8 @@ struct PodcastListView: View {
                             podcastPlayer.pause()
                             podcastPlayer.currentEpisode = nil
                             podcastPlayer.currentFeed = nil
-                        }
+                        },
+                        isPlaylistButtonDisabled: false
                     )
                     .transition(.move(edge: .bottom))
                 }
@@ -820,7 +821,8 @@ struct PodcastPlayerView: View {
                         podcastPlayer.pause()
                         podcastPlayer.currentEpisode = nil
                         podcastPlayer.currentFeed = nil
-                    }
+                    },
+                    isPlaylistButtonDisabled: true
                 )
                 .transition(.move(edge: .bottom))
                // .frame(height: 40)
@@ -880,11 +882,20 @@ struct PodcastPlayerView: View {
                             .padding()
                     }
                     
-                    if viewModel.hasMoreEpisodes {
-                        Button(action: {
-                            loadMoreEpisodes()
+                    Button(action: {
+                            viewModel.loadMoreEpisodes(for: feed) { result in
+                                switch result {
+                                case .success(let newEpisodes):
+                                    print("Loaded \(newEpisodes.count) more episodes")
+                                case .failure(let error):
+                                    print("Failed to load more episodes: \(error)")
+                                }
+                            }
                         }) {
-                            Text("Load more episodes")
+                            if viewModel.isLoadingMoreEpisodes {
+                                ProgressView()
+                            } else {
+                                Text("Load more episodes")
                                 .foregroundColor(.blue)
                                 .padding()
                                 .frame(maxWidth: .infinity)
