@@ -15,6 +15,7 @@ struct MiniPlayerView: View {
     @Binding var selectedPodcast: PodcastFeed?
     var onListButtonTap: (() -> Void)?
     var onCloseButtonTap: (() -> Void)?
+    var isPlaylistButtonDisabled: Bool
 
     @State private var isDragging = false
     @State private var sliderProgress: Double = 0
@@ -104,22 +105,26 @@ struct MiniPlayerView: View {
 
                     // List button
                     Button(action: {
-                        onListButtonTap?()
-                    }) {
-                        Image(systemName: "list.bullet")
-                            .font(.system(size: 14))
-                    }
+                                       if !isPlaylistButtonDisabled {
+                                           onListButtonTap?()
+                                       }
+                                   }) {
+                                       Image(systemName: "list.bullet")
+                                           .font(.system(size: 14))
+                                   }
+                                   .disabled(isPlaylistButtonDisabled)
+                                   .opacity(isPlaylistButtonDisabled ? 0.5 : 1)
 
-                    // Close button
-                    Button(action: {
-                        onCloseButtonTap?()
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                    }
-                }
-                .foregroundColor(.primary)
+                                   // Close button
+                                   Button(action: {
+                                       onCloseButtonTap?()
+                                   }) {
+                                       Image(systemName: "xmark.circle.fill")
+                                           .font(.system(size: 14))
+                                           .foregroundColor(.gray)
+                                   }
+                               }
+                               .foregroundColor(.primary)
             }
             .padding(.horizontal, horizontalPadding)
             .frame(height: height)
