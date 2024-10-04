@@ -899,7 +899,6 @@ struct PodcastPlayerView: View {
                refreshEpisodes()
            }
            .id(refreshTrigger)
-           
         .sheet(isPresented: $showPodcastPlayerSheet) {
             if let podcast = selectedPodcast {
                 PodcastPlayerView(
@@ -949,6 +948,8 @@ struct PodcastPlayerView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
+                    // Add extra space at the end of the list
+                                    Spacer(minLength: 100)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
@@ -958,13 +959,12 @@ struct PodcastPlayerView: View {
             }
         }
         .coordinateSpace(name: "pullToRefresh")
-        .trackScrollOffset(coordinateSpace: "scrollView", offset: $scrollOffset)
-                .background(GeometryReader { geo in
-                    Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
-                })
-                .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
-                    viewportHeight = height
+        .gesture(
+            DragGesture()
+                .onChanged { _ in
+                    hasManuallyScrolled = true // User has started scrolling
                 }
+        )
     }
 
     private func checkIfShouldLoadMore() {
