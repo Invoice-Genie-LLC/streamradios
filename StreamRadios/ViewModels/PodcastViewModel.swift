@@ -783,10 +783,12 @@ class PodcastViewModel: ObservableObject {
                 
                 switch result {
                 case .success(let newEpisodes):
-                    if newEpisodes.isEmpty {
-                        self.hasMoreEpisodes = false
-                    }
-                    completion(.success(newEpisodes))
+                                    if newEpisodes.isEmpty {
+                                        self.hasMoreEpisodes = false
+                                    } else {
+                                        self.currentEpisodes.append(contentsOf: newEpisodes)
+                                    }
+                                    completion(.success(newEpisodes))
                 case .failure(let error):
                     self.currentPage -= 1 // Revert the page increment on failure
                     completion(.failure(error))
