@@ -20,5 +20,51 @@
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "1C2ECF1F-0130-4EB1-B5E9-EAC7064942AF"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "StreamRadios/ViewModels/PodcastViewModel.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "231"
+            endingLineNumber = "231"
+            landmarkName = "sortFeedsAlphabetically()"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "1C2ECF1F-0130-4EB1-B5E9-EAC7064942AF - c48fe7b2400efae8"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "StreamRadios.PodcastViewModel.sortFeedsAlphabetically() -&gt; ()"
+                  moduleName = "StreamRadios.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/kley/Documents/StreamRadios/StreamRadios/ViewModels/PodcastViewModel.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "231"
+                  endingLineNumber = "231">
+               </Location>
+               <Location
+                  uuid = "1C2ECF1F-0130-4EB1-B5E9-EAC7064942AF - 3fd1c01f38dc5e00"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #1 (StreamRadios.PodcastFeed, StreamRadios.PodcastFeed) -&gt; Swift.Bool in StreamRadios.PodcastViewModel.sortFeedsAlphabetically() -&gt; ()"
+                  moduleName = "StreamRadios.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/kley/Documents/StreamRadios/StreamRadios/ViewModels/PodcastViewModel.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "231"
+                  endingLineNumber = "231">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
    </Breakpoints>
 </Bucket>

@@ -220,18 +220,27 @@ class PodcastViewModel: ObservableObject {
               }
           }
     
-    func sortFeedsAlphabetically() {
-            let sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() < $1.title.lowercased() }
-            podcastFeedOrder = sortedFeeds.map { $0.id }
-            saveFeedOrder()
+    func refreshAllFeeds() {
+            for feed in podcastFeeds {
+                refreshEpisodes(for: feed) { _ in }
+            }
+            objectWillChange.send()
         }
+    
+    func sortFeedsAlphabetically() {
+        let sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() < $1.title.lowercased() }
+        podcastFeedOrder = sortedFeeds.map { $0.id }
+        saveFeedOrder()
+        objectWillChange.send()
+    }
 
     func moveFeed(from source: IndexSet, to destination: Int) {
         podcastFeedOrder.move(fromOffsets: source, toOffset: destination)
         saveFeedOrder()
+        objectWillChange.send()
     }
     
-    private func saveFeedOrder() {
+     func saveFeedOrder() {
         do {
             let orderData = try JSONEncoder().encode(podcastFeedOrder)
             UserDefaults.standard.set(orderData, forKey: "PodcastFeedOrder")
