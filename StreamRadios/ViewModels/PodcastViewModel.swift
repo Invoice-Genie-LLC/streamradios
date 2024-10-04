@@ -973,7 +973,7 @@ class PodcastViewModel: ObservableObject {
             os_log("RSS parsing completed for feed: %@. Found %d episodes.", log: self.log, type: .info, feed.title, rssParser.episodes.count)
             
             var updatedFeed = feed
-            updatedFeed.title = rssParser.podcastTitle ?? feed.title
+            updatedFeed.title = feed.title
             updatedFeed.descriptionText = rssParser.podcastDescription
             updatedFeed.artworkUrl = rssParser.artworkUrl ?? feed.artworkUrl
             updatedFeed.episodes = rssParser.episodes
