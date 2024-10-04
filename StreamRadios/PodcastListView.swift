@@ -898,10 +898,8 @@ struct PodcastPlayerView: View {
            .onChange(of: refreshTrigger) { _ in
                refreshEpisodes()
            }
-           .onChange(of: viewModel.podcastFeedOrder) { _ in
-                      // Trigger a refresh when the feed order changes
-                      refreshEpisodes()
-                  }
+           .id(refreshTrigger)
+           
         .sheet(isPresented: $showPodcastPlayerSheet) {
             if let podcast = selectedPodcast {
                 PodcastPlayerView(
@@ -960,12 +958,13 @@ struct PodcastPlayerView: View {
             }
         }
         .coordinateSpace(name: "pullToRefresh")
-        .gesture(
-            DragGesture()
-                .onChanged { _ in
-                    hasManuallyScrolled = true // User has started scrolling
+        .trackScrollOffset(coordinateSpace: "scrollView", offset: $scrollOffset)
+                .background(GeometryReader { geo in
+                    Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
+                })
+                .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
+                    viewportHeight = height
                 }
-        )
     }
 
     private func checkIfShouldLoadMore() {
