@@ -27,75 +27,96 @@ struct PodcastListView: View {
     @State private var isEditing = false
     @StateObject private var radioPlayer = RadioPlayer.shared
     @State private var scrollToEpisodeID: String?
+    @State private var refreshID = UUID()
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
     
     var body: some View {
-        NavigationView {
-            ZStack(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    instructionText
-                    searchBar
-                    podcastList
-                        .padding(.bottom, podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
-                }
-                .navigationTitle("Podcasts")
-                .toolbar {
-                    ToolbarItems(isEditing: $isEditing, onAddTapped: { showingAddPodcast = true }, onSortTapped: viewModel.sortFeedsAlphabetically)
-                }
-                .onAppear(perform: onAppear)
-                .sheet(isPresented: $showingAddPodcast) {
-                    AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
-                }
-                .sheet(item: $selectedPodcast) { podcast in
-                            PodcastPlayerView(
-                                viewModel: viewModel,
-                                feed: podcast,
-                                initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
-                                podcastPlayer: podcastPlayer,
-                                episodeToScrollTo: Binding(
-                                    get: { podcastPlayer.currentEpisode },
-                                    set: { _ in }
-                                ),
-                                selectedPodcast: $selectedPodcast
-                            )
-                        }
-                .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
-                .environment(\.editMode, .constant(isEditing ? .active : .inactive))
-                
-                // Fixed Mini Player
-                if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                    MiniPlayerView(
-                        podcastPlayer: podcastPlayer,
-                        viewModel: viewModel,
-                        selectedPodcast: $selectedPodcast,
-                        onListButtonTap: {
-                            if let currentFeed = podcastPlayer.currentFeed {
-                                                            selectedPodcast = currentFeed
-                                                            scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                                        }
-                        },
-                        onCloseButtonTap: {
-                            podcastPlayer.pause()
-                            podcastPlayer.currentEpisode = nil
-                            podcastPlayer.currentFeed = nil
-                        },
-                        isPlaylistButtonDisabled: false
-                    )
-                    .transition(.move(edge: .bottom))
-                }
-            }
-        }
-        .alert(isPresented: $viewModel.showNoEpisodesAlert) {
-            Alert(
-                title: Text("No Episodes in Progress"),
-                message: Text(viewModel.noEpisodesAlertMessage),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-
-    }
+           NavigationView {
+               ZStack(alignment: .bottom) {
+                   VStack(spacing: 0) {
+                       instructionText
+                       searchBar
+                       podcastList
+                           .padding(.bottom, podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
+                   }
+                   .navigationTitle("Podcasts")
+                   .toolbar {
+                                       ToolbarItem(placement: .navigationBarLeading) {
+                                           Button(action: {
+                                               isEditing.toggle()
+                                               if !isEditing {
+                                                   viewModel.saveFeedOrder()
+                                                   refreshID = UUID() // Force view refresh
+                                               }
+                                           }) {
+                                               Text(isEditing ? "Done" : "Edit")
+                                           }
+                                       
+                       }
+                       ToolbarItemGroup(placement: .navigationBarTrailing) {
+                           if !isEditing {
+                               Button(action: viewModel.sortFeedsAlphabetically) {
+                                   Image(systemName: "arrow.up.arrow.down")
+                               }
+                               Button(action: { showingAddPodcast = true }) {
+                                   Image(systemName: "plus")
+                               }
+                           }
+                       }
+                   }
+                   .onAppear(perform: onAppear)
+                   .id(refreshID)
+                   .sheet(isPresented: $showingAddPodcast) {
+                       AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
+                   }
+                   .sheet(item: $selectedPodcast) { podcast in
+                       PodcastPlayerView(
+                           viewModel: viewModel,
+                           feed: podcast,
+                           initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
+                           podcastPlayer: podcastPlayer,
+                           episodeToScrollTo: Binding(
+                               get: { podcastPlayer.currentEpisode },
+                               set: { _ in }
+                           ),
+                           selectedPodcast: $selectedPodcast
+                       )
+                   }
+                   .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
+                   
+                   // Fixed Mini Player
+                   if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
+                       MiniPlayerView(
+                           podcastPlayer: podcastPlayer,
+                           viewModel: viewModel,
+                           selectedPodcast: $selectedPodcast,
+                           onListButtonTap: {
+                               if let currentFeed = podcastPlayer.currentFeed {
+                                   selectedPodcast = currentFeed
+                                   scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                               }
+                           },
+                           onCloseButtonTap: {
+                               podcastPlayer.pause()
+                               podcastPlayer.currentEpisode = nil
+                               podcastPlayer.currentFeed = nil
+                           },
+                           isPlaylistButtonDisabled: false
+                       )
+                       .transition(.move(edge: .bottom))
+                   }
+               }
+           }
+           .alert(isPresented: $viewModel.showNoEpisodesAlert) {
+               Alert(
+                   title: Text("No Episodes in Progress"),
+                   message: Text(viewModel.noEpisodesAlertMessage),
+                   dismissButton: .default(Text("OK"))
+               )
+           }
+       }
     
     private var instructionText: some View {
         Text("Tap on a podcast image to explore its episodes and discover more content.")
@@ -141,47 +162,56 @@ struct PodcastListView: View {
     }
     
     private var podcastList: some View {
-        List {
-            ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
-                if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
-                   filteredPodcasts.contains(where: { $0.id == feedId }) {
-                    PodcastRowView(
-                        feed: feed,
-                        isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
-                        onPlay: { podcastPlayer.playLastEpisodeForFeed(feed) },
-                        onStop: { podcastPlayer.togglePlayPause() },
-                        onTap: { selectedPodcast = feed },
-                        isExpanded: Binding(
-                            get: { expandedFeedId == feed.id },
-                            set: { isExpanded in
-                                expandedFeedId = isExpanded ? feed.id : nil
+            List {
+                ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
+                    if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
+                       filteredPodcasts.contains(where: { $0.id == feedId }) {
+                        PodcastRowView(
+                            feed: feed,
+                            isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
+                            onPlay: { podcastPlayer.playLastEpisodeForFeed(feed) },
+                            onStop: { podcastPlayer.togglePlayPause() },
+                            onTap: { selectedPodcast = feed },
+                            isExpanded: Binding(
+                                get: { expandedFeedId == feed.id },
+                                set: { isExpanded in
+                                    expandedFeedId = isExpanded ? feed.id : nil
+                                }
+                            ),
+                            viewModel: viewModel,
+                            podcastPlayer: podcastPlayer
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                podcastToDelete = feed
+                                showingDeleteConfirmation = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
-                        ),
-                        viewModel: viewModel,
-                        podcastPlayer: podcastPlayer
-                    )
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            podcastToDelete = feed
-                            showingDeleteConfirmation = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
                         }
                     }
                 }
+                .onMove(perform: isEditing ? moveFeeds : nil)
             }
-            .onMove(perform: viewModel.moveFeed)
-        }
-        .listStyle(PlainListStyle())
-        .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                viewModel.deletePodcastFeed(podcast)
+            .listStyle(PlainListStyle())
+            .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+            .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
+                Button("Cancel", role: .cancel) {}
+                Button("Delete", role: .destructive) {
+                    viewModel.deletePodcastFeed(podcast)
+                }
+            } message: { podcast in
+                Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
             }
-        } message: { podcast in
-            Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
         }
-    }
+    
+    private func moveFeeds(from source: IndexSet, to destination: Int) {
+        viewModel.moveFeed(from: source, to: destination)
+                refreshID = UUID()
+        
+        viewModel.refreshAllFeeds()
+            viewModel.objectWillChange.send()
+        }
     
     private func onAppear() {
         os_log("PodcastListView appeared", log: log, type: .info)
@@ -714,7 +744,7 @@ struct PodcastPlayerView: View {
     @State private var hasManuallyScrolled = false
     @State private var scrollOffset: CGPoint = .zero
     @State private var viewportHeight: CGFloat = 0
-
+    @State private var refreshTrigger = false
 
     
     private var sliderRange: ClosedRange<Double> {
@@ -862,6 +892,16 @@ struct PodcastPlayerView: View {
            .onChange(of: viewModel.currentEpisodes) { _ in
                scrollToEpisodeIfNeeded()
            }
+           .onChange(of: viewModel.podcastFeedOrder) { _ in
+               refreshTrigger.toggle()
+           }
+           .onChange(of: refreshTrigger) { _ in
+               refreshEpisodes()
+           }
+           .onChange(of: viewModel.podcastFeedOrder) { _ in
+                      // Trigger a refresh when the feed order changes
+                      refreshEpisodes()
+                  }
         .sheet(isPresented: $showPodcastPlayerSheet) {
             if let podcast = selectedPodcast {
                 PodcastPlayerView(
@@ -877,6 +917,7 @@ struct PodcastPlayerView: View {
                 )
             }
         }
+        .id(refreshTrigger)
     }
     
     private var episodeListWithRefresh: some View {
@@ -984,16 +1025,19 @@ struct PodcastPlayerView: View {
             .padding(.vertical, 8)
         }
     
-private func refreshEpisodes() {
-    viewModel.refreshEpisodes(for: feed) { result in
-        switch result {
-        case .success(let episodes):
-            print("Refreshed and loaded \(episodes.count) episodes")
-        case .failure(let error):
-            print("Failed to refresh episodes: \(error)")
+    private func refreshEpisodes() {
+            viewModel.refreshEpisodes(for: feed) { result in
+                switch result {
+                case .success(let episodes):
+                    print("Refreshed and loaded \(episodes.count) episodes")
+                    DispatchQueue.main.async {
+                        self.viewModel.objectWillChange.send()
+                    }
+                case .failure(let error):
+                    print("Failed to refresh episodes: \(error)")
+                }
+            }
         }
-    }
-}
     
 private func loadMoreEpisodes() {
     guard !viewModel.isLoadingMoreEpisodes else { return }
