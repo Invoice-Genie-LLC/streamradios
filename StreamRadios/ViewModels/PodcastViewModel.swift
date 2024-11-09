@@ -143,6 +143,71 @@ class PodcastViewModel: ObservableObject {
             self.objectWillChange.send()
         }
     
+    func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
+            // Check cache first
+            if let cachedEpisodes = episodeCache[feed.id] {
+                self.currentEpisodes = cachedEpisodes
+                self.objectWillChange.send()
+                return
+            }
+            
+            isLoadingEpisodes = true
+            
+            let context = CoreDataStack.shared.context
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+            fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+            
+            do {
+                let managedEpisodes = try context.fetch(fetchRequest)
+                let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    episode.state.isFavorite = managedEpisode.isFavorite
+                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    return episode
+                }
+                
+                if episodes.isEmpty {
+                    // If no cached episodes, fetch from RSS
+                    fetchRSSFeed(for: feed) { result in
+                        switch result {
+                        case .success(let updatedFeed):
+                            self.saveEpisodesToCoreData(updatedFeed.episodes, for: updatedFeed)
+                            self.episodeCache[feed.id] = updatedFeed.episodes
+                            
+                            DispatchQueue.main.async {
+                                self.currentEpisodes = updatedFeed.episodes
+                                self.isLoadingEpisodes = false
+                                self.objectWillChange.send()
+                            }
+                        case .failure(let error):
+                            print("Failed to fetch episodes from RSS: \(error)")
+                            DispatchQueue.main.async {
+                                self.isLoadingEpisodes = false
+                                self.error = "Failed to load episodes: \(error.localizedDescription)"
+                            }
+                        }
+                    }
+                } else {
+                    // Use cached episodes
+                    self.episodeCache[feed.id] = episodes
+                    DispatchQueue.main.async {
+                        self.currentEpisodes = episodes
+                        self.isLoadingEpisodes = false
+                        self.objectWillChange.send()
+                    }
+                }
+            } catch {
+                print("Error fetching episodes from CoreData: \(error)")
+                DispatchQueue.main.async {
+                    self.isLoadingEpisodes = false
+                    self.error = "Failed to load episodes: \(error.localizedDescription)"
+                }
+            }
+        }
+    
     func loadInitialEpisodes(for feed: PodcastFeed) {
            currentPage = 1
            hasMoreEpisodes = true

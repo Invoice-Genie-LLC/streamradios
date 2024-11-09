@@ -108,6 +108,7 @@ struct PodcastListView: View {
                        .transition(.move(edge: .bottom))
                    }
                }
+               
            }
            .alert(isPresented: $viewModel.showNoEpisodesAlert) {
                Alert(
@@ -834,7 +835,7 @@ struct PodcastPlayerView: View {
                         ProgressView("Loading episodes...")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        episodeListWithRefresh
+                        episodeList
                     }
                 }
             }
@@ -883,7 +884,7 @@ struct PodcastPlayerView: View {
         }
         .navigationBarHidden(true)
         .onAppear {
-            loadEpisodes()
+            loadInitialEpisodes() 
             scrollToEpisodeIfNeeded()
         }
         .onChange(of: podcastPlayer.currentEpisode) { _ in
@@ -917,56 +918,6 @@ struct PodcastPlayerView: View {
         .id(refreshTrigger)
     }
     
-    private var episodeListWithRefresh: some View {
-        ScrollView {
-            RefreshControl(coordinateSpace: .named("pullToRefresh"), onRefresh: refreshEpisodes)
-            
-            ScrollViewReader { proxy in
-                LazyVStack(spacing: 8) {
-                    ForEach(viewModel.currentEpisodes) { episode in
-                        EpisodeRowView(
-                            episode: episode,
-                            isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                            onPlay: { playEpisode(episode) },
-                            onStop: { podcastPlayer.togglePlayPause() },
-                            viewModel: viewModel,
-                            podcastPlayer: podcastPlayer
-                        )
-                        .id(episode.id)
-                    }
-                    
-                    if viewModel.isLoadingMoreEpisodes {
-                        ProgressView()
-                            .padding()
-                    }
-                    
-                    if viewModel.hasMoreEpisodes && selectedTab == 0 {
-                        Button(action: loadMoreEpisodes) {
-                            Text("Load more episodes")
-                                .foregroundColor(.blue)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-                    // Add extra space at the end of the list
-                                    Spacer(minLength: 100)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .onAppear {
-                    scrollProxy = proxy
-                }
-            }
-        }
-        .coordinateSpace(name: "pullToRefresh")
-        .gesture(
-            DragGesture()
-                .onChanged { _ in
-                    hasManuallyScrolled = true // User has started scrolling
-                }
-        )
-    }
-
     private func checkIfShouldLoadMore() {
         let threshold: CGFloat = 50 // Adjust this value as needed
         let contentHeight = CGFloat(viewModel.currentEpisodes.count) * 80 // Approximate row height
@@ -1006,36 +957,44 @@ struct PodcastPlayerView: View {
         }
     }
     
-    private var episodeList: some View {
-            LazyVStack(spacing: 8) {
-                ForEach(viewModel.currentEpisodes) { episode in
-                    EpisodeRowView(
-                        episode: episode,
-                        isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                        onPlay: { playEpisode(episode) },
-                        onStop: { podcastPlayer.togglePlayPause() },
-                        viewModel: viewModel,
-                        podcastPlayer: podcastPlayer
-                    )
-                    .id(episode.id)
+    var episodeList: some View {
+            ScrollView {
+                ScrollViewReader { proxy in
+                    LazyVStack(spacing: 8) {
+                        ForEach(viewModel.currentEpisodes) { episode in
+                            EpisodeRowView(
+                                episode: episode,
+                                isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                                onPlay: { playEpisode(episode) },
+                                onStop: { podcastPlayer.togglePlayPause() },
+                                viewModel: viewModel,
+                                podcastPlayer: podcastPlayer
+                            )
+                            .id(episode.id)
+                        }
+                        
+                        // Bottom spacing
+                        Spacer(minLength: 100)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .onAppear {
+                                       scrollProxy = proxy
+                                   }
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
         }
     
     private func refreshEpisodes() {
-            viewModel.refreshEpisodes(for: feed) { result in
-                switch result {
-                case .success(let episodes):
-                    print("Refreshed and loaded \(episodes.count) episodes")
-                    DispatchQueue.main.async {
-                        self.viewModel.objectWillChange.send()
-                    }
-                case .failure(let error):
-                    print("Failed to refresh episodes: \(error)")
-                }
-            }
+           guard !viewModel.isLoadingEpisodes else { return }
+           
+           // Clear cache for this feed before refreshing
+           viewModel.clearCache(for: feed.id)
+           viewModel.loadAllEpisodesForFeed(feed)
+       }
+    
+    private func loadInitialEpisodes() {
+            viewModel.loadAllEpisodesForFeed(feed)
         }
     
 private func loadMoreEpisodes() {
