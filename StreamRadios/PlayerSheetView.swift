@@ -54,9 +54,9 @@ struct PlayerSheetView: View {
     @State private var forceTokenRefresh = false
     @State private var debugLog = ""
     @State private var showSpotifyOptions = false
-       @State private var spotifyTrackURI: String?
+    @State private var spotifyTrackURI: String?
     @State private var debugMessage = ""
-
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -148,24 +148,24 @@ struct PlayerSheetView: View {
             }
         }
         .confirmationDialog("Spotify Options", isPresented: $showingSpotifyConfirmationDialog) {
-                    Button("Add to Playlist") {
-                        addToSpotifyPlaylist()
-                    }
-                    Button("Open in Spotify") {
-                        openInSpotify()
-                    }
-                    Button("Cancel", role: .cancel) {}
+            Button("Add to Playlist") {
+                addToSpotifyPlaylist()
+            }
+            Button("Open in Spotify") {
+                openInSpotify()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Spotify Not Installed", isPresented: $showSpotifyOptions) {
+            Button("Install Spotify") {
+                if let appStoreURL = URL(string: "itms-apps://apple.com/app/id324684580") {
+                    UIApplication.shared.open(appStoreURL, options: [:], completionHandler: nil)
                 }
-                .alert("Spotify Not Installed", isPresented: $showSpotifyOptions) {
-                    Button("Install Spotify") {
-                        if let appStoreURL = URL(string: "itms-apps://apple.com/app/id324684580") {
-                            UIApplication.shared.open(appStoreURL, options: [:], completionHandler: nil)
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Spotify app is not installed. Would you like to install it?")
-                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Spotify app is not installed. Would you like to install it?")
+        }
         .confirmationDialog("YouTube Music Options", isPresented: $showingYouTubeMusicConfirmationDialog) {
             Button("Open in YouTube Music") {
                 openInYouTubeMusic()
@@ -300,78 +300,81 @@ struct PlayerSheetView: View {
                     .padding(12)
                     .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
                 }
-                
-                Button(action: {
-                    handleSpotifyAuthorization()
-                }) {
-                    HStack {
-                        Image(systemName: "music.note.list")
-                            .font(.headline)
-                        Text("Spotify")
-                            .font(.headline)
-                    }
-                    .foregroundColor(Color.primary)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
-                }
-                .disabled(isAuthorizingSpotify)
-                
-                Button(action: {
-                    if youtubeMusicManager.isAuthorized {
-                        showingYouTubeMusicConfirmationDialog = true
-                    } else {
-                        youtubeMusicManager.authorize { success in
-                            if success {
-                                DispatchQueue.main.async {
-                                    self.showingYouTubeMusicConfirmationDialog = true
-                                }
-                            } else {
-                                DispatchQueue.main.async {
-                                    self.alertMessage = "Failed to authorize with YouTube Music"
-                                    self.showAlert = true
-                                }
-                            }
-                        }
-                    }
-                }) {
-                    /*
-                     // Remove this after Spotify is in production. For testing purpose only
-                    VStack {
-                        // ... (existing content)
-
-                        // Debug section
-                        Toggle("Force Token Refresh", isOn: $forceTokenRefresh)
-                            .padding()
-                        
-                        Button("Clear Debug Log") {
-                            debugLog = ""
-                        }
-                        .padding()
-                        
-                        ScrollView {
-                            Text(debugLog)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding()
-                        }
-                        .frame(height: 200)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(10)
-                        .padding()
-                    }
-                     */
-                    HStack {
-                        Image(systemName: "play.circle")
-                            .font(.headline)
-                        Text("YouTube")
-                            .font(.headline)
-                    }
-                    .foregroundColor(Color.primary)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
-                }
+                /*
+                 // Enable when authorization is granted from Spotify and Google
+                 Button(action: {
+                 handleSpotifyAuthorization()
+                 }) {
+                 
+                 HStack {
+                 Image(systemName: "music.note.list")
+                 .font(.headline)
+                 Text("Spotify")
+                 .font(.headline)
+                 }
+                 .foregroundColor(Color.primary)
+                 .padding(12)
+                 .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                 }
+                 .disabled(isAuthorizingSpotify)
+                 Button(action: {
+                 if youtubeMusicManager.isAuthorized {
+                 showingYouTubeMusicConfirmationDialog = true
+                 } else {
+                 youtubeMusicManager.authorize { success in
+                 if success {
+                 DispatchQueue.main.async {
+                 self.showingYouTubeMusicConfirmationDialog = true
+                 }
+                 } else {
+                 DispatchQueue.main.async {
+                 self.alertMessage = "Failed to authorize with YouTube Music"
+                 self.showAlert = true
+                 }
+                 }
+                 }
+                 }
+                 }) {
+                 /*
+                  // Remove this after Spotify is in production. For testing purpose only
+                  VStack {
+                  // ... (existing content)
+                  
+                  // Debug section
+                  Toggle("Force Token Refresh", isOn: $forceTokenRefresh)
+                  .padding()
+                  
+                  Button("Clear Debug Log") {
+                  debugLog = ""
+                  }
+                  .padding()
+                  
+                  ScrollView {
+                  Text(debugLog)
+                  .font(.system(size: 12, design: .monospaced))
+                  .padding()
+                  }
+                  .frame(height: 200)
+                  .background(Color.gray.opacity(0.1))
+                  .cornerRadius(10)
+                  .padding()
+                  }
+                  */
+                 HStack {
+                 Image(systemName: "play.circle")
+                 .font(.headline)
+                 Text("YouTube")
+                 .font(.headline)
+                 }
+                 .foregroundColor(Color.primary)
+                 .padding(12)
+                 .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+                 }
+                 */
             }
             .padding(.horizontal)
         }
+        
     }
     
     private func openInYouTubeMusic() {
@@ -410,36 +413,36 @@ struct PlayerSheetView: View {
     }
     
     private func handleSpotifyAuthorization() {
-            if spotifyManager.isAuthorized {
-                spotifyManager.checkAndRefreshTokenIfNeeded { success in
-                    DispatchQueue.main.async {
-                        if success {
-                            self.showingSpotifyConfirmationDialog = true
-                        } else {
-                            self.reauthorizeSpotify()
-                        }
-                    }
-                }
-            } else {
-                reauthorizeSpotify()
-            }
-        }
-    
-    private func reauthorizeSpotify() {
-            isAuthorizingSpotify = true
-            spotifyManager.authorize { success in
+        if spotifyManager.isAuthorized {
+            spotifyManager.checkAndRefreshTokenIfNeeded { success in
                 DispatchQueue.main.async {
-                    self.isAuthorizingSpotify = false
                     if success {
                         self.showingSpotifyConfirmationDialog = true
                     } else {
-                        self.alertMessage = "Failed to authorize Spotify. Please try again."
-                        self.showAlert = true
+                        self.reauthorizeSpotify()
                     }
                 }
             }
+        } else {
+            reauthorizeSpotify()
         }
-
+    }
+    
+    private func reauthorizeSpotify() {
+        isAuthorizingSpotify = true
+        spotifyManager.authorize { success in
+            DispatchQueue.main.async {
+                self.isAuthorizingSpotify = false
+                if success {
+                    self.showingSpotifyConfirmationDialog = true
+                } else {
+                    self.alertMessage = "Failed to authorize Spotify. Please try again."
+                    self.showAlert = true
+                }
+            }
+        }
+    }
+    
     private func fetchSpotifyPlaylists() {
         spotifyManager.fetchUserPlaylists { result in
             DispatchQueue.main.async {
@@ -497,50 +500,50 @@ struct PlayerSheetView: View {
     }
     
     private func addToSpotifyPlaylist() {
-            spotifyManager.fetchUserPlaylists { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let playlists):
-                        self.spotifyPlaylists = playlists
-                        self.activeSheet = .spotifyPlaylistPicker
-                    case .failure(let error):
-                        self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
-                        self.showAlert = true
-                    }
+        spotifyManager.fetchUserPlaylists { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let playlists):
+                    self.spotifyPlaylists = playlists
+                    self.activeSheet = .spotifyPlaylistPicker
+                case .failure(let error):
+                    self.alertMessage = "Failed to fetch Spotify playlists: \(error.localizedDescription)"
+                    self.showAlert = true
                 }
             }
         }
+    }
     
     private func openInSpotify() {
-            guard let songTitle = shazamViewModel.shazamMedia.title,
-                  let artistName = shazamViewModel.shazamMedia.artistName else {
-                self.alertMessage = "Song information is not available"
-                self.showAlert = true
-                return
-            }
-            
-            debugMessage += "Searching for: \(songTitle) by \(artistName)\n"
-            
-            spotifyManager.checkAndRefreshTokenIfNeeded { success in
-                if success {
-                    self.performSpotifySearch(songTitle: songTitle, artistName: artistName)
-                } else {
-                    DispatchQueue.main.async {
-                        self.debugMessage += "Failed to refresh token. Attempting to reauthorize...\n"
-                        self.spotifyManager.authorize { success in
-                            if success {
-                                self.debugMessage += "Reauthorization successful\n"
-                                self.performSpotifySearch(songTitle: songTitle, artistName: artistName)
-                            } else {
-                                self.debugMessage += "Reauthorization failed\n"
-                                self.alertMessage = "Failed to authorize Spotify. Please try again."
-                                self.showAlert = true
-                            }
+        guard let songTitle = shazamViewModel.shazamMedia.title,
+              let artistName = shazamViewModel.shazamMedia.artistName else {
+            self.alertMessage = "Song information is not available"
+            self.showAlert = true
+            return
+        }
+        
+        debugMessage += "Searching for: \(songTitle) by \(artistName)\n"
+        
+        spotifyManager.checkAndRefreshTokenIfNeeded { success in
+            if success {
+                self.performSpotifySearch(songTitle: songTitle, artistName: artistName)
+            } else {
+                DispatchQueue.main.async {
+                    self.debugMessage += "Failed to refresh token. Attempting to reauthorize...\n"
+                    self.spotifyManager.authorize { success in
+                        if success {
+                            self.debugMessage += "Reauthorization successful\n"
+                            self.performSpotifySearch(songTitle: songTitle, artistName: artistName)
+                        } else {
+                            self.debugMessage += "Reauthorization failed\n"
+                            self.alertMessage = "Failed to authorize Spotify. Please try again."
+                            self.showAlert = true
                         }
                     }
                 }
             }
         }
+    }
     
     private func performSpotifySearch(songTitle: String, artistName: String) {
         spotifyManager.searchForTrackURI(songTitle: songTitle, artistName: artistName) { result in
@@ -658,83 +661,83 @@ struct PlayerSheetView: View {
             }
         }
     }
-        
-        private func requestMusicAuthorization() {
-            Task {
+    
+    private func requestMusicAuthorization() {
+        Task {
+            let status = await MusicAuthorization.request()
+            DispatchQueue.main.async {
+                switch status {
+                case .authorized:
+                    self.showingConfirmationDialog = true
+                case .denied, .restricted:
+                    self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
+                    self.showAlert = true
+                case .notDetermined:
+                    self.alertMessage = "Please authorize access to Apple Music and try again."
+                    self.showAlert = true
+                @unknown default:
+                    self.alertMessage = "An unknown error occurred. Please try again."
+                    self.showAlert = true
+                }
+            }
+        }
+    }
+    
+    private func addToLibrary() {
+        Task {
+            do {
                 let status = await MusicAuthorization.request()
-                DispatchQueue.main.async {
-                    switch status {
-                    case .authorized:
-                        self.showingConfirmationDialog = true
-                    case .denied, .restricted:
+                switch status {
+                case .authorized:
+                    try await shazamViewModel.fetchAppleMusicItem()
+                    try await shazamViewModel.addToLibrary()
+                    DispatchQueue.main.async {
+                        self.alertMessage = "Song added to your library"
+                        self.showAlert = true
+                    }
+                case .denied, .restricted:
+                    DispatchQueue.main.async {
                         self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
                         self.showAlert = true
-                    case .notDetermined:
+                    }
+                case .notDetermined:
+                    DispatchQueue.main.async {
                         self.alertMessage = "Please authorize access to Apple Music and try again."
                         self.showAlert = true
-                    @unknown default:
-                        self.alertMessage = "An unknown error occurred. Please try again."
-                        self.showAlert = true
                     }
+                @unknown default:
+                    break
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "Error: \(error.localizedDescription)"
+                    self.showAlert = true
                 }
             }
         }
-        
-        private func addToLibrary() {
-            Task {
-                do {
-                    let status = await MusicAuthorization.request()
-                    switch status {
-                    case .authorized:
-                        try await shazamViewModel.fetchAppleMusicItem()
-                        try await shazamViewModel.addToLibrary()
-                        DispatchQueue.main.async {
-                            self.alertMessage = "Song added to your library"
-                            self.showAlert = true
-                        }
-                    case .denied, .restricted:
-                        DispatchQueue.main.async {
-                            self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
-                            self.showAlert = true
-                        }
-                    case .notDetermined:
-                        DispatchQueue.main.async {
-                            self.alertMessage = "Please authorize access to Apple Music and try again."
-                            self.showAlert = true
-                        }
-                    @unknown default:
-                        break
-                    }
-                } catch {
+    }
+    
+    private func openInAppleMusic() {
+        Task {
+            do {
+                try await shazamViewModel.fetchAppleMusicItem()
+                if let url = shazamViewModel.appleMusicURL {
+                    await UIApplication.shared.open(url)
+                } else {
                     DispatchQueue.main.async {
-                        self.alertMessage = "Error: \(error.localizedDescription)"
+                        self.alertMessage = "Couldn't open in Apple Music"
                         self.showAlert = true
                     }
                 }
-            }
-        }
-        
-        private func openInAppleMusic() {
-            Task {
-                do {
-                    try await shazamViewModel.fetchAppleMusicItem()
-                    if let url = shazamViewModel.appleMusicURL {
-                        await UIApplication.shared.open(url)
-                    } else {
-                        DispatchQueue.main.async {
-                            self.alertMessage = "Couldn't open in Apple Music"
-                            self.showAlert = true
-                        }
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.alertMessage = "Error: \(error.localizedDescription)"
-                        self.showAlert = true
-                    }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "Error: \(error.localizedDescription)"
+                    self.showAlert = true
                 }
             }
         }
-
+    }
+    
     private func addToPlaylist() {
         Task {
             do {
@@ -760,126 +763,126 @@ struct PlayerSheetView: View {
             }
         }
     }
-        
-        private var stationContent: some View {
-            VStack {
-                StationDetails()
-                if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
-                    Button(action: {
-                        shazamViewModel.startOrEndListening()
-                        isShazaming.toggle()
-                        permissionManager.checkMicrophonePermission { granted in
-                            if granted {
-                                print("Microphone permission granted.")
-                            } else {
-                                print("Microphone permission denied or restricted.")
-                            }
-                        }
-                        pulse.toggle()
-                    }) {
-                        VStack {
-                            Image(systemName: "shazam.logo.fill")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 100, height: 100)
-                                .foregroundColor(.primary)
-                                .scaleEffect(pulse ? 1.2 : 1.0)
-                                .padding(.bottom, 10)
-                                .modifier(NeumorphicShadow())
-                            Text("Tap to Shazam")
-                                .font(.headline)
-                                .foregroundColor(Color.primary)
+    
+    private var stationContent: some View {
+        VStack {
+            StationDetails()
+            if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
+                Button(action: {
+                    shazamViewModel.startOrEndListening()
+                    isShazaming.toggle()
+                    permissionManager.checkMicrophonePermission { granted in
+                        if granted {
+                            print("Microphone permission granted.")
+                        } else {
+                            print("Microphone permission denied or restricted.")
                         }
                     }
-                    .buttonStyle(PlainButtonStyle())
-                }
-            }
-        }
-    }
-
-    struct StationDetails: View {
-        @EnvironmentObject var radioPlayer: RadioPlayer
-        @EnvironmentObject var viewModel: RadioStationViewModel
-        
-        var body: some View {
-            if let currentStationIndex = radioPlayer.currentStationIndex,
-               let currentStation = viewModel.stations[safe: currentStationIndex] {
-                VStack {
-                    StationImage(currentStation: currentStation)
-                    Text(currentStation.name)
-                        .font(.title)
-                        .bold()
-                        .padding(.top, 4)
-                        .foregroundColor(.primary)
-                    
-                    if let metadata = radioPlayer.metadata {
-                        Text(metadata)
+                    pulse.toggle()
+                }) {
+                    VStack {
+                        Image(systemName: "shazam.logo.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 100, height: 100)
+                            .foregroundColor(.primary)
+                            .scaleEffect(pulse ? 1.2 : 1.0)
+                            .padding(.bottom, 10)
+                            .modifier(NeumorphicShadow())
+                        Text("Tap to Shazam")
                             .font(.headline)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 2)
-                            .padding(.bottom, 50)
-                    } else {
-                        Text("No song or album title available")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 2)
-                            .padding(.bottom, 50)
+                            .foregroundColor(Color.primary)
                     }
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+}
+
+struct StationDetails: View {
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @EnvironmentObject var viewModel: RadioStationViewModel
+    
+    var body: some View {
+        if let currentStationIndex = radioPlayer.currentStationIndex,
+           let currentStation = viewModel.stations[safe: currentStationIndex] {
+            VStack {
+                StationImage(currentStation: currentStation)
+                Text(currentStation.name)
+                    .font(.title)
+                    .bold()
+                    .padding(.top, 4)
+                    .foregroundColor(.primary)
+                
+                if let metadata = radioPlayer.metadata {
+                    Text(metadata)
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                        .padding(.bottom, 50)
+                } else {
+                    Text("No song or album title available")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
+                        .padding(.bottom, 50)
                 }
             }
         }
     }
+}
 
-    struct StationImage: View {
-        let currentStation: RadioStation
-        
-        var body: some View {
-            if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                Image(uiImage: image)
-                    .resizable()
-                    .frame(width: 200, height: 200)
-                    .cornerRadius(10)
-                    .modifier(NeumorphicShadow())
-            } else {
-                Image(systemName: "radio")
-                    .resizable()
-                    .frame(width: 100, height: 100)
-                    .aspectRatio(contentMode: .fit)
-                    .padding(20)
-                    .clipShape(Circle())
-                    .foregroundColor(.gray)
-                    .modifier(NeumorphicShadow())
-            }
+struct StationImage: View {
+    let currentStation: RadioStation
+    
+    var body: some View {
+        if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .frame(width: 200, height: 200)
+                .cornerRadius(10)
+                .modifier(NeumorphicShadow())
+        } else {
+            Image(systemName: "radio")
+                .resizable()
+                .frame(width: 100, height: 100)
+                .aspectRatio(contentMode: .fit)
+                .padding(20)
+                .clipShape(Circle())
+                .foregroundColor(.gray)
+                .modifier(NeumorphicShadow())
         }
     }
+}
 
-    struct AirPlayButtonView: UIViewRepresentable {
-        func makeUIView(context: Context) -> AVRoutePickerView {
-            let view = AVRoutePickerView()
-            view.activeTintColor = .blue
-            view.tintColor = .gray
-            return view
-        }
-        
-        func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
-            uiView.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
-        }
+struct AirPlayButtonView: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.activeTintColor = .blue
+        view.tintColor = .gray
+        return view
     }
+    
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        uiView.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
+    }
+}
 
-    struct PlayerSheetView_Previews: PreviewProvider {
-        static var previews: some View {
-            PlayerSheetView()
-                .environmentObject(RadioPlayer.shared)
-                .environmentObject(RadioStationViewModel())
-        }
+struct PlayerSheetView_Previews: PreviewProvider {
+    static var previews: some View {
+        PlayerSheetView()
+            .environmentObject(RadioPlayer.shared)
+            .environmentObject(RadioStationViewModel())
     }
+}
 
 struct PlaylistPickerView: View {
     @ObservedObject var shazamViewModel: ShazamViewModel
     @Environment(\.presentationMode) var presentationMode
     @State private var alertMessage = ""
     @State private var showAlert = false
-
+    
     var body: some View {
         NavigationView {
             List(shazamViewModel.userPlaylists, id: \.id) { playlist in
@@ -904,7 +907,7 @@ struct PlaylistPickerView: View {
             })
         }
     }
-
+    
     private func addToSelectedPlaylist(_ playlist: Playlist) {
         Task {
             do {
@@ -928,7 +931,7 @@ struct SpotifyPlaylistPickerView: View {
     @Binding var isPresented: Bool
     let playlists: [(id: String, name: String)]
     let onSelect: (String) -> Void
-
+    
     var body: some View {
         NavigationView {
             List(playlists, id: \.id) { playlist in
