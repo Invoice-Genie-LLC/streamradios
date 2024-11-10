@@ -345,11 +345,11 @@ struct ContentView: View {
                         feed: podcast,
                         initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
                         podcastPlayer: podcastPlayer,
+                        selectedPodcast: $selectedPodcast,
                         episodeToScrollTo: Binding(
                             get: { podcastPlayer.currentEpisode },
                             set: { _ in }
-                        ),
-                        selectedPodcast: $selectedPodcast
+                        )
                     )
                 }
             }
