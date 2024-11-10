@@ -19,62 +19,55 @@ extension FeedModel {
     }
     
     func toPodcastFeed() -> PodcastFeed {
-            var episodesArray: [PodcastEpisode] = []
-            
-            if let episode = self.episodes {
-                episodesArray = [episode.toPodcastEpisode()]
-            }
-            
-            return PodcastFeed(
-                id: self.id ?? UUID().uuidString,
-                title: self.title ?? "",
-                url: self.url ?? "",
-                artworkUrl: self.artworkUrl,
-                description: self.descriptionText,
-                iconData: self.iconData,
-                imageData: self.imageData,
-                episodes: episodesArray
-            )
-        }
+           return PodcastFeed(
+               id: self.id ?? UUID().uuidString,
+               title: self.title ?? "",
+               url: self.url ?? "",
+               artworkUrl: self.artworkUrl,
+               description: self.descriptionText,
+               iconData: self.iconData,
+               imageData: self.imageData
+           )
+       }
 }
 
 extension PodcastModel {
     func update(from episode: PodcastEpisode) {
-        self.id = episode.id
-        self.title = episode.title
-        self.descriptionText = episode.descriptionText
-        self.audioUrl = episode.audioUrl
-        self.publicationDate = episode.publicationDate
-        self.duration = episode.duration
-        self.isPlayed = episode.state.isPlayed
-        self.isFavorite = episode.state.isFavorite
-        self.progress = episode.state.progress
-        self.isDownloaded = episode.state.isDownloaded
-        self.feedId = episode.feedId
-        self.localFilePath = episode.localFilePath
-        self.fileSize = episode.fileSize ?? 0  // Use 0 as a default if fileSize is nil
-    }
+           self.id = episode.id
+           self.title = episode.title
+           self.descriptionText = episode.descriptionText
+           self.audioUrl = episode.audioUrl
+           self.publicationDate = episode.publicationDate
+           self.duration = episode.duration
+           self.isPlayed = episode.state.isPlayed
+           self.isFavorite = episode.state.isFavorite
+           self.progress = episode.state.progress
+           self.isDownloaded = episode.state.isDownloaded
+           self.feedId = episode.feedId
+           self.localFilePath = episode.localFilePath
+           self.fileSize = episode.fileSize ?? 0
+       }
     
     func toPodcastEpisode() -> PodcastEpisode {
-           return PodcastEpisode(
-               id: self.id ?? UUID().uuidString,
-               title: self.title ?? "",
-               descriptionText: self.descriptionText ?? "",
-               audioUrl: self.audioUrl ?? "",
-               publicationDate: self.publicationDate ?? Date(),
-               duration: self.duration,
-               state: EpisodeState(
-                   isPlayed: self.isPlayed,
-                   isFavorite: self.isFavorite,
-                   progress: self.progress,
-                   isDownloaded: self.isDownloaded
-               ),
-               feedId: self.feedId ?? "",
-               localFilePath: self.localFilePath,
-               fileSize: self.fileSize
-           )
-       }
-}
+            return PodcastEpisode(
+                id: self.id ?? UUID().uuidString,
+                title: self.title ?? "",
+                descriptionText: self.descriptionText ?? "",
+                audioUrl: self.audioUrl ?? "",
+                publicationDate: self.publicationDate ?? Date(),
+                duration: self.duration,
+                state: EpisodeState(
+                    isPlayed: self.isPlayed,
+                    isFavorite: self.isFavorite,
+                    progress: self.progress,
+                    isDownloaded: self.isDownloaded
+                ),
+                feedId: self.feedId ?? "",
+                localFilePath: self.localFilePath,
+                fileSize: self.fileSize
+            )
+        }
+    }
 
 extension FeedModel {
     @objc(addEpisodesObject:)
