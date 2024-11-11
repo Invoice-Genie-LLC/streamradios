@@ -123,25 +123,33 @@ class PodcastViewModel: ObservableObject {
         var currentPage = 1
     
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
-            self.context = context
-            self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
-            self.backgroundContext.parent = context
+        self.context = context
+        self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        self.backgroundContext.parent = context
 
-            // Perform initial loading asynchronously
-            Task {
-                await loadInitialData()
+        // Perform initial loading asynchronously on a background thread
+        Task(priority: .background) {
+            await loadInitialData()
+        }
+    }
+
+    @MainActor
+    private func loadInitialData() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await self.backgroundContext.perform {
+                    self.loadSavedData()
+                }
+            }
+            group.addTask {
+                await self.backgroundContext.perform {
+                    self.loadAllEpisodesProgress()
+                }
             }
         }
+        self.objectWillChange.send()
+    }
 
-        @MainActor
-        private func loadInitialData() async {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { self.loadSavedData() }
-                group.addTask { self.loadAllEpisodesProgress() }
-            }
-            
-            self.objectWillChange.send()
-        }
     
     func savePodcastEpisodesInBatches(episodes: [PodcastEpisode], for feed: PodcastFeed, batchSize: Int = 100) {
            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
@@ -358,10 +366,23 @@ class PodcastViewModel: ObservableObject {
         }
     
     func loadInitialEpisodes(for feed: PodcastFeed) {
-           currentPage = 1
-           hasMoreEpisodes = true
-           currentEpisodes.removeAll()
-        fetchEpisodes(for: feed) { [weak self] result in
+        currentPage = 1
+        hasMoreEpisodes = true
+        currentEpisodes.removeAll()
+        
+        switch currentTab {
+        case 1: // Favorites
+            currentEpisodes = favoriteEpisodes.filter { $0.feedId == feed.id }
+                .sorted { $0.publicationDate > $1.publicationDate }
+            hasMoreEpisodes = false // No pagination for filtered lists
+            
+        case 2: // Downloads
+            currentEpisodes = downloadedEpisodes.filter { $0.feedId == feed.id }
+                .sorted { $0.publicationDate > $1.publicationDate }
+            hasMoreEpisodes = false // No pagination for filtered lists
+            
+        default: // All Episodes (tab 0)
+            fetchEpisodes(for: feed) { [weak self] result in
                 guard let self = self else { return }
                 
                 DispatchQueue.main.async {
@@ -373,12 +394,12 @@ class PodcastViewModel: ObservableObject {
                         self.objectWillChange.send()
                     case .failure(let error):
                         print("Failed to load initial episodes: \(error)")
-                        // Handle the error appropriately, e.g., show an alert to the user
                         self.error = "Failed to load episodes: \(error.localizedDescription)"
                     }
                 }
             }
-       }
+        }
+    }
     
     func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
         DispatchQueue.main.async {
@@ -607,11 +628,13 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    func loadSavedData() {
-        loadPodcastFeeds()
-        loadDownloadedEpisodes()
-        loadFavoriteEpisodes()
-        loadAllEpisodes()
+    private func loadSavedData() {
+        backgroundContext.perform {
+            self.loadPodcastFeeds()
+            self.loadDownloadedEpisodes()
+            self.loadFavoriteEpisodes()
+            self.loadAllEpisodes()
+        }
     }
     
     func loadDownloadedEpisodes() {
@@ -1449,72 +1472,67 @@ class PodcastViewModel: ObservableObject {
     
     
     func toggleFavorite(for episode: PodcastEpisode) {
-            let context = CoreDataStack.shared.context
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-            
-            context.performAndWait {
-                do {
-                    let results = try context.fetch(fetchRequest)
-                    let managedEpisode: PodcastModel
-                    
-                    if let existingEpisode = results.first {
-                        managedEpisode = existingEpisode
-                    } else {
-                        managedEpisode = PodcastModel(context: context)
-                        managedEpisode.id = episode.id
-                        managedEpisode.title = episode.title
-                        managedEpisode.feedId = episode.feedId
-                        managedEpisode.descriptionText = episode.descriptionText
-                        managedEpisode.audioUrl = episode.audioUrl
-                        managedEpisode.publicationDate = episode.publicationDate
-                        managedEpisode.duration = episode.duration
-                    }
-                    
-                    // Toggle favorite status
-                    managedEpisode.isFavorite.toggle()
-                    let newFavoriteStatus = managedEpisode.isFavorite
-                    
-                    // Save context immediately
-                    try context.save()
-                    
-                    // Update in-memory state on main thread
-                    DispatchQueue.main.async {
-                        // Update the episode in all relevant collections
-                        var updatedEpisode = episode
-                        updatedEpisode.state.isFavorite = newFavoriteStatus
-                        
-                        // Update allEpisodes
-                        if let index = self.allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                            self.allEpisodes[index] = updatedEpisode
-                        }
-                        
-                        // Update currentEpisodes
-                        if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                            self.currentEpisodes[index] = updatedEpisode
-                        }
-                        
-                        // Update favoriteEpisodes
-                        if newFavoriteStatus {
-                            if !self.favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
-                                self.favoriteEpisodes.append(updatedEpisode)
-                            }
-                        } else {
-                            self.favoriteEpisodes.removeAll { $0.id == updatedEpisode.id }
-                        }
-                        
-                        // Clear cache to force refresh
-                        self.episodeCache.removeValue(forKey: episode.feedId)
-                        
-                        // Force UI update
-                        self.updateFilteredEpisodes(for: episode.feedId, selectedTab: self.currentTab)
-                        self.objectWillChange.send()
-                    }
-                } catch {
-                    print("Failed to toggle favorite status: \(error)")
+        let context = CoreDataStack.shared.context
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+        
+        context.performAndWait {
+            do {
+                let results = try context.fetch(fetchRequest)
+                let managedEpisode: PodcastModel
+                
+                if let existingEpisode = results.first {
+                    managedEpisode = existingEpisode
+                } else {
+                    managedEpisode = PodcastModel(context: context)
+                    managedEpisode.id = episode.id
+                    managedEpisode.title = episode.title
+                    managedEpisode.feedId = episode.feedId
+                    managedEpisode.descriptionText = episode.descriptionText
+                    managedEpisode.audioUrl = episode.audioUrl
+                    managedEpisode.publicationDate = episode.publicationDate
+                    managedEpisode.duration = episode.duration
                 }
+                
+                // Toggle favorite status
+                managedEpisode.isFavorite.toggle()
+                let newFavoriteStatus = managedEpisode.isFavorite
+                
+                // Save context immediately
+                try context.save()
+                
+                // Update in-memory state on main thread
+                DispatchQueue.main.async {
+                    // Update the episode in all relevant collections
+                    var updatedEpisode = episode
+                    updatedEpisode.state.isFavorite = newFavoriteStatus
+                    
+                    // Update allEpisodes
+                    if let index = self.allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                        self.allEpisodes[index] = updatedEpisode
+                    }
+                    
+                    // Update favoriteEpisodes
+                    if newFavoriteStatus {
+                        if !self.favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
+                            self.favoriteEpisodes.append(updatedEpisode)
+                        }
+                    } else {
+                        self.favoriteEpisodes.removeAll { $0.id == updatedEpisode.id }
+                    }
+                    
+                    // Clear cache and update filtered episodes
+                    self.episodeCache.removeValue(forKey: episode.feedId)
+                    self.updateFilteredEpisodes(for: episode.feedId, selectedTab: self.currentTab)
+                    
+                    // Force UI update
+                    self.objectWillChange.send()
+                }
+            } catch {
+                print("Failed to toggle favorite status: \(error)")
             }
         }
+    }
     
     func updateEpisodeDownloadStatus(_ episode: PodcastEpisode, isDownloaded: Bool) {
         let context = CoreDataStack.shared.context
@@ -1783,6 +1801,8 @@ class PodcastViewModel: ObservableObject {
         return fileName.components(separatedBy: invalidCharacters).joined(separator: "_")
     }
     
+    // In PodcastViewModel class, update the updateFilteredEpisodes method:
+
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
         DispatchQueue.main.async { [weak self] in
             self?.currentTab = selectedTab
@@ -1791,31 +1811,29 @@ class PodcastViewModel: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
-            let updatedAllFeedEpisodes = self.allEpisodes.map { episode -> PodcastEpisode in
-                var updatedEpisode = episode
-                if episode.feedId == feedId {
-                    updatedEpisode.state.isFavorite = self.favoriteEpisodes.contains(where: { $0.id == episode.id })
-                    updatedEpisode.state.isDownloaded = self.downloadedEpisodes.contains(where: { $0.id == episode.id })
-                }
-                return updatedEpisode
-            }
-            
             let filteredEpisodes: [PodcastEpisode]
-            switch self.currentTab {
-            case 0: // All
-                filteredEpisodes = updatedAllFeedEpisodes.filter { $0.feedId == feedId }
-            case 1: // Favorite
+            
+            switch selectedTab {
+            case 0: // All Episodes
+                // Show all episodes for this feed
+                filteredEpisodes = self.allEpisodes.filter { $0.feedId == feedId }
+            
+            case 1: // Favorites
+                // Only show episodes that are marked as favorite for this feed
                 filteredEpisodes = self.favoriteEpisodes.filter { $0.feedId == feedId }
+            
             case 2: // Downloads
+                // Only show episodes that are downloaded for this feed
                 filteredEpisodes = self.downloadedEpisodes.filter { $0.feedId == feedId }
+            
             default:
-                filteredEpisodes = updatedAllFeedEpisodes.filter { $0.feedId == feedId }
+                filteredEpisodes = self.allEpisodes.filter { $0.feedId == feedId }
             }
             
+            // Sort episodes by publication date (newest first)
             let sortedEpisodes = filteredEpisodes.sorted { $0.publicationDate > $1.publicationDate }
             
             DispatchQueue.main.async {
-                self.allEpisodes = updatedAllFeedEpisodes
                 self.currentEpisodes = sortedEpisodes
                 self.objectWillChange.send()
             }
@@ -1823,41 +1841,40 @@ class PodcastViewModel: ObservableObject {
     }
     
     func loadAllEpisodesProgress() {
-        let context = CoreDataStack.shared.context
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            var progress: [String: Double] = [:]
-            var updatedAllEpisodes: [PodcastEpisode] = []
-            var updatedCurrentEpisodes: [PodcastEpisode] = []
-            
-            for managedEpisode in results {
-                if let id = managedEpisode.id {
-                    progress[id] = managedEpisode.progress
-                    
-                    if let index = allEpisodes.firstIndex(where: { $0.id == id }) {
-                        var updatedEpisode = allEpisodes[index]
-                        updatedEpisode.state.progress = managedEpisode.progress
-                        updatedAllEpisodes.append(updatedEpisode)
-                    }
-                    
-                    if let currentIndex = currentEpisodes.firstIndex(where: { $0.id == id }) {
-                        var updatedEpisode = currentEpisodes[currentIndex]
-                        updatedEpisode.state.progress = managedEpisode.progress
-                        updatedCurrentEpisodes.append(updatedEpisode)
+        backgroundContext.perform {
+            // Load episode progress here in the background
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            do {
+                let results = try self.backgroundContext.fetch(fetchRequest)
+                var progress: [String: Double] = [:]
+                var updatedAllEpisodes: [PodcastEpisode] = []
+                var updatedCurrentEpisodes: [PodcastEpisode] = []
+
+                for managedEpisode in results {
+                    if let id = managedEpisode.id {
+                        progress[id] = managedEpisode.progress
+                        if let index = self.allEpisodes.firstIndex(where: { $0.id == id }) {
+                            var updatedEpisode = self.allEpisodes[index]
+                            updatedEpisode.state.progress = managedEpisode.progress
+                            updatedAllEpisodes.append(updatedEpisode)
+                        }
+                        if let currentIndex = self.currentEpisodes.firstIndex(where: { $0.id == id }) {
+                            var updatedEpisode = self.currentEpisodes[currentIndex]
+                            updatedEpisode.state.progress = managedEpisode.progress
+                            updatedCurrentEpisodes.append(updatedEpisode)
+                        }
                     }
                 }
+
+                DispatchQueue.main.async {
+                    self.episodeProgress = progress
+                    self.allEpisodes = updatedAllEpisodes
+                    self.currentEpisodes = updatedCurrentEpisodes
+                    self.objectWillChange.send()
+                }
+            } catch {
+                print("Failed to load episode progress: \(error)")
             }
-            
-            DispatchQueue.main.async {
-                self.episodeProgress = progress
-                self.allEpisodes = updatedAllEpisodes
-                self.currentEpisodes = updatedCurrentEpisodes
-                self.objectWillChange.send()
-            }
-        } catch {
-            print("Failed to load episode progress: \(error)")
         }
     }
 }

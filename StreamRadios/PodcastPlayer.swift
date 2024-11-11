@@ -41,6 +41,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var updateTimer: Timer?
         private let updateInterval: TimeInterval = 0.5
     private var lastReportedProgress: Double = 0
+    private let stateManager = EpisodeStateManager.shared
+
 
     var remainingTime: Double {
             max(0, duration - currentTime)
@@ -292,11 +294,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func rewindAndPlay(episode: PodcastEpisode) {
         if currentEpisode?.id == episode.id {
-            // If it's the same episode, rewind and play immediately
             seek(to: 0)
+            stateManager.rewindAndPlay(episodeId: episode.id)
             play()
         } else {
-            // If it's a different episode, play it from the beginning
             playEpisode(episode, feed: viewModel?.podcastFeeds.first { $0.id == episode.feedId } ?? PodcastFeed(id: "", title: "", url: ""))
         }
         isPlaying = true
@@ -310,8 +311,63 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         self.radioPlayer = player
     }
     
+    func handleNavigationAway() {
+            if let currentEpisode = currentEpisode, isPlaying {
+                // Save current progress immediately
+                saveProgressIfNeeded()
+                
+                // Update episode state to reflect "In Progress"
+                var updatedEpisode = currentEpisode
+                let progress = currentTime / duration
+                updatedEpisode.state.progress = progress
+                updatedEpisode.state.isPlayed = progress >= 0.99
+                
+                // Update the episode in ViewModel
+                viewModel?.updateEpisode(updatedEpisode)
+                
+                // Force UI update
+                DispatchQueue.main.async {
+                    self.viewModel?.objectWillChange.send()
+                }
+                
+                os_log("Updated episode status on navigation away: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
+            }
+        }
+    
+    func ensureProgressTracking(for episode: PodcastEpisode) {
+        // If this episode was ever played, ensure it shows as "In Progress"
+        if currentEpisode?.id == episode.id && currentTime > 0 {
+            let progress = currentTime / duration
+            if progress > 0 && progress < 0.99 {
+                viewModel?.updateProgress(for: episode, progress: progress)
+                
+                // Update the episode state
+                var updatedEpisode = episode
+                updatedEpisode.state.progress = progress
+                updatedEpisode.state.isPlayed = false
+                viewModel?.updateEpisode(updatedEpisode)
+                
+                // Force UI update
+                DispatchQueue.main.async {
+                    self.viewModel?.objectWillChange.send()
+                }
+            }
+        }
+    }
+    
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         stopRadioPlayback()
+        
+        // If there's a currently playing episode, mark it as "In Progress" before switching
+        if let currentEpisode = currentEpisode, currentEpisode.id != episode.id {
+            let currentProgress = currentTime / duration
+            stateManager.switchToEpisode(
+                newEpisodeId: episode.id,
+                previousEpisodeId: currentEpisode.id,
+                previousProgress: currentProgress
+            )
+            saveProgressIfNeeded()
+        }
         
         do {
             try AVAudioSession.sharedInstance().setActive(true)
@@ -319,11 +375,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("Failed to activate audio session: %@", log: log, type: .error, error.localizedDescription)
         }
         
-        // Save progress of the current episode if there is one
-        if let currentEpisode = currentEpisode {
-            saveProgressIfNeeded()
-        }
-
         // Load all episodes for the feed
         loadAllEpisodesForFeed(feed)
         
@@ -374,6 +425,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if let playerItem = player?.currentItem {
             duration = playerItem.asset.duration.seconds
         }
+        
+        // Only start playing the new episode after we've handled the previous one
+        if currentEpisode?.id == episode.id {
+            stateManager.startPlaying(episodeId: episode.id)
+        }
+        
         play()
         isPlaying = true
         updateNowPlayingInfo()
@@ -482,6 +539,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return
             }
         
+        // Ensure progress is tracked when playing starts
+           ensureProgressTracking(for: currentEpisode)
+        
         // Only reset progress if the episode was completed
         if viewModel?.getProgress(for: currentEpisode) == 1.0 {
                 currentTime = 0
@@ -491,6 +551,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         player.play()
                isPlaying = true
+        stateManager.startPlaying(episodeId: currentEpisode.id)
+
                
                updateNowPlayingInfo()
                setupTimeObserver()
@@ -507,7 +569,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.pause()
         isPlaying = false
         saveProgressIfNeeded()  // Progress is saved here
-        
+        stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
+
+        ensureProgressTracking(for: currentEpisode)
+
         updateNowPlayingInfo()
         objectWillChange.send()
         
@@ -633,6 +698,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let progress = currentTime / duration
             
             self.currentProgress = progress
+            stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying)
             
             // Calculate remaining time
             let remainingTime = max(duration - currentTime, 0)
