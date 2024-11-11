@@ -607,26 +607,25 @@ struct EpisodeRowView: View {
     }
     
     
-    
     private var episodeStatusIndicator: some View {
-        Group {
-            if episode.state.isPlayed || progress >= 0.99 {
-                Text("Played")
-                    .foregroundColor(.gray)
-            } else if isPlaying {
-                Text("Playing")
-                    .foregroundColor(.blue)
-            } else if progress > 0 {
-                Text("In Progress")
-                    .foregroundColor(.orange)
-            } else {
-                Text("New")
-                    .foregroundColor(.green)
+            Group {
+                if episode.state.isPlayed || episode.state.progress >= 0.99 {
+                    Text("Played")
+                        .foregroundColor(.gray)
+                } else if isPlaying {
+                    Text("Playing")
+                        .foregroundColor(.blue)
+                } else if episode.state.progress > 0 || podcastPlayer.getCurrentProgress(for: episode) > 0 {
+                    Text("In Progress")
+                        .foregroundColor(.orange)
+                } else {
+                    Text("New")
+                        .foregroundColor(.green)
+                }
             }
+            .font(.caption2)
+            .fontWeight(.semibold)
         }
-        .font(.caption2)
-        .fontWeight(.semibold)
-    }
     
     private var downloadButton: some View {
         Button(action: {
@@ -719,7 +718,7 @@ struct EpisodeRowView: View {
     
 }
 
-struct OptimizedEpisodeRowView: View {
+struct OptimizedEpisodeRowView: View, Equatable {
     let episode: PodcastEpisode
     let isPlaying: Bool
     let onPlay: () -> Void
@@ -739,7 +738,10 @@ struct OptimizedEpisodeRowView: View {
         return formatter
     }()
     
-    // Use equatable to prevent unnecessary redraws
+    private var episodeState: EpisodePlaybackState {
+        EpisodeStateManager.shared.getState(for: episode.id)
+    }
+    
     private let playbackProgress: Double
     private let buttonSize: CGFloat = 22
     
@@ -758,6 +760,14 @@ struct OptimizedEpisodeRowView: View {
         self.playbackProgress = isPlaying ? podcastPlayer.currentProgress : episode.state.progress
     }
     
+    static func == (lhs: OptimizedEpisodeRowView, rhs: OptimizedEpisodeRowView) -> Bool {
+        lhs.episode.id == rhs.episode.id &&
+        lhs.isPlaying == rhs.isPlaying &&
+        lhs.playbackProgress == rhs.playbackProgress &&
+        lhs.episode.state == rhs.episode.state &&
+        abs((lhs.viewModel.downloadProgress[lhs.episode.id] ?? 0) - (rhs.viewModel.downloadProgress[rhs.episode.id] ?? 0)) < 0.01
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             if showingBannerAlert {
@@ -771,22 +781,8 @@ struct OptimizedEpisodeRowView: View {
             
             HStack(alignment: .center, spacing: 10) {
                 // Play/Pause button
-                Button(action: {
-                    let progress = podcastPlayer.getCurrentProgress(for: episode)
-                    if episode.state.isPlayed || progress >= 0.99 {
-                        podcastPlayer.rewindAndPlay(episode: episode)
-                    } else if isPlaying {
-                        onStop()
-                    } else {
-                        onPlay()
-                    }
-                }) {
-                    Image(systemName: buttonImageName)
-                        .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(buttonColor)
-                }
-                .frame(width: buttonSize, height: buttonSize)
+                playButton
+                    .frame(width: buttonSize, height: buttonSize)
                 
                 // Episode info
                 VStack(alignment: .leading, spacing: 2) {
@@ -886,6 +882,31 @@ struct OptimizedEpisodeRowView: View {
         }
     }
     
+    private var episodeStatusIndicator: some View {
+        Text(episodeState.statusText)
+            .foregroundColor(episodeState.statusColor)
+            .font(.caption2)
+            .fontWeight(.semibold)
+    }
+    
+    private var playButton: some View {
+        Button(action: {
+            switch episodeState {
+            case .played:
+                podcastPlayer.rewindAndPlay(episode: episode)
+            case .playing:
+                onStop()
+            default:
+                onPlay()
+            }
+        }) {
+            Image(systemName: episodeState.buttonImage)
+                .resizable()
+                .frame(width: buttonSize, height: buttonSize)
+                .foregroundColor(episodeState.buttonColor)
+        }
+    }
+    
     private var downloadButton: some View {
         Button(action: {
             if isPlaying {
@@ -929,40 +950,6 @@ struct OptimizedEpisodeRowView: View {
         }
     }
     
-    private var episodeStatusIndicator: some View {
-        Group {
-            if episode.state.isPlayed || playbackProgress >= 0.99 {
-                Text("Played")
-                    .foregroundColor(.gray)
-            } else if isPlaying {
-                Text("Playing")
-                    .foregroundColor(.blue)
-            } else if playbackProgress > 0 {
-                Text("In Progress")
-                    .foregroundColor(.orange)
-            } else {
-                Text("New")
-                    .foregroundColor(.green)
-            }
-        }
-        .font(.caption2)
-        .fontWeight(.semibold)
-    }
-    
-    private var buttonImageName: String {
-        if episode.state.isPlayed || playbackProgress >= 0.99 {
-            return "arrow.counterclockwise.circle.fill"
-        }
-        return isPlaying ? "pause.circle.fill" : "play.circle.fill"
-    }
-    
-    private var buttonColor: Color {
-        if episode.state.isPlayed || playbackProgress >= 0.99 {
-            return .blue
-        }
-        return isPlaying ? .blue : .green
-    }
-    
     private func showBannerAlert(message: String) {
         bannerAlertMessage = message
         showingBannerAlert = true
@@ -993,7 +980,6 @@ struct OptimizedEpisodeRowView: View {
         return formatter.string(fromByteCount: size)
     }
 }
-
 struct PodcastPlayerView: View {
     // MARK: - Properties
     @ObservedObject var viewModel: PodcastViewModel
@@ -1363,6 +1349,10 @@ struct PodcastPlayerView: View {
     }
     
     private func updateViewModelAndDismiss() {
+        // First, handle the currently playing episode status
+        podcastPlayer.handleNavigationAway()
+        
+        // Then proceed with the existing logic
         if let currentEpisode = podcastPlayer.currentEpisode {
             podcastPlayer.saveProgressIfNeeded()
             
@@ -1393,6 +1383,7 @@ struct PodcastPlayerView: View {
                 }
             }
             
+            // Update progress for all episodes in the current feed
             for episode in viewModel.currentEpisodes {
                 let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
                 if episodeProgress > 0 {
@@ -1606,15 +1597,5 @@ struct DebouncedAction: ViewModifier {
                 workItem = newWorkItem
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: newWorkItem)
             }
-    }
-}
-
-extension OptimizedEpisodeRowView: Equatable {
-    static func == (lhs: OptimizedEpisodeRowView, rhs: OptimizedEpisodeRowView) -> Bool {
-        lhs.episode.id == rhs.episode.id &&
-        lhs.isPlaying == rhs.isPlaying &&
-        lhs.playbackProgress == rhs.playbackProgress &&
-        lhs.episode.state == rhs.episode.state &&
-        abs((lhs.viewModel.downloadProgress[lhs.episode.id] ?? 0) - (rhs.viewModel.downloadProgress[rhs.episode.id] ?? 0)) < 0.01
     }
 }
