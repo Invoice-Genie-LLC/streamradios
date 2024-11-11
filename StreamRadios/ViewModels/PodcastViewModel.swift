@@ -366,40 +366,32 @@ class PodcastViewModel: ObservableObject {
         }
     
     func loadInitialEpisodes(for feed: PodcastFeed) {
-        currentPage = 1
-        hasMoreEpisodes = true
-        currentEpisodes.removeAll()
-        
-        switch currentTab {
-        case 1: // Favorites
-            currentEpisodes = favoriteEpisodes.filter { $0.feedId == feed.id }
-                .sorted { $0.publicationDate > $1.publicationDate }
-            hasMoreEpisodes = false // No pagination for filtered lists
-            
-        case 2: // Downloads
-            currentEpisodes = downloadedEpisodes.filter { $0.feedId == feed.id }
-                .sorted { $0.publicationDate > $1.publicationDate }
-            hasMoreEpisodes = false // No pagination for filtered lists
-            
-        default: // All Episodes (tab 0)
-            fetchEpisodes(for: feed) { [weak self] result in
-                guard let self = self else { return }
-                
-                DispatchQueue.main.async {
-                    self.isLoadingEpisodes = false
-                    
-                    switch result {
-                    case .success(let episodes):
-                        self.currentEpisodes = episodes
-                        self.objectWillChange.send()
-                    case .failure(let error):
-                        print("Failed to load initial episodes: \(error)")
-                        self.error = "Failed to load episodes: \(error.localizedDescription)"
-                    }
-                }
-            }
-        }
-    }
+           currentPage = 1
+           hasMoreEpisodes = true
+           currentEpisodes.removeAll()
+           isLoadingEpisodes = true
+           
+           fetchEpisodesWithFilter(for: feed, page: 1, tab: currentTab) { [weak self] result in
+               guard let self = self else { return }
+               
+               DispatchQueue.main.async {
+                   self.isLoadingEpisodes = false
+                   
+                   switch result {
+                   case .success(let episodes):
+                       self.currentEpisodes = episodes
+                       if self.currentTab == 0 {
+                           self.episodeCache[feed.id] = episodes
+                       }
+                       self.objectWillChange.send()
+                       
+                   case .failure(let error):
+                       print("Failed to load initial episodes: \(error)")
+                       self.error = "Failed to load episodes: \(error.localizedDescription)"
+                   }
+               }
+           }
+       }
     
     func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
         DispatchQueue.main.async {
@@ -1007,34 +999,42 @@ class PodcastViewModel: ObservableObject {
        }
     
     func loadMoreEpisodes(for feed: PodcastFeed, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
-           guard !isLoadingMoreEpisodes && hasMoreEpisodes else { return }
-           
-           isLoadingMoreEpisodes = true
-           currentPage += 1
-           
-           fetchEpisodesInBatches(for: feed, page: currentPage) { [weak self] result in
-               guard let self = self else { return }
-               
-               DispatchQueue.main.async {
-                   self.isLoadingMoreEpisodes = false
-                   
-                   switch result {
-                   case .success(let newEpisodes):
-                       if newEpisodes.isEmpty {
-                           self.hasMoreEpisodes = false
-                           self.currentPage -= 1 // Revert page increment
-                       } else {
-                           self.currentEpisodes.append(contentsOf: newEpisodes)
-                       }
-                       completion(.success(newEpisodes))
-                       
-                   case .failure(let error):
-                       self.currentPage -= 1 // Revert page increment on failure
-                       completion(.failure(error))
-                   }
-               }
-           }
-       }
+            guard !isLoadingMoreEpisodes && hasMoreEpisodes else {
+                completion(.success([]))
+                return
+            }
+            
+            isLoadingMoreEpisodes = true
+            currentPage += 1
+            
+            fetchEpisodesWithFilter(for: feed, page: currentPage, tab: currentTab) { [weak self] result in
+                guard let self = self else { return }
+                
+                DispatchQueue.main.async {
+                    self.isLoadingMoreEpisodes = false
+                    
+                    switch result {
+                    case .success(let newEpisodes):
+                        if newEpisodes.isEmpty {
+                            self.hasMoreEpisodes = false
+                            self.currentPage -= 1
+                        } else {
+                            self.currentEpisodes.append(contentsOf: newEpisodes)
+                            if self.currentTab == 0 {
+                                var cachedEpisodes = self.episodeCache[feed.id] ?? []
+                                cachedEpisodes.append(contentsOf: newEpisodes)
+                                self.episodeCache[feed.id] = cachedEpisodes
+                            }
+                        }
+                        completion(.success(newEpisodes))
+                        
+                    case .failure(let error):
+                        self.currentPage -= 1
+                        completion(.failure(error))
+                    }
+                }
+            }
+        }
     
     private func saveEpisodesToCoreData(_ episodes: [PodcastEpisode], for feed: PodcastFeed) {
            let context = CoreDataStack.shared.context
@@ -1485,48 +1485,19 @@ class PodcastViewModel: ObservableObject {
                     managedEpisode = existingEpisode
                 } else {
                     managedEpisode = PodcastModel(context: context)
-                    managedEpisode.id = episode.id
-                    managedEpisode.title = episode.title
-                    managedEpisode.feedId = episode.feedId
-                    managedEpisode.descriptionText = episode.descriptionText
-                    managedEpisode.audioUrl = episode.audioUrl
-                    managedEpisode.publicationDate = episode.publicationDate
-                    managedEpisode.duration = episode.duration
+                    managedEpisode.update(from: episode)
                 }
                 
                 // Toggle favorite status
                 managedEpisode.isFavorite.toggle()
-                let newFavoriteStatus = managedEpisode.isFavorite
-                
-                // Save context immediately
                 try context.save()
                 
-                // Update in-memory state on main thread
                 DispatchQueue.main.async {
-                    // Update the episode in all relevant collections
                     var updatedEpisode = episode
-                    updatedEpisode.state.isFavorite = newFavoriteStatus
-                    
-                    // Update allEpisodes
-                    if let index = self.allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                        self.allEpisodes[index] = updatedEpisode
-                    }
-                    
-                    // Update favoriteEpisodes
-                    if newFavoriteStatus {
-                        if !self.favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
-                            self.favoriteEpisodes.append(updatedEpisode)
-                        }
-                    } else {
-                        self.favoriteEpisodes.removeAll { $0.id == updatedEpisode.id }
-                    }
-                    
-                    // Clear cache and update filtered episodes
-                    self.episodeCache.removeValue(forKey: episode.feedId)
-                    self.updateFilteredEpisodes(for: episode.feedId, selectedTab: self.currentTab)
-                    
-                    // Force UI update
-                    self.objectWillChange.send()
+                    updatedEpisode.state.isFavorite = managedEpisode.isFavorite
+                    // Preserve download status
+                    updatedEpisode.state.isDownloaded = episode.state.isDownloaded
+                    self.updateEpisodeInLists(updatedEpisode)
                 }
             } catch {
                 print("Failed to toggle favorite status: \(error)")
@@ -1548,16 +1519,8 @@ class PodcastViewModel: ObservableObject {
                 var updatedEpisode = episode
                 updatedEpisode.state.isDownloaded = isDownloaded
                 
-                if isDownloaded {
-                    if !downloadedEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
-                        downloadedEpisodes.append(updatedEpisode)
-                    }
-                } else {
-                    downloadedEpisodes.removeAll { $0.id == updatedEpisode.id }
-                }
-                
+                // Update only this episode
                 updateEpisodeInLists(updatedEpisode)
-                objectWillChange.send()
             }
         } catch {
             print("Failed to update episode download status: \(error)")
@@ -1650,40 +1613,41 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func updateEpisodeInLists(_ episode: PodcastEpisode) {
-        // Update in allEpisodes
-            if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                allEpisodes[index] = episode
+            // Update in allEpisodes
+                if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    allEpisodes[index] = episode
+                }
+                
+                // Update in currentEpisodes
+                if let index = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    currentEpisodes[index] = episode
+                }
+            // Update favoriteEpisodes
+            if episode.state.isFavorite {
+                if !favoriteEpisodes.contains(where: { $0.id == episode.id }) {
+                    favoriteEpisodes.append(episode)
+                } else if let index = favoriteEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    favoriteEpisodes[index] = episode
+                }
+            } else {
+                favoriteEpisodes.removeAll { $0.id == episode.id }
             }
             
-            // Update in currentEpisodes
-            if let index = currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                currentEpisodes[index] = episode
+            // Update downloadedEpisodes
+            if episode.state.isDownloaded {
+                if !downloadedEpisodes.contains(where: { $0.id == episode.id }) {
+                    downloadedEpisodes.append(episode)
+                } else if let index = downloadedEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    downloadedEpisodes[index] = episode
+                }
+            } else {
+                downloadedEpisodes.removeAll { $0.id == episode.id }
             }
-        // Update favoriteEpisodes
-        if episode.state.isFavorite {
-            if !favoriteEpisodes.contains(where: { $0.id == episode.id }) {
-                favoriteEpisodes.append(episode)
-            } else if let index = favoriteEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                favoriteEpisodes[index] = episode
-            }
-        } else {
-            favoriteEpisodes.removeAll { $0.id == episode.id }
+            
+            updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
+            objectWillChange.send()
         }
-        
-        // Update downloadedEpisodes
-        if episode.state.isDownloaded {
-            if !downloadedEpisodes.contains(where: { $0.id == episode.id }) {
-                downloadedEpisodes.append(episode)
-            } else if let index = downloadedEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                downloadedEpisodes[index] = episode
-            }
-        } else {
-            downloadedEpisodes.removeAll { $0.id == episode.id }
-        }
-        
-        updateFilteredEpisodes(for: episode.feedId, selectedTab: currentTab)
-        objectWillChange.send()
-    }
+    
     
     func downloadEpisode(_ episode: PodcastEpisode, completion: @escaping (Result<PodcastEpisode, Error>) -> Void) {
             guard let url = URL(string: episode.audioUrl) else {
@@ -1802,43 +1766,105 @@ class PodcastViewModel: ObservableObject {
     }
     
     // In PodcastViewModel class, update the updateFilteredEpisodes method:
+    
+    private func buildFilteredPredicate(feedId: String, tab: Int) -> NSPredicate {
+           switch tab {
+           case 1: // Favorites
+               return NSPredicate(format: "feedId == %@ AND isFavorite == YES", feedId)
+           case 2: // Downloads
+               return NSPredicate(format: "feedId == %@ AND isDownloaded == YES", feedId)
+           default: // All Episodes (tab 0)
+               return NSPredicate(format: "feedId == %@", feedId)
+           }
+       }
+    
+    func fetchEpisodesWithFilter(for feed: PodcastFeed, page: Int, tab: Int, completion: @escaping (Result<[PodcastEpisode], Error>) -> Void) {
+           let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+           
+           backgroundContext.perform {
+               let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+               fetchRequest.predicate = self.buildFilteredPredicate(feedId: feed.id, tab: tab)
+               fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+               fetchRequest.fetchLimit = self.episodesPerPage
+               fetchRequest.fetchOffset = (page - 1) * self.episodesPerPage
+               
+               // Enable batch faulting for better performance
+               fetchRequest.relationshipKeyPathsForPrefetching = ["feed"]
+               
+               do {
+                   let managedEpisodes = try backgroundContext.fetch(fetchRequest)
+                   
+                   // Convert to PodcastEpisode models with preserved state
+                   let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                       var episode = managedEpisode.toPodcastEpisode()
+                       episode.state.isPlayed = managedEpisode.isPlayed
+                       episode.state.progress = managedEpisode.progress
+                       episode.state.isFavorite = managedEpisode.isFavorite
+                       episode.state.isDownloaded = managedEpisode.isDownloaded
+                       return episode
+                   }
+                   
+                   // Check if there are more episodes
+                   let countRequest = NSFetchRequest<NSNumber>(entityName: "PodcastModel")
+                   countRequest.predicate = fetchRequest.predicate
+                   countRequest.resultType = .countResultType
+                   let totalCount = try backgroundContext.count(for: countRequest)
+                   let hasMore = totalCount > (page * self.episodesPerPage)
+                   
+                   DispatchQueue.main.async {
+                       self.hasMoreEpisodes = hasMore
+                       completion(.success(episodes))
+                   }
+               } catch {
+                   DispatchQueue.main.async {
+                       completion(.failure(error))
+                   }
+               }
+           }
+       }
+    
 
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
-        DispatchQueue.main.async { [weak self] in
-            self?.currentTab = selectedTab
-        }
-        
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            
-            let filteredEpisodes: [PodcastEpisode]
-            
-            switch selectedTab {
-            case 0: // All Episodes
-                // Show all episodes for this feed
-                filteredEpisodes = self.allEpisodes.filter { $0.feedId == feedId }
-            
-            case 1: // Favorites
-                // Only show episodes that are marked as favorite for this feed
-                filteredEpisodes = self.favoriteEpisodes.filter { $0.feedId == feedId }
-            
-            case 2: // Downloads
-                // Only show episodes that are downloaded for this feed
-                filteredEpisodes = self.downloadedEpisodes.filter { $0.feedId == feedId }
-            
-            default:
-                filteredEpisodes = self.allEpisodes.filter { $0.feedId == feedId }
+            // Update the currentTab on the main thread
+            DispatchQueue.main.async { [weak self] in
+                self?.currentTab = selectedTab
             }
             
-            // Sort episodes by publication date (newest first)
-            let sortedEpisodes = filteredEpisodes.sorted { $0.publicationDate > $1.publicationDate }
-            
-            DispatchQueue.main.async {
-                self.currentEpisodes = sortedEpisodes
-                self.objectWillChange.send()
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+                
+                // Update allEpisodes with the latest bookmark and download statuses
+                let updatedAllFeedEpisodes = self.allEpisodes.map { episode -> PodcastEpisode in
+                    var updatedEpisode = episode
+                    if episode.feedId == feedId {
+                        updatedEpisode.state.isFavorite = self.favoriteEpisodes.contains(where: { $0.id == episode.id })
+                        updatedEpisode.state.isDownloaded = self.downloadedEpisodes.contains(where: { $0.id == episode.id })
+                    }
+                    return updatedEpisode
+                }
+                
+                let filteredEpisodes: [PodcastEpisode]
+                switch self.currentTab {
+                case 0: // All
+                    filteredEpisodes = updatedAllFeedEpisodes.filter { $0.feedId == feedId }
+                case 1: // Favorite
+                    filteredEpisodes = self.favoriteEpisodes.filter { $0.feedId == feedId }
+                case 2: // Downloads
+                    filteredEpisodes = self.downloadedEpisodes.filter { $0.feedId == feedId }
+                default:
+                    filteredEpisodes = updatedAllFeedEpisodes.filter { $0.feedId == feedId }
+                }
+                
+                let sortedEpisodes = filteredEpisodes.sorted { $0.publicationDate > $1.publicationDate }
+                
+                DispatchQueue.main.async {
+                    // Update allEpisodes with the latest statuses
+                    self.allEpisodes = updatedAllFeedEpisodes
+                    self.currentEpisodes = sortedEpisodes
+                    self.objectWillChange.send()
+                }
             }
         }
-    }
     
     func loadAllEpisodesProgress() {
         backgroundContext.perform {
