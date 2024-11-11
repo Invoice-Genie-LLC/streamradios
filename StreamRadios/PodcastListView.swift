@@ -1035,8 +1035,6 @@ struct PodcastPlayerView: View {
         }
         .navigationBarHidden(true)
         .onAppear(perform: handleOnAppear)
-        .onChange(of: podcastPlayer.currentEpisode, perform: handleEpisodeChange)
-        .onChange(of: viewModel.currentEpisodes, perform: handleEpisodesChange)
         .onChange(of: viewModel.podcastFeedOrder) { _ in refreshTrigger.toggle() }
         .onChange(of: refreshTrigger) { _ in refreshEpisodes() }
         .sheet(isPresented: $showPodcastPlayerSheet) {
@@ -1251,14 +1249,6 @@ struct PodcastPlayerView: View {
         scrollToEpisodeIfNeeded()
     }
     
-    private func handleEpisodeChange(_ episode: PodcastEpisode?) {
-        scrollToEpisodeIfNeeded()
-    }
-    
-    private func handleEpisodesChange(_ episodes: [PodcastEpisode]) {
-        scrollToEpisodeIfNeeded()
-    }
-    
     private func handleMiniPlayerListTap() {
         if let currentFeed = podcastPlayer.currentFeed {
             selectedPodcast = currentFeed
@@ -1294,7 +1284,6 @@ struct PodcastPlayerView: View {
     
     private func scrollToInitialEpisodeIfNeeded() {
         guard !hasInitiallyScrolled,
-              shouldAllowAutoScroll,
               let episodeId = initialScrollToEpisodeID ?? podcastPlayer.currentEpisode?.id,
               viewModel.currentEpisodes.contains(where: { $0.id == episodeId }) else {
             return
