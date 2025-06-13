@@ -1144,7 +1144,6 @@ struct PodcastPlayerView: View {
     @State private var shouldAllowAutoScroll = true
     @State private var hasManuallyScrolled = false
     @State private var isLoadingMore = false
-    @State private var refreshTrigger = false
     @State private var scrollOffset: CGPoint = .zero
     @State private var viewportHeight: CGFloat = 0
     @State private var userIsScrolling = false
@@ -1189,8 +1188,12 @@ struct PodcastPlayerView: View {
                     scrollDebounceTimer?.invalidate()
                     scrollDebounceTimer = nil
                 }
-                .onChange(of: viewModel.podcastFeedOrder) { _ in refreshTrigger.toggle() }
-                .onChange(of: refreshTrigger) { _ in refreshEpisodes() }
+                .onChange(of: viewModel.podcastFeedOrder) { _ in 
+                    // Only refresh if episodes haven't been loaded yet or if there's a significant change
+                    if viewModel.currentEpisodes.isEmpty {
+                        refreshEpisodes()
+                    }
+                }
                 .sheet(isPresented: $showPodcastPlayerSheet) {
                     if let podcast = selectedPodcast {
                         PodcastPlayerView(
@@ -1206,7 +1209,6 @@ struct PodcastPlayerView: View {
                         )
                     }
                 }
-                .id(refreshTrigger)
     }
     
     // MARK: - View Components
@@ -1350,19 +1352,26 @@ struct PodcastPlayerView: View {
         // 2. There's a current episode playing
         // 3. The episode exists in the current list
         // 4. User hasn't manually scrolled yet
+        // 5. Episodes have actually loaded (not empty)
         guard !hasPerformedInitialScroll,
               !hasManuallyScrolled,
+              !viewModel.currentEpisodes.isEmpty,
               let currentEpisode = podcastPlayer.currentEpisode,
               podcastPlayer.isPlaying,
               viewModel.currentEpisodes.contains(where: { $0.id == currentEpisode.id }) else {
             return
         }
         
+        // Mark as performed immediately to prevent multiple calls
+        hasPerformedInitialScroll = true
+        
         // Add a slight delay to ensure the view is properly laid out
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            // Double-check that we should still scroll (user might have scrolled in the meantime)
+            guard !self.hasManuallyScrolled else { return }
+            
             withAnimation(.easeInOut(duration: 0.5)) {
                 proxy.scrollTo(currentEpisode.id, anchor: .center)
-                hasPerformedInitialScroll = true
             }
         }
     }
@@ -1371,7 +1380,11 @@ struct PodcastPlayerView: View {
         // Detect if user is actively scrolling
         let scrollDistance = abs(newOffset.y - lastScrollOffset.y)
         
-        if scrollDistance > userScrollThreshold {
+        // Only consider it user scrolling if:
+        // 1. The distance is significant enough
+        // 2. We're not in the middle of an initial auto-scroll
+        // 3. The initial scroll has been completed or enough time has passed
+        if scrollDistance > userScrollThreshold && hasPerformedInitialScroll {
             // User is scrolling - mark as manual scroll and disable auto-scroll
             if !userIsScrolling {
                 userIsScrolling = true
@@ -1422,14 +1435,21 @@ struct PodcastPlayerView: View {
     }
     
     private func handleOnAppear() {
-        // Reset scroll state for fresh view
-        hasPerformedInitialScroll = false
-        hasManuallyScrolled = false
-        userIsScrolling = false
-        scrollOffset = .zero
-        lastScrollOffset = .zero
-        
-        loadInitialEpisodes()
+        // Only reset scroll state if this is truly a fresh view (episodes are empty)
+        // This prevents resetting state when the view is just being refreshed
+        if viewModel.currentEpisodes.isEmpty {
+            hasPerformedInitialScroll = false
+            hasManuallyScrolled = false
+            userIsScrolling = false
+            scrollOffset = .zero
+            lastScrollOffset = .zero
+            
+            loadInitialEpisodes()
+        } else {
+            // View already has episodes loaded, just ensure we have the latest data
+            // but don't reset scroll state
+            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+        }
     }
     
     private func handleMiniPlayerListTap() {

@@ -485,7 +485,7 @@ struct PlayerSheetView: View {
             return
         }
         
-        youtubeMusicManager.saveToYouTubeMusicPlaylist(songTitle: songTitle, artistName: artistName, playlistId: playlistId) { result in
+        youtubeMusicManager.addToPlaylist(playlistId: playlistId, songTitle: songTitle, artistName: artistName) { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success:
