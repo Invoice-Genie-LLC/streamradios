@@ -1,9 +1,0 @@
-"/Users/kley/Documents/StreamRadios/streamRadiosWidget/streamRadiosWidget.swift":
-  objc-header: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets-Swift.h"
-  swiftdoc: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets.swiftdoc"
-  abi-baseline-json: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets.abi.json"
-  swiftmodule: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets.swiftmodule"
-  dependencies: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets-master.d"
-  swiftsourceinfo: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets.swiftsourceinfo"
-  diagnostics: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets-master.dia"
-  const-values: "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphoneos/StreamRadioWidgets.build/Objects-normal/arm64/StreamRadioWidgets-master.swiftconstvalues"

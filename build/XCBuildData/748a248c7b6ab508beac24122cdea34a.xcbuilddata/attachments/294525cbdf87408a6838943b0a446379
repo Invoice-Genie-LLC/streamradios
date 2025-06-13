@@ -1,4 +1,0 @@
-module FlagKit {
-header "FlagKit-Swift.h"
-export *
-}
