@@ -114,9 +114,10 @@ class PodcastViewModel: ObservableObject {
     private let episodeListKey = "PodcastEpisodeList"
         private let bookmarkStatusKey = "PodcastBookmarkStatus"
         private let downloadStatusKey = "PodcastDownloadStatus"
-    @Published var lastPlayedEpisodes: [String: String] = [:]
+        @Published var lastPlayedEpisodes: [String: String] = [:]
     @Published var showNoEpisodesAlert = false
-       @Published var noEpisodesAlertMessage = ""
+    @Published var noEpisodesAlertMessage = ""
+    @Published var isAscendingSort = true // Track sort direction
     @Published var isLoadingMoreEpisodes = false
     @Published var hasMoreEpisodes = true
     private let episodesPerPage = 100
@@ -420,6 +421,14 @@ class PodcastViewModel: ObservableObject {
         if let savedLastPlayed = UserDefaults.standard.object(forKey: "LastPlayedEpisodes") as? [String: String] {
             lastPlayedEpisodes = savedLastPlayed
         }
+        
+        // Load sort direction
+        isAscendingSort = UserDefaults.standard.bool(forKey: "PodcastSortAscending")
+    }
+    
+    // Save sort direction to UserDefaults
+    private func saveSortDirection() {
+        UserDefaults.standard.set(isAscendingSort, forKey: "PodcastSortAscending")
     }
     
     func getLastPlayedOrLatestEpisode(for feed: PodcastFeed) -> PodcastEpisode? {
@@ -485,9 +494,21 @@ class PodcastViewModel: ObservableObject {
         }
     
     func sortFeedsAlphabetically() {
-        let sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() < $1.title.lowercased() }
+        // Toggle sort direction
+        isAscendingSort.toggle()
+        
+        let sortedFeeds: [PodcastFeed]
+        if isAscendingSort {
+            // Ascending A-Z
+            sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() < $1.title.lowercased() }
+        } else {
+            // Descending Z-A
+            sortedFeeds = podcastFeeds.sorted { $0.title.lowercased() > $1.title.lowercased() }
+        }
+        
         podcastFeedOrder = sortedFeeds.map { $0.id }
         saveFeedOrder()
+        saveSortDirection()
         objectWillChange.send()
     }
 
@@ -825,6 +846,7 @@ class PodcastViewModel: ObservableObject {
             self.favoriteEpisodes = []
             self.episodeProgress = [:]
             self.lastPlayedEpisodes = [:] // Reset last played episodes
+            self.isAscendingSort = true // Reset sort direction
             
             completion(success)
         }
@@ -849,6 +871,7 @@ class PodcastViewModel: ObservableObject {
         userDefaults.removeObject(forKey: progressKey)
         userDefaults.removeObject(forKey: episodeStatesKey)
         userDefaults.removeObject(forKey: "LastPlayedEpisodes") // Clear last played episodes
+        userDefaults.removeObject(forKey: "PodcastSortAscending") // Clear sort direction
         
         // Remove all keys that start with "PodcastProgress_"
         for key in userDefaults.dictionaryRepresentation().keys {

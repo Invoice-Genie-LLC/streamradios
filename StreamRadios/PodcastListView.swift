@@ -64,7 +64,7 @@ struct PodcastListView: View {
                        ToolbarItemGroup(placement: .navigationBarTrailing) {
                            if !isEditing {
                                Button(action: viewModel.sortFeedsAlphabetically) {
-                                   Image(systemName: "arrow.up.arrow.down")
+                                   Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
                                }
                                Button(action: { showingAddPodcast = true }) {
                                    Image(systemName: "plus")
