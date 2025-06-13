@@ -431,6 +431,37 @@ class PodcastViewModel: ObservableObject {
         UserDefaults.standard.set(isAscendingSort, forKey: "PodcastSortAscending")
     }
     
+    // Force clear any remaining progress data that might have been missed
+    private func forceCleanRemainingProgressData() {
+        let userDefaults = UserDefaults.standard
+        let domain = Bundle.main.bundleIdentifier ?? "com.streamradios.app"
+        
+        // Get ALL UserDefaults keys for this app
+        if let allAppKeys = userDefaults.persistentDomain(forName: domain)?.keys {
+            var additionalKeysRemoved = 0
+            
+            for key in allAppKeys {
+                // Remove any key that might contain episode/podcast progress data
+                let lowercaseKey = key.lowercased()
+                if lowercaseKey.contains("progress") || 
+                   lowercaseKey.contains("episode") || 
+                   lowercaseKey.contains("podcast") ||
+                   lowercaseKey.contains("playback") ||
+                   lowercaseKey.contains("duration") ||
+                   lowercaseKey.contains("currenttime") {
+                    print("DEBUG: Force removing remaining key: \(key)")
+                    userDefaults.removeObject(forKey: key)
+                    additionalKeysRemoved += 1
+                }
+            }
+            
+            print("DEBUG: Force removed \(additionalKeysRemoved) additional keys")
+        }
+        
+        // Synchronize to ensure all changes are saved
+        userDefaults.synchronize()
+    }
+    
     func getLastPlayedOrLatestEpisode(for feed: PodcastFeed) -> PodcastEpisode? {
             let feedEpisodes = allEpisodes.filter { $0.feedId == feed.id }
             
@@ -801,11 +832,16 @@ class PodcastViewModel: ObservableObject {
         let group = DispatchGroup()
         var success = true
         
+        print("DEBUG: Starting comprehensive podcast data cleanup...")
+        
         // 1. Delete all downloaded podcast files
         group.enter()
         deleteAllDownloadedPodcasts { result in
             if !result {
                 success = false
+                print("DEBUG: Failed to delete downloaded podcast files")
+            } else {
+                print("DEBUG: Successfully deleted all downloaded podcast files")
             }
             group.leave()
         }
@@ -815,6 +851,9 @@ class PodcastViewModel: ObservableObject {
         deleteAllPodcastEpisodesFromCoreData { result in
             if !result {
                 success = false
+                print("DEBUG: Failed to delete podcast episodes from Core Data")
+            } else {
+                print("DEBUG: Successfully deleted all podcast episodes from Core Data")
             }
             group.leave()
         }
@@ -824,18 +863,44 @@ class PodcastViewModel: ObservableObject {
         clearAllUserDefaultsData { result in
             if !result {
                 success = false
+                print("DEBUG: Failed to clear UserDefaults data")
+            } else {
+                print("DEBUG: Successfully cleared all UserDefaults data")
             }
             group.leave()
         }
         
         // 4. Clear all saved episode progress from UserDefaults or other storage
-               group.enter()
-               clearEpisodeProgressData { result in
-                   if !result {
-                       success = false
-                   }
-                   group.leave()
-               }
+        group.enter()
+        clearEpisodeProgressData { result in
+            if !result {
+                success = false
+                print("DEBUG: Failed to clear episode progress data")
+            } else {
+                print("DEBUG: Successfully cleared episode progress data")
+            }
+            group.leave()
+        }
+        
+        // 5. Clear EpisodeStateManager data
+        group.enter()
+        DispatchQueue.main.async {
+            EpisodeStateManager.shared.clearAllStates()
+            print("DEBUG: Successfully cleared EpisodeStateManager data")
+            group.leave()
+        }
+        
+        // 6. Reset PodcastPlayer state and progress
+        group.enter()
+        DispatchQueue.main.async {
+            // Stop current playback and clear episode
+            PodcastPlayer.shared.pause()
+            PodcastPlayer.shared.currentEpisode = nil
+            PodcastPlayer.shared.currentFeed = nil
+            PodcastPlayer.shared.currentProgress = 0
+            print("DEBUG: Successfully reset PodcastPlayer state")
+            group.leave()
+        }
         
         group.notify(queue: .main) {
             // Reset view model properties
@@ -848,6 +913,16 @@ class PodcastViewModel: ObservableObject {
             self.lastPlayedEpisodes = [:] // Reset last played episodes
             self.isAscendingSort = true // Reset sort direction
             
+            // Clear episode cache
+            self.episodeCache.removeAll()
+            
+            // Force clear any remaining progress keys that might have been missed
+            self.forceCleanRemainingProgressData()
+            
+            // Force a complete UI refresh
+            self.objectWillChange.send()
+            
+            print("DEBUG: Completed comprehensive podcast data cleanup")
             completion(success)
         }
     }
@@ -867,19 +942,41 @@ class PodcastViewModel: ObservableObject {
     
     private func clearAllUserDefaultsData(completion: @escaping (Bool) -> Void) {
         let userDefaults = UserDefaults.standard
-        userDefaults.removeObject(forKey: favoritesKey)
-        userDefaults.removeObject(forKey: progressKey)
-        userDefaults.removeObject(forKey: episodeStatesKey)
-        userDefaults.removeObject(forKey: "LastPlayedEpisodes") // Clear last played episodes
-        userDefaults.removeObject(forKey: "PodcastSortAscending") // Clear sort direction
         
-        // Remove all keys that start with "PodcastProgress_"
-        for key in userDefaults.dictionaryRepresentation().keys {
-            if key.hasPrefix("PodcastProgress_") {
+        // Clear all podcast-related UserDefaults keys
+        userDefaults.removeObject(forKey: favoritesKey) // Favorite episodes
+        userDefaults.removeObject(forKey: progressKey) // Episode progress
+        userDefaults.removeObject(forKey: episodeStatesKey) // Episode states
+        userDefaults.removeObject(forKey: episodeListKey) // Episode lists
+        userDefaults.removeObject(forKey: bookmarkStatusKey) // Bookmark status
+        userDefaults.removeObject(forKey: downloadStatusKey) // Download status
+        userDefaults.removeObject(forKey: "LastPlayedEpisodes") // Last played episodes
+        userDefaults.removeObject(forKey: "PodcastSortAscending") // Sort direction
+        
+        // Remove all keys that start with podcast/episode-related prefixes (individual episode progress)
+        let allKeys = Array(userDefaults.dictionaryRepresentation().keys)
+        var removedKeysCount = 0
+        
+        for key in allKeys {
+            if key.hasPrefix("PodcastProgress_") || 
+               key.hasPrefix("PodcastBookmark_") ||
+               key.hasPrefix("PodcastDownload_") ||
+               key.hasPrefix("PodcastFavorite_") ||
+               key.hasPrefix("EpisodeProgress_") ||
+               key.hasPrefix("Episode_") ||
+               key.hasPrefix("EpisodeStates") ||
+               key.hasPrefix("EpisodeProgress") ||
+               key.contains("Progress") && (key.contains("Episode") || key.contains("Podcast")) {
+                
+                print("DEBUG: Removing UserDefaults key: \(key)")
                 userDefaults.removeObject(forKey: key)
+                removedKeysCount += 1
             }
         }
         
+        print("DEBUG: Removed \(removedKeysCount) podcast-related UserDefaults keys")
+        
+        print("DEBUG: Cleared all podcast-related UserDefaults data")
         completion(true)
     }
     
@@ -903,15 +1000,40 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func deleteAllPodcastEpisodesFromCoreData(completion: @escaping (Bool) -> Void) {
-        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
-        let batchDeleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        print("DEBUG: Starting Core Data episode deletion...")
+        
+        // First, try to fetch all episodes and delete them individually to ensure complete cleanup
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         
         do {
-            try context.execute(batchDeleteRequest)
+            let allEpisodes = try context.fetch(fetchRequest)
+            print("DEBUG: Found \(allEpisodes.count) episodes to delete from Core Data")
+            
+            // Delete each episode individually to ensure progress is cleared
+            for episode in allEpisodes {
+                print("DEBUG: Deleting episode: \(episode.title ?? "Unknown") with progress: \(episode.progress)")
+                context.delete(episode)
+            }
+            
+            // Save the context
+            try context.save()
+            print("DEBUG: Successfully deleted all \(allEpisodes.count) episodes from Core Data")
+            
+            // Also do a batch delete as a backup to catch any remaining data
+            let batchDeleteRequest = NSBatchDeleteRequest(fetchRequest: NSFetchRequest<NSFetchRequestResult>(entityName: "PodcastModel"))
+            batchDeleteRequest.resultType = .resultTypeObjectIDs
+            
+            let batchResult = try context.execute(batchDeleteRequest) as? NSBatchDeleteResult
+            if let objectIDs = batchResult?.result as? [NSManagedObjectID] {
+                let changes = [NSDeletedObjectsKey: objectIDs]
+                NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context])
+                print("DEBUG: Batch delete removed \(objectIDs.count) additional objects")
+            }
+            
             try context.save()
             completion(true)
         } catch {
-            print("Error deleting podcast episodes from Core Data: \(error)")
+            print("DEBUG: Error deleting podcast episodes from Core Data: \(error)")
             completion(false)
         }
     }
