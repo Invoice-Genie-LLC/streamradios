@@ -127,6 +127,9 @@ class PodcastViewModel: ObservableObject {
         self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
         self.backgroundContext.parent = context
 
+        // Load lastPlayedEpisodes immediately (synchronously) so UI can use it right away
+        self.loadLastPlayedEpisodes()
+
         // Perform initial loading asynchronously on a background thread
         Task(priority: .background) {
             await loadInitialData()
@@ -403,6 +406,19 @@ class PodcastViewModel: ObservableObject {
     func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
         DispatchQueue.main.async {
             self.lastPlayedEpisodes[episode.feedId] = episode.id
+            self.saveLastPlayedEpisodes() // Save to UserDefaults
+        }
+    }
+    
+    // Add new method to save lastPlayedEpisodes to UserDefaults
+    private func saveLastPlayedEpisodes() {
+        UserDefaults.standard.set(lastPlayedEpisodes, forKey: "LastPlayedEpisodes")
+    }
+    
+    // Add new method to load lastPlayedEpisodes from UserDefaults
+    private func loadLastPlayedEpisodes() {
+        if let savedLastPlayed = UserDefaults.standard.object(forKey: "LastPlayedEpisodes") as? [String: String] {
+            lastPlayedEpisodes = savedLastPlayed
         }
     }
     
@@ -731,6 +747,7 @@ class PodcastViewModel: ObservableObject {
             self.downloadedEpisodes = []
             self.favoriteEpisodes = []
             self.episodeProgress = [:]
+            self.lastPlayedEpisodes = [:] // Reset last played episodes
             
             completion(success)
         }
@@ -754,6 +771,7 @@ class PodcastViewModel: ObservableObject {
         userDefaults.removeObject(forKey: favoritesKey)
         userDefaults.removeObject(forKey: progressKey)
         userDefaults.removeObject(forKey: episodeStatesKey)
+        userDefaults.removeObject(forKey: "LastPlayedEpisodes") // Clear last played episodes
         
         // Remove all keys that start with "PodcastProgress_"
         for key in userDefaults.dictionaryRepresentation().keys {
