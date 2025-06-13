@@ -606,6 +606,83 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    func updatePodcastFeed(_ updatedFeed: PodcastFeed) {
+        print("DEBUG: updatePodcastFeed called with - ID: \(updatedFeed.id), Title: '\(updatedFeed.title)', URL: '\(updatedFeed.url)'")
+        isLoading = true
+        
+        // Update in memory first
+        if let index = podcastFeeds.firstIndex(where: { $0.id == updatedFeed.id }) {
+            let oldFeed = podcastFeeds[index]
+            print("DEBUG: Found feed to update - Old Title: '\(oldFeed.title)', New Title: '\(updatedFeed.title)'")
+            print("DEBUG: Found feed to update - Old URL: '\(oldFeed.url)', New URL: '\(updatedFeed.url)'")
+            podcastFeeds[index] = updatedFeed
+            print("DEBUG: Updated feed in memory")
+        } else {
+            print("DEBUG: ERROR - Could not find feed with ID: \(updatedFeed.id)")
+        }
+        
+        // Update in Core Data
+        let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", updatedFeed.id)
+        
+        do {
+            let results = try context.fetch(fetchRequest)
+            if let managedFeed = results.first {
+                print("DEBUG: Found managed feed to update - Old Title: '\(managedFeed.title ?? "nil")', New Title: '\(updatedFeed.title)'")
+                managedFeed.update(from: updatedFeed)
+                try context.save()
+                print("DEBUG: Successfully saved to Core Data")
+                os_log("Updated podcast feed: %@", log: log, type: .info, updatedFeed.title)
+                
+                // Force UI update
+                DispatchQueue.main.async {
+                    self.objectWillChange.send()
+                }
+                
+                // Update in CloudKit
+                dataStore.savePodcastFeedToCloudKit(updatedFeed) { [weak self] success, recordID in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        if success {
+                            print("DEBUG: Successfully updated in CloudKit")
+                            os_log("Updated podcast feed in CloudKit: %@", log: self.log, type: .info, updatedFeed.title)
+                        } else {
+                            print("DEBUG: Failed to update in CloudKit")
+                            os_log("Failed to update podcast feed in CloudKit: %@", log: self.log, type: .error, updatedFeed.title)
+                        }
+                        
+                        // Refetch episodes if URL changed
+                        self.fetchRSSFeed(for: updatedFeed) { result in
+                            switch result {
+                            case .success(let refreshedFeed):
+                                print("DEBUG: Successfully refreshed RSS feed")
+                                if let index = self.podcastFeeds.firstIndex(where: { $0.id == refreshedFeed.id }) {
+                                    self.podcastFeeds[index] = refreshedFeed
+                                }
+                                self.updateFeed(refreshedFeed)
+                            case .failure(let error):
+                                print("DEBUG: Failed to refresh RSS feed: \(error)")
+                                os_log("Failed to refresh RSS feed after update: %@", log: self.log, type: .error, error.localizedDescription)
+                            }
+                            self.isLoading = false
+                            self.objectWillChange.send()
+                        }
+                    }
+                }
+            } else {
+                print("DEBUG: ERROR - Could not find managed feed with ID: \(updatedFeed.id)")
+                self.isLoading = false
+                self.objectWillChange.send()
+            }
+        } catch {
+            print("DEBUG: Core Data error: \(error)")
+            os_log("Failed to update podcast feed: %@", log: log, type: .error, error.localizedDescription)
+            self.error = "Failed to update podcast feed"
+            self.isLoading = false
+            self.objectWillChange.send()
+        }
+    }
+    
     func refreshEpisodeStates() {
         for index in allEpisodes.indices {
             let episode = allEpisodes[index]

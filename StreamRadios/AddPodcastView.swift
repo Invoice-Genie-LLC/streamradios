@@ -21,8 +21,21 @@ struct AddPodcastView: View {
     @State private var showPodcastPlayerSheet = false
     @StateObject private var radioPlayer = RadioPlayer.shared
     
+    // Add editing support
+    let podcastToEdit: PodcastFeed?
     let onAdd: () -> Void
+    let onUpdate: ((PodcastFeed) -> Void)?
+    
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
+    
+    // Computed properties for UI
+    private var navigationTitle: String {
+        podcastToEdit != nil ? "Edit Podcast" : "Add Podcast"
+    }
+    
+    private var actionButtonText: String {
+        podcastToEdit != nil ? "Update" : "Add"
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -38,12 +51,12 @@ struct AddPodcastView: View {
                                     .foregroundColor(.primary)
                             }
                             Spacer()
-                            Text("Add Podcast")
+                            Text(navigationTitle)
                                 .font(.headline)
                                 .foregroundColor(.primary)
                             Spacer()
                             Button(action: validateAndSavePodcast) {
-                                Text("Add")
+                                Text(actionButtonText)
                                     .foregroundColor(.green)
                             }
                         }
@@ -115,6 +128,13 @@ struct AddPodcastView: View {
                         }
                     }
                     .navigationBarHidden(true)
+                    .onAppear {
+                        // Populate fields when editing
+                        if let podcastToEdit = podcastToEdit {
+                            title = podcastToEdit.title
+                            url = podcastToEdit.url
+                        }
+                    }
                 }
                 
                 if showAlert {
@@ -160,16 +180,41 @@ struct AddPodcastView: View {
             return
         }
 
-        onAdd()
+        // Handle edit vs add
+        if let podcastToEdit = podcastToEdit {
+            // Update existing podcast
+            print("DEBUG: AddPodcastView - Original podcast - ID: \(podcastToEdit.id), Title: '\(podcastToEdit.title)', URL: '\(podcastToEdit.url)'")
+            print("DEBUG: AddPodcastView - New values - Title: '\(title.trimmingCharacters(in: .whitespacesAndNewlines))', URL: '\(self.url.trimmingCharacters(in: .whitespacesAndNewlines))'")
+            
+            var updatedPodcast = podcastToEdit
+            updatedPodcast.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            updatedPodcast.url = self.url.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            print("DEBUG: AddPodcastView - Updated podcast - ID: \(updatedPodcast.id), Title: '\(updatedPodcast.title)', URL: '\(updatedPodcast.url)'")
+            onUpdate?(updatedPodcast)
+        } else {
+            // Add new podcast
+            onAdd()
+        }
+        
         isPresented = false
     }
 }
 
 struct AddPodcastView_Previews: PreviewProvider {
     static var previews: some View {
-        AddPodcastView(isPresented: .constant(true), title: .constant(""), url: .constant(""), onAdd: {
-            print("Podcast added")
-        })
+        AddPodcastView(
+            isPresented: .constant(true), 
+            title: .constant(""), 
+            url: .constant(""), 
+            podcastToEdit: nil,
+            onAdd: {
+                print("Podcast added")
+            },
+            onUpdate: { podcast in
+                print("Podcast updated: \(podcast.title)")
+            }
+        )
         .environmentObject(PermissionManager())
         .environmentObject(PodcastViewModel())
     }
