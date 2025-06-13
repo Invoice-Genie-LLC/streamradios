@@ -1,0 +1,648 @@
+{
+  "" : {
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadios-master.dia",
+    "emit-module-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadios-master-emit-module.d",
+    "emit-module-diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadios-master-emit-module.dia",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadios-master.swiftdeps"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AddPodcastView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddPodcastView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AddStationView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AddStationView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AlarmConfigurationView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmConfigurationView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AlarmTriggeredView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlarmTriggeredView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AlbumArtView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlbumArtView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AlertManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AlertManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AppDelegate.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AppDelegate~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/AudioPlayerProtocol.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/AudioPlayerProtocol~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/BackgroundTaskManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BackgroundTaskManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/BannerAlert.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/BannerAlert~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/CircularProgressView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CircularProgressView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ContentView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ContentView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/CoreDataStack.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CoreDataStack~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/CustomAlertView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CustomAlertView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Data/DataStore.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DataStore~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/DocumentPicker.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/DocumentPicker~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/EditStationView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EditStationView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Enums/ActiveSheet.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ActiveSheet~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Enums/Tabs.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Tabs~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/EpisodeStateManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EpisodeStateManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ExportSheet.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportSheet~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Extensions/EndEditing.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/EndEditing~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/FeatureSwitches/FeatureSwitch.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeatureSwitch~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/LyricsView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/LyricsView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ManagedPodcastEpisode.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ManagedPodcastEpisode~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/MiniPlayerView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MiniPlayerView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Models/Country.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/Country~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Models/ExportStation.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ExportStation~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Models/RadioStation.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStation~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/MusicAuthorizationManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/MusicAuthorizationManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/NotificationCenterProtocol.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationCenterProtocol~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/NotificationManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NotificationManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/PermissionManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PermissionManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/PlaybackManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlaybackManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/PlayerSheetView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerSheetView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/PlayerView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PlayerView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/PodcastListView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastListView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/PodcastPlayer.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastPlayer~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/RadioStationListView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationListView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/RadioStreamApp.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStreamApp~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ReachabilityCheck.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReachabilityCheck~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ReconnectingIndicatorView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ReconnectingIndicatorView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/SceneDelegate.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SceneDelegate~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ScrollOffsetTracker.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ScrollOffsetTracker~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/SettingsView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SettingsView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/SideMenuView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SideMenuView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/SpotifyAuthorizationManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/SpotifyAuthorizationManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/Style/NeumorphicShadow.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/NeumorphicShadow~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/StyledPickerView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StyledPickerView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ViewModels/ImagePicker.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ImagePicker~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ViewModels/PodcastViewModel.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastViewModel~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ViewModels/RadioPlayer.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioPlayer~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ViewModels/RadioStationViewModel.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/RadioStationViewModel~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/ViewModels/ShazamViewModel.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/ShazamViewModel~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/YouTubeMusicManager.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicManager~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/StreamRadios/YouTubeMusicPlaylistPickerView.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/YouTubeMusicPlaylistPickerView~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/CoreDataGenerated/StreamRadiosModel/CDStation+CoreDataClass.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataClass~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/CoreDataGenerated/StreamRadiosModel/CDStation+CoreDataProperties.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/CDStation+CoreDataProperties~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/CoreDataGenerated/StreamRadiosModel/FeedModel+CoreDataClass.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataClass~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/CoreDataGenerated/StreamRadiosModel/FeedModel+CoreDataProperties.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/FeedModel+CoreDataProperties~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/CoreDataGenerated/StreamRadiosModel/PodcastModel+CoreDataClass.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataClass~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/CoreDataGenerated/StreamRadiosModel/PodcastModel+CoreDataProperties.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/PodcastModel+CoreDataProperties~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/CoreDataGenerated/StreamRadiosModel/StreamRadiosModel+CoreDataModel.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/StreamRadiosModel+CoreDataModel~partial.swiftmodule"
+  },
+  "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Debug-iphoneos/StreamRadios.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  }
+}

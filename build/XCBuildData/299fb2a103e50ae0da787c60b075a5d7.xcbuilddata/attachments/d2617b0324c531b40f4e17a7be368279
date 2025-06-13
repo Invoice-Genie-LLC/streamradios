@@ -1,0 +1,4 @@
+module GoogleAPIClientForREST_YouTube {
+umbrella "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/google-api-objectivec-client-for-rest/Sources/GeneratedServices/YouTube/Public"
+export *
+}

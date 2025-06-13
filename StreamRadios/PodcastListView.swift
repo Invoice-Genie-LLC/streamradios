@@ -292,6 +292,43 @@ struct PodcastRowView: View {
     private let iconSize: CGFloat = 88 // Adjusted to match 4 lines of text plus some padding
     private let arrowSize: CGFloat = 20 // New constant for arrow size
     
+    // Computed property to check if there are episodes in progress for this feed
+    private var hasInProgressEpisodes: Bool {
+        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+        return feedEpisodes.contains { $0.state.progress > 0 && $0.state.progress < 1 }
+    }
+    
+    // Computed property to get the appropriate button text
+    private var buttonText: String {
+        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+        let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+        
+        // Priority 1: Check if we have a last played episode for this feed
+        if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id] {
+            // Always return "Resume Episode" if we have a last played episode recorded
+            // This handles the case where episodes haven't loaded yet or progress data is still syncing
+            return "Resume Episode"
+        }
+        
+        // Priority 2: Check for any episodes in progress (fallback for older data)
+        if !episodesInProgress.isEmpty {
+            return "Resume Podcast"
+        }
+        
+        // Priority 3: Check if we have any episodes with stored progress from UserDefaults
+        // This is a backup check for episodes that might have progress but aren't in lastPlayedEpisodes yet
+        for episode in feedEpisodes {
+            let progressKey = "PodcastProgress_\(episode.id)"
+            let storedProgress = UserDefaults.standard.double(forKey: progressKey)
+            if storedProgress > 0 && storedProgress < 1 {
+                return "Resume Podcast"
+            }
+        }
+        
+        // Default case: No previous playback detected
+        return "Play Latest"
+    }
+    
     var body: some View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(feed.title)
@@ -302,6 +339,9 @@ struct PodcastRowView: View {
                 HStack(alignment: .top, spacing: 12) {
                     PodcastIconView(iconData: feed.iconData, imageData: feed.imageData, artworkUrl: feed.artworkUrl)
                         .frame(width: iconSize, height: iconSize)
+                        .onTapGesture {
+                            onTap()
+                        }
                 
                 VStack(alignment: .leading, spacing: 4) {
                     if isExpanded {
@@ -309,16 +349,22 @@ struct PodcastRowView: View {
                             .font(.subheadline)
                             .foregroundColor(.gray)
                             .fixedSize(horizontal: false, vertical: true)
+                            .onTapGesture {
+                                onTap()
+                            }
                     } else {
                         Text(feed.descriptionText ?? "No description available")
                             .font(.subheadline)
                             .foregroundColor(.gray)
                             .lineLimit(4)
                             .frame(height: iconSize, alignment: .top)
+                            .onTapGesture {
+                                onTap()
+                            }
                     }
                     
                     HStack {
-                        if isPlaying {
+                        if isPlaying && podcastPlayer.currentEpisode?.feedId == feed.id {
                             Button(action: {
                                 let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
                                 impactFeedback.impactOccurred()
@@ -332,24 +378,22 @@ struct PodcastRowView: View {
                                         .foregroundColor(.blue)
                                 }
                             }
+                            .buttonStyle(.plain)
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                onStop()
-                            }
                         } else {
                             Button(action: {
-                                checkAndPlayEpisode()
+                                playLastPlayedEpisode()
                             }) {
                                 HStack {
                                     Image(systemName: "play.circle.fill")
                                         .foregroundColor(.green)
-                                    Text("Resume Podcast")
+                                    Text(buttonText)
                                         .font(.footnote)
                                         .foregroundColor(.green)
                                 }
                             }
+                            .buttonStyle(.plain)
                             .contentShape(Rectangle())
-                            .onTapGesture(perform: onPlay)
                         }
                     }
                 }
@@ -360,14 +404,13 @@ struct PodcastRowView: View {
                     .font(.system(size: arrowSize))
                     .foregroundColor(.gray)
                     .frame(width: arrowSize, height: iconSize)
+                    .onTapGesture {
+                        onTap()
+                    }
             }
         }
       //  .padding(.horizontal, 10)
         .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onTap()
-        }
     }
     
     private func checkAndPlayEpisode() {
@@ -382,6 +425,46 @@ struct PodcastRowView: View {
         } else {
             onPlay()
         }
+    }
+    
+    private func playLastPlayedEpisode() {
+        // If there's a currently playing episode from this feed, resume it
+        if let currentEpisode = podcastPlayer.currentEpisode,
+           currentEpisode.feedId == feed.id,
+           !podcastPlayer.isPlaying {
+            podcastPlayer.togglePlayPause()
+            return
+        }
+        
+        // Get all episodes for this feed
+        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+        let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+        
+        // Case 1: If there are episodes in progress (Resume Podcast button)
+        if !episodesInProgress.isEmpty {
+            // Try to play the specific last played episode if it has progress
+            if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id],
+               let lastPlayedEpisode = episodesInProgress.first(where: { $0.id == lastPlayedEpisodeId }) {
+                podcastPlayer.playEpisode(lastPlayedEpisode, feed: feed)
+                return
+            }
+            
+            // If no specific last played episode found, play the first in-progress episode
+            if let firstInProgressEpisode = episodesInProgress.first {
+                podcastPlayer.playEpisode(firstInProgressEpisode, feed: feed)
+                return
+            }
+        }
+        
+        // Case 2: No episodes in progress (Play Latest button)
+        // Play the most recent episode (newest by publication date)
+        if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
+            podcastPlayer.playEpisode(latestEpisode, feed: feed)
+            return
+        }
+        
+        // Fallback: Use the existing logic if no episodes found
+        podcastPlayer.playLastEpisodeForFeed(feed)
     }
 }
 

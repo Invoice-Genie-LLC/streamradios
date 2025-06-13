@@ -1,0 +1,24 @@
+{
+  "source": "/Users/kley/Documents/StreamRadios/streamRadiosWidget/streamRadiosWidget.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Radio Station",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 79
+        }
+      },
+      {
+        "comment": "",
+        "key": "Displays the current radio station and metadata.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 80
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,0 +1,78 @@
+{
+  "" : {
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-master.dia",
+    "emit-module-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-master-emit-module.d",
+    "emit-module-diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-master-emit-module.dia",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-master.swiftdeps"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/Sources/FlagKit/Flag.swift" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag.dia",
+    "index-unit-output-path" : "/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag.o",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag.swiftdeps",
+    "swiftmodule" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/Flag~partial.swiftmodule"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/Sources/FlagKit/FlagKit.swift" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4.dia",
+    "index-unit-output-path" : "/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4.o",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4.swiftdeps",
+    "swiftmodule" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagKit-fa8ffda81424205a3b98ab3822bf23a4~partial.swiftmodule"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/Sources/FlagKit/FlagStyle.swift" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle.dia",
+    "index-unit-output-path" : "/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle.o",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle.swiftdeps",
+    "swiftmodule" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/FlagStyle~partial.swiftmodule"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/Sources/FlagKit/NSImage.swift" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage.dia",
+    "index-unit-output-path" : "/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage.o",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage.swiftdeps",
+    "swiftmodule" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/NSImage~partial.swiftmodule"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/Sources/FlagKit/UIImage.swift" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage.dia",
+    "index-unit-output-path" : "/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage.o",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage.swiftdeps",
+    "swiftmodule" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/UIImage~partial.swiftmodule"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor.dia",
+    "index-unit-output-path" : "/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor.swiftdeps",
+    "swiftmodule" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/FlagKit/build/FlagKit.build/Debug-iphoneos/FlagKit.build/Objects-normal/arm64/resource_bundle_accessor~partial.swiftmodule"
+  }
+}
