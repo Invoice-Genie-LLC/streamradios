@@ -184,7 +184,7 @@ struct SettingsView: View {
                 .fontWeight(.bold)
                 .foregroundColor(.red)
                 .font(.footnote) +
-            Text("Clearing all podcast episodes will permanently erase all downloaded episodes and their associated information from your device's local storage. This includes playback progress and favorites. This action cannot be undone.")
+            Text("Clearing all podcast episodes will permanently erase ALL podcast-related data from your device's local storage, including:\n\n• All downloaded episodes\n• Playback progress for all episodes\n• All bookmarked episodes\n• All favorited episodes\n• Episode listening history\n• Custom sort preferences\n\nThis action cannot be undone.")
                 .font(.footnote)
                 .foregroundColor(.gray)
         }
@@ -430,7 +430,7 @@ struct SettingsView: View {
                 self.isCleaningPodcasts = false
                 if success {
                     self.podcastCleanupComplete = true
-                    self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data, including downloads, episode progress and bookmarks, has been cleared.")
+                    self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data has been successfully cleared, including downloads, playback progress, bookmarks, favorites, and listening history.")
                 } else {
                     self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
                 }
