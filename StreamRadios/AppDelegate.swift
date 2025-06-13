@@ -52,19 +52,41 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     
     func applicationWillTerminate(_ application: UIApplication) {
+        // Immediately save current state when app is terminated
         updatePodcastStateAndSave()
         PodcastPlayer.shared.handleAppWillTerminate()
         podcastViewModel.saveContextIfNeeded()
+        
+        // Force synchronize UserDefaults to ensure data persistence
+        UserDefaults.standard.synchronize()
     }
     
     func applicationWillResignActive(_ application: UIApplication) {
-            updatePodcastStateAndSave()
-        }
+        // Save state immediately when app resigns active status (might be force closed)
+        updatePodcastStateAndSave()
+        PodcastPlayer.shared.handleAppWillTerminate()
+        
+        // Force synchronize to persist data
+        UserDefaults.standard.synchronize()
+    }
 
         func updatePodcastStateAndSave() {
             if let currentEpisode = podcastPlayer.currentEpisode {
+                let currentProgress = PodcastPlayer.shared.currentProgress
+                
                 // Update progress
-                PodcastViewModel().updateProgress(for: currentEpisode, progress: PodcastPlayer.shared.currentProgress)
+                podcastViewModel.updateProgress(for: currentEpisode, progress: currentProgress)
+                
+                // If episode was playing when app is closing, mark it as "In Progress"
+                if podcastPlayer.isPlaying && currentProgress > 0 && currentProgress < 0.99 {
+                    var updatedEpisode = currentEpisode
+                    updatedEpisode.state.progress = currentProgress
+                    updatedEpisode.state.isPlayed = false
+                    podcastViewModel.updateEpisode(updatedEpisode)
+                    
+                    // Ensure EpisodeStateManager also reflects the correct state
+                    EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
+                }
 
                 // Update favorite (bookmark) state
                 if currentEpisode.state.isFavorite != podcastViewModel.favoriteEpisodes.contains(where: { $0.id == currentEpisode.id }) {
@@ -84,13 +106,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 }
             }
             
-            // Save context
+            // Save context and force synchronize
             podcastViewModel.saveContextIfNeeded()
         }
 
      func applicationDidEnterBackground(_ application: UIApplication) {
-         PodcastPlayer.shared.handleAppWillTerminate()
+         // App entered background - save all current state immediately
          updatePodcastStateAndSave()
+         PodcastPlayer.shared.handleAppWillTerminate()
+         
+         // Force synchronize to ensure data persistence
+         UserDefaults.standard.synchronize()
      }
     
     lazy var persistentContainer: NSPersistentContainer = {

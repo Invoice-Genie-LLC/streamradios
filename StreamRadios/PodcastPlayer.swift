@@ -42,6 +42,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         private let updateInterval: TimeInterval = 0.5
     private var lastReportedProgress: Double = 0
     private let stateManager = EpisodeStateManager.shared
+    private var shouldStartFromBeginning: Bool = false
 
 
     var remainingTime: Double {
@@ -53,6 +54,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                setupReachability()
                setupRemoteCommandCenter()
                setupInterruptionHandling()
+               setupTerminationHandling()
        }
     
     private func setupAudioSession() {
@@ -83,6 +85,26 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                                                    object: nil)
         }
     
+    private func setupTerminationHandling() {
+        // Listen for app termination notifications
+        NotificationCenter.default.addObserver(self,
+                                             selector: #selector(handleAppTermination),
+                                             name: UIApplication.willTerminateNotification,
+                                             object: nil)
+        
+        // Also listen for when app goes to background (force close might trigger this first)
+        NotificationCenter.default.addObserver(self,
+                                             selector: #selector(handleAppTermination),
+                                             name: UIApplication.didEnterBackgroundNotification,
+                                             object: nil)
+        
+        // Listen for when app resigns active state
+        NotificationCenter.default.addObserver(self,
+                                             selector: #selector(handleAppTermination),
+                                             name: UIApplication.willResignActiveNotification,
+                                             object: nil)
+    }
+    
     @objc private func handleInterruption(notification: Notification) {
             guard let userInfo = notification.userInfo,
                   let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -103,6 +125,19 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 break
             }
         }
+    
+    @objc private func handleAppTermination(notification: Notification) {
+        // Handle different app lifecycle events to ensure progress is saved
+        os_log("App lifecycle event detected: %@", log: log, type: .info, notification.name.rawValue)
+        
+        if notification.name == UIApplication.willTerminateNotification ||
+           notification.name == UIApplication.didEnterBackgroundNotification ||
+           notification.name == UIApplication.willResignActiveNotification {
+            
+            // Ensure progress is saved when app is force closed or goes to background
+            handleAppWillTerminate()
+        }
+    }
     
     private func handleNetworkReconnection() {
             guard isPlaying else { return }
@@ -293,14 +328,48 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     
     func rewindAndPlay(episode: PodcastEpisode) {
-        if currentEpisode?.id == episode.id {
-            seek(to: 0)
-            stateManager.rewindAndPlay(episodeId: episode.id)
-            play()
-        } else {
-            playEpisode(episode, feed: viewModel?.podcastFeeds.first { $0.id == episode.feedId } ?? PodcastFeed(id: "", title: "", url: ""))
+        // Find the correct feed for this episode
+        guard let feed = viewModel?.podcastFeeds.first(where: { $0.id == episode.feedId }) else {
+            os_log("Feed not found for episode: %@", log: log, type: .error, episode.title)
+            return
         }
+        
+        if currentEpisode?.id == episode.id {
+            // Same episode - rewind to beginning and play
+            seek(to: 0)
+            currentTime = 0
+            currentProgress = 0
+            
+            // Reset progress in view model
+            viewModel?.updateProgress(for: episode, progress: 0.0)
+            
+            // Update episode state to not played and reset progress
+            var updatedEpisode = episode
+            updatedEpisode.state.isPlayed = false
+            updatedEpisode.state.progress = 0.0
+            viewModel?.updateEpisode(updatedEpisode)
+            
+            // Update state manager
+            stateManager.rewindAndPlay(episodeId: episode.id)
+            
+            // Start playing
+            play()
+            
+            os_log("Rewound and playing episode: %@", log: log, type: .info, episode.title)
+        } else {
+            // Different episode - load it and start from beginning
+            shouldStartFromBeginning = true
+            playEpisode(episode, feed: feed)
+            os_log("Loaded new episode and playing from beginning: %@", log: log, type: .info, episode.title)
+        }
+        
         isPlaying = true
+        
+        // Force UI update
+        DispatchQueue.main.async {
+            self.viewModel?.objectWillChange.send()
+            self.objectWillChange.send()
+        }
     }
     
     func configure(with viewModel: PodcastViewModel) {
@@ -521,6 +590,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     private func seekToSavedProgress() {
         guard let currentEpisode = currentEpisode else { return }
+        
+        // If this is a replay action, always start from the beginning
+        if shouldStartFromBeginning {
+            os_log("Replay requested - starting from the beginning")
+            player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            currentTime = 0
+            currentProgress = 0
+            shouldStartFromBeginning = false  // Reset the flag
+            return
+        }
+        
         if let savedProgress = viewModel?.episodeProgress[currentEpisode.id] {
             let targetTime = savedProgress * duration
             os_log("Seeking to saved progress: %f seconds", targetTime)
@@ -728,9 +808,26 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func handleAppWillTerminate() {
-        if let currentEpisode = currentEpisode {
-            saveProgressIfNeeded()
-            os_log("Saved progress on app termination for episode: %@", log: log, type: .info, currentEpisode.title)
+        if let currentEpisode = currentEpisode, isPlaying {
+            // Immediately save current progress
+            let progress = currentTime / duration
+            
+            // Save progress in view model
+            viewModel?.updateProgress(for: currentEpisode, progress: progress)
+            
+            // Update episode state to "In Progress" if it was playing
+            var updatedEpisode = currentEpisode
+            updatedEpisode.state.progress = progress
+            updatedEpisode.state.isPlayed = progress >= 0.99
+            viewModel?.updateEpisode(updatedEpisode)
+            
+            // Update state manager to mark as in progress
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
+            
+            // Force save to UserDefaults and Core Data immediately
+            viewModel?.saveContextIfNeeded()
+            
+            os_log("Force saved progress and marked episode as in progress on app termination: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
         }
     }
     
@@ -759,8 +856,20 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     deinit {
+        // Ensure progress is saved even if the object is deallocated unexpectedly
+        if let currentEpisode = currentEpisode, isPlaying {
+            let progress = currentTime / duration
+            viewModel?.updateProgress(for: currentEpisode, progress: progress)
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
+            os_log("Saved progress on deinit for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
+        }
+        
         playerItemObserver?.invalidate()
         updateTimer?.invalidate()
+        nowPlayingUpdateTimer?.invalidate()
+        
+        // Remove observers to prevent memory leaks
+        NotificationCenter.default.removeObserver(self)
     }
 }
 

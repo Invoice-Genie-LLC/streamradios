@@ -996,6 +996,7 @@ struct PodcastPlayerView: View {
     @State private var debounceTimer: Timer?
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showPodcastPlayerSheet = false
+    @State private var hasPerformedInitialScroll = false
     @State private var hasInitiallyScrolled = false
     @State private var shouldAllowAutoScroll = true
     @State private var hasManuallyScrolled = false
@@ -1003,6 +1004,10 @@ struct PodcastPlayerView: View {
     @State private var refreshTrigger = false
     @State private var scrollOffset: CGPoint = .zero
     @State private var viewportHeight: CGFloat = 0
+    @State private var userIsScrolling = false
+    @State private var scrollStartOffset: CGPoint = .zero
+    @State private var lastScrollOffset: CGPoint = .zero
+    @State private var scrollDebounceTimer: Timer?
     
     // MARK: - Bindings
     @Binding var selectedPodcast: PodcastFeed?
@@ -1012,6 +1017,7 @@ struct PodcastPlayerView: View {
     private let scrollThreshold: CGFloat = 50
     private let rowHeight: CGFloat = 80
     private let miniPlayerHeight: CGFloat = 60
+    private let userScrollThreshold: CGFloat = 10.0 // Minimum distance to consider as user scrolling
     
     // MARK: - Computed Properties
     private var sliderRange: ClosedRange<Double> {
@@ -1034,25 +1040,30 @@ struct PodcastPlayerView: View {
             }
         }
         .navigationBarHidden(true)
-        .onAppear(perform: handleOnAppear)
-        .onChange(of: viewModel.podcastFeedOrder) { _ in refreshTrigger.toggle() }
-        .onChange(of: refreshTrigger) { _ in refreshEpisodes() }
-        .sheet(isPresented: $showPodcastPlayerSheet) {
-            if let podcast = selectedPodcast {
-                PodcastPlayerView(
-                    viewModel: viewModel,
-                    feed: podcast,
-                    initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
-                    podcastPlayer: podcastPlayer,
-                    selectedPodcast: $selectedPodcast,
-                    episodeToScrollTo: Binding(
-                        get: { podcastPlayer.currentEpisode },
-                        set: { _ in }
-                    )
-                )
-            }
-        }
-        .id(refreshTrigger)
+                .onAppear(perform: handleOnAppear)
+                .onDisappear {
+                    // Clean up timers to prevent memory leaks
+                    scrollDebounceTimer?.invalidate()
+                    scrollDebounceTimer = nil
+                }
+                .onChange(of: viewModel.podcastFeedOrder) { _ in refreshTrigger.toggle() }
+                .onChange(of: refreshTrigger) { _ in refreshEpisodes() }
+                .sheet(isPresented: $showPodcastPlayerSheet) {
+                    if let podcast = selectedPodcast {
+                        PodcastPlayerView(
+                            viewModel: viewModel,
+                            feed: podcast,
+                            initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
+                            podcastPlayer: podcastPlayer,
+                            selectedPodcast: $selectedPodcast,
+                            episodeToScrollTo: Binding(
+                                get: { podcastPlayer.currentEpisode },
+                                set: { _ in }
+                            )
+                        )
+                    }
+                }
+                .id(refreshTrigger)
     }
     
     // MARK: - View Components
@@ -1162,11 +1173,6 @@ struct PodcastPlayerView: View {
                             podcastPlayer: podcastPlayer
                         )
                         .id(episode.id)
-                        .onAppear {
-                            if episode.id == viewModel.currentEpisodes.last?.id {
-                                loadMoreIfNeeded()
-                            }
-                        }
                     }
                     
                     if viewModel.hasMoreEpisodes && !viewModel.isLoadingMoreEpisodes {
@@ -1181,38 +1187,66 @@ struct PodcastPlayerView: View {
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
+                .trackScrollOffset(coordinateSpace: "scrollArea", offset: $scrollOffset)
                 .onAppear {
                     scrollProxy = proxy
-                    if !hasInitiallyScrolled {
-                        scrollToInitialEpisodeIfNeeded()
-                    }
+                    // Perform initial scroll to the current episode only once when view first opens
+                    performInitialScrollIfNeeded(proxy: proxy)
+                }
+                .onChange(of: scrollOffset) { newOffset in
+                    handleScrollOffsetChange(newOffset)
                 }
             }
-            .overlay(
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: ScrollOffsetPreferenceKey.self,
-                        value: proxy.frame(in: .named("scroll")).origin
-                    )
-                }
-            )
         }
-        .coordinateSpace(name: "scroll")
-        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-            scrollOffset = value
-            checkIfShouldLoadMore()
+        .coordinateSpace(name: "scrollArea")
+    }
+
+    private func performInitialScrollIfNeeded(proxy: ScrollViewProxy) {
+        // Only perform initial scroll if:
+        // 1. We haven't already performed it
+        // 2. There's a current episode playing
+        // 3. The episode exists in the current list
+        // 4. User hasn't manually scrolled yet
+        guard !hasPerformedInitialScroll,
+              !hasManuallyScrolled,
+              let currentEpisode = podcastPlayer.currentEpisode,
+              podcastPlayer.isPlaying,
+              viewModel.currentEpisodes.contains(where: { $0.id == currentEpisode.id }) else {
+            return
         }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: ViewportHeightPreferenceKey.self,
-                    value: geo.size.height
-                )
+        
+        // Add a slight delay to ensure the view is properly laid out
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation(.easeInOut(duration: 0.5)) {
+                proxy.scrollTo(currentEpisode.id, anchor: .center)
+                hasPerformedInitialScroll = true
             }
-        )
-        .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
-            viewportHeight = height
         }
+    }
+    
+    private func handleScrollOffsetChange(_ newOffset: CGPoint) {
+        // Detect if user is actively scrolling
+        let scrollDistance = abs(newOffset.y - lastScrollOffset.y)
+        
+        if scrollDistance > userScrollThreshold {
+            // User is scrolling - mark as manual scroll and disable auto-scroll
+            if !userIsScrolling {
+                userIsScrolling = true
+                hasManuallyScrolled = true
+                scrollStartOffset = lastScrollOffset
+            }
+            
+            // Reset the debounce timer
+            scrollDebounceTimer?.invalidate()
+            scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                userIsScrolling = false
+            }
+        }
+        
+        lastScrollOffset = newOffset
+        
+        // Check if we should load more content
+        checkIfShouldLoadMore()
     }
     
     private var miniPlayer: some View {
@@ -1245,8 +1279,14 @@ struct PodcastPlayerView: View {
     }
     
     private func handleOnAppear() {
+        // Reset scroll state for fresh view
+        hasPerformedInitialScroll = false
+        hasManuallyScrolled = false
+        userIsScrolling = false
+        scrollOffset = .zero
+        lastScrollOffset = .zero
+        
         loadInitialEpisodes()
-        scrollToEpisodeIfNeeded()
     }
     
     private func handleMiniPlayerListTap() {
@@ -1264,54 +1304,26 @@ struct PodcastPlayerView: View {
     }
     
     private func loadInitialEpisodes() {
-        viewModel.loadAllEpisodesForFeed(feed)
-    }
+            viewModel.loadAllEpisodesForFeed(feed)
+        }
     
     private func refreshEpisodes() {
-        guard !viewModel.isLoadingEpisodes else { return }
-        viewModel.clearCache(for: feed.id)
-        viewModel.loadAllEpisodesForFeed(feed)
-    }
+            guard !viewModel.isLoadingEpisodes else { return }
+            viewModel.clearCache(for: feed.id)
+            viewModel.loadAllEpisodesForFeed(feed)
+        }
     
     private func loadMoreIfNeeded() {
-        guard !isLoadingMore && viewModel.hasMoreEpisodes else { return }
-        
-        isLoadingMore = true
-        viewModel.loadMoreEpisodes(for: feed) { result in
-            isLoadingMore = false
-        }
-    }
+           guard !isLoadingMore && viewModel.hasMoreEpisodes else { return }
+           
+           isLoadingMore = true
+           viewModel.loadMoreEpisodes(for: feed) { _ in
+               isLoadingMore = false
+           }
+       }
     
-    private func scrollToInitialEpisodeIfNeeded() {
-        guard !hasInitiallyScrolled,
-              let episodeId = initialScrollToEpisodeID ?? podcastPlayer.currentEpisode?.id,
-              viewModel.currentEpisodes.contains(where: { $0.id == episodeId }) else {
-            return
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            withAnimation {
-                scrollProxy?.scrollTo(episodeId, anchor: .top)
-                hasInitiallyScrolled = true
-            }
-        }
-    }
-    
-    private func scrollToEpisodeIfNeeded() {
-        guard !hasManuallyScrolled else { return }
-        
-        if let currentEpisodeID = podcastPlayer.currentEpisode?.id,
-           !isEpisodeVisible(currentEpisodeID) {
-            Task {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                await MainActor.run {
-                    withAnimation {
-                        scrollProxy?.scrollTo(currentEpisodeID, anchor: .top)
-                    }
-                }
-            }
-        }
-    }
+    // Removed redundant scrolling methods to prevent interference with user scrolling
+    // All auto-scrolling is now handled only in performInitialScrollIfNeeded(proxy:)
     
     private func isEpisodeVisible(_ episodeId: String) -> Bool {
         guard let episodeIndex = viewModel.currentEpisodes.firstIndex(where: { $0.id == episodeId }) else {
@@ -1326,16 +1338,16 @@ struct PodcastPlayerView: View {
     }
     
     private func playEpisode(_ episode: PodcastEpisode) {
-        if podcastPlayer.currentEpisode?.id == episode.id {
-            if episode.state.isPlayed || podcastPlayer.currentProgress >= 0.99 {
-                podcastPlayer.rewindAndPlay(episode: episode)
+            if podcastPlayer.currentEpisode?.id == episode.id {
+                if episode.state.isPlayed || podcastPlayer.currentProgress >= 0.99 {
+                    podcastPlayer.rewindAndPlay(episode: episode)
+                } else {
+                    podcastPlayer.togglePlayPause()
+                }
             } else {
-                podcastPlayer.togglePlayPause()
+                podcastPlayer.playEpisode(episode, feed: feed)
             }
-        } else {
-            podcastPlayer.playEpisode(episode, feed: feed)
         }
-    }
     
     private func updateViewModelAndDismiss() {
         // First, handle the currently playing episode status

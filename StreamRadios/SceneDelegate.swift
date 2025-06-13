@@ -84,8 +84,19 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidEnterBackground(_ scene: UIScene) {
         // Called as the scene transitions from the foreground to the background.
-        (UIApplication.shared.delegate as? AppDelegate)?.saveContext()
+        // This is often triggered when the app is force closed
+        
+        // Save podcast state immediately
         PodcastPlayer.shared.handleAppWillTerminate()
+        (UIApplication.shared.delegate as? AppDelegate)?.updatePodcastStateAndSave()
+        
+        // Save Core Data context
+        (UIApplication.shared.delegate as? AppDelegate)?.saveContext()
+        
+        // Save radio state
         RadioPlayer.shared.saveLastPlayedStation()
+        
+        // Force synchronize UserDefaults
+        UserDefaults.standard.synchronize()
     }
 }

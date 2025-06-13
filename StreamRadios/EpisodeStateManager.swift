@@ -212,6 +212,15 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func rewindAndPlay(episodeId: String) {
+        // Stop any currently playing episode first
+        if let currentPlayingId = currentlyPlayingEpisodeId, currentPlayingId != episodeId {
+            let currentProgress = episodeProgress[currentPlayingId] ?? 0.0
+            if currentProgress > 0 {
+                episodeStates[currentPlayingId] = .inProgress
+            }
+        }
+        
+        // Reset the episode to beginning and start playing
         episodeStates[episodeId] = .playing
         episodeProgress[episodeId] = 0.0
         currentlyPlayingEpisodeId = episodeId
