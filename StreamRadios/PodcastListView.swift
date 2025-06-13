@@ -29,6 +29,12 @@ struct PodcastListView: View {
     @State private var scrollToEpisodeID: String?
     @State private var refreshID = UUID()
     
+    // Edit functionality
+    @State private var showingEditPodcast = false
+    @State private var podcastToEdit: PodcastFeed?
+    @State private var editPodcastTitle = ""
+    @State private var editPodcastURL = ""
+    
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
     
@@ -69,7 +75,26 @@ struct PodcastListView: View {
                    .onAppear(perform: onAppear)
                    .id(refreshID)
                    .sheet(isPresented: $showingAddPodcast) {
-                       AddPodcastView(isPresented: $showingAddPodcast, title: $newPodcastTitle, url: $newPodcastURL, onAdd: addPodcast)
+                       AddPodcastView(
+                           isPresented: $showingAddPodcast, 
+                           title: $newPodcastTitle, 
+                           url: $newPodcastURL, 
+                           podcastToEdit: nil,
+                           onAdd: addPodcast,
+                           onUpdate: nil
+                       )
+                   }
+                   .sheet(isPresented: $showingEditPodcast) {
+                       AddPodcastView(
+                           isPresented: $showingEditPodcast,
+                           title: $editPodcastTitle,
+                           url: $editPodcastURL,
+                           podcastToEdit: podcastToEdit,
+                           onAdd: { },
+                           onUpdate: { updatedPodcast in
+                               updatePodcast(updatedPodcast)
+                           }
+                       )
                    }
                    .sheet(item: $selectedPodcast) { podcast in
                        PodcastPlayerView(
@@ -172,7 +197,18 @@ struct PodcastListView: View {
                             isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
                             onPlay: { podcastPlayer.playLastEpisodeForFeed(feed) },
                             onStop: { podcastPlayer.togglePlayPause() },
-                            onTap: { selectedPodcast = feed },
+                            onTap: { 
+                                if isEditing {
+                                    // In edit mode, open edit view
+                                    podcastToEdit = feed
+                                    editPodcastTitle = feed.title
+                                    editPodcastURL = feed.url
+                                    showingEditPodcast = true
+                                } else {
+                                    // Normal mode, show podcast episodes
+                                    selectedPodcast = feed
+                                }
+                            },
                             isExpanded: Binding(
                                 get: { expandedFeedId == feed.id },
                                 set: { isExpanded in
@@ -180,7 +216,8 @@ struct PodcastListView: View {
                                 }
                             ),
                             viewModel: viewModel,
-                            podcastPlayer: podcastPlayer
+                            podcastPlayer: podcastPlayer,
+                            isEditMode: isEditing
                         )
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
@@ -189,6 +226,18 @@ struct PodcastListView: View {
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                // Edit button action
+                                podcastToEdit = feed
+                                editPodcastTitle = feed.title
+                                editPodcastURL = feed.url
+                                showingEditPodcast = true
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(.blue)
                         }
                     }
                 }
@@ -226,6 +275,16 @@ struct PodcastListView: View {
         newPodcastTitle = ""
         newPodcastURL = ""
         showingAddPodcast = false
+    }
+    
+    private func updatePodcast(_ updatedPodcast: PodcastFeed) {
+        print("DEBUG: Updating podcast - Title: '\(updatedPodcast.title)', URL: '\(updatedPodcast.url)'")
+        viewModel.updatePodcastFeed(updatedPodcast)
+        showingEditPodcast = false
+        editPodcastTitle = ""
+        editPodcastURL = ""
+        podcastToEdit = nil
+        refreshID = UUID() // Force view refresh to show updated data
     }
     
     private func playLatestEpisode(for feed: PodcastFeed) {
@@ -288,6 +347,7 @@ struct PodcastRowView: View {
     @Binding var isExpanded: Bool
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
+    let isEditMode: Bool
     
     private let iconSize: CGFloat = 88 // Adjusted to match 4 lines of text plus some padding
     private let arrowSize: CGFloat = 20 // New constant for arrow size
@@ -1631,8 +1691,8 @@ struct PodcastList: View {
                         }
                     ),
                     viewModel: viewModel,  // Pass the viewModel here
-                    podcastPlayer: podcastPlayer
-                    
+                    podcastPlayer: podcastPlayer,
+                    isEditMode: false  // Add the missing parameter - PodcastList is not in edit mode
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
