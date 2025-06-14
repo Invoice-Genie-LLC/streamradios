@@ -126,7 +126,9 @@ struct PlayerSheetView: View {
                     get: { self.activeSheet == .spotifyPlaylistPicker },
                     set: { if !$0 { self.activeSheet = nil } }
                 ), playlists: spotifyPlaylists) { playlistID in
-                    spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
+                    let songTitle = radioPlayer.detectedSong?.title ?? ""
+                    let artistName = radioPlayer.detectedSong?.artist ?? ""
+                    spotifyManager.addToSpotifyPlaylist(songTitle: songTitle, artistName: artistName, playlistID: playlistID) { result in
                         DispatchQueue.main.async {
                             switch result {
                             case .success:
@@ -252,8 +254,15 @@ struct PlayerSheetView: View {
                 .padding(.bottom, 10)
             }
             
-            if let url = shazamViewModel.shazamMedia.albumArtURL {
-                AsyncImage(url: url) { phase in
+            if let songArtwork = radioPlayer.songArtwork {
+                Image(uiImage: songArtwork)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: UIScreen.main.bounds.height < 900 ? 280 : 380, height: UIScreen.main.bounds.height < 900 ? 280 : 380)
+                    .cornerRadius(10)
+                    .modifier(NeumorphicShadow())
+            } else if let detectedSong = radioPlayer.detectedSong, let artworkURL = detectedSong.albumArtworkURL {
+                AsyncImage(url: artworkURL) { phase in
                     switch phase {
                     case .success(let image):
                         image.resizable()
@@ -271,14 +280,14 @@ struct PlayerSheetView: View {
                     .modifier(NeumorphicShadow())
             }
             
-            Text(shazamViewModel.shazamMedia.title ?? "Title")
+            Text(radioPlayer.detectedSong?.title ?? (radioPlayer.songTitle.isEmpty ? "Title" : radioPlayer.songTitle))
                 .font(.title)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .padding(.horizontal)
             
-            Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
+            Text(radioPlayer.detectedSong?.artist ?? (radioPlayer.artistName.isEmpty ? "Artist Name" : radioPlayer.artistName))
                 .font(.title2)
                 .fontWeight(.medium)
                 .multilineTextAlignment(.center)
@@ -378,12 +387,14 @@ struct PlayerSheetView: View {
     }
     
     private func openInYouTubeMusic() {
-        guard let songTitle = shazamViewModel.shazamMedia.title,
-              let artistName = shazamViewModel.shazamMedia.artistName else {
+        guard let detectedSong = radioPlayer.detectedSong else {
             self.alertMessage = "Song information is not available"
             self.showAlert = true
             return
         }
+        
+        let songTitle = detectedSong.title
+        let artistName = detectedSong.artist
         
         let query = "\(songTitle) \(artistName)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "youtubemusic://search?q=\(query)"
@@ -478,12 +489,14 @@ struct PlayerSheetView: View {
     }
     
     private func saveToYouTubeMusicPlaylist(playlistId: String) {
-        guard let songTitle = shazamViewModel.shazamMedia.title,
-              let artistName = shazamViewModel.shazamMedia.artistName else {
+        guard let detectedSong = radioPlayer.detectedSong else {
             self.alertMessage = "Song information is not available"
             self.showAlert = true
             return
         }
+        
+        let songTitle = detectedSong.title
+        let artistName = detectedSong.artist
         
         youtubeMusicManager.addToPlaylist(playlistId: playlistId, songTitle: songTitle, artistName: artistName) { result in
             DispatchQueue.main.async {
@@ -515,12 +528,14 @@ struct PlayerSheetView: View {
     }
     
     private func openInSpotify() {
-        guard let songTitle = shazamViewModel.shazamMedia.title,
-              let artistName = shazamViewModel.shazamMedia.artistName else {
+        guard let detectedSong = radioPlayer.detectedSong else {
             self.alertMessage = "Song information is not available"
             self.showAlert = true
             return
         }
+        
+        let songTitle = detectedSong.title
+        let artistName = detectedSong.artist
         
         debugMessage += "Searching for: \(songTitle) by \(artistName)\n"
         
@@ -626,7 +641,9 @@ struct PlayerSheetView: View {
                 self.debugMessage += "Successfully opened Spotify web URL\n"
             } else {
                 self.debugMessage += "Failed to open Spotify web URL\n"
-                self.alertMessage = "Unable to open Spotify. You can search for '\(self.shazamViewModel.shazamMedia.title ?? "")' by '\(self.shazamViewModel.shazamMedia.artistName ?? "")' manually in Spotify."
+                                        let songTitle = self.radioPlayer.detectedSong?.title ?? ""
+                        let artistName = self.radioPlayer.detectedSong?.artist ?? ""
+                        self.alertMessage = "Unable to open Spotify. You can search for '\(songTitle)' by '\(artistName)' manually in Spotify."
                 self.showAlert = true
             }
         }
@@ -769,7 +786,8 @@ struct PlayerSheetView: View {
             StationDetails()
             if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
                 Button(action: {
-                    shazamViewModel.startOrEndListening()
+                    // Use the new fallback system through RadioPlayer
+                    radioPlayer.triggerManualShazamDetection()
                     isShazaming.toggle()
                     permissionManager.checkMicrophonePermission { granted in
                         if granted {
@@ -816,9 +834,10 @@ struct StationDetails: View {
                     .foregroundColor(.primary)
                 
                 // Show detected song info if available
-                if let detectedSong = radioPlayer.detectedSong,
-                   let title = detectedSong.title,
-                   let artist = detectedSong.artistName {
+                            if let detectedSong = radioPlayer.detectedSong {
+               let title = detectedSong.title
+               let artist = detectedSong.artist
+               let album = detectedSong.album
                     VStack(spacing: 8) {
                         Text(title)
                             .font(.headline)
@@ -831,11 +850,19 @@ struct StationDetails: View {
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(1)
+                        if let album = album, !album.isEmpty {
+                            Text(album)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(1)
+                                .italic()
+                        }
                         HStack {
-                            Image(systemName: "shazam.logo.fill")
+                            Image(systemName: "music.note")
                                 .foregroundColor(.blue)
                                 .font(.caption)
-                            Text("Detected by Shazam")
+                            Text("Song Detected")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .italic()
@@ -847,13 +874,6 @@ struct StationDetails: View {
                     Text(metadata)
                         .font(.headline)
                         .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                        .padding(.bottom, 50)
-                } else {
-                    Text("Listening for songs...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .italic()
                         .padding(.top, 2)
                         .padding(.bottom, 50)
                 }

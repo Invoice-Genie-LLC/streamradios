@@ -15,6 +15,49 @@ import SwiftUI
 import Reachability
 import SystemConfiguration
 
+// MARK: - Music Metadata Models
+struct SongMetadata {
+    let title: String
+    let artist: String
+    let album: String?
+    let albumArtworkURL: URL?
+    let releaseDate: String?
+    let genre: String?
+    
+    var isValid: Bool {
+        return !title.isEmpty && !artist.isEmpty
+    }
+}
+
+// MARK: - Music API Response Models
+struct iTunesSearchResponse: Codable {
+    let resultCount: Int
+    let results: [iTunesTrack]
+}
+
+struct iTunesTrack: Codable {
+    let trackName: String?
+    let artistName: String?
+    let collectionName: String?
+    let artworkUrl100: String?
+    let artworkUrl600: String?
+    let releaseDate: String?
+    let primaryGenreName: String?
+    
+    var artworkURL: URL? {
+        // Try high-res first, fallback to standard resolution
+        if let artworkUrl600 = artworkUrl600 {
+            return URL(string: artworkUrl600)
+        } else if let artworkUrl100 = artworkUrl100 {
+            return URL(string: artworkUrl100)
+        }
+        return nil
+    }
+}
+
+// MARK: - Notification Extensions
+// Notification names no longer needed - music metadata handled directly
+
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
     @objc var player: AVPlayer?
@@ -36,12 +79,16 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var isHandlingAlarm = false
     @Published var currentlyPlayingStation: RadioStation?
     @Published var alarmStation: RadioStation?
-    @Published var detectedSong: ShazamMedia?
+    @Published var detectedSong: SongMetadata?
     @Published var songArtwork: UIImage?
+    private var isDetectingCurrentSong = false
+    private var previousSongWasUnidentified = false
     private var reachability: Reachability?
     private var isOnCellularNetwork = false
     weak var podcastPlayer: PodcastPlayer?
-    weak var shazamViewModel: ShazamViewModel?
+    
+    // Music search functionality (replaces Shazam)
+    private let musicSearchQueue = DispatchQueue(label: "musicSearch", qos: .background)
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
@@ -54,6 +101,9 @@ class RadioPlayer: NSObject, ObservableObject {
     var viewModel: RadioStationViewModel?
     private var cancellables = Set<AnyCancellable>()
     
+    private var stationProvidesNoMetadata = false
+    private var periodicShazamTimer: Timer?
+    
     override init() {
             super.init()
             configureAudioSession()
@@ -65,9 +115,7 @@ class RadioPlayer: NSObject, ObservableObject {
                    self.podcastPlayer?.setRadioPlayer(self)
                }
         
-        // Listen for song detection notifications
-        NotificationCenter.default.addObserver(self, selector: #selector(songDetected(_:)), name: NSNotification.Name("SongDetected"), object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(songDetectionCleared(_:)), name: NSNotification.Name("SongDetectionCleared"), object: nil)
+        // Music metadata is now handled directly in the RadioPlayer - no notifications needed
         
             monitor.pathUpdateHandler = { [weak self] path in
                 guard let self = self else { return }
@@ -133,46 +181,15 @@ class RadioPlayer: NSObject, ObservableObject {
             .store(in: &cancellables)
     }
     
+    // Shazam fallback for when iTunes search fails
+    private weak var shazamViewModel: ShazamViewModel?
+    
     func setShazamViewModel(_ shazamViewModel: ShazamViewModel) {
         self.shazamViewModel = shazamViewModel
-        shazamViewModel.setRadioPlayer(self)
+        print("ShazamViewModel connected for fallback detection")
     }
     
-    @objc private func songDetected(_ notification: Notification) {
-        guard let detectedSong = notification.object as? ShazamMedia else { return }
-        
-        DispatchQueue.main.async {
-            // Update all song data atomically
-            self.detectedSong = detectedSong
-            self.songTitle = detectedSong.title ?? ""
-            self.artistName = detectedSong.artistName ?? ""
-            
-            // Update song artwork if available (should be ready now)
-            if let shazamViewModel = self.shazamViewModel {
-                self.songArtwork = shazamViewModel.currentSongArtwork
-            }
-            
-            // Force UI update immediately with new song data
-            self.objectWillChange.send()
-            self.updateNowPlayingInfo()
-            print("Radio player updated with detected song: \(self.songTitle) by \(self.artistName) - artwork: \(self.songArtwork != nil ? "available" : "not available")")
-        }
-    }
-    
-    @objc private func songDetectionCleared(_ notification: Notification) {
-        DispatchQueue.main.async {
-            // Clear all detected song data atomically
-            self.detectedSong = nil
-            self.songArtwork = nil
-            self.songTitle = ""
-            self.artistName = ""
-            
-            // Force UI update immediately
-            self.objectWillChange.send()
-            self.updateNowPlayingInfo()
-            print("Radio player cleared detected song data - UI should immediately show station icon")
-        }
-    }
+    // Song metadata is now handled directly in the RadioPlayer class - no notifications needed
     
     private func notifyPlaybackChanged() {
         NotificationCenter.default.post(name: NSNotification.Name("RadioPlaybackChanged"), object: nil)
@@ -455,6 +472,12 @@ class RadioPlayer: NSObject, ObservableObject {
         stopCurrentStation()
         currentStationIndex = index
         metadata = nil // Clear metadata when switching stations
+        clearAllSongData() // Clear all song data including artwork when switching stations
+        
+        // Stop periodic Shazam detection when switching stations
+        stopPeriodicShazamDetection()
+        stationProvidesNoMetadata = false
+        
         let station = stations[index]
         currentlyPlayingStation = station
         
@@ -468,6 +491,11 @@ class RadioPlayer: NSObject, ObservableObject {
         updateWidget()
         updateLastPlayed(station)
         saveLastPlayedStation()
+        
+        // Start immediate metadata check after 5 seconds, then periodic checks
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            self.checkForInitialMetadata()
+        }
     }
     
     func playStationForAlarm(station: RadioStation) {
@@ -490,11 +518,12 @@ class RadioPlayer: NSObject, ObservableObject {
         notifyPlaybackChanged()
         currentlyPlayingStation = nil
         
-        // Clear detected song info when stopping
-        detectedSong = nil
-        songArtwork = nil
-        songTitle = ""
-        artistName = ""
+        // Clear all song data when stopping
+        clearAllSongData()
+        
+        // Stop periodic Shazam detection when stopping
+        stopPeriodicShazamDetection()
+        stationProvidesNoMetadata = false
     }
     
     func nextStation(from stations: [RadioStation]) {
@@ -665,6 +694,484 @@ class RadioPlayer: NSObject, ObservableObject {
         return true
     }
     
+    // MARK: - Music Metadata Search
+    private func searchForSongMetadata(query: String) {
+        // Set detection flag to prevent duplicate searches
+        isDetectingCurrentSong = true
+        
+        musicSearchQueue.async { [weak self] in
+            self?.performiTunesSearch(query: query)
+        }
+    }
+    
+    private func performiTunesSearch(query: String) {
+        let parsedQuery = parseMetadataQuery(query)
+        guard parsedQuery.isValid else {
+            print("Invalid query for music search: \(query)")
+            return
+        }
+        
+        let searchTerm = "\(parsedQuery.artist) \(parsedQuery.title)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        let urlString = "https://itunes.apple.com/search?term=\(searchTerm)&media=music&entity=song&limit=5"
+        
+        guard let url = URL(string: urlString) else {
+            print("Invalid iTunes search URL")
+            return
+        }
+        
+        print("Searching iTunes for: \(parsedQuery.artist) - \(parsedQuery.title)")
+        
+        // Create a URLSession with shorter timeout for faster fallback to Shazam
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 5.0 // 5 second timeout
+        config.timeoutIntervalForResource = 10.0 // 10 second total timeout
+        let session = URLSession(configuration: config)
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            if let error = error {
+                print("iTunes search error: \(error) - immediately falling back to Shazam")
+                DispatchQueue.main.async { [weak self] in
+                    self?.fallbackToShazam(reason: "iTunes search failed with error")
+                }
+                return
+            }
+            
+            guard let data = data else {
+                print("No data received from iTunes search - immediately falling back to Shazam")
+                DispatchQueue.main.async { [weak self] in
+                    self?.fallbackToShazam(reason: "iTunes search returned no data")
+                }
+                return
+            }
+            
+            do {
+                let searchResponse = try JSONDecoder().decode(iTunesSearchResponse.self, from: data)
+                self?.processiTunesResults(searchResponse.results, originalQuery: parsedQuery)
+            } catch {
+                print("Error decoding iTunes response: \(error) - immediately falling back to Shazam")
+                DispatchQueue.main.async { [weak self] in
+                    self?.fallbackToShazam(reason: "iTunes response parsing failed")
+                }
+            }
+        }.resume()
+    }
+    
+    private func processiTunesResults(_ tracks: [iTunesTrack], originalQuery: (artist: String, title: String, isValid: Bool)) {
+        guard let bestMatch = findBestMatch(tracks: tracks, query: originalQuery) else {
+            print("No suitable match found in iTunes results - immediately falling back to Shazam")
+            DispatchQueue.main.async { [weak self] in
+                self?.fallbackToShazam(reason: "iTunes search returned no results")
+            }
+            return
+        }
+        
+        let songMetadata = SongMetadata(
+            title: bestMatch.trackName ?? originalQuery.title,
+            artist: bestMatch.artistName ?? originalQuery.artist,
+            album: bestMatch.collectionName,
+            albumArtworkURL: bestMatch.artworkURL,
+            releaseDate: bestMatch.releaseDate,
+            genre: bestMatch.primaryGenreName
+        )
+        
+        print("Found song metadata: \(songMetadata.title) by \(songMetadata.artist)")
+        print("iTunes track artwork URLs - 600px: \(bestMatch.artworkUrl600 ?? "None"), 100px: \(bestMatch.artworkUrl100 ?? "None")")
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.updateWithSongMetadata(songMetadata)
+            self?.isDetectingCurrentSong = false
+            self?.previousSongWasUnidentified = false // Successfully identified this song
+        }
+        
+        // Download artwork if available and we don't already have it for this song
+        if let artworkURL = songMetadata.albumArtworkURL {
+            // Check if we already have artwork for this song
+            let currentSongKey = "\(songMetadata.title)-\(songMetadata.artist)"
+            let lastArtworkSongKey = UserDefaults.standard.string(forKey: "lastArtworkSongKey") ?? ""
+            
+            if songArtwork == nil || currentSongKey != lastArtworkSongKey {
+                print("Downloading artwork from: \(artworkURL.absoluteString)")
+                downloadAlbumArtwork(from: artworkURL) { [weak self] image in
+                    DispatchQueue.main.async {
+                        if let image = image {
+                            print("Successfully downloaded artwork, size: \(image.size)")
+                            self?.songArtwork = image
+                            self?.objectWillChange.send()
+                            
+                            // Remember which song this artwork belongs to
+                            UserDefaults.standard.set(currentSongKey, forKey: "lastArtworkSongKey")
+                        } else {
+                            print("Failed to download artwork")
+                        }
+                    }
+                }
+            } else {
+                print("Already have artwork for this song - skipping download")
+            }
+        } else {
+            // If previous song was unidentified or we have no artwork, be more aggressive with Shazam
+            print("No artwork URL available for song")
+            DispatchQueue.main.async { [weak self] in
+                if self?.previousSongWasUnidentified == true || self?.detectedSong == nil {
+                    print("Previous song was unidentified or no song detected - falling back to Shazam for better identification")
+                    self?.fallbackToShazam(reason: "iTunes found song but no artwork available, previous song unidentified")
+                } else {
+                    print("Already have valid song info - skipping Shazam fallback")
+                    self?.isDetectingCurrentSong = false
+                }
+            }
+        }
+    }
+    
+    private func findBestMatch(tracks: [iTunesTrack], query: (artist: String, title: String, isValid: Bool)) -> iTunesTrack? {
+        let queryArtist = query.artist.lowercased()
+        let queryTitle = query.title.lowercased()
+        
+        // Find exact or close matches
+        for track in tracks {
+            let trackArtist = track.artistName?.lowercased() ?? ""
+            let trackTitle = track.trackName?.lowercased() ?? ""
+            
+            // Check for exact matches first
+            if trackArtist.contains(queryArtist) && trackTitle.contains(queryTitle) {
+                return track
+            }
+        }
+        
+        // If no exact match, return the first result (iTunes usually ranks by relevance)
+        return tracks.first
+    }
+    
+    private func parseMetadataQuery(_ query: String) -> (artist: String, title: String, isValid: Bool) {
+        let cleanQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Common separators used in radio metadata
+        let separators = [" - ", " – ", " — ", " by ", " BY ", " By "]
+        
+        for separator in separators {
+            if let range = cleanQuery.range(of: separator) {
+                let artist = String(cleanQuery[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let title = String(cleanQuery[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if !artist.isEmpty && !title.isEmpty {
+                    return (artist: artist, title: title, isValid: true)
+                }
+            }
+        }
+        
+        // If no separator found, try to guess (assume format: "Artist Title" or "Title Artist")
+        let words = cleanQuery.components(separatedBy: " ")
+        if words.count >= 2 {
+            let midPoint = words.count / 2
+            let firstHalf = words[0..<midPoint].joined(separator: " ")
+            let secondHalf = words[midPoint...].joined(separator: " ")
+            return (artist: firstHalf, title: secondHalf, isValid: true)
+        }
+        
+        return (artist: "", title: cleanQuery, isValid: false)
+    }
+    
+    private func downloadAlbumArtwork(from url: URL, completion: @escaping (UIImage?) -> Void) {
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            if let error = error {
+                print("Error downloading artwork: \(error)")
+                completion(nil)
+                return
+            }
+            
+            guard let data = data, let image = UIImage(data: data) else {
+                print("Invalid artwork data")
+                completion(nil)
+                return
+            }
+            
+            completion(image)
+        }.resume()
+    }
+    
+    private func updateWithSongMetadata(_ metadata: SongMetadata) {
+        // Check if this is the same song - if so, don't clear existing artwork
+        let isSameSong = self.detectedSong?.title == metadata.title && 
+                        self.detectedSong?.artist == metadata.artist
+        
+        self.detectedSong = metadata
+        self.songTitle = metadata.title
+        self.artistName = metadata.artist
+        
+        // Only clear artwork if this is a different song
+        if !isSameSong {
+            print("New song detected - clearing old artwork")
+            self.songArtwork = nil
+        } else {
+            print("Same song detected - keeping existing artwork")
+        }
+        
+        self.objectWillChange.send()
+        
+        print("Updated with song metadata: \(metadata.title) by \(metadata.artist)")
+        print("Album: \(metadata.album ?? "Unknown"), Artwork URL: \(metadata.albumArtworkURL?.absoluteString ?? "None")")
+    }
+    
+    private func clearSongMetadata() {
+        // Only clear if we don't have valid song data or if explicitly requested
+        print("Clearing song metadata - keeping artwork if available")
+        
+        // Track if we're clearing an unidentified song
+        if self.detectedSong == nil {
+            self.previousSongWasUnidentified = true
+        }
+        
+        self.detectedSong = nil
+        self.songTitle = ""
+        self.artistName = ""
+        self.isDetectingCurrentSong = false
+        // Don't clear songArtwork here - let it persist until a new song is found
+        self.objectWillChange.send()
+        
+        print("Cleared song metadata (artwork preserved)")
+    }
+    
+    // Method to completely clear everything including artwork (for station changes)
+    private func clearAllSongData() {
+        self.detectedSong = nil
+        self.songTitle = ""
+        self.artistName = ""
+        self.songArtwork = nil
+        self.isDetectingCurrentSong = false
+        
+        // Clear the artwork cache key so new artwork can be downloaded
+        UserDefaults.standard.removeObject(forKey: "lastArtworkSongKey")
+        
+        self.objectWillChange.send()
+        
+        print("Cleared all song data including artwork and cache keys")
+    }
+    
+    // MARK: - Shazam Fallback
+    
+    // Public method to manually trigger Shazam detection
+    func triggerManualShazamDetection() {
+        guard isPlaying else {
+            print("Cannot trigger Shazam detection - no radio playing")
+            return
+        }
+        
+        print("Manual Shazam detection triggered by user")
+        fallbackToShazam(reason: "Manual detection requested by user")
+    }
+    
+    // Initial check for metadata when radio starts playing
+    private func checkForInitialMetadata() {
+        guard isPlaying && !isDetectingCurrentSong else { return }
+        
+        // Check if we have song metadata
+        let currentMetadata = metadata ?? ""
+        let isStationName = currentMetadata.isEmpty || 
+                           currentMetadata == "No song or album title available" ||
+                           currentMetadata == currentlyPlayingStation?.name
+        
+        // Only trigger Shazam if we don't have metadata AND don't have detected song info
+        if isStationName && detectedSong == nil {
+            print("Initial check: No song metadata detected - triggering Shazam fallback")
+            
+            // Mark this station as providing no metadata
+            stationProvidesNoMetadata = true
+            print("Station marked as providing no metadata - will use periodic Shazam detection")
+            
+            fallbackToShazam(reason: "Initial check - no song metadata available")
+        } else if detectedSong != nil {
+            print("Initial check: Already have detected song info - skipping Shazam")
+            stationProvidesNoMetadata = false
+        } else {
+            print("Initial check: Have metadata '\(currentMetadata)' - starting periodic checks")
+            stationProvidesNoMetadata = false
+            // Start periodic checks after 30 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) {
+                self.startPeriodicMetadataCheck()
+            }
+        }
+    }
+    
+    // Periodic check for song metadata when radio is playing
+    private func startPeriodicMetadataCheck() {
+        guard isPlaying && !isDetectingCurrentSong else { return }
+        
+        // Check if we have song metadata
+        let currentMetadata = metadata ?? ""
+        let hasValidSongMetadata = !currentMetadata.isEmpty && 
+                                  currentMetadata != "No song or album title available" &&
+                                  currentMetadata != currentlyPlayingStation?.name &&
+                                  detectedSong != nil
+        
+        // Be more aggressive about triggering Shazam if previous song was unidentified
+        if !hasValidSongMetadata && detectedSong == nil {
+            print("Periodic check: No song metadata detected - triggering Shazam fallback")
+            fallbackToShazam(reason: "Periodic check - no song metadata available")
+        } else if previousSongWasUnidentified && detectedSong == nil && !currentMetadata.isEmpty {
+            print("Periodic check: Previous song was unidentified and current song not detected - triggering Shazam")
+            fallbackToShazam(reason: "Previous song unidentified - being more aggressive with detection")
+        } else if detectedSong != nil {
+            print("Periodic check: Already have detected song info - skipping Shazam")
+        }
+        
+        // Schedule next check in 2 minutes if still playing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120.0) {
+            self.startPeriodicMetadataCheck()
+        }
+    }
+    
+    private func fallbackToShazam(reason: String) {
+        guard let shazamViewModel = shazamViewModel else {
+            print("Shazam fallback requested but ShazamViewModel not available")
+            clearSongMetadata()
+            isDetectingCurrentSong = false
+            return
+        }
+        
+        print("Initiating Shazam fallback: \(reason)")
+        
+        // Set detection flag
+        isDetectingCurrentSong = true
+        
+        // Set up observer for Shazam results
+        setupShazamObserver()
+        
+        // Trigger one-time Shazam detection
+        shazamViewModel.startOrEndListening()
+        
+        // Set up timeout for Shazam detection (15 seconds for faster response)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) {
+            // If we haven't received a result yet, stop Shazam and clean up
+            if let shazamViewModel = self.shazamViewModel, shazamViewModel.audioEngine.isRunning {
+                print("Shazam timeout - stopping listening")
+                shazamViewModel.stopListening()
+            }
+            NotificationCenter.default.removeObserver(self, name: NSNotification.Name("ShazamDetectionComplete"), object: nil)
+            
+            // Only clear metadata if we don't have valid song info already
+            if self.detectedSong == nil {
+                print("Shazam timeout - clearing metadata (no existing song info)")
+                self.clearSongMetadata()
+            } else {
+                print("Shazam timeout - preserving existing song info")
+            }
+            self.isDetectingCurrentSong = false
+            self.previousSongWasUnidentified = false // Successfully identified this song with Shazam
+            print("Shazam detection complete - preserving song info until next song change")
+            
+            // For stations that provide no metadata, start periodic Shazam detection for next songs
+            if self.stationProvidesNoMetadata {
+                print("Station provides no metadata - starting periodic Shazam detection for next songs")
+                self.startPeriodicShazamDetection()
+            }
+        }
+    }
+    
+    private func setupShazamObserver() {
+        // Remove any existing observer
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("ShazamDetectionComplete"), object: nil)
+        
+        // Add observer for Shazam detection results
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleShazamResult),
+            name: NSNotification.Name("ShazamDetectionComplete"),
+            object: nil
+        )
+    }
+    
+    @objc private func handleShazamResult() {
+        guard let shazamViewModel = shazamViewModel else { return }
+        
+        let shazamMedia = shazamViewModel.shazamMedia
+        
+        if shazamMedia.isValid {
+            print("Shazam identification successful: \(shazamMedia.title ?? "Unknown") by \(shazamMedia.artistName ?? "Unknown")")
+            print("Stopping Shazam listening after successful identification")
+            
+            // Immediately stop Shazam listening after successful identification
+            if shazamViewModel.audioEngine.isRunning {
+                shazamViewModel.stopListening()
+            }
+            
+            // Convert Shazam result to our SongMetadata format
+            let songMetadata = SongMetadata(
+                title: shazamMedia.title ?? "",
+                artist: shazamMedia.artistName ?? "",
+                album: shazamMedia.subtitle != shazamMedia.artistName ? shazamMedia.subtitle : nil, // Only use subtitle as album if it's different from artist
+                albumArtworkURL: shazamMedia.albumArtURL,
+                releaseDate: nil,
+                genre: shazamMedia.genres.first
+            )
+            
+            // Update with Shazam metadata
+            updateWithSongMetadata(songMetadata)
+            
+            // Download artwork if available and we don't already have it for this song
+            if let artworkURL = songMetadata.albumArtworkURL {
+                let currentSongKey = "\(songMetadata.title)-\(songMetadata.artist)"
+                let lastArtworkSongKey = UserDefaults.standard.string(forKey: "lastArtworkSongKey") ?? ""
+                
+                if songArtwork == nil || currentSongKey != lastArtworkSongKey {
+                    print("Downloading Shazam artwork from: \(artworkURL.absoluteString)")
+                    downloadAlbumArtwork(from: artworkURL) { [weak self] image in
+                        DispatchQueue.main.async {
+                            if let image = image {
+                                print("Successfully downloaded Shazam artwork, size: \(image.size)")
+                                self?.songArtwork = image
+                                self?.objectWillChange.send()
+                                
+                                // Remember which song this artwork belongs to
+                                UserDefaults.standard.set(currentSongKey, forKey: "lastArtworkSongKey")
+                            } else {
+                                print("Failed to download Shazam artwork")
+                            }
+                        }
+                    }
+                } else {
+                    print("Already have Shazam artwork for this song - skipping download")
+                }
+            }
+            
+            // Clear detection flag - DO NOT restart periodic checks to preserve Shazam results
+            isDetectingCurrentSong = false
+            print("Shazam detection complete - preserving song info until next song change")
+            
+            // For stations that provide no metadata, start periodic Shazam detection for next songs
+            if self.stationProvidesNoMetadata {
+                print("Station provides no metadata - starting periodic Shazam detection for next songs")
+                self.startPeriodicShazamDetection()
+            }
+            
+        } else {
+            print("Shazam identification failed - no song detected")
+            
+            // Stop Shazam listening even if identification failed
+            if shazamViewModel.audioEngine.isRunning {
+                shazamViewModel.stopListening()
+            }
+            
+            clearSongMetadata()
+            
+            // Clear detection flag
+            isDetectingCurrentSong = false
+            
+            // For stations that provide no metadata, continue periodic detection
+            if stationProvidesNoMetadata {
+                print("Shazam failed but station provides no metadata - continuing periodic detection")
+                startPeriodicShazamDetection()
+            } else {
+                print("Shazam detection failed - will resume monitoring after longer delay")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 120.0) {
+                    self.startPeriodicMetadataCheck()
+                }
+            }
+        }
+        
+        // Clean up observer
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("ShazamDetectionComplete"), object: nil)
+    }
+    
     private func scheduleAppRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: "com.radio.refresh")
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // Refresh every 15 minutes.
@@ -688,7 +1195,32 @@ class RadioPlayer: NSObject, ObservableObject {
         task.setTaskCompleted(success: true)
     }
     
+    // Periodic Shazam detection for stations that provide no metadata
+    private func startPeriodicShazamDetection() {
+        // Stop any existing timer
+        stopPeriodicShazamDetection()
+        
+        guard isPlaying && stationProvidesNoMetadata else { return }
+        
+        print("Starting periodic Shazam detection - will check every 3 minutes for new songs")
+        
+        // Start timer to trigger Shazam every 3 minutes (typical song length)
+        periodicShazamTimer = Timer.scheduledTimer(withTimeInterval: 180.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
+            // Only trigger if we're still playing and not currently detecting
+            if self.isPlaying && !self.isDetectingCurrentSong && self.stationProvidesNoMetadata {
+                print("Periodic Shazam: Checking for new song (no metadata station)")
+                self.fallbackToShazam(reason: "Periodic check for new song - no metadata station")
+            }
+        }
+    }
     
+    private func stopPeriodicShazamDetection() {
+        periodicShazamTimer?.invalidate()
+        periodicShazamTimer = nil
+        print("Stopped periodic Shazam detection")
+    }
 }
 
 extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
@@ -705,28 +1237,47 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                                 self.updateNowPlayingInfo()
                                 self.updateWidget()
                                 
-                                // Smart Shazam detection: only trigger if metadata significantly changed
+                                // Smart music metadata search: only trigger if metadata significantly changed
                                 if let previous = previousMetadata, previous != stringValue {
                                     // Check if this looks like a real song change (not just minor metadata updates)
                                     if self.isLikelyNewSong(previous: previous, current: stringValue) {
-                                        print("New song detected: '\(previous)' → '\(stringValue)' - triggering smart Shazam detection")
-                                        self.shazamViewModel?.triggerImmediateDetection()
+                                        print("New song detected: '\(previous)' → '\(stringValue)' - searching for album info")
+                                        
+                                        // Track if previous song was unidentified for aggressive detection
+                                        let hadPreviousSong = self.detectedSong != nil
+                                        if !hadPreviousSong {
+                                            self.previousSongWasUnidentified = true
+                                            print("Previous song was not identified - will be more aggressive with detection")
+                                        } else {
+                                            self.previousSongWasUnidentified = false
+                                            print("Previous song was identified - clearing for new song detection")
+                                        }
+                                        
+                                        // ALWAYS clear previous song data when a new song is detected
+                                        // This ensures Shazam-detected songs are also cleared for new songs
+                                        print("Clearing previous song data (including Shazam results) for new song")
+                                        self.clearAllSongData()
+                                        
+                                        // Start detection for the new song
+                                        self.searchForSongMetadata(query: stringValue)
                                     } else {
-                                        print("Minor metadata change detected, not triggering Shazam: '\(previous)' → '\(stringValue)'")
+                                        print("Minor metadata change detected, not searching: '\(previous)' → '\(stringValue)'")
                                     }
-                                } else if previousMetadata == nil {
-                                    // First metadata received - likely a new song
-                                    print("First metadata received: '\(stringValue)' - triggering smart Shazam detection")
-                                    self.shazamViewModel?.triggerImmediateDetection()
+                                } else if previousMetadata == nil && self.detectedSong == nil {
+                                    // First metadata received and no song detected yet - likely a new song
+                                    print("First metadata received: '\(stringValue)' - searching for album info")
+                                    self.searchForSongMetadata(query: stringValue)
+                                } else if previousMetadata != nil && self.detectedSong == nil && !self.isDetectingCurrentSong {
+                                    // We have metadata but no detected song and we're not currently detecting
+                                    // This could be a case where the previous song wasn't identified
+                                    print("No song currently identified for metadata '\(stringValue)' - starting detection")
+                                    self.previousSongWasUnidentified = true
+                                    self.searchForSongMetadata(query: stringValue)
                                 }
-                            } else if self.metadata == nil {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                    if self.metadata == nil || self.metadata?.isEmpty == true {
-                                        self.metadata = "No song or album title available"
-                                        self.updateNowPlayingInfo()
-                                        self.updateWidget()
-                                    }
-                                }
+                            } else {
+                                // No metadata received or empty metadata - immediately trigger Shazam
+                                print("No metadata received from radio stream - immediately triggering Shazam")
+                                self.fallbackToShazam(reason: "No metadata available from radio stream")
                             }
                         }
                     }

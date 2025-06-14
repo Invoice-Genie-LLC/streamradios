@@ -419,9 +419,10 @@ struct ContentView: View {
                             .foregroundColor(.primary)
                         
                         // Show detected song info if available
-                        if let detectedSong = radioPlayer.detectedSong,
-                           let title = detectedSong.title,
-                           let artist = detectedSong.artistName {
+                                    if let detectedSong = radioPlayer.detectedSong {
+               let title = detectedSong.title
+               let artist = detectedSong.artist
+               let album = detectedSong.album
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(title)
                                     .font(.subheadline)
@@ -432,16 +433,18 @@ struct ContentView: View {
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
+                                if let album = album, !album.isEmpty {
+                                    Text(album)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                        .italic()
+                                }
                             }
                         } else if let metadata = metadata {
                             Text(metadata)
                                 .font(.subheadline)
                                 .foregroundColor(.primary)
-                        } else {
-                            Text("Listening for songs...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .italic()
                         }
                     }
                     Spacer()

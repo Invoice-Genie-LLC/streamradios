@@ -36,7 +36,7 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     @Published var currentSongArtwork: UIImage?
     @Published var lastDetectedSong: ShazamMedia?
 
-    private var audioEngine = AVAudioEngine()
+    var audioEngine = AVAudioEngine()
     private var session = SHSession()
     private var autoDetectionTimer: Timer?
     private var radioPlayer: RadioPlayer?
@@ -394,6 +394,9 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                     print("Stopping microphone after successful detection")
                     self.stopListening()
                 }
+                
+                // Post completion notification for fallback system
+                NotificationCenter.default.post(name: NSNotification.Name("ShazamDetectionComplete"), object: nil)
             }
         }
     }
@@ -408,6 +411,9 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             
             // Note: No retry mechanism since we only detect on metadata changes
             print("Will wait for next metadata change to try again")
+            
+            // Post completion notification for fallback system (even when no match found)
+            NotificationCenter.default.post(name: NSNotification.Name("ShazamDetectionComplete"), object: nil)
         }
     }
     
@@ -432,6 +438,9 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                 self.consecutiveFailures += 1
                 print("Shazam error - consecutive failures: \(self.consecutiveFailures)")
                 // Smart detection doesn't need pause mechanism - just wait for next metadata change
+                
+                // Post completion notification for fallback system (even on error)
+                NotificationCenter.default.post(name: NSNotification.Name("ShazamDetectionComplete"), object: nil)
             }
         }
     }

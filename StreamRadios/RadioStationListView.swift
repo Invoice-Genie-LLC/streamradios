@@ -238,9 +238,10 @@ struct RadioStationListView: View {
     private func stationMetadata(for station: RadioStation) -> some View {
         if isCurrentStation(station: station) {
             // Show detected song info if available
-            if let detectedSong = radioPlayer.detectedSong,
-               let title = detectedSong.title,
-               let artist = detectedSong.artistName {
+                        if let detectedSong = radioPlayer.detectedSong {
+                let title = detectedSong.title
+                let artist = detectedSong.artist
+                let album = detectedSong.album
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.subheadline)
@@ -251,16 +252,18 @@ struct RadioStationListView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                    if let album = album, !album.isEmpty {
+                        Text(album)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .italic()
+                    }
                 }
             } else if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                 Text(metadata)
                     .font(.subheadline)
                     .foregroundColor(.primary)
-            } else {
-                Text("Listening for songs...")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .italic()
             }
         } else {
             Text("Not Playing")
