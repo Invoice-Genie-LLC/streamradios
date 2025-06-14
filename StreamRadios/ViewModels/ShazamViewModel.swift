@@ -65,11 +65,11 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         self.radioPlayer = player
     }
     
-    // Method to trigger immediate detection when radio metadata changes
+    // Method to trigger smart detection when radio metadata changes
     func triggerImmediateDetection() {
         guard isAutoDetecting else { return }
         
-        print("Triggering immediate detection due to potential song change")
+        print("Smart detection triggered by metadata change")
         
         // Clear old song data since we detected a potential new song
         clearForNewSong()
@@ -79,10 +79,11 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             stopListening()
         }
         
-        // Start detection immediately
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // Start detection after a brief delay to let the new song start properly
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             if self.isAutoDetecting {
-                self.performAutoDetection()
+                print("Starting Shazam detection for new song...")
+                self.performSingleDetection()
             }
         }
     }
@@ -100,21 +101,16 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     func startAutoDetection() {
         guard !isAutoDetecting else { return }
         
-        print("Starting automatic song detection for radio")
+        print("Starting smart song detection for radio (metadata-based)")
         isAutoDetecting = true
         consecutiveFailures = 0
         
-        // Start immediate detection
-        performAutoDetection()
-        
-        // Schedule periodic detection
-        autoDetectionTimer = Timer.scheduledTimer(withTimeInterval: autoDetectionInterval, repeats: true) { [weak self] _ in
-            self?.performAutoDetection()
-        }
+        // Don't start immediate detection - wait for metadata changes
+        print("Shazam will only activate when metadata changes are detected")
     }
     
     func stopAutoDetection() {
-        print("Stopping automatic song detection")
+        print("Stopping smart song detection")
         isAutoDetecting = false
         autoDetectionTimer?.invalidate()
         autoDetectionTimer = nil
@@ -145,6 +141,23 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         }
     }
     
+    // Perform a single detection attempt (used for metadata-triggered detection)
+    private func performSingleDetection() {
+        guard isAutoDetecting else { return }
+        
+        AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+            guard let self = self, granted else {
+                print("Microphone permission denied for single detection")
+                return
+            }
+            
+            DispatchQueue.main.async {
+                print("Starting single Shazam detection attempt...")
+                self.startSingleListening()
+            }
+        }
+    }
+    
     private func startBriefListening() {
         guard !audioEngine.isRunning else { return }
         
@@ -154,6 +167,22 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         // Stop listening after the configured duration
         DispatchQueue.main.asyncAfter(deadline: .now() + listeningDuration) {
             if self.audioEngine.isRunning {
+                self.stopListening()
+            }
+        }
+    }
+    
+    // Single listening session for metadata-triggered detection
+    private func startSingleListening() {
+        guard !audioEngine.isRunning else { return }
+        
+        configureAudioSession()
+        setupAudioEngine()
+        
+        // Listen for 15 seconds for better detection accuracy, then stop
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) {
+            if self.audioEngine.isRunning {
+                print("Single detection session complete - stopping microphone")
                 self.stopListening()
             }
         }
@@ -187,8 +216,17 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             }
             
             DispatchQueue.main.async {
+                print("Manual Shazam detection started")
                 self.configureAudioSession()
                 self.setupAudioEngine()
+                
+                // For manual detection, listen for 20 seconds then stop
+                DispatchQueue.main.asyncAfter(deadline: .now() + 20.0) {
+                    if self.audioEngine.isRunning {
+                        print("Manual detection session complete")
+                        self.stopListening()
+                    }
+                }
             }
         }
     }
@@ -349,7 +387,13 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
                 self.updateShazamMedia(from: firstItem)
                 self.consecutiveFailures = 0 // Reset failure count on successful detection
                 self.bufferErrors = 0 // Reset buffer error count on successful detection
-                print("Successfully detected new song - resetting detection cycle")
+                print("Successfully detected song via smart detection!")
+                
+                // Stop listening immediately after successful detection
+                if self.audioEngine.isRunning {
+                    print("Stopping microphone after successful detection")
+                    self.stopListening()
+                }
             }
         }
     }
@@ -357,19 +401,13 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     func session(_ session: SHSession, didNotFindMatchFor signature: SHSignature) {
         DispatchQueue.main.async {
             self.consecutiveFailures += 1
-            print("Song not detected. Consecutive failures: \(self.consecutiveFailures)")
+            print("Song not detected in single attempt. Consecutive failures: \(self.consecutiveFailures)")
             
             // Clear previous song data when no match is found
             self.clearDetectedSong()
             
-            // If too many consecutive failures, temporarily pause auto-detection
-            if self.consecutiveFailures >= self.maxConsecutiveFailures {
-                print("Too many consecutive failures. Pausing auto-detection for 2 minutes.")
-                self.pauseAutoDetectionTemporarily()
-            } else {
-                // If we're still within tolerance, try again sooner for potential song changes
-                self.scheduleQuickRetry()
-            }
+            // Note: No retry mechanism since we only detect on metadata changes
+            print("Will wait for next metadata change to try again")
         }
     }
     
@@ -392,33 +430,13 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             } else {
                 // For other errors, increment failure count
                 self.consecutiveFailures += 1
-                if self.consecutiveFailures >= self.maxConsecutiveFailures {
-                    self.pauseAutoDetectionTemporarily()
-                }
+                print("Shazam error - consecutive failures: \(self.consecutiveFailures)")
+                // Smart detection doesn't need pause mechanism - just wait for next metadata change
             }
         }
     }
     
-    private func scheduleQuickRetry() {
-        // Try again in 8 seconds if we failed to detect (potential song change)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
-            if self.isAutoDetecting && !self.audioEngine.isRunning {
-                print("Quick retry for potential song change")
-                self.performAutoDetection()
-            }
-        }
-    }
-    
-    private func pauseAutoDetectionTemporarily() {
-        stopAutoDetection()
-        
-        // Resume after 2 minutes
-        DispatchQueue.main.asyncAfter(deadline: .now() + 120.0) {
-            if let radioPlayer = self.radioPlayer, radioPlayer.isPlaying {
-                self.startAutoDetection()
-            }
-        }
-    }
+    // Smart detection doesn't need retry mechanisms - it only activates on metadata changes
     
     private func updateShazamMedia(from item: SHMediaItem) {
         let media = ShazamMedia(title: item.title,

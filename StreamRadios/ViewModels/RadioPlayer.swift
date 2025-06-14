@@ -639,6 +639,32 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
+    // Helper method to determine if metadata change indicates a new song
+    private func isLikelyNewSong(previous: String, current: String) -> Bool {
+        // Convert to lowercase for comparison
+        let prev = previous.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let curr = current.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // If strings are identical, not a new song
+        if prev == curr { return false }
+        
+        // If one contains the other (partial updates), probably not a new song
+        if prev.contains(curr) || curr.contains(prev) { return false }
+        
+        // Check for common non-song metadata patterns
+        let nonSongPatterns = [
+            "now playing", "coming up", "next:", "advertisement", "commercial",
+            "station id", "weather", "news", "traffic", "promo"
+        ]
+        
+        for pattern in nonSongPatterns {
+            if curr.contains(pattern) { return false }
+        }
+        
+        // If the change is significant and doesn't match non-song patterns, likely a new song
+        return true
+    }
+    
     private func scheduleAppRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: "com.radio.refresh")
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // Refresh every 15 minutes.
@@ -679,9 +705,18 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                                 self.updateNowPlayingInfo()
                                 self.updateWidget()
                                 
-                                // Trigger immediate Shazam detection if metadata changed (new song)
-                                if previousMetadata != stringValue {
-                                    print("Metadata changed from '\(previousMetadata ?? "nil")' to '\(stringValue)' - triggering immediate detection")
+                                // Smart Shazam detection: only trigger if metadata significantly changed
+                                if let previous = previousMetadata, previous != stringValue {
+                                    // Check if this looks like a real song change (not just minor metadata updates)
+                                    if self.isLikelyNewSong(previous: previous, current: stringValue) {
+                                        print("New song detected: '\(previous)' → '\(stringValue)' - triggering smart Shazam detection")
+                                        self.shazamViewModel?.triggerImmediateDetection()
+                                    } else {
+                                        print("Minor metadata change detected, not triggering Shazam: '\(previous)' → '\(stringValue)'")
+                                    }
+                                } else if previousMetadata == nil {
+                                    // First metadata received - likely a new song
+                                    print("First metadata received: '\(stringValue)' - triggering smart Shazam detection")
                                     self.shazamViewModel?.triggerImmediateDetection()
                                 }
                             } else if self.metadata == nil {
