@@ -47,7 +47,10 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     var fileSize: Int64? // New property for file size in bytes
     
     var compositeID: String {
-        return "\(feedId)_\(id)_\(publicationDate.timeIntervalSince1970)"
+        // Use a more comprehensive identifier to avoid duplicates
+        let dateString = String(publicationDate.timeIntervalSince1970)
+        let titleHash = String(abs(title.hashValue))
+        return "\(feedId)_\(id)_\(dateString)_\(titleHash)"
     }
     
     init(id: String = UUID().uuidString, title: String, descriptionText: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil) {
@@ -307,7 +310,8 @@ class PodcastViewModel: ObservableObject {
     func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
             // If episodes are already in memory, use them
             if let cachedEpisodes = episodeCache[feed.id] {
-                self.currentEpisodes = cachedEpisodes
+                let uniqueEpisodes = self.removeDuplicatesFromEpisodes(cachedEpisodes)
+                self.currentEpisodes = uniqueEpisodes
                 self.objectWillChange.send()
                 return
             }
@@ -335,8 +339,9 @@ class PodcastViewModel: ObservableObject {
                     }
                     
                     DispatchQueue.main.async {
-                        self.episodeCache[feed.id] = episodes
-                        self.currentEpisodes = episodes
+                        let uniqueEpisodes = self.removeDuplicatesFromEpisodes(episodes)
+                        self.episodeCache[feed.id] = uniqueEpisodes
+                        self.currentEpisodes = uniqueEpisodes
                         self.isLoadingEpisodes = false
                         self.objectWillChange.send()
                     }
@@ -360,8 +365,9 @@ class PodcastViewModel: ObservableObject {
                     
                     DispatchQueue.main.async {
                         // Update the cache and current episodes
-                        self.episodeCache[feed.id] = updatedFeed.episodes
-                        self.currentEpisodes = updatedFeed.episodes
+                        let uniqueEpisodes = self.removeDuplicatesFromEpisodes(updatedFeed.episodes)
+                        self.episodeCache[feed.id] = uniqueEpisodes
+                        self.currentEpisodes = uniqueEpisodes
                         self.isLoadingEpisodes = false
                         self.objectWillChange.send()
                     }
@@ -390,9 +396,10 @@ class PodcastViewModel: ObservableObject {
                    
                    switch result {
                    case .success(let episodes):
-                       self.currentEpisodes = episodes
+                       let uniqueEpisodes = self.removeDuplicatesFromEpisodes(episodes)
+                       self.currentEpisodes = uniqueEpisodes
                        if self.currentTab == 0 {
-                           self.episodeCache[feed.id] = episodes
+                           self.episodeCache[feed.id] = uniqueEpisodes
                        }
                        self.objectWillChange.send()
                        
@@ -1050,6 +1057,11 @@ class PodcastViewModel: ObservableObject {
                     DispatchQueue.main.async {
                         self.podcastFeeds = feeds
                         
+                        print("DEBUG: loadPodcastFeeds - Loaded \(feeds.count) feeds:")
+                        for feed in feeds {
+                            print("DEBUG: loadPodcastFeeds - Feed: \(feed.title) (ID: \(feed.id))")
+                        }
+                        
                         // Update podcastFeedOrder
                         let existingIds = Set(self.podcastFeedOrder)
                         for feed in self.podcastFeeds where !existingIds.contains(feed.id) {
@@ -1073,6 +1085,14 @@ class PodcastViewModel: ObservableObject {
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             do {
                 let managedEpisodes = try self.backgroundContext.fetch(fetchRequest)
+                print("DEBUG: loadAllEpisodes - Found \(managedEpisodes.count) episodes in Core Data")
+                
+                // Group episodes by feedId for debugging
+                let episodesByFeed = Dictionary(grouping: managedEpisodes) { $0.feedId ?? "unknown" }
+                for (feedId, episodes) in episodesByFeed {
+                    print("DEBUG: loadAllEpisodes - Feed \(feedId): \(episodes.count) episodes")
+                }
+                
                 let episodes = managedEpisodes.map { managedEpisode in
                     var episode = managedEpisode.toPodcastEpisode()
                     episode.state.isPlayed = managedEpisode.isPlayed
@@ -1084,10 +1104,12 @@ class PodcastViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.allEpisodes = episodes
                     self.downloadedEpisodeIds = downloadedIds
+                    print("DEBUG: loadAllEpisodes - Set allEpisodes to \(self.allEpisodes.count) episodes")
                     os_log("Loaded %d episodes, %d downloaded", log: self.log, type: .info, self.allEpisodes.count, self.downloadedEpisodeIds.count)
                 }
             } catch {
                 DispatchQueue.main.async {
+                    print("DEBUG: loadAllEpisodes - Error: \(error)")
                     os_log("Failed to load episodes: %@", log: self.log, type: .error, error.localizedDescription)
                 }
             }
@@ -1190,9 +1212,10 @@ class PodcastViewModel: ObservableObject {
            // Check cache first
            if let cachedEpisodes = episodeCache[feed.id] {
                DispatchQueue.main.async {
-                   self.currentEpisodes = cachedEpisodes
+                   let uniqueEpisodes = self.removeDuplicatesFromEpisodes(cachedEpisodes)
+                   self.currentEpisodes = uniqueEpisodes
                    self.isLoadingEpisodes = false
-                   completion(.success(cachedEpisodes))
+                   completion(.success(uniqueEpisodes))
                }
                return
            }
@@ -1218,9 +1241,10 @@ class PodcastViewModel: ObservableObject {
                                    let paginatedEpisodes = Array(updatedFeed.episodes.prefix(self.episodesPerPage))
                                    
                                    DispatchQueue.main.async {
-                                       self.currentEpisodes = paginatedEpisodes
+                                       let uniqueEpisodes = self.removeDuplicatesFromEpisodes(paginatedEpisodes)
+                                       self.currentEpisodes = uniqueEpisodes
                                        self.hasMoreEpisodes = updatedFeed.episodes.count > self.episodesPerPage
-                                       completion(.success(paginatedEpisodes))
+                                       completion(.success(uniqueEpisodes))
                                    }
                                    
                                case .failure(let error):
@@ -1231,9 +1255,12 @@ class PodcastViewModel: ObservableObject {
                        } else {
                            // Update current episodes based on page
                            if self.currentPage == 1 {
-                               self.currentEpisodes = episodes
+                               let uniqueEpisodes = self.removeDuplicatesFromEpisodes(episodes)
+                               self.currentEpisodes = uniqueEpisodes
                            } else {
-                               self.currentEpisodes.append(contentsOf: episodes)
+                               let combinedEpisodes = self.currentEpisodes + episodes
+                               let uniqueEpisodes = self.removeDuplicatesFromEpisodes(combinedEpisodes)
+                               self.currentEpisodes = uniqueEpisodes
                            }
                            
                            // Cache first page results
@@ -1273,11 +1300,14 @@ class PodcastViewModel: ObservableObject {
                             self.hasMoreEpisodes = false
                             self.currentPage -= 1
                         } else {
-                            self.currentEpisodes.append(contentsOf: newEpisodes)
+                            let combinedEpisodes = self.currentEpisodes + newEpisodes
+                            let uniqueEpisodes = self.removeDuplicatesFromEpisodes(combinedEpisodes)
+                            self.currentEpisodes = uniqueEpisodes
                             if self.currentTab == 0 {
                                 var cachedEpisodes = self.episodeCache[feed.id] ?? []
                                 cachedEpisodes.append(contentsOf: newEpisodes)
-                                self.episodeCache[feed.id] = cachedEpisodes
+                                let uniqueCachedEpisodes = self.removeDuplicatesFromEpisodes(cachedEpisodes)
+                                self.episodeCache[feed.id] = uniqueCachedEpisodes
                             }
                         }
                         completion(.success(newEpisodes))
@@ -1450,12 +1480,15 @@ class PodcastViewModel: ObservableObject {
             rssParser.parse()
             
             os_log("RSS parsing completed for feed: %@. Found %d episodes.", log: self.log, type: .info, feed.title, rssParser.episodes.count)
+            print("DEBUG: RSS parsing - Feed ID: \(feed.id), Title: \(feed.title), Episodes: \(rssParser.episodes.count)")
             
             var updatedFeed = feed
             updatedFeed.title = feed.title
             updatedFeed.descriptionText = rssParser.podcastDescription
             updatedFeed.artworkUrl = rssParser.artworkUrl ?? feed.artworkUrl
             updatedFeed.episodes = rssParser.episodes
+            
+            print("DEBUG: RSS parsing - updatedFeed.id: \(updatedFeed.id), episodes count: \(updatedFeed.episodes.count)")
             
             if let artworkUrl = updatedFeed.artworkUrl, let url = URL(string: artworkUrl) {
                 self.fetchAndStoreImage(from: url) { imageData in
@@ -1544,6 +1577,7 @@ class PodcastViewModel: ObservableObject {
         }
         
         // Update episodes
+        print("DEBUG: updateFeed - Processing \(updatedFeed.episodes.count) episodes for feed: \(updatedFeed.title)")
         for episode in updatedFeed.episodes {
             if let index = allEpisodes.firstIndex(where: { $0.id == episode.id }) {
                 allEpisodes[index] = episode
@@ -1551,10 +1585,22 @@ class PodcastViewModel: ObservableObject {
                 allEpisodes.append(episode)
             }
         }
+        print("DEBUG: updateFeed - allEpisodes now contains \(allEpisodes.count) total episodes")
         
         // Update currentEpisodes if necessary
+        print("DEBUG: updateFeed called for feed: \(updatedFeed.title) with \(updatedFeed.episodes.count) episodes")
+        print("DEBUG: Current currentEpisodes.count: \(currentEpisodes.count)")
+        print("DEBUG: Current currentEpisodes.first?.feedId: \(currentEpisodes.first?.feedId ?? "nil")")
+        print("DEBUG: updatedFeed.id: \(updatedFeed.id)")
+        
         if currentEpisodes.first?.feedId == updatedFeed.id {
-            currentEpisodes = allEpisodes.filter { $0.feedId == updatedFeed.id }
+            print("DEBUG: Updating currentEpisodes for matching feed")
+            let filteredEpisodes = allEpisodes.filter { $0.feedId == updatedFeed.id }
+            print("DEBUG: Filtered episodes count: \(filteredEpisodes.count)")
+            let uniqueEpisodes = removeDuplicatesFromEpisodes(filteredEpisodes)
+            currentEpisodes = uniqueEpisodes
+        } else {
+            print("DEBUG: NOT updating currentEpisodes - feed ID mismatch or empty currentEpisodes")
         }
         
         // Trigger UI update
@@ -2087,10 +2133,54 @@ class PodcastViewModel: ObservableObject {
     
 
     func updateFilteredEpisodes(for feedId: String, selectedTab: Int) {
+            print("DEBUG: updateFilteredEpisodes called for feedId: \(feedId), selectedTab: \(selectedTab)")
+            
             // Update the currentTab
             self.currentTab = selectedTab
             
-            // Always get the latest states from Core Data
+            // First, try to get episodes from in-memory allEpisodes array (faster and more up-to-date)
+            let inMemoryEpisodes = allEpisodes.filter { $0.feedId == feedId }
+            print("DEBUG: Found \(inMemoryEpisodes.count) episodes in memory for feedId: \(feedId)")
+            
+            if !inMemoryEpisodes.isEmpty {
+                // Use in-memory episodes and apply tab filtering
+                var filteredEpisodes = inMemoryEpisodes
+                
+                switch selectedTab {
+                case 1: // Favorites
+                    filteredEpisodes = inMemoryEpisodes.filter { $0.state.isFavorite }
+                case 2: // Downloads
+                    filteredEpisodes = inMemoryEpisodes.filter { $0.state.isDownloaded }
+                default:
+                    break
+                }
+                
+                print("DEBUG: After tab filtering: \(filteredEpisodes.count) episodes")
+                
+                // Remove duplicates based on compositeID to prevent ForEach issues
+                let uniqueEpisodes = self.removeDuplicatesFromEpisodes(filteredEpisodes)
+                
+                // Update the cache with the latest states if this is the "All" tab
+                if selectedTab == 0 {
+                    episodeCache[feedId] = uniqueEpisodes
+                }
+                
+                DispatchQueue.main.async {
+                    print("DEBUG: Setting currentEpisodes to \(uniqueEpisodes.count) episodes for feedId: \(feedId) (from memory)")
+                    self.currentEpisodes = uniqueEpisodes
+                    self.objectWillChange.send()
+                }
+                
+                // Update our in-memory collections
+                self.favoriteEpisodes = inMemoryEpisodes.filter { $0.state.isFavorite }
+                self.downloadedEpisodes = inMemoryEpisodes.filter { $0.state.isDownloaded }
+                
+                return
+            }
+            
+            print("DEBUG: No episodes in memory, falling back to Core Data fetch")
+            
+            // Fallback: get the latest states from Core Data
             let context = CoreDataStack.shared.context
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             
@@ -2111,6 +2201,8 @@ class PodcastViewModel: ObservableObject {
             
             do {
                 let results = try context.fetch(fetchRequest)
+                print("DEBUG: Core Data fetch returned \(results.count) episodes for feedId: \(feedId)")
+                
                 let episodes = results.map { managedEpisode -> PodcastEpisode in
                     var episode = managedEpisode.toPodcastEpisode()
                     episode.state.isPlayed = managedEpisode.isPlayed
@@ -2120,13 +2212,21 @@ class PodcastViewModel: ObservableObject {
                     return episode
                 }
                 
+                // Remove duplicates based on compositeID to prevent ForEach issues
+                let uniqueEpisodes = self.removeDuplicatesFromEpisodes(episodes)
+                
                 // Update the cache with the latest states if this is the "All" tab
                 if selectedTab == 0 {
-                    episodeCache[feedId] = episodes
+                    episodeCache[feedId] = uniqueEpisodes
                 }
                 
                 DispatchQueue.main.async {
-                    self.currentEpisodes = episodes
+                    print("DEBUG: Setting currentEpisodes to \(uniqueEpisodes.count) episodes for feedId: \(feedId) (from Core Data)")
+                    if uniqueEpisodes.isEmpty {
+                        print("WARNING: No episodes found for feedId: \(feedId). This feed will appear empty.")
+                        print("DEBUG: Original episodes count before deduplication was: \(episodes.count)")
+                    }
+                    self.currentEpisodes = uniqueEpisodes
                     self.objectWillChange.send()
                 }
                 
@@ -2146,6 +2246,71 @@ class PodcastViewModel: ObservableObject {
                 episodeCache[episode.feedId] = cachedEpisodes
             }
         }
+    
+    // Helper method to remove duplicate episodes based on compositeID
+    private func removeDuplicatesFromEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+        guard !episodes.isEmpty else {
+            print("DEBUG: No episodes to process")
+            return []
+        }
+        
+        var seenCompositeIDs = Set<String>()
+        var uniqueEpisodes: [PodcastEpisode] = []
+        var duplicatesCount = 0
+        var duplicatedTitles: [String] = []
+        
+        print("DEBUG: Starting duplicate removal for \(episodes.count) episodes")
+        
+        for episode in episodes {
+            if !seenCompositeIDs.contains(episode.compositeID) {
+                seenCompositeIDs.insert(episode.compositeID)
+                uniqueEpisodes.append(episode)
+            } else {
+                duplicatesCount += 1
+                duplicatedTitles.append(episode.title)
+                print("DEBUG: Found duplicate episode with compositeID: \(episode.compositeID), title: \(episode.title)")
+            }
+        }
+        
+        // Safety check: if we removed too many episodes (more than 80%), fall back to the original approach
+        let removalRatio = Double(duplicatesCount) / Double(episodes.count)
+        if removalRatio > 0.8 {
+            print("WARNING: Duplicate removal removed \(Int(removalRatio * 100))% of episodes. This seems too aggressive. Falling back to ID-based deduplication.")
+            return removeDuplicatesByID(episodes)
+        }
+        
+        if duplicatesCount > 0 {
+            print("DEBUG: Removed \(duplicatesCount) duplicate episodes from \(episodes.count) total episodes")
+            print("DEBUG: Duplicated titles: \(duplicatedTitles)")
+        } else {
+            print("DEBUG: No duplicates found in \(episodes.count) episodes")
+        }
+        
+        print("DEBUG: Returning \(uniqueEpisodes.count) unique episodes")
+        return uniqueEpisodes
+    }
+    
+    // Fallback method to remove duplicates by ID only
+    private func removeDuplicatesByID(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+        var seenIDs = Set<String>()
+        var uniqueEpisodes: [PodcastEpisode] = []
+        
+        for episode in episodes {
+            if !seenIDs.contains(episode.id) {
+                seenIDs.insert(episode.id)
+                uniqueEpisodes.append(episode)
+            }
+        }
+        
+        print("DEBUG: Fallback deduplication by ID: \(episodes.count) -> \(uniqueEpisodes.count)")
+        return uniqueEpisodes
+    }
+    
+    // Private setter method to safely update currentEpisodes
+    private func setCurrentEpisodes(_ episodes: [PodcastEpisode]) {
+        let uniqueEpisodes = removeDuplicatesFromEpisodes(episodes)
+        currentEpisodes = uniqueEpisodes
+    }
     
     func loadAllEpisodesProgress() {
         backgroundContext.perform {

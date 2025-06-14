@@ -1308,7 +1308,7 @@ struct PodcastPlayerView: View {
         ScrollView {
             ScrollViewReader { proxy in
                 LazyVStack(spacing: 8) {
-                    ForEach(viewModel.currentEpisodes) { episode in
+                    ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
                         OptimizedEpisodeRowView(
                             episode: episode,
                             isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
@@ -1317,7 +1317,7 @@ struct PodcastPlayerView: View {
                             viewModel: viewModel,
                             podcastPlayer: podcastPlayer
                         )
-                        .id(episode.id)
+                        .id(episode.compositeID)
                     }
                     
                     if viewModel.hasMoreEpisodes && !viewModel.isLoadingMoreEpisodes {
@@ -1358,7 +1358,7 @@ struct PodcastPlayerView: View {
               !viewModel.currentEpisodes.isEmpty,
               let currentEpisode = podcastPlayer.currentEpisode,
               podcastPlayer.isPlaying,
-              viewModel.currentEpisodes.contains(where: { $0.id == currentEpisode.id }) else {
+              viewModel.currentEpisodes.contains(where: { $0.compositeID == currentEpisode.compositeID }) else {
             return
         }
         
@@ -1371,7 +1371,7 @@ struct PodcastPlayerView: View {
             guard !self.hasManuallyScrolled else { return }
             
             withAnimation(.easeInOut(duration: 0.5)) {
-                proxy.scrollTo(currentEpisode.id, anchor: .center)
+                proxy.scrollTo(currentEpisode.compositeID, anchor: .center)
             }
         }
     }
@@ -1488,8 +1488,8 @@ struct PodcastPlayerView: View {
     // Removed redundant scrolling methods to prevent interference with user scrolling
     // All auto-scrolling is now handled only in performInitialScrollIfNeeded(proxy:)
     
-    private func isEpisodeVisible(_ episodeId: String) -> Bool {
-        guard let episodeIndex = viewModel.currentEpisodes.firstIndex(where: { $0.id == episodeId }) else {
+    private func isEpisodeVisible(_ episodeCompositeId: String) -> Bool {
+        guard let episodeIndex = viewModel.currentEpisodes.firstIndex(where: { $0.compositeID == episodeCompositeId }) else {
             return false
         }
         
