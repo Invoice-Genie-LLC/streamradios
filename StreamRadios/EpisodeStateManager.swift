@@ -157,7 +157,15 @@ class EpisodeStateManager: ObservableObject {
         if let currentPlayingId = currentlyPlayingEpisodeId, currentPlayingId != episodeId {
             let currentProgress = episodeProgress[currentPlayingId] ?? 0.0
             if currentProgress > 0 {
-                episodeStates[currentPlayingId] = .inProgress
+                let currentState = episodeStates[currentPlayingId] ?? .new
+                if currentState != .played {
+                    // Only update to inProgress if it wasn't already marked as played
+                    if currentProgress >= 0.99 {
+                        episodeStates[currentPlayingId] = .played
+                    } else {
+                        episodeStates[currentPlayingId] = .inProgress
+                    }
+                }
             }
         }
         
@@ -185,9 +193,17 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func switchToEpisode(newEpisodeId: String, previousEpisodeId: String, previousProgress: Double) {
-        // Mark previous episode as "In Progress"
+        // Mark previous episode as "In Progress" only if it wasn't already marked as "Played"
         if previousProgress > 0 {
-            episodeStates[previousEpisodeId] = .inProgress
+            let currentState = episodeStates[previousEpisodeId] ?? .new
+            if currentState != .played {
+                // Only update to inProgress if it wasn't already marked as played
+                if previousProgress >= 0.99 {
+                    episodeStates[previousEpisodeId] = .played
+                } else {
+                    episodeStates[previousEpisodeId] = .inProgress
+                }
+            }
             episodeProgress[previousEpisodeId] = previousProgress
         }
         
@@ -216,7 +232,15 @@ class EpisodeStateManager: ObservableObject {
         if let currentPlayingId = currentlyPlayingEpisodeId, currentPlayingId != episodeId {
             let currentProgress = episodeProgress[currentPlayingId] ?? 0.0
             if currentProgress > 0 {
-                episodeStates[currentPlayingId] = .inProgress
+                let currentState = episodeStates[currentPlayingId] ?? .new
+                if currentState != .played {
+                    // Only update to inProgress if it wasn't already marked as played
+                    if currentProgress >= 0.99 {
+                        episodeStates[currentPlayingId] = .played
+                    } else {
+                        episodeStates[currentPlayingId] = .inProgress
+                    }
+                }
             }
         }
         

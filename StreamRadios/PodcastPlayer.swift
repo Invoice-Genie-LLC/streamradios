@@ -389,7 +389,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 var updatedEpisode = currentEpisode
                 let progress = currentTime / duration
                 updatedEpisode.state.progress = progress
-                updatedEpisode.state.isPlayed = progress >= 0.99
+                
+                // Preserve existing "finished" status - only mark as finished if progress >= 0.99
+                // but don't unmark episodes that were already marked as finished
+                if progress >= 0.99 {
+                    updatedEpisode.state.isPlayed = true
+                } else if !currentEpisode.state.isPlayed {
+                    // Only update isPlayed to false if it wasn't already marked as finished
+                    updatedEpisode.state.isPlayed = false
+                }
                 
                 // Update the episode in ViewModel
                 viewModel?.updateEpisode(updatedEpisode)
@@ -413,7 +421,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 // Update the episode state
                 var updatedEpisode = episode
                 updatedEpisode.state.progress = progress
-                updatedEpisode.state.isPlayed = false
+                
+                // Only mark as not played if it wasn't already marked as finished
+                if !episode.state.isPlayed {
+                    updatedEpisode.state.isPlayed = false
+                }
+                
                 viewModel?.updateEpisode(updatedEpisode)
                 
                 // Force UI update
@@ -818,7 +831,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Update episode state to "In Progress" if it was playing
             var updatedEpisode = currentEpisode
             updatedEpisode.state.progress = progress
-            updatedEpisode.state.isPlayed = progress >= 0.99
+            
+            // Preserve existing "finished" status - only mark as finished if progress >= 0.99
+            // but don't unmark episodes that were already marked as finished
+            if progress >= 0.99 {
+                updatedEpisode.state.isPlayed = true
+            } else if !currentEpisode.state.isPlayed {
+                // Only update isPlayed to false if it wasn't already marked as finished
+                updatedEpisode.state.isPlayed = false
+            }
+            
             viewModel?.updateEpisode(updatedEpisode)
             
             // Update state manager to mark as in progress

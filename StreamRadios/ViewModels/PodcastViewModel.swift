@@ -1791,6 +1791,16 @@ class PodcastViewModel: ObservableObject {
                 // Update the in-memory episode
                 var updatedEpisode = episode
                 updatedEpisode.state.progress = progress
+                
+                // Preserve existing "finished" status - only mark as finished if progress >= 0.99
+                // but don't unmark episodes that were already marked as finished
+                if progress >= 0.99 {
+                    updatedEpisode.state.isPlayed = true
+                } else if !episode.state.isPlayed {
+                    // Only update isPlayed to false if it wasn't already marked as finished
+                    updatedEpisode.state.isPlayed = false
+                }
+                
                 updateEpisodeInLists(updatedEpisode)
                 
                 // Update the progress in the episodeProgress dictionary
