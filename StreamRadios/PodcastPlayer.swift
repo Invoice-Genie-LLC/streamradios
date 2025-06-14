@@ -315,17 +315,29 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             duration = max(0.01, player.currentItem?.duration.seconds ?? 0.01)
             currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
             
-            // Only update UI if there's a significant change
+            // Only update UI if there's a significant change AND user is not actively interacting
             if abs(currentProgress - lastReportedProgress) > 0.01 {
                 lastReportedProgress = currentProgress
-                DispatchQueue.main.async {
-                    self.objectWillChange.send()
+                
+                // Check if any views are currently being scrolled by user
+                let shouldUpdateUI = !isUserCurrentlyScrolling()
+                
+                if shouldUpdateUI {
+                    DispatchQueue.main.async {
+                        self.objectWillChange.send()
+                    }
                 }
             }
             
             // Update now playing info less frequently
             updateNowPlayingInfoDebounced()
         }
+    
+    private func isUserCurrentlyScrolling() -> Bool {
+        // Check if any podcast player views are currently being scrolled
+        // This helps prevent UI updates during user interaction
+        return UserDefaults.standard.bool(forKey: "isUserScrolling")
+    }
     
     func rewindAndPlay(episode: PodcastEpisode) {
         // Find the correct feed for this episode
@@ -365,10 +377,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         isPlaying = true
         
-        // Force UI update
-        DispatchQueue.main.async {
-            self.viewModel?.objectWillChange.send()
-            self.objectWillChange.send()
+        // Force UI update only if user is not scrolling
+        if !isUserCurrentlyScrolling() {
+            DispatchQueue.main.async {
+                self.viewModel?.objectWillChange.send()
+                self.objectWillChange.send()
+            }
         }
     }
     
@@ -402,9 +416,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 // Update the episode in ViewModel
                 viewModel?.updateEpisode(updatedEpisode)
                 
-                // Force UI update
-                DispatchQueue.main.async {
-                    self.viewModel?.objectWillChange.send()
+                // Force UI update only if user is not scrolling
+                if !self.isUserCurrentlyScrolling() {
+                    DispatchQueue.main.async {
+                        self.viewModel?.objectWillChange.send()
+                    }
                 }
                 
                 os_log("Updated episode status on navigation away: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
@@ -429,9 +445,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 viewModel?.updateEpisode(updatedEpisode)
                 
-                // Force UI update
-                DispatchQueue.main.async {
-                    self.viewModel?.objectWillChange.send()
+                // Force UI update only if user is not scrolling
+                if !self.isUserCurrentlyScrolling() {
+                    DispatchQueue.main.async {
+                        self.viewModel?.objectWillChange.send()
+                    }
                 }
             }
         }
@@ -520,9 +538,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
         os_log("Started playing episode: %@", log: log, type: .info, episode.title)
         
-        // Trigger a UI update
-        DispatchQueue.main.async {
-            self.viewModel?.objectWillChange.send()
+        // Trigger a UI update only if user is not scrolling
+        if !isUserCurrentlyScrolling() {
+            DispatchQueue.main.async {
+                self.viewModel?.objectWillChange.send()
+            }
         }
     }
     
@@ -650,7 +670,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                updateNowPlayingInfo()
                setupTimeObserver()
                
-               objectWillChange.send()
+               // Only send UI update if user is not scrolling
+               if !isUserCurrentlyScrolling() {
+                   objectWillChange.send()
+               }
         
                 PlaybackManager.shared.setActivePlayer(.podcast)
             }
@@ -667,7 +690,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         ensureProgressTracking(for: currentEpisode)
 
         updateNowPlayingInfo()
-        objectWillChange.send()
+        
+        // Only send UI update if user is not scrolling
+        if !isUserCurrentlyScrolling() {
+            objectWillChange.send()
+        }
         
         do {
                     try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -893,6 +920,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Remove observers to prevent memory leaks
         NotificationCenter.default.removeObserver(self)
     }
+}
+
+// MARK: - Notification Extensions
+extension Notification.Name {
+    static let userIsScrolling = Notification.Name("userIsScrolling")
+    static let userStoppedScrolling = Notification.Name("userStoppedScrolling")
 }
 
 struct UserDefaultsKeys {
