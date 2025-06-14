@@ -191,7 +191,10 @@ class RadioPlayer: NSObject, ObservableObject {
     private var aiDetector: AISongDurationDetector?
     
     func setShazamViewModel(_ shazamViewModel: ShazamViewModel) {
+        print("🔗 DEBUG: setShazamViewModel called")
+        print("🔗 DEBUG: Connecting ShazamViewModel to RadioPlayer")
         self.shazamViewModel = shazamViewModel
+        print("🔗 DEBUG: ShazamViewModel connected successfully")
         print("ShazamViewModel connected for fallback detection")
     }
     
@@ -1052,13 +1055,18 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func fallbackToShazam(reason: String) {
+        print("🔍 DEBUG: fallbackToShazam called with reason: \(reason)")
+        print("🔍 DEBUG: shazamViewModel is \(shazamViewModel == nil ? "NIL" : "NOT NIL")")
+        
         guard let shazamViewModel = shazamViewModel else {
-            print("Shazam fallback requested but ShazamViewModel not available")
+            print("🚨 ERROR: Shazam fallback requested but ShazamViewModel not available")
+            print("🚨 ERROR: This means the ShazamViewModel connection was lost or never established")
             clearSongMetadata()
             isDetectingCurrentSong = false
             return
         }
         
+        print("✅ DEBUG: ShazamViewModel is available, proceeding with Shazam detection")
         print("Initiating Shazam fallback: \(reason)")
         
         // Set detection flag
@@ -1410,6 +1418,7 @@ class AISongDurationDetector {
     private var falsePositives: Int = 0
     private var analysisStartTime: Date?
     private var lastLogTime: Date = Date()
+    private var lastShazamTriggerTime: Date?
     private var detectionHistory: [(Date, String, Float)] = [] // timestamp, reason, confidence
     
     weak var radioPlayer: RadioPlayer?
@@ -1447,6 +1456,9 @@ class AISongDurationDetector {
         
         // Clear detection history for new song
         detectionHistory.removeAll()
+        
+        // Reset cooldown timer for new song
+        lastShazamTriggerTime = nil
         
         // Estimate song duration based on genre and artist patterns
         estimateSongDuration(for: song)
@@ -1570,34 +1582,58 @@ class AISongDurationDetector {
         // Store detection data for analysis
         detectionHistory.append((currentTime, "analysis", combinedProbability))
         
-        // Trigger next song detection if high probability of song change
-        if combinedProbability > 0.65 {  // Lowered threshold from 0.8 to 0.65
-            let reason: String
-            if soundPatternChange == combinedProbability {
-                reason = "advanced sound pattern change"
-            } else if tuneChangeProbability > songEndProbability {
-                reason = "tune change detected"
+        // Only trigger Shazam when we have very high confidence of song change
+        if combinedProbability >= 0.80 {  // 80% or higher confidence for high confidence trigger
+            // Check cooldown period to prevent rapid successive triggers
+            let cooldownPeriod: TimeInterval = 30.0 // 30 seconds minimum between triggers
+            let canTrigger = lastShazamTriggerTime == nil || 
+                           currentTime.timeIntervalSince(lastShazamTriggerTime!) > cooldownPeriod
+            
+            if canTrigger {
+                let reason: String
+                if soundPatternChange == combinedProbability {
+                    reason = "advanced sound pattern change"
+                } else if tuneChangeProbability > songEndProbability {
+                    reason = "tune change detected"
+                } else {
+                    reason = "song end detected"
+                }
+                
+                print("🎵 AI: 🚨 HIGH CONFIDENCE DETECTION!")
+                print("🎵 AI: 📈 Confidence: \(String(format: "%.1f", combinedProbability * 100))%")
+                print("🎵 AI: 🎯 Reason: \(reason)")
+                
+                lastShazamTriggerTime = currentTime
+                triggerNextSongDetection(confidence: combinedProbability, reason: reason)
             } else {
-                reason = "song end detected"
+                let timeSinceLastTrigger = currentTime.timeIntervalSince(lastShazamTriggerTime!)
+                print("🎵 AI: 🚫 High confidence detected but in cooldown period (\(String(format: "%.1f", timeSinceLastTrigger))s/\(cooldownPeriod)s)")
             }
+        } else if combinedProbability > 0.70 {  // Medium-high confidence monitoring
+            print("🎵 AI: ⚠️  High change detected (\(String(format: "%.1f", combinedProbability * 100))%) - monitoring for confirmation...")
             
-            print("🎵 AI: 🚨 HIGH CONFIDENCE DETECTION!")
-            print("🎵 AI: 📈 Confidence: \(String(format: "%.1f", combinedProbability * 100))%")
-            print("🎵 AI: 🎯 Reason: \(reason)")
-            
-            triggerNextSongDetection(confidence: combinedProbability, reason: reason)
-        } else if combinedProbability > 0.5 {  // Lowered monitoring threshold
-            print("🎵 AI: ⚠️  Moderate change detected (\(String(format: "%.1f", combinedProbability * 100))%) - monitoring...")
-            
-            // Add time-based fallback trigger for persistent moderate changes
-            if elapsedTime > 45.0 && combinedProbability > 0.55 {  // After 45 seconds with 55%+ confidence
-                print("🎵 AI: ⏰ Time-based trigger: Persistent changes detected for \(String(format: "%.0f", elapsedTime))s")
-                triggerNextSongDetection(confidence: combinedProbability, reason: "persistent pattern changes over time")
+            // Only trigger after sustained high confidence for shorter period
+            if elapsedTime > 60.0 && combinedProbability > 0.75 {  // After 60 seconds with 75%+ confidence
+                // Check cooldown for sustained triggers too
+                let cooldownPeriod: TimeInterval = 30.0
+                let canTrigger = lastShazamTriggerTime == nil || 
+                               currentTime.timeIntervalSince(lastShazamTriggerTime!) > cooldownPeriod
+                
+                if canTrigger {
+                    print("🎵 AI: ⏰ Sustained high confidence trigger: Changes detected for \(String(format: "%.0f", elapsedTime))s")
+                    lastShazamTriggerTime = currentTime
+                    triggerNextSongDetection(confidence: combinedProbability, reason: "sustained high confidence pattern changes")
+                } else {
+                    let timeSinceLastTrigger = currentTime.timeIntervalSince(lastShazamTriggerTime!)
+                    print("🎵 AI: ⏰ Sustained trigger blocked by cooldown (\(String(format: "%.1f", timeSinceLastTrigger))s/\(cooldownPeriod)s)")
+                }
             }
+        } else if combinedProbability > 0.6 {  // Moderate confidence monitoring only
+            print("🎵 AI: 📊 Moderate change detected (\(String(format: "%.1f", combinedProbability * 100))%) - monitoring...")
         }
         
         // Safety mechanism: Force trigger after maximum analysis time to prevent getting stuck
-        if elapsedTime > 300.0 {  // 5 minutes maximum
+        if elapsedTime > 600.0 {  // 10 minutes maximum (increased from 5 minutes)
             print("🎵 AI: 🛡️  Safety trigger: Maximum analysis time reached (\(String(format: "%.0f", elapsedTime))s)")
             triggerNextSongDetection(confidence: 0.7, reason: "maximum analysis time exceeded")
         }
