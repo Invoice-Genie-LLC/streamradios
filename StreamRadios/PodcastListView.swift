@@ -1556,7 +1556,16 @@ struct PodcastPlayerView: View {
                 if episodeProgress > 0 {
                     var updatedPlayedEpisode = episode
                     updatedPlayedEpisode.state.progress = episodeProgress
-                    updatedPlayedEpisode.state.isPlayed = episodeProgress >= 0.99
+                    
+                    // Preserve existing "finished" status - only mark as finished if progress >= 0.99
+                    // but don't unmark episodes that were already marked as finished
+                    if episodeProgress >= 0.99 {
+                        updatedPlayedEpisode.state.isPlayed = true
+                    } else if !episode.state.isPlayed {
+                        // Only update isPlayed to false if it wasn't already marked as finished
+                        updatedPlayedEpisode.state.isPlayed = false
+                    }
+                    
                     viewModel.updateEpisode(updatedPlayedEpisode)
                 }
             }
