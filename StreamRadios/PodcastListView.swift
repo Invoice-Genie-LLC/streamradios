@@ -1183,11 +1183,16 @@ struct PodcastPlayerView: View {
         }
         .navigationBarHidden(true)
                 .onAppear(perform: handleOnAppear)
-                .onDisappear {
-                    // Clean up timers to prevent memory leaks
-                    scrollDebounceTimer?.invalidate()
-                    scrollDebounceTimer = nil
-                }
+                        .onDisappear {
+            // Clean up timers to prevent memory leaks
+            scrollDebounceTimer?.invalidate()
+            scrollDebounceTimer = nil
+            
+            // Reset scrolling state when view disappears
+            userIsScrolling = false
+            UserDefaults.standard.set(false, forKey: "isUserScrolling")
+            NotificationCenter.default.post(name: .userStoppedScrolling, object: false)
+        }
                 .onChange(of: viewModel.podcastFeedOrder) { _ in 
                     // Only refresh if episodes haven't been loaded yet or if there's a significant change
                     if viewModel.currentEpisodes.isEmpty {
@@ -1353,8 +1358,10 @@ struct PodcastPlayerView: View {
         // 3. The episode exists in the current list
         // 4. User hasn't manually scrolled yet
         // 5. Episodes have actually loaded (not empty)
+        // 6. User is not currently scrolling
         guard !hasPerformedInitialScroll,
               !hasManuallyScrolled,
+              !userIsScrolling,
               !viewModel.currentEpisodes.isEmpty,
               let currentEpisode = podcastPlayer.currentEpisode,
               podcastPlayer.isPlaying,
@@ -1368,7 +1375,7 @@ struct PodcastPlayerView: View {
         // Add a slight delay to ensure the view is properly laid out
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             // Double-check that we should still scroll (user might have scrolled in the meantime)
-            guard !self.hasManuallyScrolled else { return }
+            guard !self.hasManuallyScrolled, !self.userIsScrolling else { return }
             
             withAnimation(.easeInOut(duration: 0.5)) {
                 proxy.scrollTo(currentEpisode.compositeID, anchor: .center)
@@ -1390,12 +1397,20 @@ struct PodcastPlayerView: View {
                 userIsScrolling = true
                 hasManuallyScrolled = true
                 scrollStartOffset = lastScrollOffset
+                
+                // Notify that user started scrolling to prevent UI updates
+                UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                NotificationCenter.default.post(name: .userIsScrolling, object: true)
             }
             
             // Reset the debounce timer
             scrollDebounceTimer?.invalidate()
-            scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
-                userIsScrolling = false
+            scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+                self.userIsScrolling = false
+                
+                // Notify that user stopped scrolling to allow UI updates again
+                UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                NotificationCenter.default.post(name: .userStoppedScrolling, object: false)
             }
         }
         
