@@ -17,6 +17,7 @@ struct RadioStreamApp: App {
     @StateObject private var alertManager = AlertManager()
     @StateObject private var podcastViewModel = PodcastViewModel()
     @StateObject private var podcastPlayer = PodcastPlayer.shared
+    @StateObject private var shazamViewModel = ShazamViewModel()
     var radioPlayer = RadioPlayer.shared
     var viewModel = RadioStationViewModel.shared
 
@@ -32,6 +33,7 @@ struct RadioStreamApp: App {
                 .environmentObject(alertManager)
                 .environmentObject(podcastViewModel)
                 .environmentObject(podcastPlayer)
+                .environmentObject(shazamViewModel)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
                 .onAppear {
                     setupApp()
@@ -50,6 +52,9 @@ struct RadioStreamApp: App {
 
         // Set the ViewModel for RadioPlayer
         radioPlayer.setViewModel(viewModel)
+        
+        // Connect ShazamViewModel to RadioPlayer
+        radioPlayer.setShazamViewModel(shazamViewModel)
                 
         if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
             notificationManager.requestAuthorization()

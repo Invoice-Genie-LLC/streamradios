@@ -38,7 +38,7 @@ struct PlayerSheetView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
     @StateObject private var permissionManager = PermissionManager()
     @Environment(\.presentationMode) var presentationMode
-    @StateObject private var shazamViewModel = ShazamViewModel()
+    @EnvironmentObject var shazamViewModel: ShazamViewModel
     @State private var isShazaming = false
     @State private var pulse = false
     @State private var showingConfirmationDialog = false
@@ -815,16 +815,45 @@ struct StationDetails: View {
                     .padding(.top, 4)
                     .foregroundColor(.primary)
                 
-                if let metadata = radioPlayer.metadata {
+                // Show detected song info if available
+                if let detectedSong = radioPlayer.detectedSong,
+                   let title = detectedSong.title,
+                   let artist = detectedSong.artistName {
+                    VStack(spacing: 8) {
+                        Text(title)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                        Text(artist)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(1)
+                        HStack {
+                            Image(systemName: "shazam.logo.fill")
+                                .foregroundColor(.blue)
+                                .font(.caption)
+                            Text("Detected by Shazam")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .italic()
+                        }
+                    }
+                    .padding(.top, 2)
+                    .padding(.bottom, 50)
+                } else if let metadata = radioPlayer.metadata {
                     Text(metadata)
                         .font(.headline)
                         .foregroundColor(.secondary)
                         .padding(.top, 2)
                         .padding(.bottom, 50)
                 } else {
-                    Text("No song or album title available")
+                    Text("Listening for songs...")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                        .italic()
                         .padding(.top, 2)
                         .padding(.bottom, 50)
                 }
@@ -835,9 +864,18 @@ struct StationDetails: View {
 
 struct StationImage: View {
     let currentStation: RadioStation
+    @EnvironmentObject var radioPlayer: RadioPlayer
     
     var body: some View {
-        if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+        // Show detected song artwork if available
+        if let songArtwork = radioPlayer.songArtwork {
+            Image(uiImage: songArtwork)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 200, height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .modifier(NeumorphicShadow())
+        } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
                 .frame(width: 200, height: 200)

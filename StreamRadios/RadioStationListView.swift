@@ -237,10 +237,30 @@ struct RadioStationListView: View {
     @ViewBuilder
     private func stationMetadata(for station: RadioStation) -> some View {
         if isCurrentStation(station: station) {
-            if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+            // Show detected song info if available
+            if let detectedSong = radioPlayer.detectedSong,
+               let title = detectedSong.title,
+               let artist = detectedSong.artistName {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    Text(artist)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            } else if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                 Text(metadata)
                     .font(.subheadline)
                     .foregroundColor(.primary)
+            } else {
+                Text("Listening for songs...")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .italic()
             }
         } else {
             Text("Not Playing")
@@ -294,8 +314,15 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func imageForStation(_ station: RadioStation) -> some View {
-        if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData),
-           let image = UIImage(data: imageData) {
+        // Show detected song artwork if this station is currently playing and a song is detected
+        if isCurrentStation(station: station),
+           let songArtwork = radioPlayer.songArtwork {
+            Image(uiImage: songArtwork)
+                .resizable()
+                .scaledToFill()
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData),
+                  let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()

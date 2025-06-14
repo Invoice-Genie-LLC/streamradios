@@ -36,9 +36,12 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var isHandlingAlarm = false
     @Published var currentlyPlayingStation: RadioStation?
     @Published var alarmStation: RadioStation?
+    @Published var detectedSong: ShazamMedia?
+    @Published var songArtwork: UIImage?
     private var reachability: Reachability?
     private var isOnCellularNetwork = false
     weak var podcastPlayer: PodcastPlayer?
+    weak var shazamViewModel: ShazamViewModel?
     
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
@@ -61,6 +64,10 @@ class RadioPlayer: NSObject, ObservableObject {
                    self.podcastPlayer = PodcastPlayer.shared
                    self.podcastPlayer?.setRadioPlayer(self)
                }
+        
+        // Listen for song detection notifications
+        NotificationCenter.default.addObserver(self, selector: #selector(songDetected(_:)), name: NSNotification.Name("SongDetected"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(songDetectionCleared(_:)), name: NSNotification.Name("SongDetectionCleared"), object: nil)
         
             monitor.pathUpdateHandler = { [weak self] path in
                 guard let self = self else { return }
@@ -126,15 +133,60 @@ class RadioPlayer: NSObject, ObservableObject {
             .store(in: &cancellables)
     }
     
+    func setShazamViewModel(_ shazamViewModel: ShazamViewModel) {
+        self.shazamViewModel = shazamViewModel
+        shazamViewModel.setRadioPlayer(self)
+    }
+    
+    @objc private func songDetected(_ notification: Notification) {
+        guard let detectedSong = notification.object as? ShazamMedia else { return }
+        
+        DispatchQueue.main.async {
+            // Update all song data atomically
+            self.detectedSong = detectedSong
+            self.songTitle = detectedSong.title ?? ""
+            self.artistName = detectedSong.artistName ?? ""
+            
+            // Update song artwork if available (should be ready now)
+            if let shazamViewModel = self.shazamViewModel {
+                self.songArtwork = shazamViewModel.currentSongArtwork
+            }
+            
+            // Force UI update immediately with new song data
+            self.objectWillChange.send()
+            self.updateNowPlayingInfo()
+            print("Radio player updated with detected song: \(self.songTitle) by \(self.artistName) - artwork: \(self.songArtwork != nil ? "available" : "not available")")
+        }
+    }
+    
+    @objc private func songDetectionCleared(_ notification: Notification) {
+        DispatchQueue.main.async {
+            // Clear all detected song data atomically
+            self.detectedSong = nil
+            self.songArtwork = nil
+            self.songTitle = ""
+            self.artistName = ""
+            
+            // Force UI update immediately
+            self.objectWillChange.send()
+            self.updateNowPlayingInfo()
+            print("Radio player cleared detected song data - UI should immediately show station icon")
+        }
+    }
+    
+    private func notifyPlaybackChanged() {
+        NotificationCenter.default.post(name: NSNotification.Name("RadioPlaybackChanged"), object: nil)
+    }
+    
     private func configureAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             
-            // Set the audio session category to playback
-            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .interruptSpokenAudioAndMixWithOthers])
+            // Set the audio session category to playback with mix with others for Shazam compatibility
+            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .mixWithOthers])
             
-            // Override the output audio port to speaker
-            try audioSession.overrideOutputAudioPort(.speaker)
+            // Don't override output port when Shazam might be recording
+            // try audioSession.overrideOutputAudioPort(.speaker)
             
             // Activate the audio session
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
@@ -142,8 +194,10 @@ class RadioPlayer: NSObject, ObservableObject {
             // Set the preferred IO buffer duration
             try audioSession.setPreferredIOBufferDuration(0.005)
             
+            print("Radio audio session configured successfully")
+            
         } catch {
-            print("Failed to set up audio session: \(error)")
+            print("Failed to set up radio audio session: \(error)")
         }
     }
     
@@ -357,6 +411,7 @@ class RadioPlayer: NSObject, ObservableObject {
             updateNowPlayingInfo()
             updateWidget()
             scheduleAppRefresh()
+            notifyPlaybackChanged()
         
         // Set radio as the active player
             PlaybackManager.shared.setActivePlayer(.radio)
@@ -373,6 +428,7 @@ class RadioPlayer: NSObject, ObservableObject {
             player.pause()
             isPlaying = false
             updateNowPlayingInfo()
+            notifyPlaybackChanged()
         }
     
     func togglePlayPause() {
@@ -431,7 +487,14 @@ class RadioPlayer: NSObject, ObservableObject {
         player = nil
         isPlaying = false
         updateNowPlayingInfo()
+        notifyPlaybackChanged()
         currentlyPlayingStation = nil
+        
+        // Clear detected song info when stopping
+        detectedSong = nil
+        songArtwork = nil
+        songTitle = ""
+        artistName = ""
     }
     
     func nextStation(from stations: [RadioStation]) {
@@ -611,9 +674,16 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                         guard let self = self else { return }
                         DispatchQueue.main.async {
                             if let stringValue = item.stringValue, !stringValue.isEmpty {
+                                let previousMetadata = self.metadata
                                 self.metadata = stringValue
                                 self.updateNowPlayingInfo()
                                 self.updateWidget()
+                                
+                                // Trigger immediate Shazam detection if metadata changed (new song)
+                                if previousMetadata != stringValue {
+                                    print("Metadata changed from '\(previousMetadata ?? "nil")' to '\(stringValue)' - triggering immediate detection")
+                                    self.shazamViewModel?.triggerImmediateDetection()
+                                }
                             } else if self.metadata == nil {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                     if self.metadata == nil || self.metadata?.isEmpty == true {

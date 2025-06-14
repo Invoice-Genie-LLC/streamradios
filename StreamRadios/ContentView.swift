@@ -388,10 +388,18 @@ struct ContentView: View {
         struct CurrentlyPlayingView: View {
             let currentStation: RadioStation
             let metadata: String?
+            @EnvironmentObject var radioPlayer: RadioPlayer
             
             var body: some View {
                 HStack(alignment: .center, spacing: 20) {
-                    if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                    // Show detected song artwork if available, otherwise show station icon
+                    if let songArtwork = radioPlayer.songArtwork {
+                        Image(uiImage: songArtwork)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 70, height: 70)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                         Image(uiImage: image)
                             .resizable()
                             .frame(width: 70, height: 70)
@@ -409,14 +417,31 @@ struct ContentView: View {
                             .font(.title2)
                             .fontWeight(.bold)
                             .foregroundColor(.primary)
-                        if let metadata = metadata {
+                        
+                        // Show detected song info if available
+                        if let detectedSong = radioPlayer.detectedSong,
+                           let title = detectedSong.title,
+                           let artist = detectedSong.artistName {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(title)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                Text(artist)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        } else if let metadata = metadata {
                             Text(metadata)
                                 .font(.subheadline)
                                 .foregroundColor(.primary)
                         } else {
-                            Text("No song or album title available")
+                            Text("Listening for songs...")
                                 .font(.subheadline)
-                                .foregroundColor(.primary)
+                                .foregroundColor(.secondary)
+                                .italic()
                         }
                     }
                     Spacer()
