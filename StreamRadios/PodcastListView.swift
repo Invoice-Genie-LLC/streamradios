@@ -1435,9 +1435,12 @@ struct PodcastPlayerView: View {
     }
     
     private func handleOnAppear() {
-        // Only reset scroll state if this is truly a fresh view (episodes are empty)
-        // This prevents resetting state when the view is just being refreshed
-        if viewModel.currentEpisodes.isEmpty {
+        // Check if current episodes belong to this feed or if episodes are empty
+        let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
+        
+        if viewModel.currentEpisodes.isEmpty || !currentEpisodesForThisFeed {
+            // Either no episodes loaded or episodes are for a different feed
+            // Reset scroll state and load episodes for this feed
             hasPerformedInitialScroll = false
             hasManuallyScrolled = false
             userIsScrolling = false
@@ -1446,7 +1449,7 @@ struct PodcastPlayerView: View {
             
             loadInitialEpisodes()
         } else {
-            // View already has episodes loaded, just ensure we have the latest data
+            // View already has episodes loaded for this feed, just ensure we have the latest data
             // but don't reset scroll state
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
         }
