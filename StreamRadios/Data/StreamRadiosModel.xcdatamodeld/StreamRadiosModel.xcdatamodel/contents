@@ -2,6 +2,8 @@
 <model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23231" systemVersion="24A335" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="YES" userDefinedModelVersionIdentifier="">
     <entity name="CDStation" representedClassName="CDStation" syncable="YES" codeGenerationType="class">
         <attribute name="country" optional="YES" attributeType="String"/>
+        <attribute name="favoriteOrder" optional="YES" attributeType="Integer 32" usesScalarValueType="YES"/>
+        <attribute name="favoritedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="iconData" optional="YES" attributeType="String"/>
         <attribute name="id" optional="YES" attributeType="String"/>
         <attribute name="isFavorite" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>

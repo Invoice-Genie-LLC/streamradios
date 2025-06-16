@@ -131,6 +131,12 @@ extension CoreDataStack {
                         existingStation.iconData = station.iconData
                         existingStation.country = station.country
                         existingStation.isFavorite = station.isFavorite
+                        existingStation.favoritedAt = station.favoritedAt
+                        if let favoriteOrder = station.favoriteOrder {
+                            existingStation.favoriteOrder = Int32(favoriteOrder)
+                        } else {
+                            existingStation.favoriteOrder = -1  // Use -1 to represent nil
+                        }
                     } else {
                         // Insert new station
                         let newStation = CDStation(context: context)
@@ -140,6 +146,12 @@ extension CoreDataStack {
                         newStation.iconData = station.iconData
                         newStation.country = station.country
                         newStation.isFavorite = station.isFavorite
+                        newStation.favoritedAt = station.favoritedAt
+                        if let favoriteOrder = station.favoriteOrder {
+                            newStation.favoriteOrder = Int32(favoriteOrder)
+                        } else {
+                            newStation.favoriteOrder = -1  // Use -1 to represent nil
+                        }
                     }
                 } catch {
                     print("Failed to fetch or save station:", error.localizedDescription)

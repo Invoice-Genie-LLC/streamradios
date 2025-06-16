@@ -308,6 +308,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
         if let index = stations.firstIndex(of: station), !isStationPlaying(stations[index]) {
             var updatedStation = stations[index]
             updatedStation.isFavorite.toggle()
+            
+            // Set favoritedAt timestamp and favoriteOrder when marking as favorite, clear when unfavoriting
+            if updatedStation.isFavorite {
+                updatedStation.favoritedAt = Date()
+                // Assign favoriteOrder as the next available order (highest current order + 1)
+                let maxFavoriteOrder = stations.filter { $0.isFavorite }.compactMap { $0.favoriteOrder }.max() ?? -1
+                updatedStation.favoriteOrder = maxFavoriteOrder + 1
+            } else {
+                updatedStation.favoritedAt = nil
+                updatedStation.favoriteOrder = nil
+            }
+            
             stations[index] = updatedStation
             updateStationInCloudKit(station: updatedStation)
             saveStationsToCoreData()
@@ -322,6 +334,39 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     func favoriteStations() -> [RadioStation] {
         return stations.filter { $0.isFavorite }
+            .sorted { station1, station2 in
+                // Sort by favoriteOrder if both have it, otherwise by favoritedAt
+                if let order1 = station1.favoriteOrder, let order2 = station2.favoriteOrder {
+                    return order1 < order2
+                } else if station1.favoriteOrder != nil {
+                    return true  // station1 has order, station2 doesn't, so station1 comes first
+                } else if station2.favoriteOrder != nil {
+                    return false // station2 has order, station1 doesn't, so station2 comes first
+                } else {
+                    // Neither has favoriteOrder, sort by favoritedAt with most recent first
+                    let date1 = station1.favoritedAt ?? Date.distantPast
+                    let date2 = station2.favoritedAt ?? Date.distantPast
+                    return date1 > date2
+                }
+            }
+    }
+    
+    private func migrateFavoriteTimestamps() {
+        Task { @MainActor in
+            var needsUpdate = false
+            let now = Date()
+            
+            for i in 0..<stations.count {
+                if stations[i].isFavorite && stations[i].favoritedAt == nil {
+                    stations[i].favoritedAt = now
+                    needsUpdate = true
+                }
+            }
+            
+            if needsUpdate {
+                saveStationsToCoreData()
+            }
+        }
     }
     
     func playStation(_ station: RadioStation) {
@@ -356,7 +401,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func addStation(name: String, url: String, iconData: String?, country: String) {
-        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: false)
+        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: false, favoriteOrder: nil)
         stations.append(newStation)
         print("Added new station: \(newStation)")
         saveStationsToCoreData()
@@ -537,6 +582,12 @@ extension RadioStationViewModel {
                     existingStation.iconData = station.iconData
                     existingStation.country = station.country
                     existingStation.isFavorite = station.isFavorite
+                    existingStation.favoritedAt = station.favoritedAt
+                    if let favoriteOrder = station.favoriteOrder {
+                        existingStation.favoriteOrder = Int32(favoriteOrder)
+                    } else {
+                        existingStation.favoriteOrder = -1  // Use -1 to represent nil
+                    }
                     existingStation.order = Int16(index)
                     existingStation.lastPlayed = station.lastPlayed
                 } else {
@@ -548,6 +599,12 @@ extension RadioStationViewModel {
                     newStation.iconData = station.iconData
                     newStation.country = station.country
                     newStation.isFavorite = station.isFavorite
+                    newStation.favoritedAt = station.favoritedAt
+                    if let favoriteOrder = station.favoriteOrder {
+                        newStation.favoriteOrder = Int32(favoriteOrder)
+                    } else {
+                        newStation.favoriteOrder = -1  // Use -1 to represent nil
+                    }
                     newStation.order = Int16(index)
                     newStation.lastPlayed = station.lastPlayed
                 }
@@ -590,10 +647,15 @@ extension RadioStationViewModel {
                     iconData: cdStation.iconData,
                     country: cdStation.country ?? "Unknown",
                     isFavorite: cdStation.isFavorite,
+                    favoritedAt: cdStation.favoritedAt,
+                    favoriteOrder: cdStation.favoriteOrder >= 0 ? Int(cdStation.favoriteOrder) : nil,
                     lastPlayed: cdStation.lastPlayed
                 )
             }
             print("Loaded \(stations.count) stations from CoreData.")
+            
+            // Migration: Set favoritedAt for existing favorites that don't have a timestamp
+            migrateFavoriteTimestamps()
         } catch {
             print("Failed to load stations from CoreData: \(error)")
         }

@@ -287,13 +287,26 @@ struct RadioStationListView: View {
             }
         }
         .onDrag {
+            // Only allow dragging for All and Favorites tabs, not Recent
+            guard selectedTab != .recent else {
+                return NSItemProvider()
+            }
             UIDevice.playHapticFeedback()
             self.draggingStation = station
             self.originalMetadata = radioPlayer.metadata
             radioPlayer.metadata = nil
             return NSItemProvider(object: String(station.id) as NSString)
         }
-        .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
+        .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(
+            station: station, 
+            stations: $viewModel.stations, 
+            draggingStation: $draggingStation, 
+            originalMetadata: $originalMetadata, 
+            viewModel: viewModel, 
+            radioPlayer: radioPlayer,
+            selectedTab: selectedTab,
+            filteredStations: filteredStations
+        ))
         }
         // Auto-dismiss error after 5 seconds
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
@@ -383,13 +396,26 @@ struct RadioStationListView: View {
             .foregroundColor(.primary)
             .padding(.trailing, 10)
             .onDrag {
+                // Only allow dragging for All and Favorites tabs, not Recent
+                guard selectedTab != .recent else {
+                    return NSItemProvider()
+                }
                 UIDevice.playHapticFeedback()
                 self.draggingStation = station
                 self.originalMetadata = radioPlayer.metadata
                 radioPlayer.metadata = nil
                 return NSItemProvider(object: String(station.id) as NSString)
             }
-            .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
+            .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(
+                station: station, 
+                stations: $viewModel.stations, 
+                draggingStation: $draggingStation, 
+                originalMetadata: $originalMetadata, 
+                viewModel: viewModel, 
+                radioPlayer: radioPlayer,
+                selectedTab: selectedTab,
+                filteredStations: filteredStations
+            ))
     }
     
     @ViewBuilder
@@ -527,6 +553,8 @@ struct StationDropDelegate: DropDelegate {
     @Binding var originalMetadata: String?
     let viewModel: RadioStationViewModel
     let radioPlayer: RadioPlayer
+    let selectedTab: Tab
+    let filteredStations: [RadioStation]
     
     func performDrop(info: DropInfo) -> Bool {
         if let metadata = originalMetadata {
@@ -538,39 +566,64 @@ struct StationDropDelegate: DropDelegate {
     }
     
     func dropEntered(info: DropInfo) {
-        guard let draggingStation = draggingStation,
-              let fromIndex = stations.firstIndex(of: draggingStation),
-              let toIndex = stations.firstIndex(of: station),
-              fromIndex != toIndex else { return }
+        guard selectedTab != .recent else { return } // Don't allow reordering in Recent tab
         
-        withAnimation {
-            moveStation(from: fromIndex, to: toIndex)
+        guard let draggingStation = draggingStation else { return }
+        
+        if selectedTab == .favorites {
+            // Handle favorites reordering
+            guard let fromIndex = filteredStations.firstIndex(of: draggingStation),
+                  let toIndex = filteredStations.firstIndex(of: station),
+                  fromIndex != toIndex else { return }
+            
+            withAnimation {
+                moveFavoriteStation(from: fromIndex, to: toIndex)
+            }
+        } else {
+            // Handle all stations reordering
+            guard let fromIndex = stations.firstIndex(of: draggingStation),
+                  let toIndex = stations.firstIndex(of: station),
+                  fromIndex != toIndex else { return }
+            
+            withAnimation {
+                moveAllStation(from: fromIndex, to: toIndex)
+            }
         }
     }
     
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard selectedTab != .recent else { 
+            return DropProposal(operation: .forbidden)
+        }
         return DropProposal(operation: .move)
     }
     
-    func moveStation(from sourceIndex: Int, to destinationIndex: Int) {
+    func moveFavoriteStation(from sourceIndex: Int, to destinationIndex: Int) {
+        // Reorder favorites by updating their favoriteOrder values
+        let favoriteStations = filteredStations
+        
+        // Create new order array
+        var newOrderedFavorites = favoriteStations
+        let movingStation = newOrderedFavorites.remove(at: sourceIndex)
+        newOrderedFavorites.insert(movingStation, at: destinationIndex)
+        
+        // Update favoriteOrder for all favorites based on new positions
+        for (index, favStation) in newOrderedFavorites.enumerated() {
+            if let stationIndex = viewModel.stations.firstIndex(where: { $0.id == favStation.id }) {
+                viewModel.stations[stationIndex].favoriteOrder = index
+            }
+        }
+        
+        viewModel.saveStationsToCoreData()
+    }
+    
+    func moveAllStation(from sourceIndex: Int, to destinationIndex: Int) {
         let itemToMove = viewModel.stations.remove(at: sourceIndex)
         viewModel.stations.insert(itemToMove, at: destinationIndex)
         
         // Save the new station order to CoreData
         viewModel.saveStationsToCoreData()
-        
-        // Print the new station list. Uncomment for debugging only
-        // viewModel.printStationsList()
     }
-    
-    // Uncomment for debugging only
-    /*
-     func printStationsList() {
-     for station in stations {
-     print("\(station.name) - \(station.url)")
-     }
-     }
-     */
 }
 
 struct RadioStationListView_Previews: PreviewProvider {

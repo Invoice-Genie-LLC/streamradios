@@ -347,6 +347,8 @@ class DataStore {
         record.setValue(station.name, forKey: "name")
         record.setValue(station.url, forKey: "url")
         record.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
+        record.setValue(station.favoritedAt, forKey: "favoritedAt")  // Store favoritedAt timestamp
+        record.setValue(station.favoriteOrder, forKey: "favoriteOrder")  // Store favoriteOrder
         record.setValue(station.country, forKey: "country")  // Store country
 
         if let iconFileName = iconFileName, let image = loadImageFromFileSystem(fileName: iconFileName) {
@@ -414,6 +416,8 @@ class DataStore {
             record["url"] = station.url
             record["country"] = station.country
             record["isFavorite"] = station.isFavorite ? "true" : "false"
+            record["favoritedAt"] = station.favoritedAt
+            record["favoriteOrder"] = station.favoriteOrder
             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                 if let asset = createAsset(from: image) {
                     record["iconData"] = asset
@@ -463,6 +467,8 @@ class DataStore {
                     fetchedRecord["url"] = record["url"]
                     fetchedRecord["country"] = record["country"]
                     fetchedRecord["isFavorite"] = record["isFavorite"]
+                    fetchedRecord["favoritedAt"] = record["favoritedAt"]
+                    fetchedRecord["favoriteOrder"] = record["favoriteOrder"]
                     if let iconAsset = record["iconData"] as? CKAsset {
                         fetchedRecord["iconData"] = iconAsset
                     }
@@ -509,6 +515,8 @@ class DataStore {
 
                     let iconData = self.decodeIconData(record: record)
                     let isFavorite = (record["isFavorite"] as? String)?.lowercased() == "true"
+                    let favoritedAt = record["favoritedAt"] as? Date
+                    let favoriteOrder = record["favoriteOrder"] as? Int
                     let id = record.recordID.recordName
 
                     return RadioStation(
@@ -517,7 +525,9 @@ class DataStore {
                         url: url,
                         iconData: iconData,
                         country: country,
-                        isFavorite: isFavorite
+                        isFavorite: isFavorite,
+                        favoritedAt: favoritedAt,
+                        favoriteOrder: favoriteOrder
                     )
                 }
                 print("Fetched \(stations.count) stations from CloudKit.")
@@ -569,6 +579,8 @@ class DataStore {
                 fetchedRecord.setValue(station.name, forKey: "name")
                 fetchedRecord.setValue(station.url, forKey: "url")
                 fetchedRecord.setValue(station.isFavorite ? "true" : "false", forKey: "isFavorite")  // Store isFavorite as a String
+                fetchedRecord.setValue(station.favoritedAt, forKey: "favoritedAt")  // Store favoritedAt timestamp
+                fetchedRecord.setValue(station.favoriteOrder, forKey: "favoriteOrder")  // Store favoriteOrder
                 fetchedRecord.setValue(station.country, forKey: "country")  // Store country
 
                 if let iconImage = iconImage, let asset = self.createAsset(from: iconImage) {

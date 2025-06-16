@@ -14,6 +14,8 @@ struct RadioStation: Identifiable, Codable, Equatable {
     var iTunesArtworkData: String? // Base64 encoded iTunes artwork
     var country: String = "Unknown Region"
     var isFavorite: Bool = false
+    var favoritedAt: Date? // Timestamp when station was marked as favorite
+    var favoriteOrder: Int? // Custom order for favorites list
     var lastPlayed: Date?
     var isRecent: Bool? = false
     
@@ -23,6 +25,8 @@ struct RadioStation: Identifiable, Codable, Equatable {
         case url
         case country
         case isFavorite
+        case favoritedAt
+        case favoriteOrder
         case iconData
         case iTunesArtworkData
         case lastPlayed
