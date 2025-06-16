@@ -278,16 +278,7 @@ struct RadioStationListView: View {
                 imageForStation(station)
                     .frame(width: 60, height: 60)
                     .cornerRadius(10)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(
-                                // Remove border for active station
-                                isCurrentStation(station: station) && radioPlayer.isPlaying 
-                                ? Color.clear 
-                                : Color.gray.opacity(0.2), 
-                                lineWidth: 1
-                            )
-                    )
+                    // Removed border overlay completely
                     .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
             }
             
@@ -399,15 +390,7 @@ struct RadioStationListView: View {
             imageForStation(station)
                 .frame(width: 56, height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(
-                            isCurrentStation(station: station) && radioPlayer.isPlaying ? 
-                            Color.blue.opacity(0.3) : Color.clear, 
-                            lineWidth: 2
-                        )
-                        // Removed animation to prevent jumping during scroll
-                )
+                // Removed border overlay completely
             
             // Playing indicator overlay
             if isCurrentStation(station: station) && radioPlayer.isPlaying {

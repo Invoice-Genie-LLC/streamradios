@@ -92,24 +92,31 @@ struct PlayerSheetView: View {
     
     var body: some View {
         NavigationView {
-            ZStack {
-                backgroundView.edgesIgnoringSafeArea(.all)
-                
-                VStack {
-                    backButton
-                        .padding(.top, UIScreen.main.bounds.height < 700 ? 110 : 25)
-                    contentView
-                    Spacer()
-                    PlayerView()
-                        .environmentObject(radioPlayer)
-                        .environmentObject(viewModel)
-                        .padding(.top, 8)
-                    AirPlayButtonView()
-                        .frame(width: 50, height: 50)
-                        .padding(.bottom, 10)
+            GeometryReader { geometry in
+                ZStack {
+                    backgroundView
+                        .edgesIgnoringSafeArea(.all)
+                    
+                    VStack(spacing: 0) {
+                        backButton
+                            .padding(.top, geometry.safeAreaInsets.top + 5)
+                        
+                        contentView
+                            .padding(.top, 4)
+                        
+                        Spacer()
+                        
+                        PlayerView()
+                            .environmentObject(radioPlayer)
+                            .environmentObject(viewModel)
+                            .padding(.top, 4)
+                        
+                        AirPlayButtonView()
+                            .frame(width: 50, height: 50)
+                            .padding(.bottom, geometry.safeAreaInsets.bottom + 5)
+                    }
+                    .navigationBarHidden(true)
                 }
-                .padding(.bottom, 20)
-                .navigationBarHidden(true)
             }
             .onAppear {
                 startPulsing()
@@ -243,8 +250,8 @@ struct PlayerSheetView: View {
             }
             Spacer()
         }
-        .padding()
-        .padding(.top, 25)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .modifier(NeumorphicShadow())
     }
     
@@ -268,154 +275,131 @@ struct PlayerSheetView: View {
     
     private var shazamContent: some View {
         VStack(spacing: 20) {
+            // Current station info at top
             if let currentStationIndex = radioPlayer.currentStationIndex,
                let currentStation = viewModel.stations[safe: currentStationIndex] {
-                HStack {
+                HStack(spacing: 12) {
                     if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                         Image(uiImage: image)
                             .resizable()
-                            .frame(width: 30, height: 30)
-                            .cornerRadius(5)
+                            .frame(width: 40, height: 40)
+                            .cornerRadius(8)
                     } else {
                         Image(systemName: "radio")
                             .resizable()
-                            .frame(width: 30, height: 30)
+                            .frame(width: 40, height: 40)
                             .aspectRatio(contentMode: .fit)
-                            .foregroundColor(.gray)
+                            .foregroundColor(.secondary)
                     }
                     
                     Text(currentStation.name)
-                        .font(.title)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
-                        .padding(.leading, 5)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
                 }
-                .padding(.bottom, 10)
+                .padding(.top, 20)
             }
             
+            // Album artwork - larger and centered
             if let url = shazamViewModel.shazamMedia.albumArtURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
-                        image.resizable()
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 280, height: 280)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
                     default:
-                        RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.5))
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 280, height: 280)
+                            .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
+                            .overlay(
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 80, weight: .light))
+                                    .foregroundColor(.white.opacity(0.8))
+                            )
                     }
                 }
-                .frame(width: UIScreen.main.bounds.height < 900 ? 280 : 380, height: UIScreen.main.bounds.height < 900 ? 280 : 380)
-                .cornerRadius(10)
-                .modifier(NeumorphicShadow())
             } else {
-                RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.5))
-                    .frame(width: UIScreen.main.bounds.height < 900 ? 280 : 380, height: UIScreen.main.bounds.height < 900 ? 280 : 380)
-                    .cornerRadius(10)
-                    .modifier(NeumorphicShadow())
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 280, height: 280)
+                    .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 80, weight: .light))
+                            .foregroundColor(.white.opacity(0.8))
+                    )
             }
             
-            Text(shazamViewModel.shazamMedia.title ?? "Title")
-                .font(.title)
-                .fontWeight(.semibold)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .padding(.horizontal)
-            
-            Text(shazamViewModel.shazamMedia.artistName ?? "Artist Name")
-                .font(.title2)
-                .fontWeight(.medium)
-                .multilineTextAlignment(.center)
+            // Song information
+            VStack(spacing: 8) {
+                Text(shazamViewModel.shazamMedia.title ?? "Unknown Title")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 20)
+                
+                Text(shazamViewModel.shazamMedia.artistName ?? "Unknown Artist")
+                    .font(.title3)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .padding(.horizontal, 20)
+            }
             
             Spacer()
             
-            HStack(spacing: 10) {
-                Button(action: {
-                    requestMusicAuthorization()
-                    showingConfirmationDialog = true
-                }) {
-                    HStack {
-                        Image(systemName: "apple.logo")
-                            .font(.headline)
-                        Text("Music")
-                            .font(.headline)
-                    }
-                    .foregroundColor(Color.primary)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
+            // Action button - simplified to just Apple Music
+            Button(action: {
+                requestMusicAuthorization()
+                showingConfirmationDialog = true
+            }) {
+                HStack(spacing: 12) {
+                    Image(systemName: "apple.logo")
+                        .font(.title2)
+                        .fontWeight(.medium)
+                    Text("Save to Apple Music")
+                        .font(.headline)
+                        .fontWeight(.medium)
                 }
-                /*
-                 // Enable when authorization is granted from Spotify and Google
-                 Button(action: {
-                 handleSpotifyAuthorization()
-                 }) {
-                 
-                 HStack {
-                 Image(systemName: "music.note.list")
-                 .font(.headline)
-                 Text("Spotify")
-                 .font(.headline)
-                 }
-                 .foregroundColor(Color.primary)
-                 .padding(12)
-                 .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
-                 }
-                 .disabled(isAuthorizingSpotify)
-                 Button(action: {
-                 if youtubeMusicManager.isAuthorized {
-                 showingYouTubeMusicConfirmationDialog = true
-                 } else {
-                 youtubeMusicManager.authorize { success in
-                 if success {
-                 DispatchQueue.main.async {
-                 self.showingYouTubeMusicConfirmationDialog = true
-                 }
-                 } else {
-                 DispatchQueue.main.async {
-                 self.alertMessage = "Failed to authorize with YouTube Music"
-                 self.showAlert = true
-                 }
-                 }
-                 }
-                 }
-                 }) {
-                 /*
-                  // Remove this after Spotify is in production. For testing purpose only
-                  VStack {
-                  // ... (existing content)
-                  
-                  // Debug section
-                  Toggle("Force Token Refresh", isOn: $forceTokenRefresh)
-                  .padding()
-                  
-                  Button("Clear Debug Log") {
-                  debugLog = ""
-                  }
-                  .padding()
-                  
-                  ScrollView {
-                  Text(debugLog)
-                  .font(.system(size: 12, design: .monospaced))
-                  .padding()
-                  }
-                  .frame(height: 200)
-                  .background(Color.gray.opacity(0.1))
-                  .cornerRadius(10)
-                  .padding()
-                  }
-                  */
-                 HStack {
-                 Image(systemName: "play.circle")
-                 .font(.headline)
-                 Text("YouTube")
-                 .font(.headline)
-                 }
-                 .foregroundColor(Color.primary)
-                 .padding(12)
-                 .background(RoundedRectangle(cornerRadius: 20).fill(Color(UIColor.secondarySystemBackground)))
-                 }
-                 */
+                .foregroundColor(.white)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 25)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+                .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 30)
         }
-        
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private func openInYouTubeMusic() {
@@ -812,8 +796,9 @@ struct PlayerSheetView: View {
     }
     
     private var stationContent: some View {
-        VStack {
+        VStack(spacing: 20) {
             StationDetails()
+            
             if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
                 Button(action: {
                     shazamViewModel.startOrEndListening()
@@ -827,23 +812,35 @@ struct PlayerSheetView: View {
                     }
                     pulse.toggle()
                 }) {
-                    VStack {
+                    HStack(spacing: 12) {
                         Image(systemName: "shazam.logo.fill")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 100, height: 100)
-                            .foregroundColor(.primary)
-                            .scaleEffect(pulse ? 1.2 : 1.0)
-                            .padding(.bottom, 10)
-                            .modifier(NeumorphicShadow())
+                            .font(.title2)
+                            .fontWeight(.medium)
                         Text("Tap to Shazam")
                             .font(.headline)
-                            .foregroundColor(Color.primary)
+                            .fontWeight(.medium)
                     }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 25)
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                    )
+                    .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .scaleEffect(pulse ? 1.05 : 1.0)
+                    .animation(.easeInOut(duration: 0.3), value: pulse)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -854,26 +851,32 @@ struct StationDetails: View {
     var body: some View {
         if let currentStationIndex = radioPlayer.currentStationIndex,
            let currentStation = viewModel.stations[safe: currentStationIndex] {
-            VStack {
+            VStack(spacing: 10) {
                 StationImage(currentStation: currentStation)
-                Text(currentStation.name)
-                    .font(.title)
-                    .bold()
-                    .padding(.top, 4)
-                    .foregroundColor(.primary)
                 
-                if let metadata = radioPlayer.metadata {
-                    Text(metadata)
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                        .padding(.bottom, 50)
-                } else {
-                    Text("No song or album title available")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 2)
-                        .padding(.bottom, 50)
+                VStack(spacing: 4) {
+                    Text(currentStation.name)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .padding(.horizontal, 20)
+                    
+                    if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+                        Text(metadata)
+                            .font(.headline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(4)
+                            .padding(.horizontal, 20)
+                    } else {
+                        Text("No song information available")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                    }
                 }
             }
         }
@@ -889,30 +892,40 @@ struct StationImage: View {
         if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
             Image(uiImage: iTunesAlbumArt)
                 .resizable()
-                .frame(width: 200, height: 200)
-                .cornerRadius(10)
-                .modifier(NeumorphicShadow())
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 240, height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
         } else if let albumArt = radioPlayer.albumArt {
             Image(uiImage: albumArt)
                 .resizable()
-                .frame(width: 200, height: 200)
-                .cornerRadius(10)
-                .modifier(NeumorphicShadow())
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 240, height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
         } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
-                .frame(width: 200, height: 200)
-                .cornerRadius(10)
-                .modifier(NeumorphicShadow())
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 240, height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
         } else {
-            Image(systemName: "radio")
-                .resizable()
-                .frame(width: 100, height: 100)
-                .aspectRatio(contentMode: .fit)
-                .padding(20)
-                .clipShape(Circle())
-                .foregroundColor(.gray)
-                .modifier(NeumorphicShadow())
+            RoundedRectangle(cornerRadius: 16)
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.4)]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 240, height: 240)
+                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
+                .overlay(
+                    Image(systemName: "radio")
+                        .font(.system(size: 70, weight: .light))
+                        .foregroundColor(.white.opacity(0.8))
+                )
         }
     }
 }
