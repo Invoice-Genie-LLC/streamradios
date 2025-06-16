@@ -26,6 +26,7 @@ struct RadioStationListView: View {
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
     @StateObject private var alertManager = AlertManager()
+    @State private var scrollProxy: ScrollViewProxy?
     
     
     var body: some View {
@@ -127,13 +128,35 @@ struct RadioStationListView: View {
     
     private var stationsListView: some View {
         ScrollView {
-            LazyVStack {
-                ForEach(filteredStations) { station in
-                    stationRow(for: station)
+            ScrollViewReader { proxy in
+                LazyVStack {
+                    ForEach(filteredStations) { station in
+                        stationRow(for: station)
+                            .id(station.id) // Add ID for scroll targeting
+                    }
+                }
+                .padding(.top, 10)
+                .padding(.vertical, 10)
+                .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
+                    // Auto-scroll to currently playing station when it changes
+                    scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                }
+                .onReceive(radioPlayer.$isPlaying) { isPlaying in
+                    // Auto-scroll when playback starts/stops
+                    if isPlaying, let currentIndex = radioPlayer.currentStationIndex {
+                        scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                    }
+                }
+                .onAppear {
+                    scrollProxy = proxy
+                    // Auto-scroll to currently playing station when view appears
+                    if let currentIndex = radioPlayer.currentStationIndex {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                        }
+                    }
                 }
             }
-            .padding(.top, 10)
-            .padding(.vertical, 10)
         }
     }
     
@@ -177,9 +200,15 @@ struct RadioStationListView: View {
             }
         }
         .padding(.all, 10)
-        .background(self.draggingStation?.id == station.id ? Color.gray.opacity(0.2) : Color(UIColor.systemGray5))
+        .background(stationBackgroundColor(for: station))
         .cornerRadius(10)
-        .shadow(radius: 4)
+        .shadow(radius: isCurrentStation(station: station) && radioPlayer.isPlaying ? 6 : 4)
+        .overlay(
+            // Add a subtle glow effect for currently playing station
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isCurrentStation(station: station) && radioPlayer.isPlaying ? 
+                       Color.blue.opacity(0.15) : Color.clear, lineWidth: 1)
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             if isEditing {
@@ -224,11 +253,15 @@ struct RadioStationListView: View {
     private func stationInfo(for station: RadioStation) -> some View {
         HStack {
             if isCurrentStation(station: station) {
-                Image(systemName: "speaker.wave.2.fill")
-                    .foregroundColor(.primary)
+                Image(systemName: radioPlayer.isPlaying ? "speaker.wave.2.fill" : "speaker.fill")
+                    .foregroundColor(.blue)
+                    .scaleEffect(radioPlayer.isPlaying ? 1.1 : 1.0)
+                    .animation(.easeInOut(duration: 0.3).repeatForever(autoreverses: true), 
+                             value: radioPlayer.isPlaying)
             }
             Text(station.name)
                 .font(.headline)
+                .fontWeight(isCurrentStation(station: station) ? .bold : .regular)
                 .foregroundColor(isCurrentStation(station: station) ? .primary : .gray)
                 .background(isCurrentStation(station: station) ? Color.clear : Color(UIColor.systemGray5))
         }
@@ -389,6 +422,30 @@ struct RadioStationListView: View {
         return radioPlayer.currentStationIndex != nil &&
                viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) &&
                viewModel.stations[radioPlayer.currentStationIndex!].id == station.id
+    }
+    
+    private func scrollToCurrentStation(proxy: ScrollViewProxy, currentIndex: Int?) {
+        guard let currentIndex = currentIndex,
+              currentIndex < viewModel.stations.count else { return }
+        
+        let currentStation = viewModel.stations[currentIndex]
+        
+        // Check if the current station is in the filtered list
+        if filteredStations.contains(where: { $0.id == currentStation.id }) {
+            withAnimation(.easeInOut(duration: 0.6)) {
+                proxy.scrollTo(currentStation.id, anchor: .center)
+            }
+        }
+    }
+    
+    private func stationBackgroundColor(for station: RadioStation) -> Color {
+        if self.draggingStation?.id == station.id {
+            return Color.gray.opacity(0.2)
+        } else if isCurrentStation(station: station) && radioPlayer.isPlaying {
+            return Color.blue.opacity(0.03) // Super subtle blue background for currently playing
+        } else {
+            return Color(UIColor.systemGray5)
+        }
     }
     
     private func cleanup() {

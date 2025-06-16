@@ -32,6 +32,39 @@ enum ActiveSheetPlayer: Identifiable {
     }
 }
 
+// MARK: - LibraryPlaylist Structure for proper editable playlist detection
+public typealias LibraryPlaylists = MusicItemCollection<LibraryPlaylist>
+
+public struct LibraryPlaylist: Codable, MusicItem {
+    public let id: MusicItemID
+    public let attributes: Attributes
+    
+    public struct Attributes: Codable, Sendable {
+        public let canEdit: Bool
+        public let name: String
+        public let isPublic: Bool?
+        public let hasCatalog: Bool?
+        public let playParams: PlayParameters?
+        public let description: Description?
+        public let artwork: Artwork?
+    }
+    
+    public struct Description: Codable, Sendable {
+        public let standard: String
+    }
+    
+    public struct PlayParameters: Codable, Sendable {
+        public let id: MusicItemID
+        public let isLibrary: Bool?
+        public let globalID: MusicItemID?
+        
+        enum CodingKeys: String, CodingKey {
+            case id, isLibrary
+            case globalID = "globalId"
+        }
+    }
+}
+
 struct PlayerSheetView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var radioPlayer: RadioPlayer
@@ -120,29 +153,37 @@ struct PlayerSheetView: View {
         .sheet(item: $activeSheet) { item in
             switch item {
             case .playlistPicker:
-                PlaylistPickerView(shazamViewModel: shazamViewModel)
+                EnhancedPlaylistPickerView(shazamViewModel: shazamViewModel)
             case .spotifyPlaylistPicker:
-                SpotifyPlaylistPickerView(isPresented: Binding(
-                    get: { self.activeSheet == .spotifyPlaylistPicker },
-                    set: { if !$0 { self.activeSheet = nil } }
-                ), playlists: spotifyPlaylists) { playlistID in
-                    spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
-                        DispatchQueue.main.async {
-                            switch result {
-                            case .success:
-                                self.alertMessage = "Song added to Spotify playlist successfully"
-                            case .failure(let error):
-                                self.alertMessage = "Failed to add song to Spotify playlist: \(error.localizedDescription)"
+                SpotifyPlaylistPickerView(
+                    isPresented: Binding(
+                        get: { self.activeSheet == .spotifyPlaylistPicker },
+                        set: { if !$0 { self.activeSheet = nil } }
+                    ), 
+                    playlists: spotifyPlaylists,
+                    shazamViewModel: shazamViewModel,
+                    onSelect: { playlistID in
+                        spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
+                            DispatchQueue.main.async {
+                                switch result {
+                                case .success:
+                                    self.alertMessage = "Song added to Spotify playlist successfully"
+                                case .failure(let error):
+                                    self.alertMessage = "Failed to add song to Spotify playlist: \(error.localizedDescription)"
+                                }
+                                self.showAlert = true
                             }
-                            self.showAlert = true
                         }
                     }
-                }
+                )
             case .youtubeMusicPlaylistPicker:
-                YouTubeMusicPlaylistPickerView(isPresented: Binding(
-                    get: { self.activeSheet == .youtubeMusicPlaylistPicker },
-                    set: { if !$0 { self.activeSheet = nil } }
-                )) { selectedPlaylistId in
+                YouTubeMusicPlaylistPickerView(
+                    isPresented: Binding(
+                        get: { self.activeSheet == .youtubeMusicPlaylistPicker },
+                        set: { if !$0 { self.activeSheet = nil } }
+                    ),
+                    shazamViewModel: shazamViewModel
+                ) { selectedPlaylistId in
                     saveToYouTubeMusicPlaylist(playlistId: selectedPlaylistId)
                 }
             }
@@ -748,7 +789,13 @@ struct PlayerSheetView: View {
                     let response = try await request.response()
                     DispatchQueue.main.async {
                         self.shazamViewModel.userPlaylists = response.items
-                        print("Fetched \(response.items.count) playlists")
+                        print("Fetched \(response.items.count) total playlists from MusicLibraryRequest")
+                        
+                        // Debug: Print playlist details to understand curator information
+                        for playlist in response.items.prefix(5) { // Show first 5 for debugging
+                            print("Playlist: '\(playlist.name)', Curator: '\(playlist.curatorName ?? "nil")'")
+                        }
+                        
                         self.activeSheet = .playlistPicker
                     }
                 } else {
@@ -894,40 +941,229 @@ struct PlayerSheetView_Previews: PreviewProvider {
 struct PlaylistPickerView: View {
     @ObservedObject var shazamViewModel: ShazamViewModel
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.colorScheme) var colorScheme
     @State private var alertMessage = ""
     @State private var showAlert = false
+    @State private var searchText = ""
+    @State private var addedPlaylistIDs: Set<String> = []
+    
+    var filteredPlaylists: [Playlist] {
+        // Filter for active (user-created) playlists only
+        let activePlaylists = Array(shazamViewModel.userPlaylists).filter { playlist in
+            // Filter out system playlists and Apple-curated content
+            
+            // Check if it has a curator name (Apple-curated playlists usually have this)
+            if let curatorName = playlist.curatorName, !curatorName.isEmpty {
+                // Exclude playlists curated by Apple Music or other services
+                let excludedCurators = ["Apple Music", "Apple", "apple music", "apple"]
+                return !excludedCurators.contains { curatorName.localizedCaseInsensitiveContains($0) }
+            }
+            
+            // Additional filtering criteria for user-created playlists
+            // User-created playlists typically:
+            // 1. Don't have a curator name (or it's the user's name)
+            // 2. Are in the user's library (which these already are)
+            // 3. Are not system-generated
+            
+            // For now, if there's no curator name, it's likely user-created
+            return playlist.curatorName == nil || playlist.curatorName?.isEmpty == true
+        }
+        
+        // Debug logging
+        let totalPlaylists = Array(shazamViewModel.userPlaylists).count
+        print("Filtered \(totalPlaylists) total playlists down to \(activePlaylists.count) active playlists")
+        
+        // Apply search filtering
+        if searchText.isEmpty {
+            return activePlaylists
+        } else {
+            return activePlaylists.filter { playlist in
+                playlist.name.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
     
     var body: some View {
         NavigationView {
-            List(shazamViewModel.userPlaylists, id: \.id) { playlist in
-                Button(action: {
-                    print("Selected playlist: \(playlist.name)")
-                    addToSelectedPlaylist(playlist)
-                }) {
-                    Text(playlist.name)
+            ZStack {
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(.systemBackground),
+                        Color(.systemBackground).opacity(0.8)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Header section with song info and album artwork
+                    if let songTitle = shazamViewModel.shazamMedia.title,
+                       let artistName = shazamViewModel.shazamMedia.artistName {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 16) {
+                                // Album artwork
+                                if let artworkURL = shazamViewModel.shazamMedia.albumArtURL {
+                                    AsyncImage(url: artworkURL) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        case .failure(_):
+                                            Image(systemName: "music.note")
+                                                .font(.title)
+                                                .foregroundColor(.blue)
+                                                .frame(width: 60, height: 60)
+                                                .background(Color(.systemGray5))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        case .empty:
+                                            ProgressView()
+                                                .frame(width: 60, height: 60)
+                                                .background(Color(.systemGray6))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        @unknown default:
+                                            Image(systemName: "music.note")
+                                                .font(.title)
+                                                .foregroundColor(.blue)
+                                                .frame(width: 60, height: 60)
+                                                .background(Color(.systemGray5))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        }
+                                    }
+                                } else {
+                                    Image(systemName: "music.note")
+                                        .font(.title)
+                                        .foregroundColor(.blue)
+                                        .frame(width: 60, height: 60)
+                                        .background(Color(.systemGray5))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Adding to Playlist")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(songTitle)
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                        .lineLimit(2)
+                                    Text("by \(artistName)")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.secondarySystemBackground))
+                                    .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+                            )
+                            .padding(.horizontal, 16)
+                        }
+                        .padding(.top, 8)
+                        .padding(.bottom, 16)
+                    }
+                    
+                    // Search bar
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                        TextField("Search playlists", text: $searchText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.tertiarySystemBackground))
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                    
+                    // Playlists list
+                    if filteredPlaylists.isEmpty {
+                        VStack(spacing: 16) {
+                            Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
+                                .font(.system(size: 48))
+                                .foregroundColor(.secondary)
+                            Text(searchText.isEmpty ? "No active playlists found" : "No active playlists match your search")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            if searchText.isEmpty {
+                                Text("Create your own playlists in Apple Music to get started")
+                                    .font(.subheadline)
+                                    .foregroundColor(Color.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(filteredPlaylists, id: \.id) { playlist in
+                                    PlaylistRowView(
+                                        playlist: playlist,
+                                        isAdded: addedPlaylistIDs.contains(playlist.id.rawValue),
+                                        onSelect: {
+                                            addToSelectedPlaylist(playlist)
+                                        }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                        }
+                    }
                 }
             }
-            .navigationTitle("Select Playlist")
-            .navigationBarItems(trailing: Button("Cancel") {
-                presentationMode.wrappedValue.dismiss()
-            })
+            .navigationTitle("Add to Playlist")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .font(.headline)
+                    .foregroundColor(.blue)
+                }
+            }
         }
         .onAppear {
             print("PlaylistPickerView appeared with \(shazamViewModel.userPlaylists.count) playlists")
         }
         .alert(isPresented: $showAlert) {
-            Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")) {
-                presentationMode.wrappedValue.dismiss()
-            })
+            Alert(
+                title: Text(alertMessage.contains("successfully") ? "Success" : "Error"),
+                message: Text(alertMessage),
+                dismissButton: .default(Text("OK")) {
+                    if alertMessage.contains("successfully") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                }
+            )
         }
     }
     
     private func addToSelectedPlaylist(_ playlist: Playlist) {
+        // Prevent adding to the same playlist multiple times
+        if addedPlaylistIDs.contains(playlist.id.rawValue) {
+            return
+        }
+        
         Task {
             do {
                 try await shazamViewModel.addToPlaylist(playlist)
                 DispatchQueue.main.async {
-                    self.alertMessage = "Song added to playlist successfully"
+                    self.addedPlaylistIDs.insert(playlist.id.rawValue)
+                    self.alertMessage = "Song added to \"\(playlist.name)\" successfully"
                     self.showAlert = true
                 }
             } catch {
@@ -941,25 +1177,713 @@ struct PlaylistPickerView: View {
     }
 }
 
+struct PlaylistRowView: View {
+    let playlist: Playlist
+    let isAdded: Bool
+    let onSelect: () -> Void
+    @State private var isPressed = false
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                // Playlist icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.6)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 52, height: 52)
+                    
+                    Image(systemName: "music.note.list")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                }
+                
+                // Playlist info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(playlist.name)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    
+                    // Show track count if available - removed as trackCount is not available
+                    // Note: Track count not available in current Playlist implementation
+                    Text("Your Playlist")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                // Add/Check indicator
+                if isAdded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.green)
+                        .scaleEffect(1.1)
+                } else {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.blue)
+                        .opacity(isPressed ? 0.6 : 1.0)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.secondarySystemBackground))
+                    .shadow(color: Color.black.opacity(isPressed ? 0.15 : 0.08), radius: isPressed ? 12 : 8, x: 0, y: isPressed ? 4 : 2)
+                    .scaleEffect(isPressed ? 0.98 : 1.0)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = pressing
+            }
+        }, perform: {})
+    }
+}
+
 struct SpotifyPlaylistPickerView: View {
     @Binding var isPresented: Bool
     let playlists: [(id: String, name: String)]
+    @ObservedObject var shazamViewModel: ShazamViewModel
     let onSelect: (String) -> Void
+    @State private var searchText = ""
+    @State private var addedPlaylistIDs: Set<String> = []
+    @Environment(\.colorScheme) var colorScheme
+    
+    var filteredPlaylists: [(id: String, name: String)] {
+        if searchText.isEmpty {
+            return playlists
+        } else {
+            return playlists.filter { playlist in
+                playlist.name.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
     
     var body: some View {
         NavigationView {
-            List(playlists, id: \.id) { playlist in
-                Button(action: {
-                    onSelect(playlist.id)
-                    isPresented = false
-                }) {
-                    Text(playlist.name)
+            ZStack {
+                // Background with Spotify brand colors
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(.systemBackground),
+                        Color(.systemBackground).opacity(0.8)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Header with song info and album artwork
+                    Group {
+                        if let songTitle = shazamViewModel.shazamMedia.title,
+                           let artistName = shazamViewModel.shazamMedia.artistName {
+                            HStack {
+                                // Album artwork
+                                if let artworkURL = shazamViewModel.shazamMedia.albumArtURL {
+                                    AsyncImage(url: artworkURL) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        case .failure(_):
+                                            Image(systemName: "music.note")
+                                                .font(.title)
+                                                .foregroundColor(.green)
+                                                .frame(width: 60, height: 60)
+                                                .background(Color(.systemGray5))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        case .empty:
+                                            ProgressView()
+                                                .frame(width: 60, height: 60)
+                                                .background(Color(.systemGray6))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        @unknown default:
+                                            Image(systemName: "music.note")
+                                                .font(.title)
+                                                .foregroundColor(.green)
+                                                .frame(width: 60, height: 60)
+                                                .background(Color(.systemGray5))
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        }
+                                    }
+                                } else {
+                                    Image(systemName: "music.note")
+                                        .font(.title)
+                                        .foregroundColor(.green)
+                                        .frame(width: 60, height: 60)
+                                        .background(Color(.systemGray5))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Adding to Spotify")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(songTitle)
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                        .lineLimit(2)
+                                    Text("by \(artistName)")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                
+                                Spacer()
+                                
+                                // Spotify logo representation
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Image(systemName: "music.note")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                    )
+                            }
+                        } else {
+                            // Fallback header
+                            HStack {
+                                Image(systemName: "music.note.list")
+                                    .font(.title2)
+                                    .foregroundColor(.green)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Add to Spotify")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("Select a playlist")
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                }
+                                Spacer()
+                                
+                                // Spotify logo representation
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 32, height: 32)
+                                    .overlay(
+                                        Image(systemName: "music.note")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                    )
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.secondarySystemBackground))
+                            .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+                    
+                    // Search bar
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                        TextField("Search Spotify playlists", text: $searchText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.tertiarySystemBackground))
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                    
+                    // Playlists list
+                    if filteredPlaylists.isEmpty {
+                        VStack(spacing: 16) {
+                            Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
+                                .font(.system(size: 48))
+                                .foregroundColor(.secondary)
+                            Text(searchText.isEmpty ? "No playlists found" : "No playlists match your search")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            if searchText.isEmpty {
+                                Text("Create a playlist in Spotify to get started")
+                                    .font(.subheadline)
+                                    .foregroundColor(Color.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(filteredPlaylists, id: \.id) { playlist in
+                                    SpotifyPlaylistRowView(
+                                        playlist: playlist,
+                                        isAdded: addedPlaylistIDs.contains(playlist.id),
+                                        onSelect: {
+                                            if !addedPlaylistIDs.contains(playlist.id) {
+                                                addedPlaylistIDs.insert(playlist.id)
+                                                onSelect(playlist.id)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                        }
+                    }
                 }
             }
-            .navigationTitle("Select Spotify Playlist")
-            .navigationBarItems(trailing: Button("Cancel") {
-                isPresented = false
-            })
+            .navigationTitle("Spotify Playlists")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        isPresented = false
+                    }
+                    .font(.headline)
+                    .foregroundColor(.green)
+                }
+            }
         }
+    }
+}
+
+struct SpotifyPlaylistRowView: View {
+    let playlist: (id: String, name: String)
+    let isAdded: Bool
+    let onSelect: () -> Void
+    @State private var isPressed = false
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                // Spotify playlist icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.green.opacity(0.8), Color.green.opacity(0.6)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 52, height: 52)
+                    
+                    Image(systemName: "music.note.list")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                }
+                
+                // Playlist info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(playlist.name)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    
+                    Text("Spotify Playlist")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                // Add/Check indicator
+                if isAdded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.green)
+                        .scaleEffect(1.1)
+                } else {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.green)
+                        .opacity(isPressed ? 0.6 : 1.0)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.secondarySystemBackground))
+                    .shadow(color: Color.black.opacity(isPressed ? 0.15 : 0.08), radius: isPressed ? 12 : 8, x: 0, y: isPressed ? 4 : 2)
+                    .scaleEffect(isPressed ? 0.98 : 1.0)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = pressing
+            }
+        }, perform: {})
+    }
+}
+
+// MARK: - Enhanced Playlist Picker for truly editable playlists
+struct EnhancedPlaylistPickerView: View {
+    @ObservedObject var shazamViewModel: ShazamViewModel
+    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.colorScheme) var colorScheme
+    @State private var alertMessage = ""
+    @State private var showAlert = false
+    @State private var searchText = ""
+    @State private var addedPlaylistIDs: Set<String> = []
+    @State private var libraryPlaylists: [LibraryPlaylist] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    
+    var filteredPlaylists: [LibraryPlaylist] {
+        // Only show playlists that can actually be edited
+        let editablePlaylists = libraryPlaylists.filter { $0.attributes.canEdit }
+        
+        // Debug logging
+        print("Filtered \(libraryPlaylists.count) total playlists down to \(editablePlaylists.count) truly editable playlists")
+        
+        // Apply search filtering
+        if searchText.isEmpty {
+            return editablePlaylists
+        } else {
+            return editablePlaylists.filter { playlist in
+                playlist.attributes.name.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                // Background gradient
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(.systemBackground),
+                        Color(.systemBackground).opacity(0.8)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Header with song info and album artwork
+                    Group {
+                        if let songTitle = shazamViewModel.shazamMedia.title,
+                           let artistName = shazamViewModel.shazamMedia.artistName {
+                            HStack {
+                                // Album artwork
+                                if let artworkURL = shazamViewModel.shazamMedia.albumArtURL {
+                                    AsyncImage(url: artworkURL) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 60, height: 60)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        case .failure(_):
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color.secondary.opacity(0.3))
+                                                .frame(width: 60, height: 60)
+                                                .overlay(
+                                                    Image(systemName: "music.note")
+                                                        .foregroundColor(.secondary)
+                                                )
+                                        case .empty:
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color.secondary.opacity(0.2))
+                                                .frame(width: 60, height: 60)
+                                                .overlay(
+                                                    ProgressView()
+                                                        .scaleEffect(0.8)
+                                                )
+                                        @unknown default:
+                                            EmptyView()
+                                        }
+                                    }
+                                } else {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.secondary.opacity(0.3))
+                                        .frame(width: 60, height: 60)
+                                        .overlay(
+                                            Image(systemName: "music.note")
+                                                .foregroundColor(.secondary)
+                                        )
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Adding to Playlist")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(songTitle)
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                        .lineLimit(1)
+                                    Text("by \(artistName)")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                        }
+                    }
+                    
+                    Divider()
+                        .background(Color.secondary.opacity(0.3))
+                    
+                    // Search bar
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                        TextField("Search playlists", text: $searchText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color(.systemGray6).opacity(0.8))
+                    .cornerRadius(10)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    
+                    // Content
+                    if isLoading {
+                        Spacer()
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                            Text("Loading your playlists...")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    } else if let errorMessage = errorMessage {
+                        Spacer()
+                        VStack(spacing: 16) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 48))
+                                .foregroundColor(.orange)
+                            Text("Error Loading Playlists")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Text(errorMessage)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                            Button("Try Again") {
+                                loadEditablePlaylists()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.horizontal, 40)
+                        Spacer()
+                    } else if filteredPlaylists.isEmpty {
+                        Spacer()
+                        VStack(spacing: 16) {
+                            Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
+                                .font(.system(size: 48))
+                                .foregroundColor(.secondary)
+                            Text(searchText.isEmpty ? "No editable playlists found" : "No editable playlists match your search")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            if searchText.isEmpty {
+                                Text("Create your own playlists in Apple Music to get started")
+                                    .font(.subheadline)
+                                    .foregroundColor(Color.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                        .padding(.horizontal, 40)
+                        Spacer()
+                    } else {
+                        // Playlist list
+                        ScrollView {
+                            LazyVStack(spacing: 12) {
+                                ForEach(filteredPlaylists, id: \.id) { playlist in
+                                    EnhancedPlaylistRowView(
+                                        playlist: playlist,
+                                        isAdded: addedPlaylistIDs.contains(playlist.id.rawValue),
+                                        onSelect: {
+                                            addToSelectedPlaylist(playlist)
+                                        }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.top, 20)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add to Playlist")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .font(.headline)
+                    .foregroundColor(.blue)
+                }
+            }
+        }
+        .onAppear {
+            loadEditablePlaylists()
+        }
+        .alert(isPresented: $showAlert) {
+            Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+        }
+    }
+    
+    private func loadEditablePlaylists() {
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let libraryPlaylistsURL = URL(string: "https://api.music.apple.com/v1/me/library/playlists")!
+                let request = MusicDataRequest(urlRequest: URLRequest(url: libraryPlaylistsURL))
+                let response = try await request.response()
+                let playlists = try JSONDecoder().decode(MusicItemCollection<LibraryPlaylist>.self, from: response.data)
+                
+                DispatchQueue.main.async {
+                    self.libraryPlaylists = Array(playlists)
+                    self.isLoading = false
+                    print("Loaded \(self.libraryPlaylists.count) total playlists from Apple Music API")
+                    
+                    // Debug: Print playlist details to understand canEdit property
+                    for playlist in self.libraryPlaylists.prefix(5) {
+                        print("Playlist: '\(playlist.attributes.name)', canEdit: \(playlist.attributes.canEdit)")
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to load playlists: \(error.localizedDescription)"
+                    self.isLoading = false
+                    print("Error loading playlists: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func addToSelectedPlaylist(_ playlist: LibraryPlaylist) {
+        // Prevent adding to the same playlist multiple times
+        if addedPlaylistIDs.contains(playlist.id.rawValue) {
+            return
+        }
+        
+        Task {
+            do {
+                // Convert LibraryPlaylist back to regular Playlist for the existing addToPlaylist method
+                if let regularPlaylist = shazamViewModel.userPlaylists.first(where: { $0.id.rawValue == playlist.id.rawValue }) {
+                    try await shazamViewModel.addToPlaylist(regularPlaylist)
+                    DispatchQueue.main.async {
+                        self.addedPlaylistIDs.insert(playlist.id.rawValue)
+                        self.alertMessage = "Song added to \"\(playlist.attributes.name)\" successfully"
+                        self.showAlert = true
+                    }
+                } else {
+                    throw NSError(domain: "PlaylistError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not find matching playlist for editing"])
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "Error adding song to playlist: \(error.localizedDescription)"
+                    self.showAlert = true
+                    print("Error in addToSelectedPlaylist: \(error)")
+                }
+            }
+        }
+    }
+}
+
+struct EnhancedPlaylistRowView: View {
+    let playlist: LibraryPlaylist
+    let isAdded: Bool
+    let onSelect: () -> Void
+    @State private var isPressed = false
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 16) {
+                // Playlist icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.6)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 50, height: 50)
+                    
+                    Image(systemName: "music.note.list")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(playlist.attributes.name)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    
+                    Text("Editable Playlist")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                // Add/Check indicator
+                if isAdded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.green)
+                        .scaleEffect(1.1)
+                } else {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.blue)
+                        .opacity(isPressed ? 0.6 : 1.0)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(.systemBackground))
+            .cornerRadius(12)
+            .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+            .scaleEffect(isPressed ? 0.98 : 1.0)
+            .animation(.easeInOut(duration: 0.1), value: isPressed)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
+            isPressed = pressing
+        }, perform: {})
+        .disabled(isAdded)
     }
 }
