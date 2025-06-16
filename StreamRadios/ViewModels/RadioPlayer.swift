@@ -374,7 +374,12 @@ class RadioPlayer: NSObject, ObservableObject {
             guard let player = player else { return }
             player.pause()
             isPlaying = false
+            
+            // Cancel any pending iTunes searches when paused
+            artworkSearchTimer?.invalidate()
+            
             updateNowPlayingInfo()
+            updateWidget()
         }
     
     func togglePlayPause() {
@@ -390,7 +395,21 @@ class RadioPlayer: NSObject, ObservableObject {
            player = nil
            currentStationIndex = nil
            isPlaying = false
+           
+           // Clear all metadata and artwork
            metadata = nil
+           iTunesAlbumArt = nil
+           albumArt = nil
+           songTitle = ""
+           artistName = ""
+           lastMetadataSearched = ""
+           
+           // Cancel any pending iTunes searches
+           artworkSearchTimer?.invalidate()
+           
+           // Update all UI elements
+           updateNowPlayingInfo()
+           updateWidget()
        }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
@@ -398,12 +417,33 @@ class RadioPlayer: NSObject, ObservableObject {
         
         guard index >= 0 && index < stations.count else { return }
         
+        let station = stations[index]
+        
+        // Clear artwork from previous station if switching to a different station
+        if let previousID = previousStationID, previousID != station.id {
+            clearPreviousStationArtwork(previousID: previousID)
+        }
+        
         stopCurrentStation()
         currentStationIndex = index
-        metadata = nil // Clear metadata when switching stations
-        iTunesAlbumArt = nil // Clear iTunes album art when switching stations
-        let station = stations[index]
+        
+        // Clear ALL metadata and artwork when switching stations
+        metadata = nil
+        iTunesAlbumArt = nil
+        albumArt = nil
+        songTitle = ""
+        artistName = ""
+        lastMetadataSearched = ""
+        
+        // Reset artwork persistence tracking for new station
+        currentTrackArtwork = nil
+        currentTrackKey = nil
+        
+        // Cancel any pending iTunes searches
+        artworkSearchTimer?.invalidate()
+        
         currentlyPlayingStation = station
+        previousStationID = station.id
         
         if let url = URL(string: station.url) {
             setStationURL(url)
@@ -424,17 +464,45 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
 
+        // Clear all metadata and artwork when playing alarm station
+        metadata = nil
+        iTunesAlbumArt = nil
+        albumArt = nil
+        songTitle = ""
+        artistName = ""
+        lastMetadataSearched = ""
+        
+        // Cancel any pending iTunes searches
+        artworkSearchTimer?.invalidate()
+
         setStationURL(url)
         play()
         alarmStation = station
+        
+        // Update UI elements
+        updateNowPlayingInfo()
+        updateWidget()
     }
     
     func stopCurrentStation() {
         player?.pause()
         player = nil
         isPlaying = false
-        iTunesAlbumArt = nil // Clear iTunes album art when stopping
+        
+        // Clear all metadata and artwork
+        metadata = nil
+        iTunesAlbumArt = nil
+        albumArt = nil
+        songTitle = ""
+        artistName = ""
+        lastMetadataSearched = ""
+        
+        // Cancel any pending iTunes searches
+        artworkSearchTimer?.invalidate()
+        
+        // Update all UI elements
         updateNowPlayingInfo()
+        updateWidget()
         currentlyPlayingStation = nil
     }
     
@@ -499,8 +567,13 @@ class RadioPlayer: NSObject, ObservableObject {
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         
-        // Priority: iTunes album art > stream album art > station icon
-        if let iTunesAlbumArt = iTunesAlbumArt {
+        // Priority: Current track artwork > iTunes album art > stream album art > station icon
+        if let currentTrackArtwork = currentTrackArtwork {
+            let artwork = MPMediaItemArtwork(boundsSize: currentTrackArtwork.size) { size in
+                return currentTrackArtwork
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        } else if let iTunesAlbumArt = iTunesAlbumArt {
             let artwork = MPMediaItemArtwork(boundsSize: iTunesAlbumArt.size) { size in
                 return iTunesAlbumArt
             }
@@ -597,6 +670,49 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
+    private var lastMetadataSearched: String = ""
+    private var lastArtworkFetched: UIImage?
+    private var artworkSearchTimer: Timer?
+    private var artworkCache: [String: UIImage?] = [:]
+    
+    // Artwork persistence tracking
+    private var currentTrackArtwork: UIImage?
+    private var currentTrackKey: String?
+    private var previousStationID: String?
+    
+    private func clearPreviousStationArtwork(previousID: String) {
+        guard let viewModel = viewModel else { return }
+        
+        // Find the previous station and clear its iTunes artwork data
+        if let previousStationIndex = viewModel.stations.firstIndex(where: { $0.id == previousID }) {
+            var previousStation = viewModel.stations[previousStationIndex]
+            previousStation.iTunesArtworkData = nil
+            viewModel.stations[previousStationIndex] = previousStation
+            viewModel.saveStationsToCoreData()
+            print("Cleared artwork from previous station: \(previousStation.name)")
+        }
+    }
+    
+    private func generateTrackKey(from metadata: String) -> String {
+        // Create a unique key for the track by extracting core artist and track info
+        let parsed = parseComplexMetadata(metadata)
+        let artist = parsed.artist?.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
+        let track = parsed.track?.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
+        
+        // Combine artist and track to create unique key
+        return "\(artist)|\(track)".replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+    
+    private func normalizeTrackName(_ trackName: String) -> String {
+        return trackName
+            .lowercased()
+            .replacingOccurrences(of: "^the\\s+", with: "", options: .regularExpression) // Remove leading "the"
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression) // Remove all spaces
+            .replacingOccurrences(of: "[^a-z0-9]", with: "", options: .regularExpression) // Keep only alphanumeric
+    }
+    private var cacheOrder: [String] = []
+    private let maxCacheSize = 50
+    
     private func fetchITunesAlbumArt(for metadata: String) {
         guard !metadata.isEmpty && metadata != "No song or album title available" else {
             DispatchQueue.main.async { [weak self] in
@@ -605,70 +721,1267 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
-        // Search iTunes for album artwork
-        searchITunesForArtwork(metadata: metadata) { [weak self] image in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.iTunesAlbumArt = image
-                self.updateNowPlayingInfo()
-                self.updateWidget()
-                print("iTunes album art fetched successfully: \(image != nil)")
+        // Parse metadata to get core song information (ignore timestamps)
+        let parsedData = parseComplexMetadata(metadata)
+        
+        // Create a normalized cache key based on artist and track (ignore timestamps and other varying data)
+        var cacheKey = ""
+        if let artist = parsedData.artist, let track = parsedData.track {
+            cacheKey = "\(artist.lowercased()) - \(track.lowercased())"
+        } else {
+            // Fallback: use first two components for tilde-separated metadata
+            let components = metadata.components(separatedBy: "~")
+            if components.count >= 2 {
+                cacheKey = "\(components[0].lowercased()) - \(components[1].lowercased())"
+            } else {
+                cacheKey = metadata.lowercased()
+            }
+        }
+        
+        // Prevent duplicate searches for the same song (ignore timestamp differences)
+        if cacheKey == lastMetadataSearched {
+            return
+        }
+        
+        // Check cache first using normalized key
+        if let cachedImage = artworkCache[cacheKey] {
+            // Move to end of cache order (most recently used)
+            if let index = cacheOrder.firstIndex(of: cacheKey) {
+                cacheOrder.remove(at: index)
+            }
+            cacheOrder.append(cacheKey)
+            
+            DispatchQueue.main.async { [weak self] in
+                self?.iTunesAlbumArt = cachedImage
+                self?.updateNowPlayingInfo()
+                self?.updateWidget()
+                print("iTunes album art loaded from cache for: \(cacheKey)")
+            }
+            return
+        }
+        
+        // Cancel any existing timer to debounce rapid metadata changes
+        artworkSearchTimer?.invalidate()
+        
+        // Debounce the search to prevent rapid successive API calls
+        artworkSearchTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            
+            self.lastMetadataSearched = cacheKey
+            
+            print("Fetching iTunes album art for song: \(cacheKey)")
+            
+            // Search iTunes for album artwork
+            self.searchITunesForArtwork(metadata: metadata) { [weak self] image in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    
+                    // Cache the result using normalized key (even if nil)
+                    self.cacheImage(image, for: cacheKey)
+                    
+                    // Only update if we're still on the same song
+                    if cacheKey == self.lastMetadataSearched {
+                        self.iTunesAlbumArt = image
+                        
+                        // Save iTunes artwork to current station if image was found
+                        if let image = image {
+                            self.saveITunesArtworkToCurrentStation(image)
+                        }
+                        
+                        self.updateNowPlayingInfo()
+                        self.updateWidget()
+                        print("iTunes album art fetched successfully: \(image != nil) for song: \(cacheKey)")
+                    }
+                }
             }
         }
     }
     
     private func searchITunesForArtwork(metadata: String, completion: @escaping (UIImage?) -> Void) {
-        // Parse metadata to extract artist and track
-        let components = metadata.components(separatedBy: " - ")
-        var searchQuery = metadata
+        let parsedData = parseComplexMetadata(metadata)
         
-        if components.count >= 2 {
-            let artist = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            let track = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
-            searchQuery = "\(artist) \(track)"
+        // Try multiple search strategies
+        let searchQueries = buildSearchQueries(parsedData: parsedData, originalMetadata: metadata)
+        
+        searchWithQueries(searchQueries, completion: completion)
+    }
+    
+    private func parseComplexMetadata(_ metadata: String) -> (artist: String?, track: String?, album: String?) {
+        var artist: String?
+        var track: String?
+        var album: String?
+        
+        // Preprocessing: Remove common radio prefixes and noise
+        let cleanedMetadata = metadata
+            .replacingOccurrences(of: "♪", with: "")
+            .replacingOccurrences(of: "♫", with: "")
+            .replacingOccurrences(of: "NOW PLAYING:", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "CURRENT:", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "ON AIR:", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "LIVE:", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Complex radio metadata formats with detailed parsing
+        
+        // Format 1: Tilde-separated with timestamps and IDs
+        // "Quanti Anni Hai~Vasco Rossi~~1998~~260~2025-06-16T13:51:31~2025-06-16T13:51:34~United Music Vasco Rossi~3.19~dbeca8a2-f14e-43e8-9081-95f3c9810890"
+        if cleanedMetadata.contains("~") {
+            let components = cleanedMetadata.components(separatedBy: "~")
+            if components.count >= 2 {
+                track = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                artist = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Look for album/year in remaining components (skip timestamps and IDs)
+                for (index, component) in components[2...].enumerated() {
+                    let cleaned = component.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleaned.isEmpty && 
+                       !cleaned.contains("-") && 
+                       !cleaned.contains(":") && 
+                       !cleaned.contains("2025") && 
+                       !cleaned.contains("2024") &&
+                       !cleaned.contains("United Music") &&
+                       !cleaned.matches("^[0-9]+$") && // Skip pure numbers
+                       !cleaned.matches(".*[0-9]{4}-[0-9]{2}-[0-9]{2}.*") && // Skip dates
+                       !cleaned.matches(".*[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}.*") && // Skip UUIDs
+                       cleaned.count > 2 && cleaned.count < 50 {
+                        album = cleaned
+                        break
+                    }
+                }
+            }
         }
         
-        // Clean up search query
-        searchQuery = searchQuery
+        // Format 2: Standard artist-title with various separators (prioritize dash separation)
+        // "MODA' - COME UN PITTORE", "Artist: Track", "Artist | Track"
+        else if cleanedMetadata.containsAnyOf([" - ", " – ", " — ", " | ", " / ", ": ", " by "]) {
+            // Prioritize dash separators since they create the best phrase groups
+            let dashSeparators = [" - ", " – ", " — "]
+            let otherSeparators = [" | ", " / ", ": ", " by "]
+            let allSeparators = dashSeparators + otherSeparators
+            
+            for separator in allSeparators {
+                if cleanedMetadata.contains(separator) {
+                    let components = cleanedMetadata.components(separatedBy: separator)
+                    if components.count >= 2 {
+                        // Extract the first two main components as phrase groups
+                        let artistPart = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trackPart = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                        
+                        // Clean and preserve phrase groups
+                        artist = cleanAndPreservePhraseGroup(artistPart)
+                        
+                        // Handle parenthetical content while preserving main phrase group
+                        if trackPart.contains("(") && trackPart.contains(")") {
+                            // Extract year if present: "Spaccacuore (2007)"
+                            if let yearRange = trackPart.range(of: "\\([0-9]{4}\\)", options: .regularExpression) {
+                                track = cleanAndPreservePhraseGroup(String(trackPart[..<yearRange.lowerBound]))
+                                let yearMatch = String(trackPart[yearRange])
+                                album = yearMatch.replacingOccurrences(of: "[()]", with: "", options: .regularExpression)
+                            }
+                            // Remove features and remixes while preserving main phrase: "Song (feat. Artist)", "Song (Remix)"
+                            else if trackPart.matches(".*\\((feat\\.|featuring|remix|radio edit|extended|acoustic).*\\).*", options: .caseInsensitive) {
+                                track = cleanAndPreservePhraseGroup(
+                                    trackPart.replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression)
+                                )
+                            } else {
+                                track = cleanAndPreservePhraseGroup(trackPart)
+                            }
+                        } else {
+                            track = cleanAndPreservePhraseGroup(trackPart)
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        
+        // Format 3: Track "by" Artist (reverse order)
+        // "Beautiful Song by Amazing Artist"
+        else if cleanedMetadata.lowercased().contains(" by ") {
+            let components = cleanedMetadata.components(separatedBy: CharacterSet(charactersIn: " by "))
+            if components.count >= 2 {
+                track = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                artist = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        
+        // Format 4: Quoted tracks or artists
+        // "\"Track Name\" - Artist" or "Artist - \"Track Name\""
+        else if cleanedMetadata.contains("\"") {
+            let quotedParts = cleanedMetadata.extractQuotedStrings()
+            if quotedParts.count > 0 {
+                let nonQuotedParts = cleanedMetadata.removeQuotedStrings().components(separatedBy: " - ")
+                if nonQuotedParts.count >= 1 {
+                    track = quotedParts[0]
+                    artist = nonQuotedParts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        
+        // Format 5: Comma-separated (some international formats)
+        // "Artist, Track" or "Track, Artist"
+        else if cleanedMetadata.contains(", ") {
+            let components = cleanedMetadata.components(separatedBy: ", ")
+            if components.count >= 2 {
+                // Try both orders and determine which makes more sense
+                let first = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let second = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // If first part is short and second is longer, likely "Artist, Long Track Name"
+                if first.count < Int(Double(second.count) * 0.7) {
+                    artist = first
+                    track = second
+                } else {
+                    track = first
+                    artist = second
+                }
+            }
+        }
+        
+        // Format 6: Single string without separators (try to extract meaningful parts)
+        else {
+            // Look for common patterns in single strings
+            if cleanedMetadata.count > 10 {
+                // Try to find artist names in parentheses at the end
+                if let artistRange = cleanedMetadata.range(of: "\\([^)]+\\)$", options: .regularExpression) {
+                    artist = String(cleanedMetadata[artistRange])
+                        .replacingOccurrences(of: "[()]", with: "", options: .regularExpression)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    track = String(cleanedMetadata[..<artistRange.lowerBound])
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    // Use the whole string as track title for single-word searches
+                    track = cleanedMetadata
+                }
+            }
+        }
+        
+        // Clean up extracted values
+        artist = cleanArtistName(artist)
+        track = cleanTrackName(track)
+        album = cleanAlbumName(album)
+        
+        return (artist: artist, track: track, album: album)
+    }
+    
+    private func cleanArtistName(_ artist: String?) -> String? {
+        guard var cleaned = artist else { return nil }
+        
+        cleaned = cleaned
             .replacingOccurrences(of: "♪", with: "")
             .replacingOccurrences(of: "♫", with: "")
             .replacingOccurrences(of: "Now Playing:", with: "", options: .caseInsensitive)
             .replacingOccurrences(of: "Current Song:", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "Playing:", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "feat\\.", with: "", options: [.caseInsensitive, .regularExpression])
+            .replacingOccurrences(of: "featuring", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "&", with: "and")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         
-        guard let encodedQuery = searchQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://itunes.apple.com/search?term=\(encodedQuery)&media=music&entity=song&limit=1") else {
+        return cleaned.isEmpty ? nil : cleaned
+    }
+    
+    private func cleanTrackName(_ track: String?) -> String? {
+        guard var cleaned = track else { return nil }
+        
+        cleaned = cleaned
+            .replacingOccurrences(of: "♪", with: "")
+            .replacingOccurrences(of: "♫", with: "")
+            .replacingOccurrences(of: "\\[.*?\\]", with: "", options: .regularExpression) // Remove [Radio Edit], [Clean], etc.
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression) // Normalize whitespace
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        return cleaned.isEmpty ? nil : cleaned
+    }
+    
+    private func cleanAlbumName(_ album: String?) -> String? {
+        guard var cleaned = album else { return nil }
+        
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        return cleaned.isEmpty ? nil : cleaned
+    }
+    
+    private func cleanAndPreservePhraseGroup(_ text: String) -> String {
+        return text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression) // Normalize whitespace but preserve phrases
+    }
+    
+    private func cacheImage(_ image: UIImage?, for metadata: String) {
+        // Add to cache
+        artworkCache[metadata] = image
+        
+        // Update cache order
+        if let index = cacheOrder.firstIndex(of: metadata) {
+            cacheOrder.remove(at: index)
+        }
+        cacheOrder.append(metadata)
+        
+        // Maintain cache size
+        while cacheOrder.count > maxCacheSize {
+            let oldestKey = cacheOrder.removeFirst()
+            artworkCache.removeValue(forKey: oldestKey)
+        }
+    }
+    
+    private func saveITunesArtworkToCurrentStation(_ image: UIImage) {
+        guard let currentIndex = currentStationIndex,
+              let viewModel = viewModel,
+              currentIndex < viewModel.stations.count else {
+            return
+        }
+        
+        // Convert image to base64
+        guard let imageData = image.jpegData(compressionQuality: 0.7) else {
+            return
+        }
+        let base64String = imageData.base64EncodedString()
+        
+        // Store artwork for current track persistence
+        currentTrackArtwork = image
+        
+        // Update the station
+        var updatedStation = viewModel.stations[currentIndex]
+        updatedStation.iTunesArtworkData = base64String
+        viewModel.stations[currentIndex] = updatedStation
+        
+        // Save to Core Data
+        viewModel.saveStationsToCoreData()
+        
+        print("iTunes artwork saved to station: \(updatedStation.name)")
+    }
+    
+    private func buildSearchQueries(parsedData: (artist: String?, track: String?, album: String?), originalMetadata: String) -> [String] {
+        var queries: [String] = []
+        
+        // Check if this is regional/local content that might need special handling
+        let originalGroups = extractPhraseGroups(from: originalMetadata)
+        let isRegionalContent = detectRegionalContent(query: originalMetadata, queryGroups: originalGroups)
+        
+        // Enhanced search strategy: PRIORITY 1 - Two-group matches, PRIORITY 2 - Single groups
+        
+        // PRIORITY 1: Two-group combination searches (highest priority)
+        var twoGroupQueries: [String] = []
+        
+        if let artist = parsedData.artist, let track = parsedData.track {
+            let artistGroups = extractPhraseGroups(from: artist)
+            let trackGroups = extractPhraseGroups(from: track)
+            
+            // PRIORITY A: Track name focused queries (highest priority)
+            twoGroupQueries.append("\"\(track)\" \(artist)") // Track first with quotes
+            twoGroupQueries.append("\(track) \(artist)") // Track first without quotes
+            twoGroupQueries.append("\(artist) \(track)") // Traditional artist-track
+            
+            // PRIORITY B: Cross-group combinations for enhanced matching
+            for artistGroup in artistGroups.prefix(2) {
+                for trackGroup in trackGroups.prefix(2) {
+                    twoGroupQueries.append("\"\(trackGroup)\" \(artistGroup)") // Track-focused
+                    twoGroupQueries.append("\(artistGroup) \(trackGroup)") // Artist-focused
+                }
+            }
+        }
+        
+        // Additional two-group combinations from original metadata with track name detection
+        if originalGroups.count >= 2 {
+            // Smart track detection: last group is often the track name
+            let potentialTrack = originalGroups.last!
+            let potentialArtist = originalGroups.first!
+            
+            // Prioritize combinations with potential track name
+            twoGroupQueries.append("\"\(potentialTrack)\" \(potentialArtist)")
+            twoGroupQueries.append("\(potentialArtist) \(potentialTrack)")
+            
+            // Additional combinations
+            let twoGroupCombinations = generateGroupCombinations(groups: originalGroups, maxGroups: 2)
+            twoGroupQueries.append(contentsOf: twoGroupCombinations.prefix(2))
+        }
+        
+        // Add all two-group queries with highest priority
+        queries.append(contentsOf: twoGroupQueries.prefix(5))
+        
+        // PRIORITY 2: Single-group fallback searches (only if two-group matches might fail)
+        var singleGroupQueries: [String] = []
+        
+        // For regional content, focus on the main artist/group names only
+        if isRegionalContent {
+            // Extract main artist names, avoiding very long collaborative titles
+            if let artist = parsedData.artist {
+                let artistGroups = extractPhraseGroups(from: artist)
+                for group in artistGroups {
+                    // Focus on shorter, more specific artist names for regional content
+                    if group.count > 3 && group.count < 15 && !group.contains("(") {
+                        singleGroupQueries.append(group)
+                    }
+                }
+            }
+            
+            // For regional content, also try just the first word/name as artist queries
+            if let artist = parsedData.artist {
+                let words = artist.components(separatedBy: CharacterSet.whitespacesAndNewlines)
+                    .filter { !$0.isEmpty && $0.count > 3 }
+                for word in words.prefix(2) {
+                    singleGroupQueries.append(word)
+                }
+            }
+        } else {
+            // Standard single group handling for non-regional content
+            
+            // Single artist groups
+            if let artist = parsedData.artist {
+                let artistGroups = extractPhraseGroups(from: artist)
+                for group in artistGroups.prefix(2) {
+                    if group.count > 3 {
+                        singleGroupQueries.append(group)
+                    }
+                }
+                singleGroupQueries.append(artist) // Full artist as single group
+            }
+            
+            // Single track groups
+            if let track = parsedData.track {
+                let trackGroups = extractPhraseGroups(from: track)
+                for group in trackGroups.prefix(2) {
+                    if group.count > 3 {
+                        singleGroupQueries.append(group)
+                    }
+                }
+                singleGroupQueries.append(track) // Full track as single group
+            }
+            
+            // Album-based single groups
+            if let album = parsedData.album, album.count > 3 {
+                singleGroupQueries.append(album)
+            }
+        }
+        
+        // Add single-group queries as fallback
+        queries.append(contentsOf: singleGroupQueries.prefix(3))
+        
+        // Smart fallback searches: Extract meaningful phrase groups from original metadata
+        if !isRegionalContent {
+            let smartFallback = generateSmartGroupFallbackQueries(from: originalMetadata)
+            queries.append(contentsOf: smartFallback.prefix(2))
+        }
+        
+        // Remove duplicates and filter out very short queries
+        queries = Array(Set(queries))
+            .filter { $0.count > 2 && !$0.matches("^[0-9]+$") }
+        
+        // Sort by priority: two-group queries first, then single-group queries
+        queries = prioritizeQueriesByGroupCount(queries)
+        
+        // For regional content, limit queries more aggressively to avoid poor matches
+        let queryLimit = isRegionalContent ? 5 : 8
+        return Array(queries.prefix(queryLimit))
+    }
+    
+    private func extractPhraseGroups(from text: String) -> [String] {
+        // Split text by enhanced separators but preserve phrase groups
+        var groups: [String] = []
+        
+        // Enhanced separators based on user specification: -, ~, ~~, --, _
+        let primarySeparators = [" - ", " -- ", "~", "~~", "_"]
+        let secondarySeparators = [" | ", " / ", " : ", " by ", " – ", " — "]
+        let allSeparators = primarySeparators + secondarySeparators
+        
+        var foundSeparator = false
+        
+        // Try separators in priority order
+        for separator in allSeparators {
+            if text.contains(separator) {
+                let components = text.components(separatedBy: separator)
+                if components.count > 1 {
+                    // Multiple groups found
+                    for component in components {
+                        let cleaned = cleanPhraseGroup(component)
+                        if !cleaned.isEmpty {
+                            groups.append(cleaned)
+                        }
+                    }
+                    foundSeparator = true
+                    break
+                }
+            }
+        }
+        
+        if !foundSeparator {
+            // Single phrase, break into meaningful chunks by parentheses or length
+            groups = extractMeaningfulChunks(from: text)
+        }
+        
+        // Filter out stop-word-only groups and very short groups
+        return groups.filter { group in
+            let words = group.components(separatedBy: CharacterSet.whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+            
+            return group.count > 2 && 
+                   !group.matches("^[0-9]+$") && 
+                   !isStopWordOnlyGroup(group) &&
+                   words.count <= 6 // Avoid overly long groups
+        }
+    }
+    
+    private func cleanPhraseGroup(_ group: String) -> String {
+        return group
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "^(feat\\.|featuring|ft\\.|with)\\s+", with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "\\s+(feat\\.|featuring|ft\\.).*$", with: "", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: "\\([^)]*\\)", with: "", options: .regularExpression) // Remove parenthetical content
+            .replacingOccurrences(of: "\\[[^\\]]*\\]", with: "", options: .regularExpression) // Remove bracketed content
+            .replacingOccurrences(of: "\\r\\n|\\r|\\n", with: " ", options: .regularExpression) // Remove line breaks
+            .replacingOccurrences(of: "[(){}\\[\\]]", with: "", options: .regularExpression) // Remove special chars
+            .replacingOccurrences(of: "\\s*-\\s*$", with: "", options: .regularExpression) // Remove trailing dashes
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+    }
+    
+    private func extractMeaningfulChunks(from text: String) -> [String] {
+        var chunks: [String] = []
+        let cleaned = cleanPhraseGroup(text)
+        
+        if cleaned.count > 20 {
+            // Long text, try to break into meaningful chunks
+            let words = cleaned.components(separatedBy: CharacterSet.whitespacesAndNewlines)
+            
+            if words.count >= 4 {
+                // Create 2-3 word chunks
+                for i in 0..<words.count-1 {
+                    let twoWordChunk = "\(words[i]) \(words[i+1])"
+                    if !isStopWordOnlyGroup(twoWordChunk) {
+                        chunks.append(twoWordChunk)
+                    }
+                }
+                
+                if words.count >= 6 {
+                    // Create 3-word chunks for longer phrases
+                    for i in 0..<words.count-2 {
+                        let threeWordChunk = "\(words[i]) \(words[i+1]) \(words[i+2])"
+                        if !isStopWordOnlyGroup(threeWordChunk) {
+                            chunks.append(threeWordChunk)
+                        }
+                    }
+                }
+            }
+        }
+        
+        if chunks.isEmpty {
+            chunks.append(cleaned)
+        }
+        
+        return chunks
+    }
+    
+    private func isStopWordOnlyGroup(_ group: String) -> Bool {
+        let stopWords = Set(["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "feat", "featuring", "ft", "vs", "version", "remix", "edit", "radio", "new", "live", "official"])
+        
+        let words = group.lowercased().components(separatedBy: CharacterSet.whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        
+        return words.allSatisfy { stopWords.contains($0) }
+    }
+    
+    private func generateGroupCombinations(groups: [String], maxGroups: Int) -> [String] {
+        guard groups.count >= maxGroups else { return [] }
+        
+        var combinations: [String] = []
+        
+        if maxGroups == 2 && groups.count >= 2 {
+            for i in 0..<groups.count-1 {
+                for j in i+1..<groups.count {
+                    combinations.append("\(groups[i]) \(groups[j])")
+                }
+            }
+            // Also include consecutive pairs
+            for i in 0..<groups.count-1 {
+                combinations.append("\(groups[i]) \(groups[i+1])")
+            }
+        } else if maxGroups == 3 && groups.count >= 3 {
+            for i in 0..<groups.count-2 {
+                for j in i+1..<groups.count-1 {
+                    for k in j+1..<groups.count {
+                        combinations.append("\(groups[i]) \(groups[j]) \(groups[k])")
+                    }
+                }
+            }
+            // Also include consecutive triplets
+            for i in 0..<groups.count-2 {
+                combinations.append("\(groups[i]) \(groups[i+1]) \(groups[i+2])")
+            }
+        }
+        
+        return combinations
+    }
+    
+    private func prioritizeQueriesByGroupCount(_ queries: [String]) -> [String] {
+        var twoGroupQueries: [String] = []
+        var singleGroupQueries: [String] = []
+        
+        for query in queries {
+            let groups = extractPhraseGroups(from: query)
+            if groups.count >= 2 {
+                twoGroupQueries.append(query)
+            } else {
+                singleGroupQueries.append(query)
+            }
+        }
+        
+        // Sort each category by length (longer queries tend to be more specific)
+        twoGroupQueries.sort { $0.count > $1.count }
+        singleGroupQueries.sort { $0.count > $1.count }
+        
+        // Return two-group queries first, then single-group queries
+        return twoGroupQueries + singleGroupQueries
+    }
+    
+    private func generateSmartGroupFallbackQueries(from metadata: String) -> [String] {
+        var fallbackQueries: [String] = []
+        
+        // Clean the metadata
+        let cleaned = metadata
+            .replacingOccurrences(of: "♪", with: "")
+            .replacingOccurrences(of: "♫", with: "")
+            .replacingOccurrences(of: "~.*~.*~.*", with: "", options: .regularExpression) // Remove timestamp patterns
+            .replacingOccurrences(of: "Now Playing:", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "Current Song:", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if cleaned.count > 5 {
+            // Extract phrase groups and create meaningful combinations
+            let phraseGroups = extractPhraseGroups(from: cleaned)
+            
+            if phraseGroups.count >= 2 {
+                // Best 2-group combination
+                let first2Groups = Array(phraseGroups.prefix(2)).joined(separator: " ")
+                fallbackQueries.append(first2Groups)
+                
+                // Individual significant groups
+                for group in phraseGroups.prefix(2) {
+                    if group.count > 3 {
+                        fallbackQueries.append(group)
+                    }
+                }
+                
+                // Enhanced fallback: Simplified queries for complex cases
+                for group in phraseGroups.prefix(3) {
+                    let simplified = group
+                        .replacingOccurrences(of: "\\b(19|20)\\d{2}\\b", with: "", options: .regularExpression) // Remove years
+                        .replacingOccurrences(of: "\\b(feat|ft|featuring|with|remix|mix|edit|version|vs|popullore|veriu|potpuri|kolazh)\\b.*", with: "", options: [.regularExpression, .caseInsensitive]) // Remove features and common noise
+                        .replacingOccurrences(of: "[\\(\\)\\[\\]{}\\-\\_]", with: " ", options: .regularExpression) // Replace special chars with spaces
+                        .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression) // Normalize spaces
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    if simplified.count > 3 && simplified != group && !simplified.isEmpty {
+                        fallbackQueries.append(simplified)
+                    }
+                }
+            }
+            
+            if phraseGroups.count >= 3 {
+                // Best 3-group combination
+                let first3Groups = Array(phraseGroups.prefix(3)).joined(separator: " ")
+                fallbackQueries.append(first3Groups)
+            }
+            
+            // Original cleaned metadata as last resort (if not too long)
+            if cleaned.count < 50 && !phraseGroups.isEmpty {
+                fallbackQueries.append(cleaned)
+            }
+        }
+        
+        return fallbackQueries
+    }
+    
+    private func searchWithQueries(_ queries: [String], completion: @escaping (UIImage?) -> Void) {
+        guard !queries.isEmpty else {
+            // Check if we should use station artwork as fallback for regional content
+            print("iTunes Enhanced AI: No queries available - using graceful fallback")
             completion(nil)
             return
         }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        // Check smart cache for successful matches first
+        for query in queries.prefix(3) { // Check first 3 queries for cache hits
+            let cacheKey = "success_\(query.lowercased())"
+            if let cachedImage = artworkCache[cacheKey] {
+                print("Smart cache hit for: \(query)")
+                DispatchQueue.main.async {
+                    completion(cachedImage)
+                }
+                return
+            }
+        }
+        
+        searchWithQuery(queries[0], remainingQueries: Array(queries.dropFirst()), completion: completion)
+    }
+    
+    private func searchWithQuery(_ query: String, remainingQueries: [String], completion: @escaping (UIImage?) -> Void) {
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://itunes.apple.com/search?term=\(encodedQuery)&media=music&entity=song&limit=10") else {
+            
+            // Try next query if available
+            if !remainingQueries.isEmpty {
+                searchWithQuery(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), completion: completion)
+            } else {
+                completion(nil)
+            }
+            return
+        }
+        
+        print("iTunes search query: \(query)")
+        
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let results = json["results"] as? [[String: Any]],
-                  let firstResult = results.first,
-                  let artworkUrl = firstResult["artworkUrl100"] as? String else {
-                completion(nil)
+                  let results = json["results"] as? [[String: Any]] else {
+                
+                // Try next query if available
+                if !remainingQueries.isEmpty {
+                    self?.searchWithQuery(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), completion: completion)
+                } else {
+                    completion(nil)
+                }
                 return
             }
             
-            // Get higher resolution artwork
-            let highResArtworkUrl = artworkUrl.replacingOccurrences(of: "100x100bb", with: "600x600bb")
+            // Enhanced result evaluation - find best match based on word similarity
+            let bestMatch = self?.findBestMatch(query: query, results: results)
             
-            guard let imageUrl = URL(string: highResArtworkUrl) else {
-                completion(nil)
-                return
-            }
-            
-            URLSession.shared.dataTask(with: imageUrl) { imageData, _, _ in
-                guard let imageData = imageData,
-                      let image = UIImage(data: imageData) else {
+            if let bestResult = bestMatch,
+               let artworkUrl = bestResult["artworkUrl100"] as? String {
+                
+                print("iTunes best match found: \(bestResult["trackName"] ?? "Unknown") by \(bestResult["artistName"] ?? "Unknown")")
+                
+                // Get higher resolution artwork
+                let highResArtworkUrl = artworkUrl.replacingOccurrences(of: "100x100bb", with: "600x600bb")
+                
+                guard let imageUrl = URL(string: highResArtworkUrl) else {
                     completion(nil)
                     return
                 }
-                completion(image)
-            }.resume()
+                
+                URLSession.shared.dataTask(with: imageUrl) { imageData, _, _ in
+                    guard let imageData = imageData,
+                          let image = UIImage(data: imageData) else {
+                        // Try next query if available
+                        if !remainingQueries.isEmpty {
+                            self?.searchWithQuery(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), completion: completion)
+                        } else {
+                            completion(nil)
+                        }
+                        return
+                    }
+                    
+                    // Cache successful match for future use
+                    let successCacheKey = "success_\(query.lowercased())"
+                    self?.artworkCache[successCacheKey] = image
+                    
+                    completion(image)
+                }.resume()
+            } else {
+                // No good match found, try next query
+                if !remainingQueries.isEmpty {
+                    self?.searchWithQuery(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), completion: completion)
+                } else {
+                    completion(nil)
+                }
+            }
         }.resume()
+    }
+    
+    private func findBestMatch(query: String, results: [[String: Any]]) -> [String: Any]? {
+        guard !results.isEmpty else { return nil }
+        
+        let queryGroups = extractPhraseGroups(from: query)
+        var bestScore = 0.0
+        var bestMatch: [String: Any]?
+        var bestAccuracy = 0.0
+        
+        // Check if this appears to be a regional/local song that might not be in iTunes
+        let isRegionalContent = detectRegionalContent(query: query, queryGroups: queryGroups)
+        
+        // Enhanced AI-based scoring system with smarter thresholds
+        for result in results {
+            let trackName = result["trackName"] as? String ?? ""
+            let artistName = result["artistName"] as? String ?? ""
+            let albumName = result["collectionName"] as? String ?? ""
+            
+            // Fast exact match detection (highest priority)
+            let exactMatchScore = calculateExactMatchScore(query: query, 
+                                                         trackName: trackName, 
+                                                         artistName: artistName)
+            
+            // Extract phrase groups from iTunes result
+            let trackGroups = extractPhraseGroups(from: trackName)
+            let artistGroups = extractPhraseGroups(from: artistName)
+            let albumGroups = extractPhraseGroups(from: albumName)
+            
+            // PRIORITY 1: Two-group matching (highest weight)
+            let twoGroupScore = calculateEnhancedTwoGroupScore(queryGroups: queryGroups, 
+                                                             trackGroups: trackGroups, 
+                                                             artistGroups: artistGroups,
+                                                             albumGroups: albumGroups)
+            
+            // PRIORITY 2: Single-group fallback matching (medium weight)
+            let singleGroupScore = calculateEnhancedSingleGroupScore(queryGroups: queryGroups,
+                                                                   trackGroups: trackGroups,
+                                                                   artistGroups: artistGroups,
+                                                                   albumGroups: albumGroups)
+            
+            // Enhanced AI confidence scoring with fuzzy matching
+            let (aiScore, confidence) = calculateEnhancedAIScore(query: query,
+                                                               trackName: trackName,
+                                                               artistName: artistName,
+                                                               albumName: albumName,
+                                                               queryGroups: queryGroups,
+                                                               resultGroups: trackGroups + artistGroups + albumGroups)
+            
+            // Rebalanced scoring weights for better single-group recognition
+            let baseScore = (twoGroupScore * 0.35) + (singleGroupScore * 0.45) + (aiScore * 0.2)
+            let totalScore = baseScore + (exactMatchScore * 0.3) // Boost for exact matches
+            let accuracy = min(confidence * 100, 100.0)
+            
+            // Special override for obvious perfect matches
+            var finalAccuracy = accuracy
+            if exactMatchScore >= 1.0 && accuracy < 60.0 {
+                finalAccuracy = max(accuracy, 70.0) // Override low accuracy for perfect matches
+                print("  - PERFECT MATCH DETECTED: Accuracy boosted to \(String(format: "%.1f", finalAccuracy))%")
+            }
+            
+            print("iTunes Enhanced AI: \(trackName) by \(artistName)")
+            print("  - Exact: \(String(format: "%.2f", exactMatchScore)), Two-group: \(String(format: "%.2f", twoGroupScore))")
+            print("  - Single: \(String(format: "%.2f", singleGroupScore)), AI: \(String(format: "%.2f", aiScore))")
+            print("  - Total: \(String(format: "%.2f", totalScore)), Accuracy: \(String(format: "%.1f", finalAccuracy))%")
+            
+            // Enhanced acceptance criteria with regional content awareness
+            var acceptanceThreshold = 0.35
+            var accuracyThreshold = 60.0
+            
+            // For regional content, be more strict to avoid false matches
+            if isRegionalContent {
+                acceptanceThreshold = 0.5 // Higher threshold for regional content
+                accuracyThreshold = 75.0 // Much higher accuracy requirement
+                print("  - REGIONAL CONTENT DETECTED: Using stricter thresholds")
+            }
+            
+            let isAcceptable = (totalScore >= 0.25 && finalAccuracy >= 85.0) || // Very high accuracy override
+                              (totalScore >= 0.3 && finalAccuracy >= 80.0) || // High accuracy standard
+                              (totalScore >= acceptanceThreshold && finalAccuracy >= accuracyThreshold) || // Dynamic threshold
+                              (exactMatchScore >= 0.9 && finalAccuracy >= 50.0) || // Perfect match override
+                              (exactMatchScore >= 0.8 && finalAccuracy >= 55.0) || // High exact match
+                              (twoGroupScore >= 0.8 && finalAccuracy >= 60.0) || // Two-group match override
+                              (twoGroupScore >= 1.0 && finalAccuracy >= 40.0) || // Perfect two-group override
+                              (singleGroupScore >= 0.6 && finalAccuracy >= 90.0 && !isRegionalContent) || // High single match (non-regional only)
+                              (singleGroupScore >= 0.5 && finalAccuracy >= 95.0) // Ultra high accuracy single match
+            
+            if totalScore > bestScore && isAcceptable {
+                bestScore = totalScore
+                bestMatch = result
+                bestAccuracy = finalAccuracy
+            }
+        }
+        
+        if bestMatch != nil {
+            print("iTunes Enhanced AI: Match selected with score \(String(format: "%.2f", bestScore)) and \(String(format: "%.1f", bestAccuracy))% accuracy")
+            return bestMatch
+        } else {
+            print("iTunes Enhanced AI: No suitable match found (best score: \(String(format: "%.2f", bestScore)), best accuracy: \(String(format: "%.1f", bestAccuracy))%)")
+            
+            // For regional content, return nothing rather than a poor match
+            if isRegionalContent {
+                print("iTunes Enhanced AI: Regional content detected - rejecting low-quality matches to avoid incorrect artwork")
+                return nil
+            }
+            
+            return nil
+        }
+    }
+    
+    private func detectRegionalContent(query: String, queryGroups: [String]) -> Bool {
+        let queryLower = query.lowercased()
+        
+        // Albanian language/cultural indicators
+        let albanianIndicators = [
+            "popullore", "veriu", "kolazh", "aurela", "gace", "fatmira", 
+            "brecani", "therret", "prizreni", "lumi", "buta"
+        ]
+        
+        // Check for regional indicators
+        for indicator in albanianIndicators {
+            if queryLower.contains(indicator) {
+                return true
+            }
+        }
+        
+        // Check for complex multi-artist collaborations (often regional)
+        let hasMultipleArtists = queryLower.contains("-") && 
+                                (queryLower.components(separatedBy: "-").count > 2 ||
+                                 queryGroups.count > 4)
+        
+        // Check for very long artist names (often regional compilations)
+        let hasVeryLongComponents = queryGroups.contains { $0.count > 25 }
+        
+        // Check for parenthetical regional descriptors
+        let hasRegionalDescriptors = queryLower.contains("(") && 
+                                   (queryLower.contains("popullore") || 
+                                    queryLower.contains("folk") ||
+                                    queryLower.contains("traditional"))
+        
+        return hasMultipleArtists || hasVeryLongComponents || hasRegionalDescriptors
+    }
+    
+    private func calculateExactMatchScore(query: String, trackName: String, artistName: String) -> Double {
+        let queryLower = query.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let trackLower = trackName.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let artistLower = artistName.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let fullResultLower = "\(trackLower) \(artistLower)".trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        
+        // Enhanced track name matching with normalization (handles "Love Cats" vs "Lovecats")
+        let normalizedQuery = normalizeTrackName(queryLower)
+        let normalizedTrack = normalizeTrackName(trackLower)
+        let normalizedArtist = normalizeTrackName(artistLower)
+        
+        // Check for normalized track name match (highest priority)
+        if normalizedQuery == normalizedTrack || 
+           normalizedQuery.contains(normalizedTrack) && normalizedTrack.count > 3 {
+            return 1.2 // Highest score for normalized track match
+        }
+        
+        // Check for exact matches with various combinations
+        if queryLower == fullResultLower || 
+           queryLower == "\(artistLower) \(trackLower)" ||
+           queryLower.contains(trackLower) && queryLower.contains(artistLower) {
+            return 1.0
+        }
+        
+        // Check for high similarity with Levenshtein
+        let similarity1 = calculateLevenshteinSimilarity(queryLower, fullResultLower)
+        let similarity2 = calculateLevenshteinSimilarity(queryLower, "\(artistLower) \(trackLower)")
+        
+        let maxSimilarity = max(similarity1, similarity2)
+        return maxSimilarity >= 0.9 ? maxSimilarity : 0.0
+    }
+    
+    private func calculateEnhancedTwoGroupScore(queryGroups: [String], 
+                                              trackGroups: [String], 
+                                              artistGroups: [String],
+                                              albumGroups: [String]) -> Double {
+        guard queryGroups.count >= 2 else { return 0.0 }
+        
+        var twoGroupScore = 0.0
+        
+        // Enhanced two-group matching with fuzzy logic
+        for i in 0..<queryGroups.count-1 {
+            for j in i+1..<queryGroups.count {
+                let group1 = queryGroups[i].lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                let group2 = queryGroups[j].lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                
+                // Check artist-track combinations
+                for artistGroup in artistGroups {
+                    for trackGroup in trackGroups {
+                        let artistLower = artistGroup.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                        let trackLower = trackGroup.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                        
+                        // Perfect match with track name bonus
+                        if (group1 == artistLower && group2 == trackLower) || 
+                           (group1 == trackLower && group2 == artistLower) {
+                            // Extra bonus if track name is specifically mentioned
+                            return group1 == trackLower || group2 == trackLower ? 1.3 : 1.0
+                        }
+                        
+                        // Fuzzy match with high threshold
+                        let similarity1 = (calculateLevenshteinSimilarity(group1, artistLower) + 
+                                         calculateLevenshteinSimilarity(group2, trackLower)) / 2.0
+                        let similarity2 = (calculateLevenshteinSimilarity(group1, trackLower) + 
+                                         calculateLevenshteinSimilarity(group2, artistLower)) / 2.0
+                        
+                        let maxSimilarity = max(similarity1, similarity2)
+                        if maxSimilarity >= 0.8 {
+                            twoGroupScore += maxSimilarity
+                        }
+                    }
+                }
+            }
+        }
+        
+        return min(twoGroupScore, 1.0)
+    }
+    
+    private func calculateEnhancedSingleGroupScore(queryGroups: [String],
+                                                 trackGroups: [String],
+                                                 artistGroups: [String],
+                                                 albumGroups: [String]) -> Double {
+        var singleGroupScore = 0.0
+        let allResultGroups = trackGroups + artistGroups + albumGroups
+        
+        for queryGroup in queryGroups {
+            let queryLower = queryGroup.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            var bestGroupScore = 0.0
+            
+            // Check against artist groups first (higher priority)
+            for artistGroup in artistGroups {
+                let artistLower = artistGroup.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if queryLower == artistLower {
+                    bestGroupScore = max(bestGroupScore, 1.0) // Perfect artist match
+                } else if queryLower.contains(artistLower) || artistLower.contains(queryLower) {
+                    let lengthRatio = Double(min(queryLower.count, artistLower.count)) / 
+                                    Double(max(queryLower.count, artistLower.count))
+                    bestGroupScore = max(bestGroupScore, 0.8 * lengthRatio)
+                } else {
+                    let similarity = calculateLevenshteinSimilarity(queryLower, artistLower)
+                    if similarity >= 0.75 {
+                        bestGroupScore = max(bestGroupScore, 0.7 * similarity)
+                    }
+                }
+            }
+            
+            // Check against track groups
+            for trackGroup in trackGroups {
+                let trackLower = trackGroup.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Enhanced track name matching with article normalization
+                let normalizedQuery = normalizeTrackName(queryLower)
+                let normalizedTrack = normalizeTrackName(trackLower)
+                
+                if normalizedQuery == normalizedTrack {
+                    bestGroupScore = max(bestGroupScore, 1.3) // Perfect normalized track match gets highest priority
+                } else if queryLower == trackLower {
+                    bestGroupScore = max(bestGroupScore, 1.2) // Perfect exact match
+                } else if queryLower.contains(trackLower) || trackLower.contains(queryLower) {
+                    let lengthRatio = Double(min(queryLower.count, trackLower.count)) / 
+                                    Double(max(queryLower.count, trackLower.count))
+                    bestGroupScore = max(bestGroupScore, 0.7 * lengthRatio)
+                } else {
+                    let similarity = calculateLevenshteinSimilarity(queryLower, trackLower)
+                    if similarity >= 0.75 {
+                        bestGroupScore = max(bestGroupScore, 0.6 * similarity)
+                    }
+                }
+            }
+            
+            // Check against album groups (lowest priority)
+            for albumGroup in albumGroups {
+                let albumLower = albumGroup.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if queryLower == albumLower {
+                    bestGroupScore = max(bestGroupScore, 0.6) // Perfect album match
+                } else if queryLower.contains(albumLower) || albumLower.contains(queryLower) {
+                    let lengthRatio = Double(min(queryLower.count, albumLower.count)) / 
+                                    Double(max(queryLower.count, albumLower.count))
+                    bestGroupScore = max(bestGroupScore, 0.4 * lengthRatio)
+                } else {
+                    let similarity = calculateLevenshteinSimilarity(queryLower, albumLower)
+                    if similarity >= 0.75 {
+                        bestGroupScore = max(bestGroupScore, 0.3 * similarity)
+                    }
+                }
+            }
+            
+            singleGroupScore += bestGroupScore
+        }
+        
+        return min(singleGroupScore, 1.0)
+    }
+    
+    private func calculateEnhancedAIScore(query: String,
+                                        trackName: String,
+                                        artistName: String,
+                                        albumName: String,
+                                        queryGroups: [String],
+                                        resultGroups: [String]) -> (score: Double, confidence: Double) {
+        let fullResultText = "\(trackName) \(artistName) \(albumName)".lowercased()
+        let queryText = query.lowercased()
+        
+        // Enhanced semantic similarity
+        let semanticScore = calculateEnhancedSemanticSimilarity(queryText, fullResultText)
+        
+        // Smart length comparison (penalize extreme differences less)
+        let lengthDiff = abs(Double(queryText.count - fullResultText.count))
+        let maxLength = Double(max(queryText.count, fullResultText.count))
+        let lengthSimilarity = max(0.0, 1.0 - (lengthDiff / maxLength) * 0.5) // Less penalty for length differences
+        
+        // Group coverage with bonus for exact matches
+        var groupCoverage = 0.0
+        if !queryGroups.isEmpty && !resultGroups.isEmpty {
+            var matches = 0
+            for queryGroup in queryGroups {
+                for resultGroup in resultGroups {
+                    if areGroupsMatchingEnhanced(queryGroup, resultGroup) {
+                        matches += 1
+                        break
+                    }
+                }
+            }
+            groupCoverage = Double(matches) / Double(queryGroups.count)
+        }
+        
+        // Enhanced character overlap with word boundary awareness
+        let wordOverlap = calculateWordOverlap(queryText, fullResultText)
+        
+        // Word order similarity
+        let orderSimilarity = calculateWordOrderSimilarity(queryText, fullResultText)
+        
+        // Enhanced AI weighted scoring
+        let aiScore = (semanticScore * 0.3) + 
+                     (lengthSimilarity * 0.15) + 
+                     (groupCoverage * 0.25) + 
+                     (wordOverlap * 0.2) + 
+                     (orderSimilarity * 0.1)
+        
+        // Intelligent confidence calculation with bonus for obvious matches
+        var confidence = (aiScore * 0.6) + (semanticScore * 0.25) + (groupCoverage * 0.15)
+        
+        // Boost confidence for obvious exact matches
+        if queryText.contains(trackName.lowercased()) && queryText.contains(artistName.lowercased()) {
+            confidence = min(confidence + 0.3, 1.0) // +30% boost for containing both artist and track
+        } else if queryText.contains(trackName.lowercased()) || queryText.contains(artistName.lowercased()) {
+            confidence = min(confidence + 0.15, 1.0) // +15% boost for containing either
+        }
+        
+        // Boost for short, exact queries
+        if queryText.count <= 20 && (semanticScore >= 0.7 || groupCoverage >= 0.8) {
+            confidence = min(confidence + 0.2, 1.0) // +20% boost for short, precise queries
+        }
+        
+        return (aiScore, confidence)
+    }
+    
+    private func calculateEnhancedSemanticSimilarity(_ text1: String, _ text2: String) -> Double {
+        let words1 = text1.components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty && $0.count > 2 }
+        let words2 = text2.components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty && $0.count > 2 }
+        
+        let set1 = Set(words1)
+        let set2 = Set(words2)
+        
+        let intersection = set1.intersection(set2)
+        let union = set1.union(set2)
+        
+        return union.isEmpty ? 0.0 : Double(intersection.count) / Double(union.count)
+    }
+    
+    private func calculateWordOverlap(_ text1: String, _ text2: String) -> Double {
+        let words1 = Set(text1.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty && $0.count > 1 })
+        let words2 = Set(text2.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty && $0.count > 1 })
+        
+        let intersection = words1.intersection(words2)
+        let maxCount = max(words1.count, words2.count)
+        
+        return maxCount > 0 ? Double(intersection.count) / Double(maxCount) : 0.0
+    }
+    
+    private func calculateWordOrderSimilarity(_ text1: String, _ text2: String) -> Double {
+        let words1 = text1.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let words2 = text2.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        
+        let minCount = min(words1.count, words2.count)
+        guard minCount > 0 else { return 0.0 }
+        
+        var matches = 0
+        for i in 0..<minCount {
+            if words1[i].lowercased() == words2[i].lowercased() {
+                matches += 1
+            }
+        }
+        
+        return Double(matches) / Double(minCount)
+    }
+    
+    private func areGroupsMatchingEnhanced(_ query: String, _ result: String) -> Bool {
+        let queryLower = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let resultLower = result.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Exact match
+        if queryLower == resultLower {
+            return true
+        }
+        
+        // Substring match with reasonable length
+        if queryLower.contains(resultLower) || resultLower.contains(queryLower) {
+            let minLength = min(queryLower.count, resultLower.count)
+            let maxLength = max(queryLower.count, resultLower.count)
+            return Double(minLength) / Double(maxLength) >= 0.6
+        }
+        
+        // Fuzzy match
+        return calculateLevenshteinSimilarity(queryLower, resultLower) >= 0.8
+    }
+    
+    private func areGroupPairsMatching(_ query: String, _ result: String) -> Bool {
+        let queryLower = query.lowercased()
+        let resultLower = result.lowercased()
+        
+        // Check for substantial overlap between two-group pairs
+        let queryWords = Set(queryLower.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter { !$0.isEmpty })
+        let resultWords = Set(resultLower.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter { !$0.isEmpty })
+        
+        let overlap = queryWords.intersection(resultWords)
+        return Double(overlap.count) / Double(max(queryWords.count, 1)) >= 0.6
+    }
+    
+    private func areGroupsMatching(_ query: String, _ result: String) -> Bool {
+        let queryLower = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let resultLower = result.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        return queryLower.contains(resultLower) || 
+               resultLower.contains(queryLower) || 
+               calculateLevenshteinSimilarity(queryLower, resultLower) >= 0.7
+    }
+    
+    private func calculateSemanticSimilarity(_ text1: String, _ text2: String) -> Double {
+        let words1 = Set(text1.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter { !$0.isEmpty })
+        let words2 = Set(text2.components(separatedBy: CharacterSet.whitespacesAndNewlines).filter { !$0.isEmpty })
+        
+        let intersection = words1.intersection(words2)
+        let union = words1.union(words2)
+        
+        return union.isEmpty ? 0.0 : Double(intersection.count) / Double(union.count)
+    }
+    
+    private func calculateCharacterOverlap(_ text1: String, _ text2: String) -> Double {
+        let chars1 = Set(text1.lowercased())
+        let chars2 = Set(text2.lowercased())
+        
+        let intersection = chars1.intersection(chars2)
+        let union = chars1.union(chars2)
+        
+        return union.isEmpty ? 0.0 : Double(intersection.count) / Double(union.count)
+    }
+    
+    private func calculateLevenshteinSimilarity(_ str1: String, _ str2: String) -> Double {
+        let len1 = str1.count
+        let len2 = str2.count
+        
+        if len1 == 0 { return len2 == 0 ? 1.0 : 0.0 }
+        if len2 == 0 { return 0.0 }
+        
+        var matrix = Array(repeating: Array(repeating: 0, count: len2 + 1), count: len1 + 1)
+        
+        for i in 0...len1 { matrix[i][0] = i }
+        for j in 0...len2 { matrix[0][j] = j }
+        
+        let str1Array = Array(str1)
+        let str2Array = Array(str2)
+        
+        for i in 1...len1 {
+            for j in 1...len2 {
+                let cost = str1Array[i-1] == str2Array[j-1] ? 0 : 1
+                matrix[i][j] = min(
+                    matrix[i-1][j] + 1,
+                    matrix[i][j-1] + 1,
+                    matrix[i-1][j-1] + cost
+                )
+            }
+        }
+        
+        let distance = matrix[len1][len2]
+        return 1.0 - Double(distance) / Double(max(len1, len2))
     }
     
     private func handleAppRefresh(task: BGAppRefreshTask) {
@@ -683,6 +1996,12 @@ class RadioPlayer: NSObject, ObservableObject {
         task.setTaskCompleted(success: true)
     }
     
+    deinit {
+        artworkSearchTimer?.invalidate()
+        player?.pause()
+        retryTimer?.invalidate()
+    }
+    
     
 }
 
@@ -695,18 +2014,34 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                         guard let self = self else { return }
                         DispatchQueue.main.async {
                             if let stringValue = item.stringValue, !stringValue.isEmpty {
-                                // Clear previous iTunes album art when metadata changes
+                                let newTrackKey = self.generateTrackKey(from: stringValue)
+                                
+                                // Check if this is the same track as currently playing
+                                if let currentKey = self.currentTrackKey, currentKey == newTrackKey {
+                                    // Same track - preserve artwork, just update metadata text
+                                    self.metadata = stringValue
+                                    self.updateNowPlayingInfo() // This will preserve current iTunes artwork
+                                    self.updateWidget()
+                                    return
+                                }
+                                
+                                // New track detected - clear old artwork and search for new
+                                self.currentTrackKey = newTrackKey
+                                self.currentTrackArtwork = nil
                                 self.iTunesAlbumArt = nil
                                 self.metadata = stringValue
                                 self.updateNowPlayingInfo()
                                 self.updateWidget()
                                 
-                                // Fetch iTunes album artwork for the new metadata
+                                // Fetch iTunes album artwork for the new track
                                 self.fetchITunesAlbumArt(for: stringValue)
                             } else if self.metadata == nil {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                     if self.metadata == nil || self.metadata?.isEmpty == true {
                                         self.metadata = "No song or album title available"
+                                        // Clear track persistence when no metadata
+                                        self.currentTrackKey = nil
+                                        self.currentTrackArtwork = nil
                                         self.iTunesAlbumArt = nil
                                         self.updateNowPlayingInfo()
                                         self.updateWidget()
@@ -723,6 +2058,44 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
 
 extension Notification.Name {
     static let NetworkReconnectNotification = Notification.Name("NetworkReconnectNotification")
+}
+
+// String extensions for enhanced metadata parsing
+extension String {
+    func containsAnyOf(_ substrings: [String]) -> Bool {
+        return substrings.contains { self.contains($0) }
+    }
+    
+    func matches(_ pattern: String, options: NSString.CompareOptions = []) -> Bool {
+        var searchOptions: NSString.CompareOptions = [.regularExpression]
+        searchOptions.formUnion(options)
+        return self.range(of: pattern, options: searchOptions) != nil
+    }
+    
+    func extractQuotedStrings() -> [String] {
+        var results: [String] = []
+        let pattern = "\"([^\"]*)\""
+        
+        do {
+            let regex = try NSRegularExpression(pattern: pattern)
+            let matches = regex.matches(in: self, range: NSRange(self.startIndex..., in: self))
+            
+            for match in matches {
+                if let range = Range(match.range(at: 1), in: self) {
+                    results.append(String(self[range]))
+                }
+            }
+        } catch {
+            print("Regex error in extractQuotedStrings: \(error)")
+        }
+        
+        return results
+    }
+    
+    func removeQuotedStrings() -> String {
+        return self.replacingOccurrences(of: "\"[^\"]*\"", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 extension RadioPlayer {

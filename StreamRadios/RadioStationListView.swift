@@ -294,12 +294,32 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func imageForStation(_ station: RadioStation) -> some View {
-        if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData),
+        // Show live iTunes artwork for currently playing station if available and playing
+        if isCurrentStation(station: station), radioPlayer.isPlaying, let iTunesArt = radioPlayer.iTunesAlbumArt {
+            Image(uiImage: iTunesArt)
+                .resizable()
+                .scaledToFill()
+                .clipped()
+        }
+        // Show cached iTunes artwork if available and station is not currently playing
+        else if !isCurrentStation(station: station) || !radioPlayer.isPlaying,
+                let iTunesData = station.iTunesArtworkData, 
+                let imageData = Data(base64Encoded: iTunesData),
+                let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .clipped()
+        }
+        // Show station icon if available
+        else if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData),
            let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
-        } else {
+        } 
+        // Default radio icon
+        else {
             Image(systemName: "radio")
                 .resizable()
                 .scaledToFit()
