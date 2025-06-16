@@ -147,6 +147,15 @@ struct RadioStationListView: View {
                         scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
                     }
                 }
+                .onChange(of: selectedTab) { oldTab, newTab in
+                    // Auto-scroll to currently playing station when tab changes
+                    if let currentIndex = radioPlayer.currentStationIndex {
+                        // Add a small delay to allow the filtered list to update
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                        }
+                    }
+                }
                 .onAppear {
                     scrollProxy = proxy
                     // Auto-scroll to currently playing station when view appears
