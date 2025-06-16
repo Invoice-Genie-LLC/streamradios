@@ -835,9 +835,23 @@ struct StationDetails: View {
 
 struct StationImage: View {
     let currentStation: RadioStation
+    @EnvironmentObject var radioPlayer: RadioPlayer
     
     var body: some View {
-        if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+        // Priority: iTunes album art > stream album art > station icon > default radio icon
+        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+            Image(uiImage: iTunesAlbumArt)
+                .resizable()
+                .frame(width: 200, height: 200)
+                .cornerRadius(10)
+                .modifier(NeumorphicShadow())
+        } else if let albumArt = radioPlayer.albumArt {
+            Image(uiImage: albumArt)
+                .resizable()
+                .frame(width: 200, height: 200)
+                .cornerRadius(10)
+                .modifier(NeumorphicShadow())
+        } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
                 .frame(width: 200, height: 200)

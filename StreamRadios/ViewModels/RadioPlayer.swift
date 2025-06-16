@@ -14,6 +14,7 @@ import BackgroundTasks
 import SwiftUI
 import Reachability
 import SystemConfiguration
+import Foundation
 
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
@@ -33,6 +34,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var artistName: String = ""
     @Published var albumArt: UIImage?
     @Published var metadata: String?
+    @Published var iTunesAlbumArt: UIImage?
     @Published var isHandlingAlarm = false
     @Published var currentlyPlayingStation: RadioStation?
     @Published var alarmStation: RadioStation?
@@ -399,6 +401,7 @@ class RadioPlayer: NSObject, ObservableObject {
         stopCurrentStation()
         currentStationIndex = index
         metadata = nil // Clear metadata when switching stations
+        iTunesAlbumArt = nil // Clear iTunes album art when switching stations
         let station = stations[index]
         currentlyPlayingStation = station
         
@@ -430,6 +433,7 @@ class RadioPlayer: NSObject, ObservableObject {
         player?.pause()
         player = nil
         isPlaying = false
+        iTunesAlbumArt = nil // Clear iTunes album art when stopping
         updateNowPlayingInfo()
         currentlyPlayingStation = nil
     }
@@ -495,7 +499,13 @@ class RadioPlayer: NSObject, ObservableObject {
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         
-        if let albumArt = albumArt {
+        // Priority: iTunes album art > stream album art > station icon
+        if let iTunesAlbumArt = iTunesAlbumArt {
+            let artwork = MPMediaItemArtwork(boundsSize: iTunesAlbumArt.size) { size in
+                return iTunesAlbumArt
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        } else if let albumArt = albumArt {
             let artwork = MPMediaItemArtwork(boundsSize: albumArt.size) { size in
                 return albumArt
             }
@@ -587,6 +597,80 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
+    private func fetchITunesAlbumArt(for metadata: String) {
+        guard !metadata.isEmpty && metadata != "No song or album title available" else {
+            DispatchQueue.main.async { [weak self] in
+                self?.iTunesAlbumArt = nil
+            }
+            return
+        }
+        
+        // Search iTunes for album artwork
+        searchITunesForArtwork(metadata: metadata) { [weak self] image in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.iTunesAlbumArt = image
+                self.updateNowPlayingInfo()
+                self.updateWidget()
+                print("iTunes album art fetched successfully: \(image != nil)")
+            }
+        }
+    }
+    
+    private func searchITunesForArtwork(metadata: String, completion: @escaping (UIImage?) -> Void) {
+        // Parse metadata to extract artist and track
+        let components = metadata.components(separatedBy: " - ")
+        var searchQuery = metadata
+        
+        if components.count >= 2 {
+            let artist = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let track = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            searchQuery = "\(artist) \(track)"
+        }
+        
+        // Clean up search query
+        searchQuery = searchQuery
+            .replacingOccurrences(of: "♪", with: "")
+            .replacingOccurrences(of: "♫", with: "")
+            .replacingOccurrences(of: "Now Playing:", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "Current Song:", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard let encodedQuery = searchQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://itunes.apple.com/search?term=\(encodedQuery)&media=music&entity=song&limit=1") else {
+            completion(nil)
+            return
+        }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = json["results"] as? [[String: Any]],
+                  let firstResult = results.first,
+                  let artworkUrl = firstResult["artworkUrl100"] as? String else {
+                completion(nil)
+                return
+            }
+            
+            // Get higher resolution artwork
+            let highResArtworkUrl = artworkUrl.replacingOccurrences(of: "100x100bb", with: "600x600bb")
+            
+            guard let imageUrl = URL(string: highResArtworkUrl) else {
+                completion(nil)
+                return
+            }
+            
+            URLSession.shared.dataTask(with: imageUrl) { imageData, _, _ in
+                guard let imageData = imageData,
+                      let image = UIImage(data: imageData) else {
+                    completion(nil)
+                    return
+                }
+                completion(image)
+            }.resume()
+        }.resume()
+    }
+    
     private func handleAppRefresh(task: BGAppRefreshTask) {
         scheduleAppRefresh()
         
@@ -611,13 +695,19 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                         guard let self = self else { return }
                         DispatchQueue.main.async {
                             if let stringValue = item.stringValue, !stringValue.isEmpty {
+                                // Clear previous iTunes album art when metadata changes
+                                self.iTunesAlbumArt = nil
                                 self.metadata = stringValue
                                 self.updateNowPlayingInfo()
                                 self.updateWidget()
+                                
+                                // Fetch iTunes album artwork for the new metadata
+                                self.fetchITunesAlbumArt(for: stringValue)
                             } else if self.metadata == nil {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                     if self.metadata == nil || self.metadata?.isEmpty == true {
                                         self.metadata = "No song or album title available"
+                                        self.iTunesAlbumArt = nil
                                         self.updateNowPlayingInfo()
                                         self.updateWidget()
                                     }

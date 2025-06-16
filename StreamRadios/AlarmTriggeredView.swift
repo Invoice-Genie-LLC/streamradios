@@ -66,7 +66,20 @@ struct AlarmTriggeredView: View {
     
     private func stationView(for station: RadioStation) -> some View {
         VStack(spacing: 15) {
-            if let iconData = station.iconData, let uiImage = UIImage(data: Data(base64Encoded: iconData) ?? Data()) {
+            // Priority: iTunes album art > stream album art > station icon > default radio icon
+            if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+                Image(uiImage: iTunesAlbumArt)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 200, height: 200)
+                    .cornerRadius(15)
+            } else if let albumArt = radioPlayer.albumArt {
+                Image(uiImage: albumArt)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 200, height: 200)
+                    .cornerRadius(15)
+            } else if let iconData = station.iconData, let uiImage = UIImage(data: Data(base64Encoded: iconData) ?? Data()) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)

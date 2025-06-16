@@ -242,6 +242,7 @@ struct ContentView: View {
                     VStack {
                         if let currentStation = viewModel.currentlyPlayingStation {
                             CurrentlyPlayingView(currentStation: currentStation, metadata: radioPlayer.metadata)
+                                .environmentObject(radioPlayer)
                         }
                         PlayerView()
                             .environmentObject(radioPlayer)
@@ -388,10 +389,22 @@ struct ContentView: View {
         struct CurrentlyPlayingView: View {
             let currentStation: RadioStation
             let metadata: String?
+            @EnvironmentObject var radioPlayer: RadioPlayer
             
             var body: some View {
                 HStack(alignment: .center, spacing: 20) {
-                    if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                    // Priority: iTunes album art > stream album art > station icon > default radio icon
+                    if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+                        Image(uiImage: iTunesAlbumArt)
+                            .resizable()
+                            .frame(width: 70, height: 70)
+                            .cornerRadius(10)
+                    } else if let albumArt = radioPlayer.albumArt {
+                        Image(uiImage: albumArt)
+                            .resizable()
+                            .frame(width: 70, height: 70)
+                            .cornerRadius(10)
+                    } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                         Image(uiImage: image)
                             .resizable()
                             .frame(width: 70, height: 70)
