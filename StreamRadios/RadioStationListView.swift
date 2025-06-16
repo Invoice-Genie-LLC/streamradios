@@ -213,6 +213,17 @@ struct RadioStationListView: View {
         .onTapGesture {
             if isEditing {
                 selectedStationForEdit = station
+            } else {
+                // If this station is currently playing, open the Shazam sheet
+                if isStationPlaying(station) && radioPlayer.isPlaying {
+                    activeSheet = .playerSheet
+                } else {
+                    // Otherwise, play this station
+                    if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                        viewModel.updateLastPlayed(for: viewModel.stations[index])
+                        radioPlayer.playStation(at: index, from: viewModel.stations)
+                    }
+                }
             }
         }
         .swipeActions(edge: .trailing) {
