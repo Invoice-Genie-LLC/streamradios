@@ -312,9 +312,19 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Set favoritedAt timestamp and favoriteOrder when marking as favorite, clear when unfavoriting
             if updatedStation.isFavorite {
                 updatedStation.favoritedAt = Date()
-                // Assign favoriteOrder as the next available order (highest current order + 1)
-                let maxFavoriteOrder = stations.filter { $0.isFavorite }.compactMap { $0.favoriteOrder }.max() ?? -1
-                updatedStation.favoriteOrder = maxFavoriteOrder + 1
+                
+                // Add new favorite at the top (favoriteOrder = 0)
+                // First, increment all existing favorites' favoriteOrder by 1 to make room at the top
+                for i in 0..<stations.count {
+                    if stations[i].isFavorite && stations[i].id != station.id {
+                        if let currentOrder = stations[i].favoriteOrder {
+                            stations[i].favoriteOrder = currentOrder + 1
+                        }
+                    }
+                }
+                
+                // Set the new favorite to favoriteOrder = 0 (top of the list)
+                updatedStation.favoriteOrder = 0
             } else {
                 updatedStation.favoritedAt = nil
                 updatedStation.favoriteOrder = nil

@@ -391,31 +391,34 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func editControls(for station: RadioStation) -> some View {
-        Image(systemName: "line.horizontal.3")
-            .font(.title)
-            .foregroundColor(.primary)
-            .padding(.trailing, 10)
-            .onDrag {
-                // Only allow dragging for All and Favorites tabs, not Recent
-                guard selectedTab != .recent else {
-                    return NSItemProvider()
+        // Don't show drag handles for Recent tab since reordering is not allowed
+        if selectedTab != .recent {
+            Image(systemName: "line.horizontal.3")
+                .font(.title)
+                .foregroundColor(.primary)
+                .padding(.trailing, 10)
+                .onDrag {
+                    // Only allow dragging for All and Favorites tabs, not Recent
+                    guard selectedTab != .recent else {
+                        return NSItemProvider()
+                    }
+                    UIDevice.playHapticFeedback()
+                    self.draggingStation = station
+                    self.originalMetadata = radioPlayer.metadata
+                    radioPlayer.metadata = nil
+                    return NSItemProvider(object: String(station.id) as NSString)
                 }
-                UIDevice.playHapticFeedback()
-                self.draggingStation = station
-                self.originalMetadata = radioPlayer.metadata
-                radioPlayer.metadata = nil
-                return NSItemProvider(object: String(station.id) as NSString)
-            }
-            .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(
-                station: station, 
-                stations: $viewModel.stations, 
-                draggingStation: $draggingStation, 
-                originalMetadata: $originalMetadata, 
-                viewModel: viewModel, 
-                radioPlayer: radioPlayer,
-                selectedTab: selectedTab,
-                filteredStations: filteredStations
-            ))
+                .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(
+                    station: station, 
+                    stations: $viewModel.stations, 
+                    draggingStation: $draggingStation, 
+                    originalMetadata: $originalMetadata, 
+                    viewModel: viewModel, 
+                    radioPlayer: radioPlayer,
+                    selectedTab: selectedTab,
+                    filteredStations: filteredStations
+                ))
+        }
     }
     
     @ViewBuilder
