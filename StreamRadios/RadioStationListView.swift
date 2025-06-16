@@ -27,6 +27,7 @@ struct RadioStationListView: View {
     @State private var originalMetadata: String?
     @StateObject private var alertManager = AlertManager()
     @State private var scrollProxy: ScrollViewProxy?
+    @State private var showFavoriteError = false
     
     
     var body: some View {
@@ -180,10 +181,37 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func stationRow(for station: RadioStation) -> some View {
-        HStack {
-            imageForStation(station)
-                .frame(width: 50, height: 50)
+        VStack(spacing: 0) {
+            // Show inline error above currently playing station if favorite toggle was attempted
+            if showFavoriteError && isStationPlaying(station) && radioPlayer.isPlaying {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .font(.footnote)
+                    Text("Cannot change favorite status while station is playing")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Spacer()
+                    Button("Dismiss") {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            showFavoriteError = false
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundColor(.blue)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.orange.opacity(0.1))
                 .cornerRadius(8)
+                .padding(.horizontal)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            
+            HStack {
+                imageForStation(station)
+                    .frame(width: 50, height: 50)
+                    .cornerRadius(8)
             
             VStack(alignment: .leading, spacing: 5) {
                 stationInfo(for: station)
@@ -266,7 +294,15 @@ struct RadioStationListView: View {
             return NSItemProvider(object: String(station.id) as NSString)
         }
         .onDrop(of: [UTType.plainText], delegate: StationDropDelegate(station: station, stations: $viewModel.stations, draggingStation: $draggingStation, originalMetadata: $originalMetadata, viewModel: viewModel, radioPlayer: radioPlayer))
-        
+        }
+        // Auto-dismiss error after 5 seconds
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+            if showFavoriteError {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    showFavoriteError = false
+                }
+            }
+        }
     }
     
     @ViewBuilder
@@ -320,8 +356,19 @@ struct RadioStationListView: View {
                 .accessibilityIdentifier("playButton-\(station.id)")
         }
         Button(action: {
-            viewModel.toggleFavorite(for: station)
-            viewModel.saveStationsToCoreData()
+            // Check if this station is currently playing
+            if isStationPlaying(station) && radioPlayer.isPlaying {
+                // Show error message instead of toggling favorite
+                withAnimation(.easeIn(duration: 0.3)) {
+                    showFavoriteError = true
+                }
+                // Provide haptic feedback for the error
+                UIDevice.playHapticFeedback()
+            } else {
+                // Allow normal favorite toggle for non-playing stations
+                viewModel.toggleFavorite(for: station)
+                viewModel.saveStationsToCoreData()
+            }
         }) {
             Image(systemName: station.isFavorite ? "heart.fill" : "heart")
                 .font(.title)
