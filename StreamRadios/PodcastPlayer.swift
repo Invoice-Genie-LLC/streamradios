@@ -530,12 +530,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("Failed to find index for current episode", log: log, type: .error)
         }
         
-        // Always start from the beginning
-        currentTime = 0
+        // Initialize time and duration - don't reset to zero yet, let seekToSavedProgress handle it
         duration = episode.duration
         currentProgress = 0
-        player?.seek(to: .zero)
         
+        // Set up observers first so we can properly seek when ready
         setupPlayerItemObserver()
         setupTimeObserver()
         
@@ -630,7 +629,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // If this is a replay action, always start from the beginning
         if shouldStartFromBeginning {
-            os_log("Replay requested - starting from the beginning")
+            os_log("Replay requested - starting from the beginning", log: log, type: .info)
             player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             currentTime = 0
             currentProgress = 0
@@ -638,13 +637,51 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return
         }
         
-        if let savedProgress = viewModel?.episodeProgress[currentEpisode.id] {
+        // Try to get saved progress from multiple sources for better reliability
+        var savedProgress: Double = 0.0
+        var progressSource = "none"
+        
+        // 1. Check ViewModel's in-memory cache first (fastest)
+        if let viewModelProgress = viewModel?.episodeProgress[currentEpisode.id], viewModelProgress > 0 {
+            savedProgress = viewModelProgress
+            progressSource = "viewModel"
+        }
+        // 2. If not found, check the episode's state directly
+        else if currentEpisode.state.progress > 0 {
+            savedProgress = currentEpisode.state.progress
+            progressSource = "episodeState"
+        }
+        // 3. As fallback, query Core Data directly (for CarPlay independence)
+        else if let viewModel = viewModel {
+            let coreDataProgress = viewModel.getProgress(for: currentEpisode)
+            if coreDataProgress > 0 {
+                savedProgress = coreDataProgress
+                progressSource = "coreData"
+            }
+        }
+        
+        if savedProgress > 0 && savedProgress < 1.0 {
             let targetTime = savedProgress * duration
-            os_log("Seeking to saved progress: %f seconds", targetTime)
-            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero)
-            currentTime = targetTime
+            os_log("Seeking to saved progress: %.2f%% (%.1f seconds) from %@", log: log, type: .info, savedProgress * 100, targetTime, progressSource)
+            
+            // Seek to the saved position
+            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
+                if completed {
+                    DispatchQueue.main.async {
+                        self?.currentTime = targetTime
+                        self?.currentProgress = savedProgress
+                        self?.updatePlaybackInfo()
+                        os_log("Successfully restored playback position to %.1f seconds", log: self?.log ?? OSLog.default, type: .info, targetTime)
+                    }
+                } else {
+                    os_log("Failed to seek to saved progress", log: self?.log ?? OSLog.default, type: .error)
+                }
+            }
         } else {
-            os_log("No saved progress found, starting from the beginning")
+            os_log("No valid saved progress found, starting from the beginning (progress: %.2f)", log: log, type: .info, savedProgress)
+            player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            currentTime = 0
+            currentProgress = 0
         }
     }
     

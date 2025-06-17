@@ -210,11 +210,24 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     func configurePodcastData(_ podcastFeeds: [PodcastFeed]) {
+        os_log("CarPlay: Configuring with %d podcast feeds", log: log, type: .info, podcastFeeds.count)
+        
+        // Safely update podcast feeds
         self.podcastFeeds = podcastFeeds
         
-        // Load episodes for each feed from Core Data if they're missing
-        Task {
-            await loadEpisodesForFeeds()
+        // Only load episodes if there are feeds and they don't already have episodes
+        let feedsNeedingEpisodes = podcastFeeds.filter { $0.episodes.isEmpty }
+        if !feedsNeedingEpisodes.isEmpty {
+            os_log("CarPlay: %d feeds need episode loading", log: log, type: .info, feedsNeedingEpisodes.count)
+            
+            // Load episodes for each feed from Core Data if they're missing
+            Task {
+                do {
+                    await loadEpisodesForFeeds()
+                } catch {
+                    os_log("CarPlay: Error loading episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                }
+            }
         }
         
         // Update recent podcast episodes
@@ -230,7 +243,7 @@ class CarPlayManager: NSObject, ObservableObject {
         
         os_log("CarPlay: Configured with podcast data - %d feeds", log: log, type: .info, podcastFeeds.count)
         
-        // Debug podcast feed artwork data
+        // Debug podcast feed artwork data safely
         for feed in podcastFeeds {
             let hasImageData = feed.imageData != nil && !feed.imageData!.isEmpty
             let hasIconData = feed.iconData != nil && !feed.iconData!.isEmpty
@@ -241,19 +254,6 @@ class CarPlayManager: NSObject, ObservableObject {
                    hasImageData ? "true" : "false", feed.imageData?.count ?? 0,
                    hasIconData ? "true" : "false", feed.iconData?.count ?? 0,
                    hasArtworkUrl ? "true" : "false", feed.artworkUrl ?? "none")
-            
-            // Also debug the base64 decoding if iconData exists
-            if let iconData = feed.iconData, !iconData.isEmpty {
-                if let decodedData = Data(base64Encoded: iconData) {
-                    os_log("CarPlay: Feed '%@' iconData decodes successfully to %d bytes", log: log, type: .debug, feed.title, decodedData.count)
-                } else {
-                    os_log("CarPlay: Feed '%@' iconData FAILED to decode from base64", log: log, type: .error, feed.title)
-                }
-            }
-        }
-        
-        DispatchQueue.main.async {
-            self.updatePodcastData()
         }
     }
     
@@ -298,19 +298,21 @@ class CarPlayManager: NSObject, ObservableObject {
     private func loadEpisodesForFeeds() async {
         os_log("CarPlay: Loading episodes for %d podcast feeds from Core Data", log: log, type: .info, podcastFeeds.count)
         
-        await withTaskGroup(of: Void.self) { taskGroup in
-            for i in 0..<podcastFeeds.count {
-                taskGroup.addTask {
+        // Use the main context and perform operations on its queue to avoid threading issues
+        let context = CoreDataStack.shared.context
+        
+        await withCheckedContinuation { continuation in
+            context.perform {
+                for i in 0..<self.podcastFeeds.count {
                     let feed = self.podcastFeeds[i]
                     
                     // Skip if feed already has episodes
                     if !feed.episodes.isEmpty {
                         os_log("CarPlay: Feed '%@' already has %d episodes, skipping load", log: self.log, type: .debug, feed.title, feed.episodes.count)
-                        return
+                        continue
                     }
                     
-                    // Load episodes from Core Data
-                    let context = CoreDataStack.shared.context
+                    // Load episodes from Core Data on the same context
                     let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                     fetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
                     fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
@@ -330,27 +332,22 @@ class CarPlayManager: NSObject, ObservableObject {
                             }
                             
                             // Update the feed with its episodes
-                            await MainActor.run {
-                                self.podcastFeeds[i].episodes = episodes
-                                os_log("CarPlay: Updated feed '%@' with %d episodes", log: self.log, type: .info, feed.title, episodes.count)
-                            }
+                            self.podcastFeeds[i].episodes = episodes
+                            os_log("CarPlay: Updated feed '%@' with %d episodes", log: self.log, type: .info, feed.title, episodes.count)
                         }
                     } catch {
                         os_log("CarPlay: Error loading episodes for feed '%@': %@", log: self.log, type: .error, feed.title, error.localizedDescription)
                     }
                 }
+                
+                continuation.resume()
             }
         }
         
-        // After loading all episodes, update the podcast data
-        os_log("CarPlay: Finished loading episodes for all feeds", log: log, type: .info)
+        // After loading all episodes, update the podcast data on main actor
         await MainActor.run {
-            self.updatePodcastData()
-            
-            // Reload CarPlay data to reflect the new episodes
-            DispatchQueue.main.async {
-                MPPlayableContentManager.shared().reloadData()
-            }
+            self.updateRecentPodcastEpisodes()
+            os_log("CarPlay: Finished loading episodes for all feeds", log: self.log, type: .info)
         }
     }
     

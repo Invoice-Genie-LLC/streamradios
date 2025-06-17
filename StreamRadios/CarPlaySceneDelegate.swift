@@ -23,78 +23,99 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         os_log("🚗 CarPlay: Initializing data independently", log: log, type: .info)
         print("🚗 CarPlay: Starting independent data initialization...")
         
-        // Load podcast feeds and episodes from Core Data directly
-        await loadPodcastDataFromCoreData()
-        
-        // Load radio stations from the shared view model
-        await loadRadioStationsData()
-        
-        os_log("🚗 CarPlay: Data initialization complete", log: log, type: .info)
-        print("🚗 CarPlay: Independent data initialization complete")
+        do {
+            // Load podcast feeds and episodes from Core Data directly
+            await loadPodcastDataFromCoreData()
+            
+            // Load radio stations from the shared view model
+            await loadRadioStationsData()
+            
+            os_log("🚗 CarPlay: Data initialization complete", log: log, type: .info)
+            print("🚗 CarPlay: Independent data initialization complete")
+            
+        } catch {
+            os_log("🚗 CarPlay: Error during data initialization: %@", log: log, type: .error, error.localizedDescription)
+            print("🚗 CarPlay: Error during initialization: \(error.localizedDescription)")
+            
+            // Initialize with empty data so CarPlay still works
+            await MainActor.run {
+                CarPlayManager.shared.configurePodcastData([])
+                CarPlayManager.shared.updateContent()
+            }
+        }
     }
     
     /// Load podcast data directly from Core Data for CarPlay
     private func loadPodcastDataFromCoreData() async {
         os_log("🚗 CarPlay: Loading podcast data from Core Data", log: log, type: .info)
         
+        // Use the main context and perform operations on its queue to avoid threading issues
         let context = CoreDataStack.shared.context
-        
-        // Load podcast feeds first
-        let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-        feedRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
         
         var podcastFeeds: [PodcastFeed] = []
         
-        do {
-            let managedFeeds = try context.fetch(feedRequest)
-            os_log("🚗 CarPlay: Found %d podcast feeds in Core Data", log: log, type: .info, managedFeeds.count)
-            
-            // Convert each managed feed to PodcastFeed and load its episodes
-            for managedFeed in managedFeeds {
-                var feed = managedFeed.toPodcastFeed()
-                
-                // Load episodes for this feed
-                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
-                
+        // Perform Core Data operations on the context's queue to avoid threading violations
+        await withCheckedContinuation { continuation in
+            context.perform {
                 do {
-                    let managedEpisodes = try context.fetch(episodeRequest)
-                    let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
-                        var episode = managedEpisode.toPodcastEpisode()
-                        episode.state.isPlayed = managedEpisode.isPlayed
-                        episode.state.progress = managedEpisode.progress
-                        episode.state.isFavorite = managedEpisode.isFavorite
-                        episode.state.isDownloaded = managedEpisode.isDownloaded
-                        return episode
+                    // Load podcast feeds first
+                    let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    feedRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+                    
+                    let managedFeeds = try context.fetch(feedRequest)
+                    os_log("🚗 CarPlay: Found %d podcast feeds in Core Data", log: self.log, type: .info, managedFeeds.count)
+                    
+                    // Convert each managed feed to PodcastFeed and load its episodes
+                    for managedFeed in managedFeeds {
+                        var feed = managedFeed.toPodcastFeed()
+                        
+                        // Load episodes for this feed on the same context
+                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                        episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                        
+                        do {
+                            let managedEpisodes = try context.fetch(episodeRequest)
+                            let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                                var episode = managedEpisode.toPodcastEpisode()
+                                episode.state.isPlayed = managedEpisode.isPlayed
+                                episode.state.progress = managedEpisode.progress
+                                episode.state.isFavorite = managedEpisode.isFavorite
+                                episode.state.isDownloaded = managedEpisode.isDownloaded
+                                
+                                // Log progress for debugging
+                                if managedEpisode.progress > 0 {
+                                    os_log("🚗 CarPlay: Episode '%@' has progress: %.2f%%", log: self.log, type: .debug, episode.title, managedEpisode.progress * 100)
+                                }
+                                
+                                return episode
+                            }
+                            
+                            feed.episodes = episodes
+                            os_log("🚗 CarPlay: Loaded %d episodes for feed '%@'", log: self.log, type: .debug, episodes.count, feed.title)
+                            
+                        } catch {
+                            os_log("🚗 CarPlay: Error loading episodes for feed '%@': %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                        }
+                        
+                        podcastFeeds.append(feed)
                     }
                     
-                    feed.episodes = episodes
-                    os_log("🚗 CarPlay: Loaded %d episodes for feed '%@'", log: log, type: .debug, episodes.count, feed.title)
+                    continuation.resume()
                     
                 } catch {
-                    os_log("🚗 CarPlay: Error loading episodes for feed '%@': %@", log: log, type: .error, feed.title, error.localizedDescription)
+                    os_log("🚗 CarPlay: Error loading podcast feeds from Core Data: %@", log: self.log, type: .error, error.localizedDescription)
+                    print("🚗 CarPlay: Error loading podcast feeds: \(error.localizedDescription)")
+                    continuation.resume()
                 }
-                
-                podcastFeeds.append(feed)
             }
-            
-            // Configure CarPlayManager with the loaded podcast data
-            await MainActor.run {
-                CarPlayManager.shared.configurePodcastData(podcastFeeds)
-                os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds", log: self.log, type: .info, podcastFeeds.count)
-                print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds")
-            }
-            
-        } catch {
-            os_log("🚗 CarPlay: Error loading podcast feeds from Core Data: %@", log: log, type: .error, error.localizedDescription)
-            print("🚗 CarPlay: Error loading podcast feeds: \(error.localizedDescription)")
-            
-            // Fallback: Initialize with empty data so CarPlay still works
-            await MainActor.run {
-                CarPlayManager.shared.configurePodcastData([])
-                os_log("🚗 CarPlay: Fallback - configured with empty podcast data", log: self.log, type: .info)
-            }
+        }
+        
+        // Configure CarPlayManager with the loaded podcast data on main actor
+        await MainActor.run {
+            CarPlayManager.shared.configurePodcastData(podcastFeeds)
+            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds", log: self.log, type: .info, podcastFeeds.count)
+            print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds")
         }
     }
     
@@ -115,27 +136,32 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
-    func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene, 
-                                didConnect interfaceController: CPInterfaceController) {
-        self.interfaceController = interfaceController
-        os_log("🚗 CarPlay scene connected successfully!", log: log, type: .info)
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let templateApplicationScene = scene as? CPTemplateApplicationScene else { 
+            os_log("❌ CarPlay: Scene is not CPTemplateApplicationScene", log: log, type: .error)
+            return 
+        }
         
-        // Print debug info
-        print("🚗 CarPlay: Scene delegate didConnect called")
-        print("🚗 CarPlay: Interface controller: \(interfaceController)")
+        os_log("🚗 CarPlay: Scene willConnectTo called", log: log, type: .info)
+        print("🚗 CarPlay: Scene willConnectTo called")
         
-        // Ensure CarPlayManager is properly initialized with data
-        let carPlayManager = CarPlayManager.shared
-        print("🚗 CarPlay: CarPlayManager initialized")
-        
-        // Initialize podcast data independently for CarPlay
-        // This ensures CarPlay works even when the main app isn't running
+        // The interface controller will be set up in templateApplicationScene:didConnect:
+        // We'll initialize data in the background
+        os_log("🚗 CarPlay: Starting background data initialization...", log: log, type: .info)
         Task {
-            await self.initializeCarPlayData()
-            
-            // Set up the interface after data is loaded
-            await MainActor.run {
-                self.setupRootTemplate()
+            do {
+                await initializeCarPlayData()
+                
+                // Refresh the interface after data is loaded
+                await MainActor.run {
+                    // Update the templates with loaded data if interface controller is available
+                    if self.interfaceController != nil {
+                        self.setupRootTemplate()
+                        os_log("🚗 CarPlay: Interface updated after data loading", log: self.log, type: .info)
+                    }
+                }
+            } catch {
+                os_log("🚗 CarPlay: Error during data initialization: %@", log: self.log, type: .error, error.localizedDescription)
             }
         }
     }
@@ -145,6 +171,22 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         os_log("🚗 CarPlay scene disconnected", log: log, type: .info)
         print("🚗 CarPlay: Scene delegate didDisconnect called")
         self.interfaceController = nil
+    }
+    
+    // MARK: - CPTemplateApplicationSceneDelegate Required Methods
+    
+    func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene, 
+                                didConnect interfaceController: CPInterfaceController) {
+        os_log("🚗 CarPlay: Scene delegate didConnect called", log: log, type: .info)
+        print("🚗 CarPlay: Scene delegate didConnect called")
+        
+        // Store the interface controller
+        self.interfaceController = interfaceController
+        
+        // Setup the root template immediately
+        setupRootTemplate()
+        
+        os_log("🚗 CarPlay: Initial template setup complete", log: log, type: .info)
     }
     
     // MARK: - CarPlay Interface Setup
@@ -370,9 +412,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         var episodeItems: [CPListItem] = []
         for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
             let duration = formatDuration(episode.duration)
-            let progress = episode.state.progress > 0 ? " • \(Int(episode.state.progress * 100))% played" : ""
+            var progressText = ""
+            
+            // Show progress information if episode has been started
+            if episode.state.progress > 0 && episode.state.progress < 1.0 {
+                let progressPercent = Int(episode.state.progress * 100)
+                progressText = " • \(progressPercent)% played"
+            } else if episode.state.isPlayed {
+                progressText = " • Completed"
+            }
+            
             let item = CPListItem(text: episode.title,
-                                 detailText: "\(duration)\(progress)",
+                                 detailText: "\(duration)\(progressText)",
                                  image: carPlayManager.getPodcastArtwork(for: podcast))
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playEpisode(episode, completion: completion)
@@ -402,16 +453,25 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func playEpisode(_ episode: PodcastEpisode, completion: @escaping () -> Void) {
-        os_log("CarPlay: Playing episode %@", log: log, type: .info, episode.title)
+        os_log("🚗 CarPlay: Playing episode '%@' with progress: %.2f%%", log: log, type: .info, episode.title, episode.state.progress * 100)
         
         // Use the existing PodcastPlayer to play the episode
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [self] in
             let podcastPlayer = PodcastPlayer.shared
             // Find the feed that contains this episode
             let carPlayManager = CarPlayManager.shared
             let podcastFeeds = carPlayManager.getPodcastFeeds()
             if let feed = podcastFeeds.first(where: { $0.episodes.contains(where: { $0.id == episode.id }) }) {
-                podcastPlayer.playEpisode(episode, feed: feed)
+                // Ensure the episode has the latest progress data from the feed
+                if let feedEpisode = feed.episodes.first(where: { $0.id == episode.id }) {
+                    os_log("🚗 CarPlay: Episode progress from feed: %.2f%%, isPlayed: %@", log: self.log, type: .debug, feedEpisode.state.progress * 100, feedEpisode.state.isPlayed ? "true" : "false")
+                    podcastPlayer.playEpisode(feedEpisode, feed: feed)
+                } else {
+                    // Fallback to the original episode if not found in feed
+                    podcastPlayer.playEpisode(episode, feed: feed)
+                }
+            } else {
+                os_log("🚗 CarPlay: Warning - Could not find feed for episode '%@'", log: self.log, type: .error, episode.title)
             }
             completion()
         }

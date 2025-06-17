@@ -74,7 +74,8 @@ class EpisodeStateManager: ObservableObject {
     @Published private(set) var currentlyPlayingEpisodeId: String?
     private var episodeProgress: [String: Double] = [:]
     
-    private let userDefaults = UserDefaults.standard
+    // Use shared app group UserDefaults instead of standard UserDefaults
+    private let userDefaults = UserDefaults(suiteName: "group.streamradios") ?? UserDefaults.standard
     private let statesKey = "EpisodeStates"
     private let progressKey = "EpisodeProgress"
     
