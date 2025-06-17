@@ -95,7 +95,8 @@ class RadioPlayer: NSObject, ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 // Only auto-play if we're not currently handling an alarm
                 if !self.isHandlingAlarm {
-                    if let lastStationID = UserDefaults.standard.string(forKey: "LastPlayedStationID"),
+                    // Use shared UserDefaults consistently for CarPlay compatibility
+                    if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID"),
                        let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
                         // Play the last played station
                         self.currentlyPlayingStation = lastStation
@@ -103,7 +104,7 @@ class RadioPlayer: NSObject, ObservableObject {
                             self.setStationURL(url)
                             if let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
                                 self.currentStationIndex = index
-                                UserDefaults.standard.set(index, forKey: "lastStationIndex")
+                                self.userDefaults?.set(index, forKey: "lastStationIndex")
                             }
                             self.play()
                         }

@@ -12,11 +12,46 @@ class CoreDataStack {
 
     lazy var persistentContainer: NSPersistentContainer = {
         let container = NSPersistentContainer(name: "StreamRadiosModel")  // Name here should match the .xcdatamodeld file name
+        
+        // Configure the container to use the app group for data sharing between main app and CarPlay
+        let storeURL: URL
+        if let appGroupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.streamradios") {
+            storeURL = appGroupURL.appendingPathComponent("StreamRadiosModel.sqlite")
+            print("CoreData: Using app group URL: \(storeURL.absoluteString)")
+        } else {
+            // Fallback to default location if app group is not available
+            storeURL = container.persistentStoreDescriptions.first?.url ?? 
+                      FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("StreamRadiosModel.sqlite")
+            print("CoreData: App group not available, using fallback URL: \(storeURL.absoluteString)")
+        }
+        
+        // Update the store description with the shared URL
+        let storeDescription = NSPersistentStoreDescription(url: storeURL)
+        storeDescription.shouldMigrateStoreAutomatically = true
+        storeDescription.shouldInferMappingModelAutomatically = true
+        container.persistentStoreDescriptions = [storeDescription]
+        
         container.loadPersistentStores { (storeDescription, error) in
             print("CoreData: Loaded store at \(storeDescription.url?.absoluteString ?? "Unknown URL")")
             if let error = error as NSError? {
                 print("CoreData: Failed to load persistent stores: \(error), \(error.userInfo)")
-                fatalError("Unresolved CoreData error \(error), \(error.userInfo)")
+                // In case of migration issues, try to delete and recreate the store
+                if error.code == NSPersistentStoreIncompatibleVersionHashError || 
+                   error.code == NSMigrationMissingSourceModelError {
+                    print("CoreData: Attempting to recreate store due to migration error")
+                    try? FileManager.default.removeItem(at: storeURL)
+                    
+                    // Try loading again
+                    container.loadPersistentStores { (newStoreDescription, newError) in
+                        if let newError = newError as NSError? {
+                            fatalError("Unresolved CoreData error after recreation: \(newError), \(newError.userInfo)")
+                        } else {
+                            print("CoreData: Successfully recreated store at \(newStoreDescription.url?.absoluteString ?? "Unknown URL")")
+                        }
+                    }
+                } else {
+                    fatalError("Unresolved CoreData error \(error), \(error.userInfo)")
+                }
             }
         }
         return container

@@ -8,6 +8,7 @@
 import UIKit
 import CarPlay
 import os.log
+import CoreData
 
 class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
@@ -15,6 +16,104 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     var interfaceController: CPInterfaceController?
     
     // MARK: - Scene Delegate Methods
+    
+    /// Initialize CarPlay data independently from the main app
+    /// This ensures CarPlay works even when the main app isn't running
+    private func initializeCarPlayData() async {
+        os_log("🚗 CarPlay: Initializing data independently", log: log, type: .info)
+        print("🚗 CarPlay: Starting independent data initialization...")
+        
+        // Load podcast feeds and episodes from Core Data directly
+        await loadPodcastDataFromCoreData()
+        
+        // Load radio stations from the shared view model
+        await loadRadioStationsData()
+        
+        os_log("🚗 CarPlay: Data initialization complete", log: log, type: .info)
+        print("🚗 CarPlay: Independent data initialization complete")
+    }
+    
+    /// Load podcast data directly from Core Data for CarPlay
+    private func loadPodcastDataFromCoreData() async {
+        os_log("🚗 CarPlay: Loading podcast data from Core Data", log: log, type: .info)
+        
+        let context = CoreDataStack.shared.context
+        
+        // Load podcast feeds first
+        let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+        feedRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        
+        var podcastFeeds: [PodcastFeed] = []
+        
+        do {
+            let managedFeeds = try context.fetch(feedRequest)
+            os_log("🚗 CarPlay: Found %d podcast feeds in Core Data", log: log, type: .info, managedFeeds.count)
+            
+            // Convert each managed feed to PodcastFeed and load its episodes
+            for managedFeed in managedFeeds {
+                var feed = managedFeed.toPodcastFeed()
+                
+                // Load episodes for this feed
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                
+                do {
+                    let managedEpisodes = try context.fetch(episodeRequest)
+                    let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                        var episode = managedEpisode.toPodcastEpisode()
+                        episode.state.isPlayed = managedEpisode.isPlayed
+                        episode.state.progress = managedEpisode.progress
+                        episode.state.isFavorite = managedEpisode.isFavorite
+                        episode.state.isDownloaded = managedEpisode.isDownloaded
+                        return episode
+                    }
+                    
+                    feed.episodes = episodes
+                    os_log("🚗 CarPlay: Loaded %d episodes for feed '%@'", log: log, type: .debug, episodes.count, feed.title)
+                    
+                } catch {
+                    os_log("🚗 CarPlay: Error loading episodes for feed '%@': %@", log: log, type: .error, feed.title, error.localizedDescription)
+                }
+                
+                podcastFeeds.append(feed)
+            }
+            
+            // Configure CarPlayManager with the loaded podcast data
+            await MainActor.run {
+                CarPlayManager.shared.configurePodcastData(podcastFeeds)
+                os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds", log: self.log, type: .info, podcastFeeds.count)
+                print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds")
+            }
+            
+        } catch {
+            os_log("🚗 CarPlay: Error loading podcast feeds from Core Data: %@", log: log, type: .error, error.localizedDescription)
+            print("🚗 CarPlay: Error loading podcast feeds: \(error.localizedDescription)")
+            
+            // Fallback: Initialize with empty data so CarPlay still works
+            await MainActor.run {
+                CarPlayManager.shared.configurePodcastData([])
+                os_log("🚗 CarPlay: Fallback - configured with empty podcast data", log: self.log, type: .info)
+            }
+        }
+    }
+    
+    /// Load radio stations data for CarPlay
+    private func loadRadioStationsData() async {
+        os_log("🚗 CarPlay: Loading radio stations data", log: log, type: .info)
+        
+        await MainActor.run {
+            // Ensure RadioStationViewModel is initialized
+            let radioViewModel = RadioStationViewModel.shared
+            let stations = radioViewModel.stations
+            
+            // Update CarPlayManager with radio station data
+            CarPlayManager.shared.updateContent()
+            
+            os_log("🚗 CarPlay: Loaded %d radio stations", log: self.log, type: .info, stations.count)
+            print("🚗 CarPlay: Loaded \(stations.count) radio stations")
+        }
+    }
     
     func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene, 
                                 didConnect interfaceController: CPInterfaceController) {
@@ -29,8 +128,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         print("🚗 CarPlay: CarPlayManager initialized")
         
-        // Set up the interface immediately instead of waiting
-        self.setupRootTemplate()
+        // Initialize podcast data independently for CarPlay
+        // This ensures CarPlay works even when the main app isn't running
+        Task {
+            await self.initializeCarPlayData()
+            
+            // Set up the interface after data is loaded
+            await MainActor.run {
+                self.setupRootTemplate()
+            }
+        }
     }
     
     func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene, 
