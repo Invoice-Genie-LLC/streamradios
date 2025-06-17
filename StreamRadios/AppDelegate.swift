@@ -307,12 +307,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     private func setupCarPlay() {
-        // Set up CarPlay using the new manager
+        // CarPlay is now handled by CarPlaySceneDelegate
+        // The old MPPlayableContentDataSource approach is disabled
+        
+        // Configure podcast data for CarPlay and ensure data is loaded
         let carPlayManager = CarPlayManager.shared
-        carPlayManager.setupCarPlay()
         carPlayManager.configurePodcastData(podcastViewModel.podcastFeeds)
         
-        print("CarPlay configured successfully.")
+        // Ensure radio station data is available for CarPlay
+        carPlayManager.updateContent()
+        
+        print("CarPlay will be configured via CarPlaySceneDelegate.")
     }
     
     private func playFavoriteStation(at index: Int) {

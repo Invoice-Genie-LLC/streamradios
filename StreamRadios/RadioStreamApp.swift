@@ -36,8 +36,7 @@ struct RadioStreamApp: App {
                 .onAppear {
                     setupApp()
                     PodcastPlayer.shared.configure(with: podcastViewModel)
-                    // Configure CarPlay with podcast data
-                    CarPlayManager.shared.configurePodcastData(podcastViewModel.podcastFeeds)
+                    // CarPlay is now configured via CarPlaySceneDelegate
                 }
                 .onDisappear {
                             appDelegate.updatePodcastStateAndSave()

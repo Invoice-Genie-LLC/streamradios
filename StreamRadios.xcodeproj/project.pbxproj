@@ -82,6 +82,8 @@
 		77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F6689E2C7A56CF00E2618C /* BannerAlert.swift */; };
 		77F668A32C7CCEB400E2618C /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F668A22C7CCEB400E2618C /* MiniPlayerView.swift */; };
 		35784634DC5C44839E7A7E8C /* CarPlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */; };
+		CARPLAY001234567890ABCDEF /* CarPlay.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CARPLAY123456789ABCDEF01 /* CarPlay.framework */; };
+		CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -138,6 +140,7 @@
 		774617812C17411C00F442B3 /* StreamRadioWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamRadioWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		774617832C17411C00F442B3 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		774617852C17411C00F442B3 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		CARPLAY123456789ABCDEF01 /* CarPlay.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CarPlay.framework; path = System/Library/Frameworks/CarPlay.framework; sourceTree = SDKROOT; };
 		774617882C17411C00F442B3 /* streamRadiosWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = streamRadiosWidgetBundle.swift; sourceTree = "<group>"; };
 		7746178A2C17411C00F442B3 /* streamRadiosWidgetLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = streamRadiosWidgetLiveActivity.swift; sourceTree = "<group>"; };
 		7746178C2C17411C00F442B3 /* streamRadiosWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = streamRadiosWidget.swift; sourceTree = "<group>"; };
@@ -183,6 +186,7 @@
 		77F6689E2C7A56CF00E2618C /* BannerAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerAlert.swift; sourceTree = "<group>"; };
 		77F668A22C7CCEB400E2618C /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
 		6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayManager.swift; sourceTree = "<group>"; };
+		CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -197,6 +201,7 @@
 				77F50BAB2C62621A00187488 /* SpotifyiOS in Frameworks */,
 				77F50BC12C63BBDF00187488 /* GoogleAPIClientForRESTCore in Frameworks */,
 				7780E9622C3CDEF2009CCF6F /* FlagKit in Frameworks */,
+				CARPLAY001234567890ABCDEF /* CarPlay.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -284,6 +289,7 @@
 				778F746F2C2F13CE00AB81CD /* PlayerView.swift */,
 				779352212C1A118A008F8416 /* AlbumArtView.swift */,
 				77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */,
+				CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */,
 				77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */,
 				7707DA622C156D92006D5EBB /* AddStationView.swift */,
 				7707DA3C2C152EF5006D5EBB /* Assets.xcassets */,
@@ -354,6 +360,7 @@
 			children = (
 				774617832C17411C00F442B3 /* WidgetKit.framework */,
 				774617852C17411C00F442B3 /* SwiftUI.framework */,
+				CARPLAY123456789ABCDEF01 /* CarPlay.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -545,6 +552,7 @@
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				35784634DC5C44839E7A7E8C /* CarPlayManager.swift in Sources */,
+				CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */,
 				77E23F4E2C90A0B300CDECD9 /* PlaybackManager.swift in Sources */,
 				7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */,
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,

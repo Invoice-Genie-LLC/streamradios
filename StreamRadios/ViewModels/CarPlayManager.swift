@@ -42,9 +42,8 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     func setupCarPlay() {
-        // Set up CarPlay content manager
-        MPPlayableContentManager.shared().dataSource = self
-        MPPlayableContentManager.shared().delegate = self
+        // CarPlay is now handled by CarPlaySceneDelegate using CPTabBarTemplate
+        // This method is kept for data configuration only
         
         // Initial data load
         updateContent()
@@ -52,7 +51,7 @@ class CarPlayManager: NSObject, ObservableObject {
         // Set up data observers
         setupDataObservers()
         
-        os_log("CarPlay manager configured successfully", log: log, type: .info)
+        os_log("CarPlay data manager configured successfully (scene-based approach)", log: log, type: .info)
     }
     
     private func setupDataObservers() {
@@ -72,7 +71,7 @@ class CarPlayManager: NSObject, ObservableObject {
         )
     }
     
-    private func updateContent() {
+    func updateContent() {
         updateRadioStations(RadioStationViewModel.shared.stations)
     }
     
@@ -512,7 +511,7 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     // Get country flag image using FlagKit with better mapping and debugging
-    private func getFlagImage(for country: String) -> UIImage? {
+    func getFlagImage(for country: String) -> UIImage? {
         os_log("CarPlay: Getting flag for country: '%@'", log: log, type: .debug, country)
         
         // Improved country code mapping with more variations
@@ -987,6 +986,94 @@ class CarPlayManager: NSObject, ObservableObject {
         }
         
         return true
+    }
+    
+    // MARK: - Public Data Access Methods for CarPlay Scene Delegate
+    
+    func getAvailableCountries() -> [String] {
+        // Ensure we have fresh data
+        updateContent()
+        
+        let countries = Array(stationsByCountry.keys).sorted()
+        os_log("CarPlayManager: Available countries: %d", log: log, type: .info, countries.count)
+        
+        // If no countries from our data, try to get from RadioStationViewModel
+        if countries.isEmpty {
+            let allStations = RadioStationViewModel.shared.stations
+            let countriesFromStations = Set(allStations.map { $0.country }).sorted()
+            os_log("CarPlayManager: Fallback countries from RadioStationViewModel: %d", log: log, type: .info, countriesFromStations.count)
+            return Array(countriesFromStations)
+        }
+        
+        return countries
+    }
+    
+    func getStations(for country: String) -> [RadioStation] {
+        // First try our cached data
+        var stations = stationsByCountry[country] ?? []
+        
+        // If no cached data, get from RadioStationViewModel
+        if stations.isEmpty {
+            stations = RadioStationViewModel.shared.stations.filter { $0.country == country }
+            os_log("CarPlayManager: Fallback stations for %@: %d", log: log, type: .info, country, stations.count)
+        }
+        
+        return stations
+    }
+    
+    func getFavoriteStations() -> [RadioStation] {
+        return favoriteStations
+    }
+    
+    func getRecentStations() -> [RadioStation] {
+        return recentStations
+    }
+    
+    func getPodcastFeeds() -> [PodcastFeed] {
+        return podcastFeeds
+    }
+    
+    func getStationArtwork(for station: RadioStation) -> UIImage? {
+        return createStationArtworkImage(for: station)
+    }
+    
+    func getPodcastArtwork(for podcast: PodcastFeed) -> UIImage? {
+        return createPodcastArtworkImage(for: podcast)
+    }
+    
+    private func createStationArtworkImage(for station: RadioStation) -> UIImage? {
+        // Try iTunes artwork first, then icon data, then fallback
+        if let iTunesData = station.iTunesArtworkData,
+           let imageData = Data(base64Encoded: iTunesData),
+           let image = UIImage(data: imageData) {
+            return image
+        }
+        
+        if let iconData = station.iconData,
+           let imageData = Data(base64Encoded: iconData),
+           let image = UIImage(data: imageData) {
+            return image
+        }
+        
+        // Fallback to system image
+        return UIImage(systemName: "radio")
+    }
+    
+    private func createPodcastArtworkImage(for podcast: PodcastFeed) -> UIImage? {
+        // Try imageData first, then iconData, then fallback
+        if let imageData = podcast.imageData,
+           let image = UIImage(data: imageData) {
+            return image
+        }
+        
+        if let iconData = podcast.iconData,
+           let imageData = Data(base64Encoded: iconData),
+           let image = UIImage(data: imageData) {
+            return image
+        }
+        
+        // Fallback to system image
+        return UIImage(systemName: "podcast")
     }
 }
 
