@@ -138,20 +138,10 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private func configureAudioSession() {
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            
-            // Use a simpler, more reliable audio session configuration for Now Playing
-            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
-            
-            // Activate the audio session - this is critical for Now Playing to work!
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            
-            print("✅ Audio session configured and ACTIVATED for Now Playing support")
-            
-        } catch {
-            print("❌ Failed to set up audio session: \(error)")
-        }
+        // Audio session is now managed centrally by PlaybackManager
+        // This method is kept for backward compatibility but delegates to PlaybackManager
+        PlaybackManager.shared.activateAudioSessionForPlayer(.radio)
+        print("✅ RadioPlayer: Audio session management delegated to PlaybackManager")
     }
     
     func addInterruptionObserver() {
@@ -179,17 +169,12 @@ class RadioPlayer: NSObject, ObservableObject {
             // Interruption began, pause the player
             player?.pause()
         } else if type == .ended {
-            // Interruption ended, reactivate the audio session
-            do {
-                try AVAudioSession.sharedInstance().setActive(true)
-                guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
-                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                if options.contains(.shouldResume) {
-                    // Resume playback if it should resume
-                    player?.play()
-                }
-            } catch {
-                print("Failed to reactivate audio session: \(error)")
+            // Interruption ended - let PlaybackManager handle audio session reactivation
+            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            if options.contains(.shouldResume) && PlaybackManager.shared.activePlayer == .radio {
+                // Resume playback if it should resume and radio is the active player
+                player?.play()
             }
         }
     }
@@ -358,14 +343,9 @@ class RadioPlayer: NSObject, ObservableObject {
     func play() {
         stopPodcastPlayback()
         
-        // CRITICAL: Activate audio session BEFORE starting playback
-        do {
-            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
-            print("✅ Play: Audio session activated")
-        } catch {
-            print("❌ Play: Failed to activate audio session: \(error)")
-            return
-        }
+        // Set radio as the active player FIRST - this will handle audio session activation
+        PlaybackManager.shared.setActivePlayer(.radio)
+        print("📻 Play: Set radio as active player")
         
         // Ensure we have a player
         guard let player = player else { 
@@ -387,17 +367,11 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("▶️ Play: Player started, isPlaying: \(isPlaying)")
         
-        // Set radio as the active player FIRST
-        PlaybackManager.shared.setActivePlayer(.radio)
-        print("📻 Play: Set radio as active player")
+        // Update Now Playing immediately since audio session is already activated
+        updateNowPlayingInfo()
         
-        // Update Now Playing after a brief delay to ensure player has started
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.updateNowPlayingInfo()
-        }
-        
-        // Add verification after a longer delay to ensure everything is set up
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        // Add verification after a brief delay to ensure everything is set up
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.verifyNowPlayingSetup()
         }
         
@@ -586,11 +560,10 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private func updateNowPlayingInfo() {
-        // CRITICAL: Ensure audio session is active before setting Now Playing info
-        do {
-            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            print("❌ Now Playing: Failed to activate audio session: \(error)")
+        // Audio session is managed centrally by PlaybackManager
+        // Just ensure we're the active player
+        guard PlaybackManager.shared.activePlayer == .radio else {
+            print("❌ Now Playing: Radio is not the active player")
             return
         }
         

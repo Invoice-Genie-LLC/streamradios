@@ -297,13 +297,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     private func configureAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try AVAudioSession.sharedInstance().setActive(true)
-            print("Audio session configured successfully.")
-        } catch {
-            print("Failed to set up audio session: \(error)")
-        }
+        // Audio session configuration is now handled by PlaybackManager
+        // This ensures centralized management and prevents conflicts
+        print("Audio session configuration delegated to PlaybackManager")
     }
     
     private func setupCarPlay() {

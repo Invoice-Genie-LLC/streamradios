@@ -1112,7 +1112,7 @@ class CarPlayManager: NSObject, ObservableObject {
         }
         
         // Fallback to system image
-        return UIImage(systemName: "podcast")
+        return UIImage(systemName: "microphone")
     }
     
     @objc private func handleStationArtworkUpdate(_ notification: Notification) {

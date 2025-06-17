@@ -227,7 +227,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         let listTemplate = CPListTemplate(title: "Podcasts", sections: sections)
         listTemplate.tabTitle = "Podcasts"
-        listTemplate.tabImage = UIImage(systemName: "podcast")
+        listTemplate.tabImage = UIImage(systemName: "microphone")
         
         return listTemplate
     }

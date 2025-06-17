@@ -58,14 +58,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        }
     
     private func setupAudioSession() {
-        do {
-            // Use compatible audio session settings that don't conflict with radio
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
-            // Don't activate here - let the active player control activation
-            print("✅ Podcast: Audio session category configured (not activated)")
-        } catch {
-            os_log("Failed to set up audio session: %@", log: log, type: .error, error.localizedDescription)
-        }
+        // Audio session is now managed centrally by PlaybackManager
+        // This method is kept for backward compatibility
+        print("✅ Podcast: Audio session management delegated to PlaybackManager")
     }
     
     private func setupReachability() {
@@ -118,9 +113,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             case .began:
                 pause()
             case .ended:
+                // Let PlaybackManager handle audio session reactivation
                 guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                if options.contains(.shouldResume) {
+                if options.contains(.shouldResume) && PlaybackManager.shared.activePlayer == .podcast {
                     play()
                 }
             @unknown default:
@@ -493,11 +489,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             saveProgressIfNeeded()
         }
         
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            os_log("Failed to activate audio session: %@", log: log, type: .error, error.localizedDescription)
-        }
+        // Set podcast as the active player - this will handle audio session activation
+        PlaybackManager.shared.setActivePlayer(.podcast)
         
         // Load all episodes for the feed
         loadAllEpisodesForFeed(feed)
@@ -594,23 +587,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     
     private func setupBackgroundPlayback() {
-            do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.defaultToSpeaker, .mixWithOthers])
-                try AVAudioSession.sharedInstance().setActive(true)
-                
-                // Enable background audio
-                let audioSession = AVAudioSession.sharedInstance()
-                do {
-                    try audioSession.setCategory(.playback, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
-                    try audioSession.setActive(true)
-                    os_log("Successfully set up background audio", log: log, type: .info)
-                } catch {
-                    os_log("Failed to set up background audio: %@", log: log, type: .error, error.localizedDescription)
-                }
-            } catch {
-                os_log("Error setting up audio session: %@", log: log, type: .error, error.localizedDescription)
-            }
-        }
+        // Background audio is handled by the centralized PlaybackManager
+        // This ensures consistent audio session configuration
+        os_log("Background playback configured via PlaybackManager", log: log, type: .info)
+    }
     
     private func updateDuration() {
             guard let currentItem = player?.currentItem else { return }
@@ -676,6 +656,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return
             }
         
+        // Set podcast as the active player - this will handle audio session activation
+        PlaybackManager.shared.setActivePlayer(.podcast)
+        
         // Ensure progress is tracked when playing starts
            ensureProgressTracking(for: currentEpisode)
         
@@ -698,8 +681,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                if !isUserCurrentlyScrolling() {
                    objectWillChange.send()
                }
-        
-                PlaybackManager.shared.setActivePlayer(.podcast)
             }
     
     
@@ -720,11 +701,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             objectWillChange.send()
         }
         
-        do {
-                    try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-                } catch {
-                    os_log("Failed to deactivate audio session: %@", log: log, type: .error, error.localizedDescription)
-                }
+        // Use centralized audio session management - only deactivate if no other audio is playing
+        if !isPlaying && PlaybackManager.shared.activePlayer == .podcast {
+            PlaybackManager.shared.deactivateAudioSession()
+        }
     }
     
     func togglePlayPause() {
@@ -794,6 +774,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func updateNowPlayingInfo() {
+        // Only update Now Playing info if podcast is the active player
+        guard PlaybackManager.shared.activePlayer == .podcast else {
+            os_log("Podcast is not the active player, skipping Now Playing update", log: log, type: .info)
+            return
+        }
+        
         guard let currentEpisode = currentEpisode,
               let currentFeed = currentFeed else {
             os_log("Unable to update now playing info: current episode or feed is nil", log: log, type: .error)
