@@ -239,21 +239,56 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    VStack {
+                    VStack(spacing: 0) {
                         if let currentStation = viewModel.currentlyPlayingStation {
                             CurrentlyPlayingView(currentStation: currentStation, metadata: radioPlayer.metadata)
                                 .environmentObject(radioPlayer)
+                                .background(
+                                    Color(UIColor.systemBackground)
+                                        .overlay(
+                                            Rectangle()
+                                                .fill(Color.primary.opacity(0.05))
+                                        )
+                                )
                         }
+                        
+                        // Separator line
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.1))
+                            .frame(height: 0.5)
+                        
                         PlayerView()
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
-                            .padding(.top, 8)
+                            .padding(.vertical, 12)
+                            .background(Color(UIColor.secondarySystemBackground))
                     }
                     .frame(width: playerViewWidth)
-                    .padding()
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(12)
-                    .modifier(NeumorphicShadow())
+                    .background(
+                        ZStack {
+                            Color(UIColor.secondarySystemBackground)
+                            
+                            // Top edge highlight
+                            VStack {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.1))
+                                    .frame(height: 1)
+                                Spacer()
+                            }
+                        }
+                    )
+                    .overlay(
+                        // Side borders for definition
+                        HStack {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.05))
+                                .frame(width: 0.5)
+                            Spacer()
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.05))
+                                .frame(width: 0.5)
+                        }
+                    )
                     .onTapGesture {
                         isPlayerSheetPresented.toggle()
                     }
@@ -392,49 +427,73 @@ struct ContentView: View {
             @EnvironmentObject var radioPlayer: RadioPlayer
             
             var body: some View {
-                HStack(alignment: .center, spacing: 20) {
+                HStack(alignment: .center, spacing: 16) {
                     // Priority: iTunes album art > stream album art > station icon > default radio icon
-                    if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
-                        Image(uiImage: iTunesAlbumArt)
-                            .resizable()
-                            .frame(width: 70, height: 70)
-                            .cornerRadius(10)
-                    } else if let albumArt = radioPlayer.albumArt {
-                        Image(uiImage: albumArt)
-                            .resizable()
-                            .frame(width: 70, height: 70)
-                            .cornerRadius(10)
-                    } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .frame(width: 70, height: 70)
-                            .cornerRadius(10)
-                    } else {
-                        Image(systemName: "radio")
-                            .resizable()
-                            .frame(width: 70, height: 70)
-                            .cornerRadius(10)
-                            .foregroundColor(.gray)
+                    ZStack {
+                        // Background gradient for the album art container
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.black.opacity(0.1), Color.black.opacity(0.05)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .frame(width: 75, height: 75)
+                        
+                        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+                            Image(uiImage: iTunesAlbumArt)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 75, height: 75)
+                                .clipped()
+                        } else if let albumArt = radioPlayer.albumArt {
+                            Image(uiImage: albumArt)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 75, height: 75)
+                                .clipped()
+                        } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 75, height: 75)
+                                .clipped()
+                        } else {
+                            Image(systemName: "radio")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 40, height: 40)
+                                .foregroundColor(.primary.opacity(0.7))
+                        }
+                        
+                        // Subtle border overlay for enhanced visual appeal
+                        Rectangle()
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
+                            .frame(width: 75, height: 75)
                     }
                     
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(currentStation.name)
-                            .font(.title2)
-                            .fontWeight(.bold)
+                            .font(.system(size: 18, weight: .bold, design: .default))
                             .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        
                         if let metadata = metadata {
                             Text(metadata)
-                                .font(.subheadline)
-                                .foregroundColor(.primary)
+                                .font(.system(size: 14, weight: .medium, design: .default))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
                         } else {
-                            Text("No song or album title available")
-                                .font(.subheadline)
-                                .foregroundColor(.primary)
+                            Text("Live Radio")
+                                .font(.system(size: 14, weight: .medium, design: .default))
+                                .foregroundColor(.secondary.opacity(0.8))
                         }
                     }
+                    
                     Spacer()
                 }
-                .padding(.leading, 10)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
         }
 

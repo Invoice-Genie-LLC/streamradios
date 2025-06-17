@@ -21,19 +21,19 @@ struct MiniPlayerView: View {
     @State private var sliderProgress: Double = 0
 
     private let height: CGFloat = 70
-    private let cornerRadius: CGFloat = 20
-    private let horizontalPadding: CGFloat = 12
+    private let cornerRadius: CGFloat = 0
+    private let horizontalPadding: CGFloat = 16
     private let sliderWidth: CGFloat = 110 // Further reduced width for the slider
     private let imageSize: CGFloat = 50 // Slightly reduced size for the feed image
 
     var body: some View {
         if let episode = podcastPlayer.currentEpisode,
            let feed = podcastPlayer.currentFeed {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 // Feed image
                 FeedImageView(feed: feed)
                     .frame(width: imageSize, height: imageSize)
-                    .cornerRadius(6)
+                    .clipped()
 
                 VStack(alignment: .leading, spacing: 2) {
                     // Episode title
@@ -48,7 +48,7 @@ struct MiniPlayerView: View {
                         GeometryReader { geometry in
                             ZStack(alignment: .leading) {
                                 Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
+                                    .fill(Color.primary.opacity(0.15))
                                     .frame(height: 3)
 
                                 Rectangle()
@@ -58,8 +58,12 @@ struct MiniPlayerView: View {
                                 // Draggable circle
                                 Circle()
                                     .fill(Color.white)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.accentColor, lineWidth: 1)
+                                    )
                                     .frame(width: 12, height: 12)
-                                    .shadow(radius: 2)
+                                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
                                     .offset(x: max(0, min(geometry.size.width * CGFloat(sliderProgress) - 6, geometry.size.width - 12)))
                                     .gesture(
                                         DragGesture(minimumDistance: 0)
@@ -86,21 +90,27 @@ struct MiniPlayerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Playback controls
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
-                            .font(.system(size: 14))
+                            .font(.system(size: 14, weight: .medium))
                     }
 
                     Button(action: podcastPlayer.togglePlayPause) {
-                        Image(systemName: podcastPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundColor(.accentColor)
+                        ZStack {
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 32, height: 32)
+                            
+                            Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                        }
                     }
 
                     Button(action: podcastPlayer.skipForward) {
                         Image(systemName: "goforward.30")
-                            .font(.system(size: 14))
+                            .font(.system(size: 14, weight: .medium))
                     }
 
                     // List button
@@ -110,7 +120,7 @@ struct MiniPlayerView: View {
                                        }
                                    }) {
                                        Image(systemName: "list.bullet")
-                                           .font(.system(size: 14))
+                                           .font(.system(size: 14, weight: .medium))
                                    }
                                    .disabled(isPlaylistButtonDisabled)
                                    .opacity(isPlaylistButtonDisabled ? 0.5 : 1)
@@ -120,8 +130,8 @@ struct MiniPlayerView: View {
                                        onCloseButtonTap?()
                                    }) {
                                        Image(systemName: "xmark.circle.fill")
-                                           .font(.system(size: 14))
-                                           .foregroundColor(.gray)
+                                           .font(.system(size: 14, weight: .medium))
+                                           .foregroundColor(.secondary)
                                    }
                                }
                                .foregroundColor(.primary)
@@ -130,16 +140,31 @@ struct MiniPlayerView: View {
             .frame(height: height)
             .background(
                 ZStack {
-                    BlurView(style: .systemThinMaterial)
-                        .opacity(colorScheme == .dark ? 0.8 : 1.0)
-
-                    Color.black.opacity(colorScheme == .dark ? 0.4 : 0.2)
+                    Color(UIColor.secondarySystemBackground)
+                    
+                    // Top border
+                    VStack {
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.1))
+                            .frame(height: 1)
+                        Spacer()
+                    }
+                    
+                    // Subtle overlay for depth
+                    Color.black.opacity(colorScheme == .dark ? 0.2 : 0.05)
                 }
             )
-            .cornerRadius(cornerRadius)
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
+                // Side borders
+                HStack {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.05))
+                        .frame(width: 0.5)
+                    Spacer()
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.05))
+                        .frame(width: 0.5)
+                }
             )
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
@@ -176,24 +201,36 @@ struct FeedImageView: View {
     let feed: PodcastFeed
 
     var body: some View {
-        Group {
-            if let imageData = feed.imageData, let uiImage = UIImage(data: imageData) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
-                AsyncImage(url: url) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    ProgressView()
+        ZStack {
+            // Background gradient
+            LinearGradient(
+                gradient: Gradient(colors: [Color.black.opacity(0.1), Color.black.opacity(0.05)]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            
+            Group {
+                if let imageData = feed.imageData, let uiImage = UIImage(data: imageData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else if let artworkUrl = feed.artworkUrl, let url = URL(string: artworkUrl) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        ProgressView()
+                            .tint(.accentColor)
+                    }
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.primary.opacity(0.7))
                 }
-            } else {
-                Image(systemName: "music.note")
-                    .font(.system(size: 24))
-                    .foregroundColor(.secondary)
-                    .frame(width: 48, height: 48)
-                    .background(Color.gray.opacity(0.3))
             }
+            
+            // Subtle border overlay
+            Rectangle()
+                .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
         }
     }
 }
