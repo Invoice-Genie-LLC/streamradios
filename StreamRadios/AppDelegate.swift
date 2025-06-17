@@ -12,6 +12,7 @@ import AVFoundation
 import SwiftUI
 import BackgroundTasks
 import SpotifyiOS
+import MediaPlayer
 
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     
@@ -30,6 +31,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             requestNotificationAuthorization()
             registerBackgroundTasks()
             configureAudioSession()
+            setupCarPlay()
             
             let alarmCategory = UNNotificationCategory(identifier: "ALARM_CATEGORY", actions: [], intentIdentifiers: [], options: [])
             UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
@@ -296,12 +298,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     
     private func configureAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try AVAudioSession.sharedInstance().setActive(true)
             print("Audio session configured successfully.")
         } catch {
             print("Failed to set up audio session: \(error)")
         }
+    }
+    
+    private func setupCarPlay() {
+        // Set up CarPlay using the new manager
+        let carPlayManager = CarPlayManager.shared
+        carPlayManager.setupCarPlay()
+        carPlayManager.configurePodcastData(podcastViewModel.podcastFeeds)
+        
+        print("CarPlay configured successfully.")
     }
     
     private func playFavoriteStation(at index: Int) {

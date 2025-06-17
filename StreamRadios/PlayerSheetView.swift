@@ -93,29 +93,29 @@ struct PlayerSheetView: View {
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
-                ZStack {
+            ZStack {
                     backgroundView
                         .edgesIgnoringSafeArea(.all)
-                    
+                
                     VStack(spacing: 0) {
-                        backButton
-                            .padding(.top, geometry.safeAreaInsets.top + 5)
+                    backButton
+                            .padding(.top, geometry.safeAreaInsets.top + 10)
                         
-                        contentView
-                            .padding(.top, 4)
+                    contentView
+                            .padding(.top, 20)
                         
-                        Spacer()
+                    Spacer()
                         
-                        PlayerView()
-                            .environmentObject(radioPlayer)
-                            .environmentObject(viewModel)
-                            .padding(.top, 4)
+                    PlayerView()
+                        .environmentObject(radioPlayer)
+                        .environmentObject(viewModel)
+                        .padding(.top, 8)
                         
-                        AirPlayButtonView()
-                            .frame(width: 50, height: 50)
-                            .padding(.bottom, geometry.safeAreaInsets.bottom + 5)
-                    }
-                    .navigationBarHidden(true)
+                    AirPlayButtonView()
+                        .frame(width: 50, height: 50)
+                            .padding(.bottom, geometry.safeAreaInsets.bottom + 10)
+                }
+                .navigationBarHidden(true)
                 }
             }
             .onAppear {
@@ -164,30 +164,30 @@ struct PlayerSheetView: View {
             case .spotifyPlaylistPicker:
                 SpotifyPlaylistPickerView(
                     isPresented: Binding(
-                        get: { self.activeSheet == .spotifyPlaylistPicker },
-                        set: { if !$0 { self.activeSheet = nil } }
+                    get: { self.activeSheet == .spotifyPlaylistPicker },
+                    set: { if !$0 { self.activeSheet = nil } }
                     ), 
                     playlists: spotifyPlaylists,
                     shazamViewModel: shazamViewModel,
                     onSelect: { playlistID in
-                        spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
-                            DispatchQueue.main.async {
-                                switch result {
-                                case .success:
-                                    self.alertMessage = "Song added to Spotify playlist successfully"
-                                case .failure(let error):
-                                    self.alertMessage = "Failed to add song to Spotify playlist: \(error.localizedDescription)"
-                                }
-                                self.showAlert = true
+                    spotifyManager.addToSpotifyPlaylist(songTitle: shazamViewModel.shazamMedia.title ?? "", artistName: shazamViewModel.shazamMedia.artistName ?? "", playlistID: playlistID) { result in
+                        DispatchQueue.main.async {
+                            switch result {
+                            case .success:
+                                self.alertMessage = "Song added to Spotify playlist successfully"
+                            case .failure(let error):
+                                self.alertMessage = "Failed to add song to Spotify playlist: \(error.localizedDescription)"
                             }
+                            self.showAlert = true
                         }
                     }
+                }
                 )
             case .youtubeMusicPlaylistPicker:
                 YouTubeMusicPlaylistPickerView(
                     isPresented: Binding(
-                        get: { self.activeSheet == .youtubeMusicPlaylistPicker },
-                        set: { if !$0 { self.activeSheet = nil } }
+                    get: { self.activeSheet == .youtubeMusicPlaylistPicker },
+                    set: { if !$0 { self.activeSheet = nil } }
                     ),
                     shazamViewModel: shazamViewModel
                 ) { selectedPlaylistId in
@@ -250,8 +250,7 @@ struct PlayerSheetView: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding()
         .modifier(NeumorphicShadow())
     }
     
@@ -274,7 +273,7 @@ struct PlayerSheetView: View {
     }
     
     private var shazamContent: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 30) {
             // Current station info at top
             if let currentStationIndex = radioPlayer.currentStationIndex,
                let currentStation = viewModel.stations[safe: currentStationIndex] {
@@ -352,16 +351,16 @@ struct PlayerSheetView: View {
             VStack(spacing: 8) {
                 Text(shazamViewModel.shazamMedia.title ?? "Unknown Title")
                     .font(.title2)
-                    .fontWeight(.semibold)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                .fontWeight(.semibold)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
                     .padding(.horizontal, 20)
-                
+            
                 Text(shazamViewModel.shazamMedia.artistName ?? "Unknown Artist")
                     .font(.title3)
-                    .fontWeight(.medium)
+                .fontWeight(.medium)
                     .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                .multilineTextAlignment(.center)
                     .lineLimit(1)
                     .padding(.horizontal, 20)
             }
@@ -369,16 +368,16 @@ struct PlayerSheetView: View {
             Spacer()
             
             // Action button - simplified to just Apple Music
-            Button(action: {
-                requestMusicAuthorization()
-                showingConfirmationDialog = true
-            }) {
+                Button(action: {
+                    requestMusicAuthorization()
+                    showingConfirmationDialog = true
+                }) {
                 HStack(spacing: 12) {
-                    Image(systemName: "apple.logo")
+                        Image(systemName: "apple.logo")
                         .font(.title2)
                         .fontWeight(.medium)
                     Text("Save to Apple Music")
-                        .font(.headline)
+                            .font(.headline)
                         .fontWeight(.medium)
                 }
                 .foregroundColor(.white)
@@ -796,7 +795,7 @@ struct PlayerSheetView: View {
     }
     
     private var stationContent: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 40) {
             StationDetails()
             
             if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
@@ -851,11 +850,11 @@ struct StationDetails: View {
     var body: some View {
         if let currentStationIndex = radioPlayer.currentStationIndex,
            let currentStation = viewModel.stations[safe: currentStationIndex] {
-            VStack(spacing: 10) {
+            VStack(spacing: 24) {
                 StationImage(currentStation: currentStation)
                 
-                VStack(spacing: 4) {
-                    Text(currentStation.name)
+                VStack(spacing: 12) {
+                Text(currentStation.name)
                         .font(.title2)
                         .fontWeight(.semibold)
                         .multilineTextAlignment(.center)
@@ -863,17 +862,17 @@ struct StationDetails: View {
                         .padding(.horizontal, 20)
                     
                     if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                        Text(metadata)
-                            .font(.headline)
+                    Text(metadata)
+                        .font(.headline)
                             .fontWeight(.medium)
-                            .foregroundColor(.secondary)
+                        .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
-                            .lineLimit(4)
+                            .lineLimit(2)
                             .padding(.horizontal, 20)
-                    } else {
+                } else {
                         Text("No song information available")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 20)
                     }
@@ -893,21 +892,21 @@ struct StationImage: View {
             Image(uiImage: iTunesAlbumArt)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: 240, height: 240)
+                .frame(width: 280, height: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
         } else if let albumArt = radioPlayer.albumArt {
             Image(uiImage: albumArt)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: 240, height: 240)
+                .frame(width: 280, height: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
         } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: 240, height: 240)
+                .frame(width: 280, height: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
         } else {
@@ -919,11 +918,11 @@ struct StationImage: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 240, height: 240)
+                .frame(width: 280, height: 280)
                 .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
                 .overlay(
-                    Image(systemName: "radio")
-                        .font(.system(size: 70, weight: .light))
+            Image(systemName: "radio")
+                        .font(.system(size: 80, weight: .light))
                         .foregroundColor(.white.opacity(0.8))
                 )
         }
@@ -1126,7 +1125,7 @@ struct PlaylistPickerView: View {
                                         playlist: playlist,
                                         isAdded: addedPlaylistIDs.contains(playlist.id.rawValue),
                                         onSelect: {
-                                            addToSelectedPlaylist(playlist)
+                    addToSelectedPlaylist(playlist)
                                         }
                                     )
                                 }
@@ -1142,7 +1141,7 @@ struct PlaylistPickerView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
+                presentationMode.wrappedValue.dismiss()
                     }
                     .font(.headline)
                     .foregroundColor(.blue)
@@ -1158,7 +1157,7 @@ struct PlaylistPickerView: View {
                 message: Text(alertMessage),
                 dismissButton: .default(Text("OK")) {
                     if alertMessage.contains("successfully") {
-                        presentationMode.wrappedValue.dismiss()
+                presentationMode.wrappedValue.dismiss()
                     }
                 }
             )
@@ -1454,7 +1453,7 @@ struct SpotifyPlaylistPickerView: View {
                                         onSelect: {
                                             if !addedPlaylistIDs.contains(playlist.id) {
                                                 addedPlaylistIDs.insert(playlist.id)
-                                                onSelect(playlist.id)
+                    onSelect(playlist.id)
                                             }
                                         }
                                     )
@@ -1471,7 +1470,7 @@ struct SpotifyPlaylistPickerView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Cancel") {
-                        isPresented = false
+                    isPresented = false
                     }
                     .font(.headline)
                     .foregroundColor(.green)

@@ -80,6 +80,14 @@
             <string>audio</string>
             <string>fetch</string>
         </array>
+    <key>UISupportedExternalAccessoryProtocols</key>
+    <array>
+        <string>com.apple.IAP.Radio</string>
+    </array>
+    <key>MKDirectionsApplicationSupportedModes</key>
+    <array>
+        <string>MKDirectionsModeCar</string>
+    </array>
         <key>NSMicrophoneUsageDescription</key>
         <string>StreamRadios needs access to your microphone to identify songs.</string>
     </dict>

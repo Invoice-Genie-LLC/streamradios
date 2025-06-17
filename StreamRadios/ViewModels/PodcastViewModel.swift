@@ -159,6 +159,9 @@ class PodcastViewModel: ObservableObject {
         // Mark initial loading as complete
         self.isInitialLoadComplete = true
         
+        // Notify CarPlay that podcast data is now available
+        CarPlayManager.shared.configurePodcastData(self.podcastFeeds)
+        
         self.objectWillChange.send()
     }
 

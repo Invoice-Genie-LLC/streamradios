@@ -221,6 +221,28 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
             return .commandFailed
         }
+        
+        // Enable skip forward command (for seeking within episodes)
+        commandCenter.skipForwardCommand.isEnabled = true
+        commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: 15)]
+        commandCenter.skipForwardCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.skipForward()
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        // Enable skip backward command (for seeking within episodes)
+        commandCenter.skipBackwardCommand.isEnabled = true
+        commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: 15)]
+        commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.skipBackward()
+                return .success
+            }
+            return .commandFailed
+        }
     }
     
     private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
@@ -785,24 +807,62 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
         
-        if let artworkUrlString = currentFeed.artworkUrl,
-           let artworkUrl = URL(string: artworkUrlString) {
-            URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
-                if let data = data, let image = UIImage(data: data) {
-                    let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-                    nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-                    DispatchQueue.main.async {
-                        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-                    }
-                } else {
-                    os_log("Failed to load artwork: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
-                }
-            }.resume()
-        } else {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        // Enhanced artwork priority: imageData -> iconData -> artworkUrl (same as CarPlay)
+        var artworkSet = false
+        
+        // First priority: Direct image data
+        if let imageData = currentFeed.imageData, !imageData.isEmpty {
+            if let image = UIImage(data: imageData) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                os_log("Podcast Now Playing: Using imageData for artwork (%d bytes)", log: log, type: .debug, imageData.count)
+            }
         }
         
-        os_log("Updated now playing info for episode: %@", log: log, type: .debug, currentEpisode.title)
+        // Second priority: Base64 encoded icon data
+        if !artworkSet, let iconData = currentFeed.iconData, !iconData.isEmpty {
+            if let data = Data(base64Encoded: iconData), let image = UIImage(data: data) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                os_log("Podcast Now Playing: Using iconData for artwork (%d bytes)", log: log, type: .debug, data.count)
+            } else {
+                os_log("Podcast Now Playing: Failed to decode iconData base64", log: log, type: .error)
+            }
+        }
+        
+        // Third priority: Download from artwork URL (async)
+        if !artworkSet, let artworkUrlString = currentFeed.artworkUrl, !artworkUrlString.isEmpty {
+            if let artworkUrl = URL(string: artworkUrlString) {
+                os_log("Podcast Now Playing: Downloading artwork from URL: %@", log: log, type: .info, artworkUrlString)
+                
+                URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
+                    if let data = data, let image = UIImage(data: data) {
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                        var updatedInfo = nowPlayingInfo
+                        updatedInfo[MPMediaItemPropertyArtwork] = artwork
+                        
+                        DispatchQueue.main.async {
+                            MPNowPlayingInfoCenter.default().nowPlayingInfo = updatedInfo
+                            os_log("Podcast Now Playing: Successfully set artwork from URL (%d bytes, %dx%d)", 
+                                   log: self.log, type: .info, data.count, Int(image.size.width), Int(image.size.height))
+                        }
+                    } else {
+                        os_log("Podcast Now Playing: Failed to load artwork from URL: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+                    }
+                }.resume()
+            }
+        }
+        
+        // Set the now playing info (with or without artwork)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        
+        if !artworkSet {
+            os_log("Podcast Now Playing: No artwork available for feed '%@'", log: log, type: .info, currentFeed.title)
+        }
+        
+        os_log("Podcast Now Playing: Updated info for episode '%@' from feed '%@'", log: log, type: .debug, currentEpisode.title, currentFeed.title)
     }
     
     func getCurrentProgress(for episode: PodcastEpisode) -> Double {
@@ -889,19 +949,62 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         
-        if let artworkUrlString = feed.artworkUrl, let artworkUrl = URL(string: artworkUrlString) {
-            URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
-                if let data = data, let image = UIImage(data: data) {
-                    let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-                    nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-                    DispatchQueue.main.async {
-                        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-                    }
-                }
-            }.resume()
-        } else {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        // Enhanced artwork priority: imageData -> iconData -> artworkUrl (same as CarPlay)
+        var artworkSet = false
+        
+        // First priority: Direct image data
+        if let imageData = feed.imageData, !imageData.isEmpty {
+            if let image = UIImage(data: imageData) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                os_log("Podcast Setup: Using imageData for artwork (%d bytes)", log: log, type: .debug, imageData.count)
+            }
         }
+        
+        // Second priority: Base64 encoded icon data
+        if !artworkSet, let iconData = feed.iconData, !iconData.isEmpty {
+            if let data = Data(base64Encoded: iconData), let image = UIImage(data: data) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                os_log("Podcast Setup: Using iconData for artwork (%d bytes)", log: log, type: .debug, data.count)
+            } else {
+                os_log("Podcast Setup: Failed to decode iconData base64", log: log, type: .error)
+            }
+        }
+        
+        // Third priority: Download from artwork URL (async)
+        if !artworkSet, let artworkUrlString = feed.artworkUrl, !artworkUrlString.isEmpty {
+            if let artworkUrl = URL(string: artworkUrlString) {
+                os_log("Podcast Setup: Downloading artwork from URL: %@", log: log, type: .info, artworkUrlString)
+                
+                URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
+                    if let data = data, let image = UIImage(data: data) {
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                        var updatedInfo = nowPlayingInfo
+                        updatedInfo[MPMediaItemPropertyArtwork] = artwork
+                        
+                        DispatchQueue.main.async {
+                            MPNowPlayingInfoCenter.default().nowPlayingInfo = updatedInfo
+                            os_log("Podcast Setup: Successfully set artwork from URL (%d bytes, %dx%d)", 
+                                   log: self.log, type: .info, data.count, Int(image.size.width), Int(image.size.height))
+                        }
+                    } else {
+                        os_log("Podcast Setup: Failed to load artwork from URL: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+                    }
+                }.resume()
+            }
+        }
+        
+        // Set the now playing info (with or without artwork)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        
+        if !artworkSet {
+            os_log("Podcast Setup: No artwork available for feed '%@'", log: log, type: .info, feed.title)
+        }
+        
+        os_log("Podcast Setup: Setup complete for episode '%@' from feed '%@'", log: log, type: .debug, episode.title, feed.title)
     }
     
     deinit {
