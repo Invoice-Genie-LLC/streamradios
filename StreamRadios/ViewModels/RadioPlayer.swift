@@ -23,7 +23,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private var statusCancellable: AnyCancellable?
     private var retryTimer: Timer?
     private var retryCount = 0
-    private let monitor = NWPathMonitor()
+    private var monitor = NWPathMonitor()
     private var isNetworkAvailable = true
     private var wasPlayingBeforeNetworkLoss = false
     @Published var isBuffering = false
@@ -54,25 +54,34 @@ class RadioPlayer: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     override init() {
-            super.init()
-            configureAudioSession()
-            addInterruptionObserver()
-            autoPlayLastStationSetup()
+        monitor = NWPathMonitor()
+        
+        super.init()
+        
+        let queue = DispatchQueue(label: "NetworkMonitor")
+        monitor.start(queue: queue)
+        
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.isNetworkAvailable = (path.status == .satisfied)
+                self?.isOnCellularNetwork = path.usesInterfaceType(.cellular)
+            }
+        }
+        
+        // Initialize Now Playing and CarPlay support
+        configureAudioSession()
+        setupRemoteCommandCenter()
+        addInterruptionObserver()
+        
+        print("✅ RadioPlayer initialized with CarPlay and Now Playing support")
         
         DispatchQueue.main.async {
-                   self.podcastPlayer = PodcastPlayer.shared
-                   self.podcastPlayer?.setRadioPlayer(self)
-               }
-        
-            monitor.pathUpdateHandler = { [weak self] path in
-                guard let self = self else { return }
-                self.isOnCellularNetwork = path.isExpensive
-                self.adjustForNetworkConditions()
-                self.updateBitrateBasedOnNetwork(path: path)
-            }
-            let queue = DispatchQueue(label: "NetworkMonitor")
-            monitor.start(queue: queue)
+            self.podcastPlayer = PodcastPlayer.shared
+            self.podcastPlayer?.setRadioPlayer(self)
         }
+        
+        autoPlayLastStationSetup()
+    }
 
     
     private func updateBitrateText(_ bitrate: Double) {
@@ -132,20 +141,16 @@ class RadioPlayer: NSObject, ObservableObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             
-            // Set the audio session category to playback
-            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .interruptSpokenAudioAndMixWithOthers])
+            // Use a simpler, more reliable audio session configuration for Now Playing
+            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
             
-            // Override the output audio port to speaker
-            try audioSession.overrideOutputAudioPort(.speaker)
-            
-            // Activate the audio session
+            // Activate the audio session - this is critical for Now Playing to work!
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
             
-            // Set the preferred IO buffer duration
-            try audioSession.setPreferredIOBufferDuration(0.005)
+            print("✅ Audio session configured and ACTIVATED for Now Playing support")
             
         } catch {
-            print("Failed to set up audio session: \(error)")
+            print("❌ Failed to set up audio session: \(error)")
         }
     }
     
@@ -220,6 +225,8 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private func setStationURL(_ url: URL) {
+        print("🔗 Setting station URL: \(url)")
+        
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
         player?.automaticallyWaitsToMinimizeStalling = true
@@ -228,20 +235,27 @@ class RadioPlayer: NSObject, ObservableObject {
         // Cancel previous observer if it exists
         statusCancellable?.cancel()
         
-        // Set up observers
+        // Set up observers with enhanced debugging
         statusCancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
                 guard let self = self else { return }
                 self.isPlaying = (status == .playing)
                 self.isBuffering = (status == .waitingToPlayAtSpecifiedRate)
-                print("Set station URL: isPlaying = \(self.isPlaying), isBuffering = \(self.isBuffering)")
-                self.updateNowPlayingInfo()
+                print("📊 Player Status Change: isPlaying = \(self.isPlaying), isBuffering = \(self.isBuffering), status = \(status)")
+                
+                // Update Now Playing whenever player status changes
+                DispatchQueue.main.async {
+                    self.updateNowPlayingInfo()
+                }
             }
         
         // Set the bitrate and add metadata output
         updateBitrateBasedOnNetwork(path: monitor.currentPath)
         
+        // Ensure metadata output is added immediately
         addMetadataOutput()
+        
+        print("✅ Station URL set and player configured")
     }
     
     private func updateBitrateBasedOnNetwork(path: NWPath) {
@@ -343,26 +357,53 @@ class RadioPlayer: NSObject, ObservableObject {
     
     func play() {
         stopPodcastPlayback()
-            
-            // Existing play logic
-            guard let player = player else { return }
-            
-            // Ensure the player is properly set up with the current station URL
-        if player.currentItem?.asset as? AVURLAsset == nil,
-               let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
-                setStationURL(lastStationURL)
-            }
-            
-            player.play()
-            isPlaying = true
-            resetRetryCount()
-            updateNowPlayingInfo()
-            updateWidget()
-            scheduleAppRefresh()
         
-        // Set radio as the active player
-            PlaybackManager.shared.setActivePlayer(.radio)
+        // CRITICAL: Activate audio session BEFORE starting playback
+        do {
+            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+            print("✅ Play: Audio session activated")
+        } catch {
+            print("❌ Play: Failed to activate audio session: \(error)")
+            return
         }
+        
+        // Ensure we have a player
+        guard let player = player else { 
+            print("❌ Play: No player available")
+            return 
+        }
+        
+        // Ensure the player is properly set up with the current station URL
+        if player.currentItem?.asset as? AVURLAsset == nil,
+           let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+            setStationURL(lastStationURL)
+            print("🔄 Play: Restored last station URL")
+        }
+        
+        // Start playback
+        player.play()
+        isPlaying = true
+        resetRetryCount()
+        
+        print("▶️ Play: Player started, isPlaying: \(isPlaying)")
+        
+        // Set radio as the active player FIRST
+        PlaybackManager.shared.setActivePlayer(.radio)
+        print("📻 Play: Set radio as active player")
+        
+        // Update Now Playing after a brief delay to ensure player has started
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.updateNowPlayingInfo()
+        }
+        
+        // Add verification after a longer delay to ensure everything is set up
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.verifyNowPlayingSetup()
+        }
+        
+        updateWidget()
+        scheduleAppRefresh()
+    }
     
     private func stopPodcastPlayback() {
             if let podcastPlayer = podcastPlayer, podcastPlayer.isPlaying {
@@ -545,45 +586,94 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private func updateNowPlayingInfo() {
-        guard let viewModel = viewModel else { return }
+        // CRITICAL: Ensure audio session is active before setting Now Playing info
+        do {
+            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("❌ Now Playing: Failed to activate audio session: \(error)")
+            return
+        }
+        
+        guard let viewModel = viewModel else { 
+            print("❌ Now Playing: No viewModel available")
+            return 
+        }
         
         var nowPlayingInfo = [String: Any]()
         
+        // Determine current station
         let currentStation: RadioStation?
         if isHandlingAlarm {
             currentStation = alarmStation
+            print("🎵 Now Playing: Using alarm station")
         } else if let currentStationIndex = currentStationIndex,
                   currentStationIndex < viewModel.stations.count {
             currentStation = viewModel.stations[currentStationIndex]
+            print("🎵 Now Playing: Using station at index \(currentStationIndex)")
         } else {
             currentStation = nil
+            print("❌ Now Playing: No current station available")
         }
         
+        // Set basic metadata
         if let station = currentStation {
-            nowPlayingInfo[MPMediaItemPropertyTitle] = songTitle.isEmpty ? station.name : songTitle
-            nowPlayingInfo[MPMediaItemPropertyArtist] = artistName.isEmpty ? (metadata ?? station.name) : artistName
+            let stationName = station.name
+            let trackTitle = songTitle.isEmpty ? stationName : songTitle
+            let artistInfo = artistName.isEmpty ? (metadata ?? stationName) : artistName
+            
+            nowPlayingInfo[MPMediaItemPropertyTitle] = trackTitle
+            nowPlayingInfo[MPMediaItemPropertyArtist] = artistInfo
+            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = stationName
+            
+            print("🎵 Now Playing Info - Title: '\(trackTitle)', Artist: '\(artistInfo)', Station: '\(stationName)'")
+        } else {
+            nowPlayingInfo[MPMediaItemPropertyTitle] = "StreamRadios"
+            nowPlayingInfo[MPMediaItemPropertyArtist] = "No Station Playing"
+            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "StreamRadios"
+            print("⚠️ Now Playing: Using default info as no station is available")
         }
         
+        // Set stream properties
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
         
-        // Priority: Current track artwork > iTunes album art > stream album art > station icon
-        if let currentTrackArtwork = currentTrackArtwork {
+        // Add artwork if available (enhanced priority order)
+        var artworkSet = false
+        
+        // PRIORITY 1: Current track iTunes artwork (highest priority)
+        if let iTunesArt = iTunesAlbumArt {
+            let artwork = MPMediaItemArtwork(boundsSize: iTunesArt.size) { size in
+                return iTunesArt
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+            artworkSet = true
+            print("🎨 Now Playing: Using live iTunes artwork")
+        }
+        // PRIORITY 2: Current track artwork from metadata
+        else if let currentTrackArtwork = currentTrackArtwork {
             let artwork = MPMediaItemArtwork(boundsSize: currentTrackArtwork.size) { size in
                 return currentTrackArtwork
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-        } else if let iTunesAlbumArt = iTunesAlbumArt {
-            let artwork = MPMediaItemArtwork(boundsSize: iTunesAlbumArt.size) { size in
-                return iTunesAlbumArt
+            artworkSet = true
+            print("🎨 Now Playing: Using current track artwork")
+        }
+        // PRIORITY 3: Station's saved iTunes artwork (from previous tracks)
+        else if let station = currentStation,
+                  let iTunesData = station.iTunesArtworkData,
+                  !iTunesData.isEmpty,
+                  let imageData = Data(base64Encoded: iTunesData),
+                  let image = UIImage(data: imageData) {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+                return image
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-        } else if let albumArt = albumArt {
-            let artwork = MPMediaItemArtwork(boundsSize: albumArt.size) { size in
-                return albumArt
-            }
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-        } else if let station = currentStation,
+            artworkSet = true
+            print("🎨 Now Playing: Using station's saved iTunes artwork")
+        }
+        // PRIORITY 4: Station icon (fallback)
+        else if let station = currentStation,
                   let iconData = station.iconData,
                   let imageData = Data(base64Encoded: iconData),
                   let image = UIImage(data: imageData) {
@@ -591,10 +681,20 @@ class RadioPlayer: NSObject, ObservableObject {
                 return image
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+            artworkSet = true
+            print("🎨 Now Playing: Using station icon artwork")
         }
         
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
-        print("Updated now playing info: \(nowPlayingInfo)")
+        if !artworkSet {
+            print("⚠️ Now Playing: No artwork available")
+        }
+        
+        // Set the now playing info
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
+        
+        print("✅ Now Playing: Successfully updated info center with \(nowPlayingInfo.count) items")
+        print("🎵 Now Playing State - isPlaying: \(isPlaying), playback rate: \(nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0.0)")
     }
     
     private func updateWidget() {
@@ -618,45 +718,87 @@ class RadioPlayer: NSObject, ObservableObject {
     func setupRemoteCommandCenter() {
         let commandCenter = MPRemoteCommandCenter.shared()
         
+        // Clear any existing targets first
+        commandCenter.playCommand.removeTarget(nil)
+        commandCenter.pauseCommand.removeTarget(nil)
+        commandCenter.nextTrackCommand.removeTarget(nil)
+        commandCenter.previousTrackCommand.removeTarget(nil)
+        
+        // Enable and configure play command
         commandCenter.playCommand.isEnabled = true
-        commandCenter.playCommand.addTarget { [weak self] _ in
+        commandCenter.playCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
             if PlaybackManager.shared.activePlayer == .radio {
-                self?.play()
+                self.play()
+                print("🎮 Remote Command: Play executed")
                 return .success
             }
             return .commandFailed
         }
         
+        // Enable and configure pause command
         commandCenter.pauseCommand.isEnabled = true
-        commandCenter.pauseCommand.addTarget { [weak self] _ in
+        commandCenter.pauseCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
             if PlaybackManager.shared.activePlayer == .radio {
-                self?.pause()
+                self.pause()
+                print("🎮 Remote Command: Pause executed")
                 return .success
             }
             return .commandFailed
         }
         
+        // Enable and configure next track command
         commandCenter.nextTrackCommand.isEnabled = true
-        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+        commandCenter.nextTrackCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
             if PlaybackManager.shared.activePlayer == .radio {
-                if let self = self, let viewModel = self.viewModel {
+                if let viewModel = self.viewModel {
                     self.nextStation(from: viewModel.stations)
+                    print("🎮 Remote Command: Next station executed")
                     return .success
                 }
             }
             return .commandFailed
         }
         
+        // Enable and configure previous track command
         commandCenter.previousTrackCommand.isEnabled = true
-        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+        commandCenter.previousTrackCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
             if PlaybackManager.shared.activePlayer == .radio {
-                if let self = self, let viewModel = self.viewModel {
+                if let viewModel = self.viewModel {
                     self.previousStation(from: viewModel.stations)
+                    print("🎮 Remote Command: Previous station executed")
                     return .success
                 }
             }
             return .commandFailed
         }
+        
+        // CRITICAL: Enable toggle play/pause command for Now Playing display
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
+            if PlaybackManager.shared.activePlayer == .radio {
+                if self.isPlaying {
+                    self.pause()
+                    print("🎮 Remote Command: Toggle - Paused")
+                } else {
+                    self.play()
+                    print("🎮 Remote Command: Toggle - Playing")
+                }
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        // Disable commands that don't make sense for radio
+        commandCenter.stopCommand.isEnabled = false
+        commandCenter.seekForwardCommand.isEnabled = false
+        commandCenter.seekBackwardCommand.isEnabled = false
+        
+        print("✅ Remote Command Center configured for Now Playing")
     }
     
     private func scheduleAppRefresh() {
@@ -1050,6 +1192,23 @@ class RadioPlayer: NSObject, ObservableObject {
         viewModel.saveStationsToCoreData()
         
         print("iTunes artwork saved to station: \(updatedStation.name)")
+        
+        // CRITICAL: Immediately update Now Playing with new artwork
+        updateNowPlayingInfo()
+        
+        // CRITICAL: Notify CarPlay of station data changes for real-time artwork update
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("StationArtworkUpdated"), 
+                object: nil, 
+                userInfo: ["stationId": updatedStation.id, "hasArtwork": true]
+            )
+        }
+        
+        // Also update widget with new artwork
+        updateWidget()
+        
+        print("✅ iTunes artwork updated in real-time - Now Playing, CarPlay, and Widget refreshed")
     }
     
     private func buildSearchQueries(parsedData: (artist: String?, track: String?, album: String?), originalMetadata: String) -> [String] {
@@ -2002,7 +2161,79 @@ class RadioPlayer: NSObject, ObservableObject {
         retryTimer?.invalidate()
     }
     
+    // MARK: - Now Playing Debug Helper
+    func debugNowPlayingState() {
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        let currentInfo = nowPlayingCenter.nowPlayingInfo
+        
+        print("🔍 Now Playing Debug State:")
+        print("  - Audio session active: \(AVAudioSession.sharedInstance().isOtherAudioPlaying == false)")
+        print("  - Player exists: \(player != nil)")
+        print("  - Is playing: \(isPlaying)")
+        print("  - Current station index: \(currentStationIndex ?? -1)")
+        print("  - Now playing info count: \(currentInfo?.count ?? 0)")
+        
+        if let info = currentInfo {
+            print("  - Title: \(info[MPMediaItemPropertyTitle] as? String ?? "nil")")
+            print("  - Artist: \(info[MPMediaItemPropertyArtist] as? String ?? "nil")")
+            print("  - Artwork: \(info[MPMediaItemPropertyArtwork] != nil ? "present" : "missing")")
+            print("  - Playback rate: \(info[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber ?? 0)")
+        }
+        
+        print("  - Metadata: '\(metadata ?? "nil")'")
+        print("  - Song title: '\(songTitle)'")
+        print("  - Artist name: '\(artistName)'")
+        print("  - iTunes artwork: \(iTunesAlbumArt != nil ? "present" : "missing")")
+    }
     
+    // MARK: - Now Playing Verification Helper
+    func verifyNowPlayingSetup() {
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        let commandCenter = MPRemoteCommandCenter.shared()
+        let audioSession = AVAudioSession.sharedInstance()
+        
+        print("🔍 === NOW PLAYING VERIFICATION ===")
+        
+        // Audio Session Check
+        print("🔍 Audio Session:")
+        print("  - Category: \(audioSession.category.rawValue)")
+        print("  - Mode: \(audioSession.mode.rawValue)")
+        print("  - Options: \(audioSession.categoryOptions.rawValue)")
+        print("  - Is Active: \(audioSession.isOtherAudioPlaying == false)")
+        
+        // Now Playing Info Check
+        let currentInfo = nowPlayingCenter.nowPlayingInfo
+        print("🔍 Now Playing Info:")
+        print("  - Info Count: \(currentInfo?.count ?? 0)")
+        if let info = currentInfo {
+            print("  - Title: \(info[MPMediaItemPropertyTitle] as? String ?? "nil")")
+            print("  - Artist: \(info[MPMediaItemPropertyArtist] as? String ?? "nil")")
+            print("  - Playback Rate: \(info[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0.0)")
+            print("  - Has Artwork: \(info[MPMediaItemPropertyArtwork] != nil)")
+            print("  - Is Live Stream: \(info[MPNowPlayingInfoPropertyIsLiveStream] as? Bool ?? false)")
+        }
+        
+        // Command Center Check
+        print("🔍 Remote Command Center:")
+        print("  - Play Enabled: \(commandCenter.playCommand.isEnabled)")
+        print("  - Pause Enabled: \(commandCenter.pauseCommand.isEnabled)")
+        print("  - Next Enabled: \(commandCenter.nextTrackCommand.isEnabled)")
+        print("  - Previous Enabled: \(commandCenter.previousTrackCommand.isEnabled)")
+        print("  - Toggle Play/Pause Enabled: \(commandCenter.togglePlayPauseCommand.isEnabled)")
+        
+        // Player State Check
+        print("🔍 Player State:")
+        print("  - Player Exists: \(player != nil)")
+        print("  - Is Playing: \(isPlaying)")
+        print("  - Current Station Index: \(currentStationIndex ?? -1)")
+        print("  - Active Player: \(PlaybackManager.shared.activePlayer)")
+        
+        // Force Now Playing Update
+        print("🔍 Forcing Now Playing Update...")
+        updateNowPlayingInfo()
+        
+        print("🔍 === VERIFICATION COMPLETE ===")
+    }
 }
 
 extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {

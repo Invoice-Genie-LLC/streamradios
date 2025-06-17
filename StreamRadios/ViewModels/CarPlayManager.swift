@@ -69,6 +69,14 @@ class CarPlayManager: NSObject, ObservableObject {
             name: NSNotification.Name("PodcastDataUpdated"),
             object: nil
         )
+        
+        // NOTE: CarPlay disabled for iTunes artwork updates - only shows station icons
+        // NotificationCenter.default.addObserver(
+        //     self,
+        //     selector: #selector(handleStationArtworkUpdate(_:)),
+        //     name: NSNotification.Name("StationArtworkUpdated"),
+        //     object: nil
+        // )
     }
     
     func updateContent() {
@@ -76,46 +84,36 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     private func updateRadioStations(_ stations: [RadioStation]) {
-        allStations = stations
-        favoriteStations = stations.filter { $0.isFavorite }.sorted { first, second in
-            if let firstOrder = first.favoriteOrder, let secondOrder = second.favoriteOrder {
-                return firstOrder < secondOrder
-            } else if first.favoriteOrder != nil {
-                return true
-            } else if second.favoriteOrder != nil {
-                return false
-            } else {
-                return (first.favoritedAt ?? Date.distantPast) > (second.favoritedAt ?? Date.distantPast)
-            }
-        }
-        recentStations = stations.filter { $0.lastPlayed != nil }.sorted { 
-            ($0.lastPlayed ?? Date.distantPast) > ($1.lastPlayed ?? Date.distantPast) 
-        }.prefix(10).map { $0 }
+        os_log("CarPlay: Updating radio stations - received %d stations", log: log, type: .info, stations.count)
         
-        // Group stations by country
+        // Log station icon statistics (CarPlay only shows station icons, not iTunes artwork)
+        let stationsWithIcon = stations.filter { $0.iconData != nil && !$0.iconData!.isEmpty }
+        
+        os_log("🎨 CarPlay: Station artwork stats - Total: %d, WithIcon: %d", 
+               log: log, type: .info, stations.count, stationsWithIcon.count)
+        
+        // Log details of first few stations with icon artwork
+        for (index, station) in stationsWithIcon.prefix(3).enumerated() {
+            os_log("🎨 CarPlay: Station %d with icon artwork: '%@' (data length: %d)", 
+                   log: log, type: .debug, index, station.name, station.iconData!.count)
+        }
+        
+        allStations = stations
+        favoriteStations = stations.filter { $0.isFavorite }
+        recentStations = stations.filter { $0.lastPlayed != nil }
         stationsByCountry = Dictionary(grouping: stations) { $0.country }
         availableCountries = Array(stationsByCountry.keys).sorted()
         
-        // Add sample stations if no stations exist for testing
-        if allStations.isEmpty {
-            addSampleRadioStationsIfNeeded()
-        } else {
-            // Enhance existing stations with iTunes artwork for known popular stations
-            enhancePopularStationsWithiTunesArtwork()
-        }
-
-        // Debug station artwork data
-        os_log("CarPlay: Loaded %d total stations", log: log, type: .info, allStations.count)
-        for station in Array(allStations.prefix(5)) { // Log first 5 stations
-            let hasIconData = station.iconData != nil && !station.iconData!.isEmpty
-            let hasiTunesData = station.iTunesArtworkData != nil && !station.iTunesArtworkData!.isEmpty
-            os_log("CarPlay: Station '%@' has iconData: %@, iTunesData: %@", log: log, type: .debug, 
-                   station.name, hasIconData ? "true" : "false", hasiTunesData ? "true" : "false")
-        }
-
-        DispatchQueue.main.async {
-            MPPlayableContentManager.shared().reloadData()
-        }
+        // Skip demo stations since CarPlay only shows station icons, not iTunes artwork
+        os_log("🎨 CarPlay: Skipping demo stations - CarPlay displays only station icons", 
+               log: log, type: .info)
+        
+        // Skip adding sample artwork since CarPlay only shows station icons
+        os_log("🎨 CarPlay: No sample artwork needed - CarPlay displays only station icons", 
+               log: log, type: .info)
+        
+        os_log("CarPlay: Final counts - total: %d, favorites: %d, recent: %d, countries: %d", 
+               log: log, type: .info, allStations.count, favoriteStations.count, recentStations.count, availableCountries.count)
     }
     
     private func enhancePopularStationsWithiTunesArtwork() {
@@ -605,13 +603,25 @@ class CarPlayManager: NSObject, ObservableObject {
     private func addDemoStationsWithiTunesArtwork() {
         // Create sample iTunes artwork for demo stations
         guard let sampleiTunesArtwork = createSampleiTunesArtwork() else {
-            os_log("CarPlay: Failed to create sample iTunes artwork for demo stations", log: log, type: .error)
+            os_log("❌ CarPlay: Failed to create sample iTunes artwork for demo stations", log: log, type: .error)
             return
         }
         
         let sampleiTunesArtworkBase64 = sampleiTunesArtwork.base64EncodedString()
+        os_log("✅ CarPlay: Created sample iTunes artwork (base64 length: %d)", log: log, type: .info, sampleiTunesArtworkBase64.count)
         
-        // Create demo stations that look like real radio stations
+        // FIRST: Add iTunes artwork to existing real stations that have been played recently
+        var enhancedCount = 0
+        for i in 0..<min(5, allStations.count) {
+            if allStations[i].iTunesArtworkData == nil || allStations[i].iTunesArtworkData!.isEmpty {
+                allStations[i].iTunesArtworkData = sampleiTunesArtworkBase64
+                enhancedCount += 1
+                os_log("✅ CarPlay: Enhanced existing station '%@' with iTunes artwork for CarPlay display", 
+                       log: log, type: .info, allStations[i].name)
+            }
+        }
+        
+        // SECOND: Create demo stations that look like real radio stations
         let demoStations = [
             RadioStation(
                 id: "demo_kiis_fm",
@@ -636,21 +646,46 @@ class CarPlayManager: NSObject, ObservableObject {
                 favoriteOrder: 2
             ),
             RadioStation(
-                id: "demo_hot_995",
-                name: "HOT 99.5",
-                url: "http://stream.hot995.com/stream",
+                id: "demo_radio_emanuel_itunes",
+                name: "Radio Emanuel (Demo)",
+                url: "http://stream.radioemanuel.com/stream",
                 iconData: nil,
                 iTunesArtworkData: sampleiTunesArtworkBase64,
-                country: "USA",
+                country: "Albania",
                 isFavorite: false
             )
         ]
         
-        // Add demo stations to the beginning of the arrays
+        os_log("✅ CarPlay: Created %d demo stations", log: log, type: .info, demoStations.count)
+        
+        // Log demo station details
+        for (index, station) in demoStations.enumerated() {
+            os_log("📍 Demo Station %d: '%@' (country: %@, iTunes data: %d chars)", 
+                   log: log, type: .info, index, station.name, station.country, station.iTunesArtworkData?.count ?? 0)
+        }
+        
+        // Add demo stations to the arrays strategically
+        let originalCount = allStations.count
         allStations = demoStations + allStations
         favoriteStations = demoStations.filter { $0.isFavorite } + favoriteStations
         
-        os_log("CarPlay: Added %d demo stations with iTunes artwork", log: log, type: .info, demoStations.count)
+        os_log("✅ CarPlay: Added demo stations - total stations changed from %d to %d", 
+               log: log, type: .info, originalCount, allStations.count)
+        
+        // Update country groupings to include the new demo stations
+        stationsByCountry = Dictionary(grouping: allStations) { $0.country }
+        availableCountries = Array(stationsByCountry.keys).sorted()
+        
+        os_log("✅ CarPlay: Updated country groupings - now have %d countries: %@", 
+               log: log, type: .info, availableCountries.count, availableCountries.joined(separator: ", "))
+        
+        // Final verification
+        let finalStationsWithiTunes = allStations.filter { $0.iTunesArtworkData != nil && !$0.iTunesArtworkData!.isEmpty }
+        os_log("✅ CarPlay: Final verification - %d stations now have iTunes artwork", 
+               log: log, type: .info, finalStationsWithiTunes.count)
+        
+        os_log("✅ CarPlay: Demo station addition completed - enhanced %d existing + added %d demo stations", 
+               log: log, type: .info, enhancedCount, demoStations.count)
     }
     
     private func addEmptyStationSamples() {
@@ -818,83 +853,66 @@ class CarPlayManager: NSObject, ObservableObject {
         let image = renderer.image { context in
             let rect = CGRect(origin: .zero, size: size)
             
-            // Create a more realistic radio station logo style with gradient background
+            // Create a more realistic album artwork style with modern gradient
             let colors = [
-                UIColor(red: 0.9, green: 0.1, blue: 0.4, alpha: 1.0),  // Hot pink
-                UIColor(red: 0.6, green: 0.0, blue: 0.8, alpha: 1.0)   // Purple
+                UIColor(red: 0.2, green: 0.6, blue: 0.9, alpha: 1.0),  // Nice blue
+                UIColor(red: 0.8, green: 0.3, blue: 0.8, alpha: 1.0),  // Purple accent
+                UIColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1.0)   // Dark base
             ]
             
             let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let colorLocations: [CGFloat] = [0.0, 1.0]
+            let colorLocations: [CGFloat] = [0.0, 0.6, 1.0]
             let gradient = CGGradient(colorsSpace: colorSpace,
                                     colors: colors.map { $0.cgColor } as CFArray,
                                     locations: colorLocations)!
             
-            context.cgContext.drawRadialGradient(gradient,
-                                               startCenter: CGPoint(x: size.width/2, y: size.height/2),
-                                               startRadius: 0,
-                                               endCenter: CGPoint(x: size.width/2, y: size.height/2),
-                                               endRadius: size.width/2,
+            // Create a diagonal gradient for modern look
+            context.cgContext.drawLinearGradient(gradient,
+                                               start: CGPoint(x: 0, y: 0),
+                                               end: CGPoint(x: size.width, y: size.height),
                                                options: [])
             
-            // Add a subtle border
-            context.cgContext.setStrokeColor(UIColor.white.withAlphaComponent(0.3).cgColor)
-            context.cgContext.setLineWidth(2.0)
-            context.cgContext.strokeEllipse(in: rect.insetBy(dx: 5, dy: 5))
+            // Add abstract geometric shapes like modern album art
+            context.cgContext.setBlendMode(.softLight)
             
-            // Add station-style text with modern typography
-            let mainText = "KIIS"
-            let subText = "102.7"
-            let bottomText = "FM"
+            // Add some circles
+            for i in 0..<3 {
+                let circleSize = CGFloat(60 + i * 40)
+                let alpha = 0.3 - CGFloat(i) * 0.1
+                context.cgContext.setFillColor(UIColor.white.withAlphaComponent(alpha).cgColor)
+                
+                let x = CGFloat(40 + i * 80)
+                let y = CGFloat(50 + i * 50)
+                let circleRect = CGRect(x: x, y: y, width: circleSize, height: circleSize)
+                context.cgContext.fillEllipse(in: circleRect)
+            }
             
-            // Main station letters
-            let mainAttributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 48, weight: .black),
-                .foregroundColor: UIColor.white,
-                .strokeColor: UIColor.black.withAlphaComponent(0.3),
-                .strokeWidth: -2.0
-            ]
+            // Add a subtle border like real album artwork
+            context.cgContext.setStrokeColor(UIColor.white.withAlphaComponent(0.2).cgColor)
+            context.cgContext.setLineWidth(1.0)
+            context.cgContext.strokeEllipse(in: rect.insetBy(dx: 2, dy: 2))
             
-            // Frequency number
-            let subAttributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 32, weight: .bold),
+            // Add track/song info text in the style of modern album art
+            let songText = "♪ Now Playing"
+            let artistText = "Live Radio"
+            
+            // Song title
+            let songAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 24, weight: .bold),
                 .foregroundColor: UIColor.white.withAlphaComponent(0.9)
             ]
+            let songSize = songText.boundingRect(with: size, options: .usesLineFragmentOrigin, attributes: songAttributes, context: nil).size
+            let songRect = CGRect(x: (size.width - songSize.width) / 2, y: size.height - 80, width: songSize.width, height: songSize.height)
+            songText.draw(in: songRect, withAttributes: songAttributes)
             
-            // FM text
-            let bottomAttributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 28, weight: .medium),
-                .foregroundColor: UIColor.white.withAlphaComponent(0.8)
+            // Artist name
+            let artistAttributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 16, weight: .medium),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.7)
             ]
-            
-            // Calculate text positions for proper spacing
-            let mainSize = mainText.size(withAttributes: mainAttributes)
-            let subSize = subText.size(withAttributes: subAttributes)
-            let bottomSize = bottomText.size(withAttributes: bottomAttributes)
-            
-            let totalHeight = mainSize.height + subSize.height + bottomSize.height + 20 // 20 for spacing
-            let startY = (size.height - totalHeight) / 2
-            
-            // Draw main text (KIIS)
-            let mainRect = CGRect(x: (size.width - mainSize.width) / 2,
-                                y: startY,
-                                width: mainSize.width,
-                                height: mainSize.height)
-            mainText.draw(in: mainRect, withAttributes: mainAttributes)
-            
-            // Draw frequency (102.7)
-            let subRect = CGRect(x: (size.width - subSize.width) / 2,
-                               y: startY + mainSize.height + 5,
-                               width: subSize.width,
-                               height: subSize.height)
-            subText.draw(in: subRect, withAttributes: subAttributes)
-            
-            // Draw FM
-            let bottomRect = CGRect(x: (size.width - bottomSize.width) / 2,
-                                  y: startY + mainSize.height + subSize.height + 15,
-                                  width: bottomSize.width,
-                                  height: bottomSize.height)
-            bottomText.draw(in: bottomRect, withAttributes: bottomAttributes)
+            let artistSize = artistText.boundingRect(with: size, options: .usesLineFragmentOrigin, attributes: artistAttributes, context: nil).size
+            let artistRect = CGRect(x: (size.width - artistSize.width) / 2, y: size.height - 50, width: artistSize.width, height: artistSize.height)
+            artistText.draw(in: artistRect, withAttributes: artistAttributes)
         }
         
         return image.pngData()
@@ -1042,20 +1060,41 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     private func createStationArtworkImage(for station: RadioStation) -> UIImage? {
-        // Try iTunes artwork first, then icon data, then fallback
-        if let iTunesData = station.iTunesArtworkData,
-           let imageData = Data(base64Encoded: iTunesData),
-           let image = UIImage(data: imageData) {
-            return image
-        }
+        os_log("🎨 CarPlay: Creating artwork for station '%@' - ONLY using station icon", log: log, type: .debug, station.name)
         
+        // Log what artwork data is available (excluding iTunes artwork)
+        let hasIconData = station.iconData != nil && !station.iconData!.isEmpty
+        
+        os_log("🎨 CarPlay: Station '%@' - iconData: %@", 
+               log: log, type: .debug, station.name, 
+               hasIconData ? "YES" : "NO")
+        
+        // ONLY use station icon data - NO iTunes artwork in CarPlay
         if let iconData = station.iconData,
-           let imageData = Data(base64Encoded: iconData),
-           let image = UIImage(data: imageData) {
-            return image
+           !iconData.isEmpty {
+            os_log("🎨 CarPlay: Attempting to decode station icon for '%@' (length: %d)", 
+                   log: log, type: .debug, station.name, iconData.count)
+            
+            if let imageData = Data(base64Encoded: iconData) {
+                os_log("🎨 CarPlay: Successfully decoded base64 icon data for station '%@' (data size: %d bytes)", 
+                       log: log, type: .debug, station.name, imageData.count)
+                
+                if let image = UIImage(data: imageData) {
+                    os_log("🎨 CarPlay: ✅ Successfully created UIImage from station icon for '%@' (size: %.0fx%.0f)", 
+                           log: log, type: .info, station.name, image.size.width, image.size.height)
+                    return image
+                } else {
+                    os_log("🎨 CarPlay: ❌ Failed to create UIImage from station icon for '%@'", 
+                           log: log, type: .error, station.name)
+                }
+            } else {
+                os_log("🎨 CarPlay: ❌ Failed to decode base64 station icon for '%@'", 
+                       log: log, type: .error, station.name)
+            }
         }
         
         // Fallback to system image
+        os_log("🎨 CarPlay: Using fallback system image for station '%@'", log: log, type: .info, station.name)
         return UIImage(systemName: "radio")
     }
     
@@ -1074,6 +1113,107 @@ class CarPlayManager: NSObject, ObservableObject {
         
         // Fallback to system image
         return UIImage(systemName: "podcast")
+    }
+    
+    @objc private func handleStationArtworkUpdate(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            os_log("🎨 CarPlay: Artwork update notification missing stationId", log: log, type: .error)
+            return
+        }
+        
+        os_log("🎨 CarPlay: Received real-time artwork update for station ID: %@", log: log, type: .info, stationId)
+        
+        // Find and update the station with new artwork from the radio player
+        if let updatedStations = RadioStationViewModel.shared.stations as [RadioStation]? {
+            // Update our local station data
+            allStations = updatedStations
+            favoriteStations = allStations.filter { $0.isFavorite }
+            recentStations = allStations.filter { $0.lastPlayed != nil }
+            stationsByCountry = Dictionary(grouping: allStations) { $0.country }
+            
+            // Log the artwork update
+            if let updatedStation = allStations.first(where: { $0.id == stationId }) {
+                let hasiTunes = updatedStation.iTunesArtworkData != nil && !updatedStation.iTunesArtworkData!.isEmpty
+                os_log("🎨 CarPlay: Station '%@' now has iTunes artwork: %@ (data length: %d)", 
+                       log: log, type: .info, updatedStation.name, hasiTunes ? "YES" : "NO", 
+                       updatedStation.iTunesArtworkData?.count ?? 0)
+            }
+            
+            // CRITICAL: Multiple strategies to force CarPlay interface refresh
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                os_log("🎨 CarPlay: Starting aggressive interface refresh...", log: self.log, type: .info)
+                
+                // Strategy 1: Standard reload data
+                MPPlayableContentManager.shared().reloadData()
+                os_log("🎨 CarPlay: Called reloadData()", log: self.log, type: .debug)
+                
+                // Strategy 2: Force refresh with slight delay to ensure data is processed
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    guard let self = self else { return }
+                    MPPlayableContentManager.shared().reloadData()
+                    os_log("🎨 CarPlay: Called delayed reloadData()", log: self.log, type: .debug)
+                }
+                
+                // Strategy 3: If there's an active interface controller, try to refresh its current template
+                // Note: interfaceController is managed by CarPlaySceneDelegate, not CarPlayManager
+                os_log("🎨 CarPlay: Attempting template refresh via CarPlaySceneDelegate", log: self.log, type: .debug)
+                
+                // Strategy 4: Clear image cache to force re-creation of artwork
+                self.clearImageCache()
+                
+                // Strategy 5: Force refresh of visible content items
+                self.forceRefreshVisibleContent()
+                
+                os_log("🎨 CarPlay: Completed aggressive interface refresh sequence", log: self.log, type: .info)
+            }
+        } else {
+            os_log("🎨 CarPlay: Failed to get updated stations from RadioStationViewModel", log: log, type: .error)
+        }
+    }
+    
+    private func clearImageCache() {
+        // Clear the image cache to force re-creation of station artwork
+        imageCache.removeAll()
+        os_log("🎨 CarPlay: Cleared image cache to force artwork refresh", log: log, type: .debug)
+    }
+    
+    private func forceRefreshVisibleContent() {
+        // Try to refresh the currently visible content in CarPlay
+        os_log("🎨 CarPlay: Attempting to force refresh visible content", log: log, type: .debug)
+        
+        // Strategy: Since CarPlaySceneDelegate handles templates, we need to trigger a refresh
+        // through the MPPlayableContentManager delegate system
+        
+        // Force multiple reload calls with different timing
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            MPPlayableContentManager.shared().reloadData()
+            os_log("🎨 CarPlay: First immediate reloadData() call", log: self.log, type: .debug)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self else { return }
+            MPPlayableContentManager.shared().reloadData()
+            os_log("🎨 CarPlay: Second delayed reloadData() call", log: self.log, type: .debug)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self = self else { return }
+            MPPlayableContentManager.shared().reloadData()
+            os_log("🎨 CarPlay: Third delayed reloadData() call", log: self.log, type: .debug)
+        }
+        
+        // Additional strategy: Post a notification to CarPlaySceneDelegate to trigger refresh
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            NotificationCenter.default.post(name: NSNotification.Name("CarPlayRefreshRequested"), object: nil)
+            os_log("🎨 CarPlay: Posted refresh notification to CarPlaySceneDelegate", log: self.log, type: .debug)
+        }
+        
+        os_log("🎨 CarPlay: Initiated aggressive refresh sequence", log: log, type: .info)
     }
 }
 
@@ -1416,18 +1556,14 @@ extension CarPlayManager: MPPlayableContentDataSource {
                         stationItem.isContainer = false
                         stationItem.isPlayable = true
                         
-                        // Add station artwork safely - debug and prioritize iTunes artwork
+                        // Add station artwork safely - ONLY use station icon data, NO iTunes artwork
                         let hasIconData = station.iconData != nil && !station.iconData!.isEmpty
-                        let hasiTunesData = station.iTunesArtworkData != nil && !station.iTunesArtworkData!.isEmpty
-                        os_log("CarPlay: Home station '%@' has iconData: %@, iTunesData: %@", log: log, type: .debug, 
-                               station.name, hasIconData ? "true" : "false", hasiTunesData ? "true" : "false")
+                        os_log("CarPlay: Home station '%@' has iconData: %@", log: log, type: .debug, 
+                               station.name, hasIconData ? "true" : "false")
                         
-                        if hasiTunesData {
-                            stationItem.artwork = createSafeArtworkFromBase64(station.iTunesArtworkData, fallbackSystemImage: "radio")
-                            os_log("CarPlay: Using iTunes artwork for home station '%@'", log: log, type: .debug, station.name)
-                        } else if hasIconData {
+                        if hasIconData {
                             stationItem.artwork = createSafeArtworkFromBase64(station.iconData, fallbackSystemImage: "radio")
-                            os_log("CarPlay: Using icon data for home station '%@'", log: log, type: .debug, station.name)
+                            os_log("CarPlay: Using station icon for home station '%@'", log: log, type: .debug, station.name)
                         } else {
                             stationItem.artwork = createSafeArtworkFromBase64(nil, fallbackSystemImage: "radio")
                             os_log("CarPlay: Using fallback artwork for home station '%@'", log: log, type: .debug, station.name)
@@ -1497,18 +1633,14 @@ extension CarPlayManager: MPPlayableContentDataSource {
                         stationItem.isContainer = false
                         stationItem.isPlayable = true
                         
-                        // Add station artwork safely - debug and prioritize iTunes artwork
+                        // Add station artwork safely - ONLY use station icon data, NO iTunes artwork
                         let hasIconData = station.iconData != nil && !station.iconData!.isEmpty
-                        let hasiTunesData = station.iTunesArtworkData != nil && !station.iTunesArtworkData!.isEmpty
-                        os_log("CarPlay: Favorite station '%@' has iconData: %@, iTunesData: %@", log: log, type: .debug, 
-                               station.name, hasIconData ? "true" : "false", hasiTunesData ? "true" : "false")
+                        os_log("CarPlay: Favorite station '%@' has iconData: %@", log: log, type: .debug, 
+                               station.name, hasIconData ? "true" : "false")
                         
-                        if hasiTunesData {
-                            stationItem.artwork = createSafeArtworkFromBase64(station.iTunesArtworkData, fallbackSystemImage: "radio")
-                            os_log("CarPlay: Using iTunes artwork for favorite station '%@'", log: log, type: .info, station.name)
-                        } else if hasIconData {
+                        if hasIconData {
                             stationItem.artwork = createSafeArtworkFromBase64(station.iconData, fallbackSystemImage: "radio")
-                            os_log("CarPlay: Using icon data for favorite station '%@'", log: log, type: .debug, station.name)
+                            os_log("CarPlay: Using station icon for favorite station '%@'", log: log, type: .debug, station.name)
                         } else {
                             stationItem.artwork = createSafeArtworkFromBase64(nil, fallbackSystemImage: "radio")
                             os_log("CarPlay: Using fallback artwork for favorite station '%@'", log: log, type: .debug, station.name)
@@ -1526,18 +1658,14 @@ extension CarPlayManager: MPPlayableContentDataSource {
                         stationItem.isContainer = false
                         stationItem.isPlayable = true
                         
-                        // Add station artwork safely - debug and prioritize iTunes artwork
+                        // Add station artwork safely - ONLY use station icon data, NO iTunes artwork
                         let hasIconData = station.iconData != nil && !station.iconData!.isEmpty
-                        let hasiTunesData = station.iTunesArtworkData != nil && !station.iTunesArtworkData!.isEmpty
-                        os_log("CarPlay: Recent station '%@' has iconData: %@, iTunesData: %@", log: log, type: .debug, 
-                               station.name, hasIconData ? "true" : "false", hasiTunesData ? "true" : "false")
+                        os_log("CarPlay: Recent station '%@' has iconData: %@", log: log, type: .debug, 
+                               station.name, hasIconData ? "true" : "false")
                         
-                        if hasiTunesData {
-                            stationItem.artwork = createSafeArtworkFromBase64(station.iTunesArtworkData, fallbackSystemImage: "radio")
-                            os_log("CarPlay: Using iTunes artwork for recent station '%@'", log: log, type: .debug, station.name)
-                        } else if hasIconData {
+                        if hasIconData {
                             stationItem.artwork = createSafeArtworkFromBase64(station.iconData, fallbackSystemImage: "radio")
-                            os_log("CarPlay: Using icon data for recent station '%@'", log: log, type: .debug, station.name)
+                            os_log("CarPlay: Using station icon for recent station '%@'", log: log, type: .debug, station.name)
                         } else {
                             stationItem.artwork = createSafeArtworkFromBase64(nil, fallbackSystemImage: "radio")
                             os_log("CarPlay: Using fallback artwork for recent station '%@'", log: log, type: .debug, station.name)
@@ -1642,17 +1770,14 @@ extension CarPlayManager: MPPlayableContentDataSource {
                             stationItem.isPlayable = true
                             
                             // Add station artwork safely - debug and prioritize iTunes artwork
+                            // Add station artwork safely - ONLY use station icon data, NO iTunes artwork
                             let hasIconData = station.iconData != nil && !station.iconData!.isEmpty
-                            let hasiTunesData = station.iTunesArtworkData != nil && !station.iTunesArtworkData!.isEmpty
-                            os_log("CarPlay: Country station '%@' has iconData: %@, iTunesData: %@", log: log, type: .debug, 
-                                   station.name, hasIconData ? "true" : "false", hasiTunesData ? "true" : "false")
+                            os_log("CarPlay: Country station '%@' has iconData: %@", log: log, type: .debug, 
+                                   station.name, hasIconData ? "true" : "false")
                             
-                            if hasiTunesData {
-                                stationItem.artwork = createSafeArtworkFromBase64(station.iTunesArtworkData, fallbackSystemImage: "radio")
-                                os_log("CarPlay: Using iTunes artwork for country station '%@'", log: log, type: .debug, station.name)
-                            } else if hasIconData {
+                            if hasIconData {
                                 stationItem.artwork = createSafeArtworkFromBase64(station.iconData, fallbackSystemImage: "radio")
-                                os_log("CarPlay: Using icon data for country station '%@'", log: log, type: .debug, station.name)
+                                os_log("CarPlay: Using station icon for country station '%@'", log: log, type: .debug, station.name)
                             } else {
                                 stationItem.artwork = createSafeArtworkFromBase64(nil, fallbackSystemImage: "radio")
                                 os_log("CarPlay: Using fallback artwork for country station '%@'", log: log, type: .debug, station.name)

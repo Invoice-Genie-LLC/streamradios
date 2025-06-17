@@ -77,6 +77,17 @@ struct RadioStationListView: View {
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
             viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StationArtworkUpdated"))) { notification in
+            // Force refresh of the view when station artwork is updated
+            if let userInfo = notification.userInfo,
+               let stationId = userInfo["stationId"] as? String {
+                DispatchQueue.main.async {
+                    // Trigger view refresh by updating the viewModel
+                    viewModel.objectWillChange.send()
+                    print("📱 Station List: Refreshed for artwork update on station: \(stationId)")
+                }
+            }
+        }
         .overlay(
             Group {
                 if alertManager.showCustomAlert {

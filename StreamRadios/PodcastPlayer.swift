@@ -58,13 +58,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        }
     
     private func setupAudioSession() {
-            do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
-                try AVAudioSession.sharedInstance().setActive(true)
-            } catch {
-                os_log("Failed to set up audio session: %@", log: log, type: .error, error.localizedDescription)
-            }
+        do {
+            // Use compatible audio session settings that don't conflict with radio
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay])
+            // Don't activate here - let the active player control activation
+            print("✅ Podcast: Audio session category configured (not activated)")
+        } catch {
+            os_log("Failed to set up audio session: %@", log: log, type: .error, error.localizedDescription)
         }
+    }
     
     private func setupReachability() {
            do {

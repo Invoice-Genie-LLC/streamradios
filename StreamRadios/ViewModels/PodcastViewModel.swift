@@ -1781,6 +1781,20 @@ class PodcastViewModel: ObservableObject {
     }
     
     func updateProgress(for episode: PodcastEpisode, progress: Double) {
+        // Update the in-memory cache immediately
+        episodeProgress[episode.id] = progress
+        
+        // Ensure Core Data operations happen on the main thread
+        if Thread.isMainThread {
+            updateProgressInCoreData(episode, progress: progress)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.updateProgressInCoreData(episode, progress: progress)
+            }
+        }
+    }
+    
+    private func updateProgressInCoreData(_ episode: PodcastEpisode, progress: Double) {
         let context = CoreDataStack.shared.context
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
@@ -1805,10 +1819,6 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 updateEpisodeInLists(updatedEpisode)
-                
-                // Update the progress in the episodeProgress dictionary
-                episodeProgress[episode.id] = progress
-                
                 objectWillChange.send()
             } else {
                 print("Episode not found in CoreData")
@@ -2086,6 +2096,29 @@ class PodcastViewModel: ObservableObject {
 
     
     func getProgress(for episode: PodcastEpisode) -> Double {
+        // First check the in-memory cache for better performance
+        if let cachedProgress = episodeProgress[episode.id] {
+            return cachedProgress
+        }
+        
+        // If not in cache, check Core Data on the main thread
+        var progress: Double = 0.0
+        
+        // Ensure Core Data operations happen on the main thread
+        if Thread.isMainThread {
+            progress = getProgressFromCoreData(episode)
+        } else {
+            DispatchQueue.main.sync {
+                progress = getProgressFromCoreData(episode)
+            }
+        }
+        
+        // Cache the result for future use
+        episodeProgress[episode.id] = progress
+        return progress
+    }
+    
+    private func getProgressFromCoreData(_ episode: PodcastEpisode) -> Double {
         let context = CoreDataStack.shared.context
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
