@@ -70,6 +70,22 @@ class CarPlayManager: NSObject, ObservableObject {
             object: nil
         )
         
+        // Listen for real-time podcast progress updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePodcastProgressUpdate(_:)),
+            name: NSNotification.Name("PodcastProgressUpdated"),
+            object: nil
+        )
+        
+        // Listen for episode completions
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleEpisodeCompletion(_:)),
+            name: NSNotification.Name("EpisodeCompleted"),
+            object: nil
+        )
+        
         // NOTE: CarPlay disabled for iTunes artwork updates - only shows station icons
         // NotificationCenter.default.addObserver(
         //     self,
@@ -1211,6 +1227,65 @@ class CarPlayManager: NSObject, ObservableObject {
         }
         
         os_log("🎨 CarPlay: Initiated aggressive refresh sequence", log: log, type: .info)
+    }
+    
+    @objc private func handlePodcastProgressUpdate(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let progress = userInfo["progress"] as? Double else {
+            os_log("CarPlay: Invalid progress update notification", log: log, type: .error)
+            return
+        }
+        
+        os_log("CarPlay: Updating episode progress - ID: %@, progress: %.2f%%", log: log, type: .debug, episodeId, progress * 100)
+        
+        // Update the episode progress in our local data
+        updateEpisodeProgress(episodeId: episodeId, progress: progress)
+        
+        // Refresh CarPlay interface
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
+    }
+    
+    @objc private func handleEpisodeCompletion(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String else {
+            os_log("CarPlay: Invalid episode completion notification", log: log, type: .error)
+            return
+        }
+        
+        os_log("CarPlay: Marking episode as completed - ID: %@", log: log, type: .info, episodeId)
+        
+        // Update the episode as completed in our local data
+        updateEpisodeProgress(episodeId: episodeId, progress: 1.0, isCompleted: true)
+        
+        // Refresh CarPlay interface
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
+    }
+    
+    private func updateEpisodeProgress(episodeId: String, progress: Double, isCompleted: Bool = false) {
+        // Find and update the episode in our podcast feeds
+        for i in 0..<podcastFeeds.count {
+            if let episodeIndex = podcastFeeds[i].episodes.firstIndex(where: { $0.id == episodeId }) {
+                podcastFeeds[i].episodes[episodeIndex].state.progress = progress
+                if isCompleted {
+                    podcastFeeds[i].episodes[episodeIndex].state.isPlayed = true
+                }
+                
+                os_log("CarPlay: Updated episode '%@' progress to %.2f%% (completed: %@)", 
+                       log: log, type: .debug, 
+                       podcastFeeds[i].episodes[episodeIndex].title, 
+                       progress * 100, 
+                       isCompleted ? "true" : "false")
+                break
+            }
+        }
+        
+        // Update recent episodes list
+        updateRecentPodcastEpisodes()
     }
 }
 

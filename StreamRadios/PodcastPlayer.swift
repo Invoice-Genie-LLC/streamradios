@@ -241,6 +241,25 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
             return .commandFailed
         }
+        
+        // CRITICAL: Enable toggle play/pause command for CarPlay
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.togglePlayPause()
+                os_log("Remote Command: Toggle play/pause executed", log: self?.log ?? OSLog.default, type: .info)
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        // Disable commands that don't make sense for podcasts
+        commandCenter.stopCommand.isEnabled = false
+        commandCenter.seekForwardCommand.isEnabled = false
+        commandCenter.seekBackwardCommand.isEnabled = false
+        commandCenter.changePlaybackRateCommand.isEnabled = false
+        
+        os_log("Podcast Remote Command Center configured for CarPlay", log: log, type: .info)
     }
     
     private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
@@ -551,6 +570,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         isPlaying = true
         updateNowPlayingInfo()
         setupBackgroundPlayback()
+        
+        // Ensure remote command center is configured for CarPlay
+        setupRemoteCommandCenter()
 
         os_log("Started playing episode: %@", log: log, type: .info, episode.title)
         
@@ -634,6 +656,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             currentTime = 0
             currentProgress = 0
             shouldStartFromBeginning = false  // Reset the flag
+            // Update Now Playing info immediately with correct elapsed time
+            updateNowPlayingInfo()
             return
         }
         
@@ -664,17 +688,28 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let targetTime = savedProgress * duration
             os_log("Seeking to saved progress: %.2f%% (%.1f seconds) from %@", log: log, type: .info, savedProgress * 100, targetTime, progressSource)
             
+            // Update currentTime immediately BEFORE seeking to fix progress bar
+            currentTime = targetTime
+            currentProgress = savedProgress
+            
             // Seek to the saved position
             player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
                 if completed {
                     DispatchQueue.main.async {
+                        // Ensure the time is correctly set after seeking
                         self?.currentTime = targetTime
                         self?.currentProgress = savedProgress
                         self?.updatePlaybackInfo()
+                        // Update Now Playing info with correct elapsed time
+                        self?.updateNowPlayingInfo()
                         os_log("Successfully restored playback position to %.1f seconds", log: self?.log ?? OSLog.default, type: .info, targetTime)
                     }
                 } else {
                     os_log("Failed to seek to saved progress", log: self?.log ?? OSLog.default, type: .error)
+                    // Even if seeking fails, update Now Playing info
+                    DispatchQueue.main.async {
+                        self?.updateNowPlayingInfo()
+                    }
                 }
             }
         } else {
@@ -682,6 +717,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             currentTime = 0
             currentProgress = 0
+            // Update Now Playing info immediately
+            updateNowPlayingInfo()
         }
     }
     
@@ -827,10 +864,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         nowPlayingInfo[MPMediaItemPropertyTitle] = currentEpisode.title
         nowPlayingInfo[MPMediaItemPropertyArtist] = currentFeed.title
         nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+        
+        // CRITICAL: Ensure elapsed time is correctly set for CarPlay progress bar
+        let elapsedTime = max(0, currentTime)
+        let totalDuration = max(0.01, duration)
+        
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
+        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = totalDuration
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+        
+        os_log("Podcast Now Playing: Elapsed=%.1fs, Duration=%.1fs, Rate=%.1f", log: log, type: .debug, elapsedTime, totalDuration, isPlaying ? 1.0 : 0.0)
         
         // Enhanced artwork priority: imageData -> iconData -> artworkUrl (same as CarPlay)
         var artworkSet = false
@@ -912,12 +956,35 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             if remainingTime < 1 || progress >= 0.99 {
                 viewModel?.markEpisodeAsCompleted(currentEpisode)
                 os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
+                
+                // Notify CarPlay of episode completion
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("EpisodeCompleted"),
+                    object: nil,
+                    userInfo: [
+                        "episodeId": currentEpisode.id,
+                        "isCompleted": true
+                    ]
+                )
             } else {
                 // Only save progress if it has changed significantly
                 if abs(progress - lastSavedProgress) >= saveThreshold {
                     viewModel?.updateProgress(for: currentEpisode, progress: progress)
                     lastSavedProgress = progress
                     os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
+                    
+                    // Notify CarPlay of progress update for real-time updates
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("PodcastProgressUpdated"),
+                        object: nil,
+                        userInfo: [
+                            "episodeId": currentEpisode.id,
+                            "progress": progress,
+                            "isPlaying": isPlaying,
+                            "currentTime": currentTime,
+                            "duration": duration
+                        ]
+                    )
                 }
             }
             
