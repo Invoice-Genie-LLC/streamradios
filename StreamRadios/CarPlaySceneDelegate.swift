@@ -11,7 +11,7 @@ import os.log
 import CoreData
 import MediaPlayer
 
-class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPTabBarTemplateDelegate {
     
     private let log = OSLog(subsystem: "com.streamradios.carplay", category: "SceneDelegate")
     var interfaceController: CPInterfaceController?
@@ -21,6 +21,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var currentPodcastFeed: PodcastFeed?
     private var lastProgressUpdateTime: Date?
     private var isUpdatingTemplate = false
+    private var currentPodcastTabType: PodcastTabType = .all
+    private var currentPodcastTabBarTemplate: CPTabBarTemplate?
+    
+    enum PodcastTabType {
+        case all
+        case favorites
+        case downloads
+    }
     
     // MARK: - Scene Delegate Methods
     
@@ -65,44 +73,32 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         await withCheckedContinuation { continuation in
             context.perform {
                 do {
-                    // Load podcast feeds first
+                    // Load podcast feeds first - WITHOUT loading all episodes
                     let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                     feedRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
                     
                     let managedFeeds = try context.fetch(feedRequest)
                     os_log("🚗 CarPlay: Found %d podcast feeds in Core Data", log: self.log, type: .info, managedFeeds.count)
                     
-                    // Convert each managed feed to PodcastFeed and load its episodes
+                    // Convert each managed feed to PodcastFeed WITHOUT loading episodes yet
                     for managedFeed in managedFeeds {
                         var feed = managedFeed.toPodcastFeed()
                         
-                        // Load episodes for this feed on the same context
-                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                        episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                        episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                        // Only get episode count for display purposes, don't load actual episodes
+                        let episodeCountRequest: NSFetchRequest<NSNumber> = NSFetchRequest(entityName: "PodcastModel")
+                        episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                        episodeCountRequest.resultType = .countResultType
                         
                         do {
-                            let managedEpisodes = try context.fetch(episodeRequest)
-                            let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
-                                var episode = managedEpisode.toPodcastEpisode()
-                                episode.state.isPlayed = managedEpisode.isPlayed
-                                episode.state.progress = managedEpisode.progress
-                                episode.state.isFavorite = managedEpisode.isFavorite
-                                episode.state.isDownloaded = managedEpisode.isDownloaded
-                                
-                                // Log progress for debugging
-                                if managedEpisode.progress > 0 {
-                                    os_log("🚗 CarPlay: Episode '%@' has progress: %.2f%%", log: self.log, type: .debug, episode.title, managedEpisode.progress * 100)
-                                }
-                                
-                                return episode
-                            }
+                            let episodeCount = try context.count(for: episodeCountRequest)
+                            os_log("🚗 CarPlay: Feed '%@' has %d episodes (count only)", log: self.log, type: .debug, feed.title, episodeCount)
                             
-                            feed.episodes = episodes
-                            os_log("🚗 CarPlay: Loaded %d episodes for feed '%@'", log: self.log, type: .debug, episodes.count, feed.title)
+                            // Initialize with empty episodes array - episodes will be loaded on-demand
+                            feed.episodes = []
                             
                         } catch {
-                            os_log("🚗 CarPlay: Error loading episodes for feed '%@': %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                            os_log("🚗 CarPlay: Error counting episodes for feed '%@': %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                            feed.episodes = []
                         }
                         
                         podcastFeeds.append(feed)
@@ -121,8 +117,54 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Configure CarPlayManager with the loaded podcast data on main actor
         await MainActor.run {
             CarPlayManager.shared.configurePodcastData(podcastFeeds)
-            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds", log: self.log, type: .info, podcastFeeds.count)
-            print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds")
+            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, podcastFeeds.count)
+            print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds (episodes will load on-demand)")
+        }
+    }
+    
+    /// Load episodes for a specific feed on-demand for better performance
+    func loadEpisodesForFeed(_ feedId: String, completion: @escaping ([PodcastEpisode]) -> Void) {
+        os_log("🚗 CarPlay: Loading episodes on-demand for feed ID: %@", log: log, type: .info, feedId)
+        
+        let context = CoreDataStack.shared.context
+        
+        // Perform Core Data operations on the context's queue
+        context.perform {
+            do {
+                // Load episodes with pagination for better performance
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                episodeRequest.fetchLimit = 50 // Load first 50 episodes only for CarPlay
+                
+                let managedEpisodes = try context.fetch(episodeRequest)
+                let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    episode.state.isFavorite = managedEpisode.isFavorite
+                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    
+                    // Log progress for debugging
+                    if managedEpisode.progress > 0 {
+                        os_log("🚗 CarPlay: Episode '%@' has progress: %.2f%%", log: self.log, type: .debug, episode.title, managedEpisode.progress * 100)
+                    }
+                    
+                    return episode
+                }
+                
+                os_log("🚗 CarPlay: Loaded %d episodes on-demand for feed ID: %@", log: self.log, type: .info, episodes.count, feedId)
+                
+                DispatchQueue.main.async {
+                    completion(episodes)
+                }
+                
+            } catch {
+                os_log("🚗 CarPlay: Error loading episodes on-demand for feed ID '%@': %@", log: self.log, type: .error, feedId, error.localizedDescription)
+                DispatchQueue.main.async {
+                    completion([])
+                }
+            }
         }
     }
     
@@ -416,42 +458,132 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func showPodcastEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
-        let carPlayManager = CarPlayManager.shared
+        os_log("🚗 CarPlay: Showing episodes for podcast: %@", log: log, type: .info, podcast.title)
         
-        var episodeItems: [CPListItem] = []
-        for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
-            let duration = formatDuration(episode.duration)
-            var statusText = ""
+        // Load episodes on-demand if not already loaded
+        if podcast.episodes.isEmpty {
+            os_log("🚗 CarPlay: Episodes not loaded for podcast '%@', loading on-demand...", log: log, type: .info, podcast.title)
             
-            // Determine episode status based on state and current playback
-            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
-                statusText = " • Playing"
-            } else if episode.state.isPlayed {
-                statusText = " • Complete"
-            } else if episode.state.progress > 0 {
-                statusText = " • In Progress"
+            loadEpisodesForFeed(podcast.id) { [weak self] episodes in
+                guard let self = self else { return }
+                
+                os_log("🚗 CarPlay: Loaded %d episodes on-demand for podcast '%@'", log: self.log, type: .info, episodes.count, podcast.title)
+                
+                // Update the podcast with loaded episodes
+                var updatedPodcast = podcast
+                updatedPodcast.episodes = episodes
+                
+                // Create episode list template with tabs after loading episodes
+                self.createAndShowPodcastTemplate(updatedPodcast, completion: completion)
             }
-            
-            let item = CPListItem(text: episode.title,
-                                 detailText: "\(duration)\(statusText)",
-                                 image: carPlayManager.getPodcastArtwork(for: podcast))
-            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                self?.playEpisode(episode, completion: completion)
-            }
-            episodeItems.append(item)
+        } else {
+            // Episodes already loaded, show immediately
+            createAndShowPodcastTemplate(podcast, completion: completion)
         }
+    }
+    
+    private func createAndShowPodcastTemplate(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        // Create horizontal tabs for All, Favorites and Downloads
+        let allTab = createAllTabTemplate(for: podcast)
+        let favoritesTab = createFavoritesTabTemplate(for: podcast)
+        let downloadsTab = createDownloadsTabTemplate(for: podcast)
         
-        let section = CPListSection(items: episodeItems, header: "Episodes", sectionIndexTitle: nil)
-        let listTemplate = CPListTemplate(title: podcast.title, sections: [section])
+        let tabBarTemplate = CPTabBarTemplate(templates: [allTab, favoritesTab, downloadsTab])
+        tabBarTemplate.delegate = self
         
         // Track the current template and feed for real-time updates
-        currentPodcastTemplate = listTemplate
+        currentPodcastTemplate = allTab  // Start with All tab (default)
         currentPodcastFeed = podcast
+        currentPodcastTabType = .all  // Default to All tab
+        currentPodcastTabBarTemplate = tabBarTemplate
         
-        interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+        // Set as root template since CPTabBarTemplate cannot be pushed
+        interfaceController?.setRootTemplate(tabBarTemplate, animated: true) { success, error in
+            if success {
+                os_log("🚗 CarPlay: Successfully displayed podcast episodes with tabs", log: self.log, type: .info)
+            } else {
+                os_log("🚗 CarPlay: Failed to display podcast episodes: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+            }
             completion()
-        })
+        }
+    }
+    
+    private func createAllTabTemplate(for podcast: PodcastFeed) -> CPListTemplate {
+        let allEpisodes = podcast.episodes
+        let listItems = allEpisodes.map { episode in
+            createEpisodeListItem(episode: episode, podcast: podcast)
+        }
+        
+        // Add a back navigation item at the top of the list
+        let backItem = CPListItem(text: "← Back to Podcast List", detailText: "Return to all podcasts")
+        backItem.handler = { [weak self] _, completion in
+            self?.returnToPodcastList()
+            completion()
+        }
+        
+        let template = CPListTemplate(title: podcast.title, sections: [
+            CPListSection(items: [backItem]),
+            CPListSection(items: listItems.isEmpty ? [createEmptyStateItem(message: "No episodes")] : listItems)
+        ])
+        
+        template.tabTitle = "All"
+        template.tabImage = UIImage(systemName: "list.bullet")
+        
+        return template
+    }
+    
+    private func createFavoritesTabTemplate(for podcast: PodcastFeed) -> CPListTemplate {
+        let favoriteEpisodes = podcast.episodes.filter { episode in
+            episode.state.isFavorite
+        }
+        
+        let listItems = favoriteEpisodes.map { episode in
+            createEpisodeListItem(episode: episode, podcast: podcast)
+        }
+        
+        // Add a back navigation item at the top of the list
+        let backItem = CPListItem(text: "← Back to Podcast List", detailText: "Return to all podcasts")
+        backItem.handler = { [weak self] _, completion in
+            self?.returnToPodcastList()
+            completion()
+        }
+        
+        let template = CPListTemplate(title: podcast.title, sections: [
+            CPListSection(items: [backItem]),
+            CPListSection(items: listItems.isEmpty ? [createEmptyStateItem(message: "No favorite episodes")] : listItems)
+        ])
+        
+        template.tabTitle = "Favorites"
+        template.tabImage = UIImage(systemName: "star.fill")
+        
+        return template
+    }
+    
+    private func createDownloadsTabTemplate(for podcast: PodcastFeed) -> CPListTemplate {
+        let downloadedEpisodes = podcast.episodes.filter { episode in
+            episode.state.isDownloaded
+        }
+        
+        let listItems = downloadedEpisodes.map { episode in
+            createEpisodeListItem(episode: episode, podcast: podcast)
+        }
+        
+        // Add a back navigation item at the top of the list
+        let backItem = CPListItem(text: "← Back to Podcast List", detailText: "Return to all podcasts")
+        backItem.handler = { [weak self] _, completion in
+            self?.returnToPodcastList()
+            completion()
+        }
+        
+        let template = CPListTemplate(title: podcast.title, sections: [
+            CPListSection(items: [backItem]),
+            CPListSection(items: listItems.isEmpty ? [createEmptyStateItem(message: "No downloaded episodes")] : listItems)
+        ])
+        
+        template.tabTitle = "Downloads"
+        template.tabImage = UIImage(systemName: "arrow.down.circle.fill")
+        
+        return template
     }
     
     private func playStation(_ station: RadioStation, completion: @escaping () -> Void) {
@@ -699,8 +831,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         // Check if we're currently showing a podcast episode list that contains this episode
-        guard let currentTemplate = currentPodcastTemplate,
-              let currentFeed = currentPodcastFeed,
+        guard let currentFeed = currentPodcastFeed,
               currentFeed.episodes.contains(where: { $0.id == episodeId }) else {
             os_log("🚗 CarPlay: No current template or episode not found in current feed", log: log, type: .debug)
             return
@@ -727,68 +858,153 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func recreatePodcastEpisodeTemplate(for podcast: PodcastFeed) {
-        let carPlayManager = CarPlayManager.shared
+        os_log("🚗 CarPlay: Recreating podcast template for tab type: %@", log: log, type: .debug, String(describing: currentPodcastTabType))
         
-        var episodeItems: [CPListItem] = []
-        for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
-            let duration = formatDuration(episode.duration)
-            var statusText = ""
-            
-            // Determine episode status based on state and current playback
-            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
-                statusText = " • Playing"
-                os_log("🚗 CarPlay: Episode '%@' showing as Playing", log: log, type: .debug, episode.title)
-            } else if episode.state.isPlayed {
-                statusText = " • Complete"
-                os_log("🚗 CarPlay: Episode '%@' marked as Complete", log: log, type: .debug, episode.title)
-            } else if episode.state.progress > 0 {
-                statusText = " • In Progress"
-                os_log("🚗 CarPlay: Episode '%@' showing as In Progress", log: log, type: .debug, episode.title)
-            }
-            
-            let item = CPListItem(text: episode.title,
-                                 detailText: "\(duration)\(statusText)",
-                                 image: carPlayManager.getPodcastArtwork(for: podcast))
-            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                self?.playEpisode(episode, completion: completion)
-            }
-            episodeItems.append(item)
-        }
-        
-        // Create a new section with updated episode items
-        let section = CPListSection(items: episodeItems, header: "Episodes", sectionIndexTitle: nil)
-        
-        // Create a completely new template to ensure refresh
-        let newTemplate = CPListTemplate(title: podcast.title, sections: [section])
-        
-        // Update our reference to the new template
-        currentPodcastTemplate = newTemplate
-        
-        // Replace the current template if we're at the top of the stack
+        // For tab bar templates, we need to recreate the entire tab bar
         if let interfaceController = interfaceController,
-           let topTemplate = interfaceController.topTemplate as? CPListTemplate,
-           topTemplate.title == podcast.title {
+           let currentTabBar = currentPodcastTabBarTemplate {
             
-            // Pop current template and push the new one
-            interfaceController.popTemplate(animated: false) { [weak self] success, error in
+            // Create new tabs with updated data
+            let allTab = createAllTabTemplate(for: podcast)
+            let favoritesTab = createFavoritesTabTemplate(for: podcast)
+            let downloadsTab = createDownloadsTabTemplate(for: podcast)
+            
+            let newTabBarTemplate = CPTabBarTemplate(templates: [allTab, favoritesTab, downloadsTab])
+            newTabBarTemplate.delegate = self
+            
+            // Update current template reference based on current tab type
+            switch currentPodcastTabType {
+            case .all:
+                currentPodcastTemplate = allTab
+            case .favorites:
+                currentPodcastTemplate = favoritesTab
+            case .downloads:
+                currentPodcastTemplate = downloadsTab
+            }
+            
+            // Update the tab bar template reference
+            currentPodcastTabBarTemplate = newTabBarTemplate
+            
+            // Replace the current tab bar template
+            interfaceController.setRootTemplate(newTabBarTemplate, animated: false) { success, error in
                 if success {
-                    interfaceController.pushTemplate(newTemplate, animated: false) { success, error in
-                        if success {
-                            os_log("🚗 CarPlay: Successfully recreated episode template with status updates", log: self?.log ?? OSLog.default, type: .info)
-                        } else {
-                            os_log("🚗 CarPlay: Failed to push new template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
-                        }
-                    }
+                    os_log("🚗 CarPlay: Successfully recreated tab bar template", log: self.log, type: .debug)
                 } else {
-                    os_log("🚗 CarPlay: Failed to pop current template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
+                    os_log("🚗 CarPlay: Failed to recreate tab bar template: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
                 }
             }
-        } else {
-            // If we're not at the top, just update our reference for when we return
-            os_log("🚗 CarPlay: Template not at top of stack, just updating reference", log: log, type: .debug)
+        }
+    }
+    
+    private func createEpisodeListItem(episode: PodcastEpisode, podcast: PodcastFeed) -> CPListItem {
+        let carPlayManager = CarPlayManager.shared
+        let duration = formatDuration(episode.duration)
+        var statusText = ""
+        
+        // Determine episode status based on state and current playback
+        if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+           currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+            statusText = " • Playing"
+        } else if episode.state.isPlayed {
+            statusText = " • Complete"
+        } else if episode.state.progress > 0 {
+            statusText = " • In Progress"
         }
         
-        os_log("🚗 CarPlay: Recreated episode template with %d episodes (status indicators)", log: log, type: .debug, episodeItems.count)
+        let item = CPListItem(text: episode.title,
+                             detailText: "\(duration)\(statusText)",
+                             image: carPlayManager.getPodcastArtwork(for: podcast))
+        item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+            self?.playEpisode(episode, completion: completion)
+        }
+        return item
+    }
+    
+    private func createEmptyStateItem(message: String) -> CPListItem {
+        let item = CPListItem(text: message, detailText: nil)
+        // Make it non-selectable by not setting a handler
+        return item
+    }
+    
+    private func createPodcastListTemplate() -> CPListTemplate? {
+        // Get podcasts from CarPlayManager
+        let carPlayManager = CarPlayManager.shared
+        let podcastFeeds = carPlayManager.getPodcastFeeds()
+        
+        os_log("🚗 CarPlay: Creating podcast list with %d feeds", log: log, type: .info, podcastFeeds.count)
+        
+        var sections: [CPListSection] = []
+        
+        if podcastFeeds.isEmpty {
+            let emptyItem = CPListItem(text: "No Podcasts", detailText: "Add podcasts to see them here")
+            let emptySection = CPListSection(items: [emptyItem])
+            sections.append(emptySection)
+        } else {
+            let podcastItems = podcastFeeds.map { feed in
+                let episodeCount = feed.episodes.count
+                let detailText = episodeCount == 1 ? "1 episode" : "\(episodeCount) episodes"
+                
+                let item = CPListItem(text: feed.title,
+                                     detailText: detailText,
+                                     image: carPlayManager.getPodcastArtwork(for: feed))
+                
+                item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                    self?.showPodcastEpisodes(feed, completion: completion)
+                }
+                
+                return item
+            }
+            
+            let podcastSection = CPListSection(items: podcastItems)
+            sections.append(podcastSection)
+        }
+        
+        let listTemplate = CPListTemplate(title: "Podcasts", sections: sections)
+        listTemplate.emptyViewTitleVariants = ["No Podcasts"]
+        listTemplate.emptyViewSubtitleVariants = ["Add podcasts to see them here"]
+        
+        return listTemplate
+    }
+    
+    private func returnToPodcastList() {
+        // Create and show the podcast list template to return to
+        guard let podcastListTemplate = createPodcastListTemplate() else {
+            os_log("🚗 CarPlay: Failed to create podcast list template", log: log, type: .error)
+            return
+        }
+        
+        interfaceController?.setRootTemplate(podcastListTemplate, animated: true) { success, error in
+            if success {
+                os_log("🚗 CarPlay: Successfully returned to podcast list", log: self.log, type: .info)
+            } else {
+                os_log("🚗 CarPlay: Failed to return to podcast list: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+            }
+        }
+        
+        // Clear current podcast tracking
+        currentPodcastTemplate = nil
+        currentPodcastFeed = nil
+        currentPodcastTabBarTemplate = nil
+    }
+    
+    // MARK: - CPTabBarTemplateDelegate
+    
+    func tabBarTemplate(_ tabBarTemplate: CPTabBarTemplate, didSelect selectedTemplate: CPTemplate) {
+        guard let listTemplate = selectedTemplate as? CPListTemplate else { return }
+        
+        // Update current tab type based on selected template
+        if listTemplate.tabTitle == "All" {
+            currentPodcastTabType = .all
+            os_log("🚗 CarPlay: User selected All tab", log: log, type: .info)
+        } else if listTemplate.tabTitle == "Favorites" {
+            currentPodcastTabType = .favorites
+            os_log("🚗 CarPlay: User selected Favorites tab", log: log, type: .info)
+        } else if listTemplate.tabTitle == "Downloads" {
+            currentPodcastTabType = .downloads
+            os_log("🚗 CarPlay: User selected Downloads tab", log: log, type: .info)
+        }
+        
+        // Update current template reference
+        currentPodcastTemplate = listTemplate
     }
 } 
