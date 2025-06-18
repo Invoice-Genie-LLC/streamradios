@@ -1266,7 +1266,8 @@ class CarPlayManager: NSObject, ObservableObject {
         }
     }
     
-    private func updateEpisodeProgress(episodeId: String, progress: Double, isCompleted: Bool = false) {
+    // Make this method public so CarPlaySceneDelegate can call it
+    func updateEpisodeProgress(episodeId: String, progress: Double, isCompleted: Bool = false) {
         // Find and update the episode in our podcast feeds
         for i in 0..<podcastFeeds.count {
             if let episodeIndex = podcastFeeds[i].episodes.firstIndex(where: { $0.id == episodeId }) {

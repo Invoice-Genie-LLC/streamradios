@@ -9,6 +9,7 @@ import UIKit
 import CarPlay
 import os.log
 import CoreData
+import MediaPlayer
 
 class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
@@ -599,8 +600,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         os_log("🚗 CarPlay: Received progress update for episode ID: %@, progress: %.2f%%", log: log, type: .debug, episodeId, progress * 100)
         
+        // Update the episode in CarPlayManager's data immediately
+        let carPlayManager = CarPlayManager.shared
+        carPlayManager.updateEpisodeProgress(episodeId: episodeId, progress: progress, isCompleted: progress >= 0.99)
+        
         // Update the currently displayed podcast episode list if it contains this episode
         refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
+        
+        // Also refresh the legacy CarPlay content for older systems
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
     }
     
     private func handleEpisodeCompletion(_ notification: Notification) {
@@ -610,7 +620,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         os_log("🚗 CarPlay: Episode completed: %@", log: log, type: .info, episodeId)
+        
+        // Update the episode in CarPlayManager's data immediately
+        let carPlayManager = CarPlayManager.shared
+        carPlayManager.updateEpisodeProgress(episodeId: episodeId, progress: 1.0, isCompleted: true)
+        
+        // Refresh the current template immediately to show completion
         refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
+        
+        // Also refresh the legacy CarPlay content for older systems
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
     }
     
     private func handleEpisodeStateChange(_ notification: Notification) {

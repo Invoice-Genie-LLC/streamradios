@@ -1795,36 +1795,65 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func updateProgressInCoreData(_ episode: PodcastEpisode, progress: Double) {
-        let context = CoreDataStack.shared.context
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-        
-        do {
-            let results = try context.fetch(fetchRequest)
-            if let managedEpisode = results.first {
-                managedEpisode.progress = progress
-                try context.save()
+        // Perform Core Data operations on a background queue to avoid main thread I/O
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            guard let self = self else { return }
+            
+            let context = CoreDataStack.shared.context
+            context.perform {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
                 
-                // Update the in-memory episode
-                var updatedEpisode = episode
-                updatedEpisode.state.progress = progress
-                
-                // Preserve existing "finished" status - only mark as finished if progress >= 0.99
-                // but don't unmark episodes that were already marked as finished
-                if progress >= 0.99 {
-                    updatedEpisode.state.isPlayed = true
-                } else if !episode.state.isPlayed {
-                    // Only update isPlayed to false if it wasn't already marked as finished
-                    updatedEpisode.state.isPlayed = false
+                do {
+                    let results = try context.fetch(fetchRequest)
+                    if let managedEpisode = results.first {
+                        managedEpisode.progress = progress
+                        
+                        // Update completion status
+                        if progress >= 0.99 {
+                            managedEpisode.isPlayed = true
+                        } else if !episode.state.isPlayed {
+                            // Only update isPlayed to false if it wasn't already marked as finished
+                            managedEpisode.isPlayed = false
+                        }
+                        
+                        try context.save()
+                        
+                        // Update the in-memory episode on main thread
+                        DispatchQueue.main.async {
+                            var updatedEpisode = episode
+                            updatedEpisode.state.progress = progress
+                            
+                            // Preserve existing "finished" status - only mark as finished if progress >= 0.99
+                            // but don't unmark episodes that were already marked as finished
+                            if progress >= 0.99 {
+                                updatedEpisode.state.isPlayed = true
+                                
+                                // Notify CarPlay immediately of episode completion
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("EpisodeCompleted"),
+                                    object: nil,
+                                    userInfo: [
+                                        "episodeId": episode.id,
+                                        "isCompleted": true,
+                                        "progress": progress
+                                    ]
+                                )
+                            } else if !episode.state.isPlayed {
+                                // Only update isPlayed to false if it wasn't already marked as finished
+                                updatedEpisode.state.isPlayed = false
+                            }
+                            
+                            self.updateEpisodeInLists(updatedEpisode)
+                            self.objectWillChange.send()
+                        }
+                    } else {
+                        print("Episode not found in CoreData")
+                    }
+                } catch {
+                    print("Failed to update episode progress: \(error)")
                 }
-                
-                updateEpisodeInLists(updatedEpisode)
-                objectWillChange.send()
-            } else {
-                print("Episode not found in CoreData")
             }
-        } catch {
-            print("Failed to update episode progress: \(error)")
         }
     }
     
@@ -1835,6 +1864,19 @@ class PodcastViewModel: ObservableObject {
         updateEpisodeInLists(updatedEpisode)
         saveEpisodeToCoreData(updatedEpisode)
         objectWillChange.send()
+        
+        // Immediately notify CarPlay of episode completion for real-time updates
+        NotificationCenter.default.post(
+            name: NSNotification.Name("EpisodeCompleted"),
+            object: nil,
+            userInfo: [
+                "episodeId": episode.id,
+                "isCompleted": true,
+                "progress": 1.0
+            ]
+        )
+        
+        os_log("Episode marked as completed and CarPlay notified: %@", log: log, type: .info, episode.title)
     }
     
     func updateEpisode(_ updatedEpisode: PodcastEpisode) {

@@ -638,10 +638,34 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
             NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem, queue: .main) { [weak self] _ in
                 guard let self = self, let currentEpisode = self.currentEpisode else { return }
+                
+                os_log("🎵 Episode finished playing (AVPlayerItemDidPlayToEndTime): %@", log: self.log, type: .info, currentEpisode.title)
+                
+                // Mark episode as completed
                 self.viewModel?.markEpisodeAsCompleted(currentEpisode)
+                
+                // Pause playback
                 self.pause()
+                
+                // Update current time and progress to reflect completion
+                self.currentTime = self.duration
+                self.currentProgress = 1.0
+                
+                // Update playback info and Now Playing
                 self.updatePlaybackInfo()
                 self.updateNowPlayingInfo()
+                
+                // Notify CarPlay of episode completion
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("EpisodeCompleted"),
+                    object: nil,
+                    userInfo: [
+                        "episodeId": currentEpisode.id,
+                        "isCompleted": true
+                    ]
+                )
+                
+                os_log("🚗 Episode completion notification sent to CarPlay: %@", log: self.log, type: .info, currentEpisode.title)
             }
         }
     
@@ -952,7 +976,27 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Calculate remaining time
             let remainingTime = max(duration - currentTime, 0)
             
-            // If the remaining time is less than 1 second or progress is >= 0.99, mark the episode as completed
+            // Always save progress if it has changed significantly
+            if abs(progress - lastSavedProgress) >= saveThreshold {
+                viewModel?.updateProgress(for: currentEpisode, progress: progress)
+                lastSavedProgress = progress
+                os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
+                
+                // Notify CarPlay of progress update for real-time updates
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("PodcastProgressUpdated"),
+                    object: nil,
+                    userInfo: [
+                        "episodeId": currentEpisode.id,
+                        "progress": progress,
+                        "isPlaying": isPlaying,
+                        "currentTime": currentTime,
+                        "duration": duration
+                    ]
+                )
+            }
+            
+            // Check for episode completion AFTER saving progress
             if remainingTime < 1 || progress >= 0.99 {
                 viewModel?.markEpisodeAsCompleted(currentEpisode)
                 os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
@@ -966,26 +1010,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         "isCompleted": true
                     ]
                 )
-            } else {
-                // Only save progress if it has changed significantly
-                if abs(progress - lastSavedProgress) >= saveThreshold {
-                    viewModel?.updateProgress(for: currentEpisode, progress: progress)
-                    lastSavedProgress = progress
-                    os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
-                    
-                    // Notify CarPlay of progress update for real-time updates
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("PodcastProgressUpdated"),
-                        object: nil,
-                        userInfo: [
-                            "episodeId": currentEpisode.id,
-                            "progress": progress,
-                            "isPlaying": isPlaying,
-                            "currentTime": currentTime,
-                            "duration": duration
-                        ]
-                    )
-                }
             }
             
             DispatchQueue.main.async {
