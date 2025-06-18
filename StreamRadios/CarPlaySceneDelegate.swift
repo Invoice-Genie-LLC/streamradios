@@ -459,9 +459,74 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     private func showPodcastEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
         let carPlayManager = CarPlayManager.shared
+        var sections: [CPListSection] = []
         
+        // Add Downloaded episodes filter option at the top
+        let downloadedEpisodes = podcast.episodes.filter { $0.state.isDownloaded }
+        if !downloadedEpisodes.isEmpty {
+            let downloadedItem = CPListItem(text: "Downloaded Episodes",
+                                           detailText: "\(downloadedEpisodes.count) downloaded",
+                                           image: UIImage(systemName: "arrow.down.circle.fill"))
+            downloadedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.showDownloadedEpisodes(podcast, completion: completion)
+            }
+            
+            let filterSection = CPListSection(items: [downloadedItem], header: "Filter", sectionIndexTitle: nil)
+            sections.append(filterSection)
+        }
+        
+        // Show all episodes
         var episodeItems: [CPListItem] = []
         for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
+            let duration = formatDuration(episode.duration)
+            var statusText = ""
+            
+            // Determine episode status based on state and current playback
+            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+                statusText = " • Playing"
+            } else if episode.state.isPlayed {
+                statusText = " • Complete"
+            } else if episode.state.progress > 0 {
+                statusText = " • In Progress"
+            }
+            
+            // Add download indicator
+            if episode.state.isDownloaded {
+                statusText += " • Downloaded"
+            }
+            
+            let item = CPListItem(text: episode.title,
+                                 detailText: "\(duration)\(statusText)",
+                                 image: carPlayManager.getPodcastArtwork(for: podcast))
+            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.playEpisode(episode, completion: completion)
+            }
+            episodeItems.append(item)
+        }
+        
+        let episodesSection = CPListSection(items: episodeItems, header: "All Episodes", sectionIndexTitle: nil)
+        sections.append(episodesSection)
+        
+        let listTemplate = CPListTemplate(title: podcast.title, sections: sections)
+        
+        // Track the current template and feed for real-time updates
+        currentPodcastTemplate = listTemplate
+        currentPodcastFeed = podcast
+        
+        interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+            completion()
+        })
+    }
+    
+    private func showDownloadedEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        let carPlayManager = CarPlayManager.shared
+        
+        // Filter to only downloaded episodes
+        let downloadedEpisodes = podcast.episodes.filter { $0.state.isDownloaded }
+        
+        var episodeItems: [CPListItem] = []
+        for episode in downloadedEpisodes {
             let duration = formatDuration(episode.duration)
             var statusText = ""
             
@@ -484,12 +549,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             episodeItems.append(item)
         }
         
-        let section = CPListSection(items: episodeItems, header: "Episodes", sectionIndexTitle: nil)
-        let listTemplate = CPListTemplate(title: podcast.title, sections: [section])
+        if episodeItems.isEmpty {
+            let emptyItem = CPListItem(text: "No Downloaded Episodes", detailText: "Download episodes to listen offline")
+            episodeItems.append(emptyItem)
+        }
         
-        // Track the current template and feed for real-time updates
-        currentPodcastTemplate = listTemplate
-        currentPodcastFeed = podcast
+        let section = CPListSection(items: episodeItems, header: "Downloaded Episodes", sectionIndexTitle: nil)
+        let listTemplate = CPListTemplate(title: "\(podcast.title) - Downloaded", sections: [section])
         
         interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
             completion()
