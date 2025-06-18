@@ -43,6 +43,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var lastReportedProgress: Double = 0
     private let stateManager = EpisodeStateManager.shared
     private var shouldStartFromBeginning: Bool = false
+    private var lastCarPlayProgress: Double?
 
 
     var remainingTime: Double {
@@ -541,6 +542,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         currentFeed = feed
         isPodcastActive = true
         
+        // Reset CarPlay progress tracking for new episode
+        lastCarPlayProgress = nil
+        
         // Update currentEpisodeIndex
         if let index = allEpisodesInFeed.firstIndex(where: { $0.id == episode.id }) {
             currentEpisodeIndex = index
@@ -775,6 +779,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                updateNowPlayingInfo()
                setupTimeObserver()
                
+               // Notify CarPlay of playback state change
+               NotificationCenter.default.post(
+                   name: NSNotification.Name("PodcastPlaybackStateChanged"),
+                   object: nil,
+                   userInfo: [
+                       "episodeId": currentEpisode.id,
+                       "isPlaying": true
+                   ]
+               )
+               
                // Only send UI update if user is not scrolling
                if !isUserCurrentlyScrolling() {
                    objectWillChange.send()
@@ -793,6 +807,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         ensureProgressTracking(for: currentEpisode)
 
         updateNowPlayingInfo()
+        
+        // Notify CarPlay of playback state change
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PodcastPlaybackStateChanged"),
+            object: nil,
+            userInfo: [
+                "episodeId": currentEpisode.id,
+                "isPlaying": false
+            ]
+        )
         
         // Only send UI update if user is not scrolling
         if !isUserCurrentlyScrolling() {
@@ -976,11 +1000,19 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Calculate remaining time
             let remainingTime = max(duration - currentTime, 0)
             
-            // Always save progress if it has changed significantly
+            // Always save progress if it has changed significantly (less frequent for Core Data performance)
             if abs(progress - lastSavedProgress) >= saveThreshold {
                 viewModel?.updateProgress(for: currentEpisode, progress: progress)
                 lastSavedProgress = progress
                 os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
+            }
+            
+            // Send CarPlay progress updates more frequently for real-time percentage updates (every 1%)
+            let progressPercent = Int(progress * 100)
+            let lastProgressPercent = Int((lastCarPlayProgress ?? 0) * 100)
+            
+            if progressPercent != lastProgressPercent || abs(progress - (lastCarPlayProgress ?? 0)) >= 0.01 {
+                lastCarPlayProgress = progress
                 
                 // Notify CarPlay of progress update for real-time updates
                 NotificationCenter.default.post(
@@ -994,6 +1026,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         "duration": duration
                     ]
                 )
+                
+                os_log("🚗 CarPlay progress update sent: %@, Progress: %.1f%%", log: log, type: .debug, currentEpisode.title, progress * 100)
             }
             
             // Check for episode completion AFTER saving progress

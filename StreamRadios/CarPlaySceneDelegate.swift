@@ -19,6 +19,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     // Track currently displayed templates for real-time updates
     private var currentPodcastTemplate: CPListTemplate?
     private var currentPodcastFeed: PodcastFeed?
+    private var lastProgressUpdateTime: Date?
+    private var isUpdatingTemplate = false
     
     // MARK: - Scene Delegate Methods
     
@@ -419,18 +421,20 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         var episodeItems: [CPListItem] = []
         for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
             let duration = formatDuration(episode.duration)
-            var progressText = ""
+            var statusText = ""
             
-            // Show progress information if episode has been started
-            if episode.state.progress > 0 && episode.state.progress < 1.0 {
-                let progressPercent = Int(episode.state.progress * 100)
-                progressText = " • \(progressPercent)% played"
+            // Determine episode status based on state and current playback
+            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+                statusText = " • Playing"
             } else if episode.state.isPlayed {
-                progressText = " • Completed"
+                statusText = " • Complete"
+            } else if episode.state.progress > 0 {
+                statusText = " • In Progress"
             }
             
             let item = CPListItem(text: episode.title,
-                                 detailText: "\(duration)\(progressText)",
+                                 detailText: "\(duration)\(statusText)",
                                  image: carPlayManager.getPodcastArtwork(for: podcast))
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playEpisode(episode, completion: completion)
@@ -588,6 +592,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         ) { [weak self] notification in
             self?.handleEpisodeStateChange(notification)
         }
+        
+        // Listen for playback state changes (play/pause)
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("PodcastPlaybackStateChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handlePlaybackStateChange(notification)
+        }
     }
     
     private func handlePodcastProgressUpdate(_ notification: Notification) {
@@ -598,13 +611,27 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             return
         }
         
-        os_log("🚗 CarPlay: Received progress update for episode ID: %@, progress: %.2f%%", log: log, type: .debug, episodeId, progress * 100)
+        os_log("🚗 CarPlay: Received progress update for episode ID: %@, progress: %.1f%%", log: log, type: .info, episodeId, progress * 100)
         
         // Update the episode in CarPlayManager's data immediately
         let carPlayManager = CarPlayManager.shared
         carPlayManager.updateEpisodeProgress(episodeId: episodeId, progress: progress, isCompleted: progress >= 0.99)
         
-        // Update the currently displayed podcast episode list if it contains this episode
+        // Log current template state for debugging
+        if let currentFeed = currentPodcastFeed {
+            let episodeFound = currentFeed.episodes.contains(where: { $0.id == episodeId })
+            os_log("🚗 CarPlay: Current feed: %@, contains episode: %@", log: log, type: .debug, currentFeed.title, episodeFound ? "YES" : "NO")
+            
+            if episodeFound {
+                if let episode = currentFeed.episodes.first(where: { $0.id == episodeId }) {
+                    os_log("🚗 CarPlay: Episode current progress: %.1f%%", log: log, type: .debug, episode.state.progress * 100)
+                }
+            }
+        } else {
+            os_log("🚗 CarPlay: No current podcast feed set", log: log, type: .debug)
+        }
+        
+        // Update the currently displayed podcast episode list immediately if it contains this episode
         refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
         
         // Also refresh the legacy CarPlay content for older systems
@@ -644,15 +671,45 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
     }
     
+    private func handlePlaybackStateChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let isPlaying = userInfo["isPlaying"] as? Bool else {
+            os_log("🚗 CarPlay: Invalid playback state change notification", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Playback state changed for episode ID: %@, isPlaying: %@", log: log, type: .info, episodeId, isPlaying ? "YES" : "NO")
+        
+        // Update the episode status display immediately
+        refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
+    }
+    
     private func refreshCurrentPodcastTemplateIfNeeded(episodeId: String) {
+        // Throttle updates to prevent too frequent template refreshes (allow every 1 second for status changes)
+        let now = Date()
+        if let lastUpdate = lastProgressUpdateTime, now.timeIntervalSince(lastUpdate) < 1.0 {
+            // Skip if we updated less than 1 second ago
+            return
+        }
+        
+        // Prevent concurrent updates
+        if isUpdatingTemplate {
+            return
+        }
+        
         // Check if we're currently showing a podcast episode list that contains this episode
         guard let currentTemplate = currentPodcastTemplate,
               let currentFeed = currentPodcastFeed,
               currentFeed.episodes.contains(where: { $0.id == episodeId }) else {
+            os_log("🚗 CarPlay: No current template or episode not found in current feed", log: log, type: .debug)
             return
         }
         
         os_log("🚗 CarPlay: Refreshing current podcast template for episode: %@", log: log, type: .debug, episodeId)
+        
+        isUpdatingTemplate = true
+        lastProgressUpdateTime = now
         
         // Get updated feed data from CarPlayManager
         let carPlayManager = CarPlayManager.shared
@@ -662,29 +719,36 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Update the current feed reference
             currentPodcastFeed = updatedFeed
             
-            // Recreate the episode list with updated progress information
-            refreshPodcastEpisodeList(for: updatedFeed, template: currentTemplate)
+            // Force a template recreation for better reliability
+            recreatePodcastEpisodeTemplate(for: updatedFeed)
         }
+        
+        isUpdatingTemplate = false
     }
     
-    private func refreshPodcastEpisodeList(for podcast: PodcastFeed, template: CPListTemplate) {
+    private func recreatePodcastEpisodeTemplate(for podcast: PodcastFeed) {
         let carPlayManager = CarPlayManager.shared
         
         var episodeItems: [CPListItem] = []
         for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
             let duration = formatDuration(episode.duration)
-            var progressText = ""
+            var statusText = ""
             
-            // Show progress information if episode has been started
-            if episode.state.progress > 0 && episode.state.progress < 1.0 {
-                let progressPercent = Int(episode.state.progress * 100)
-                progressText = " • \(progressPercent)% played"
+            // Determine episode status based on state and current playback
+            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+                statusText = " • Playing"
+                os_log("🚗 CarPlay: Episode '%@' showing as Playing", log: log, type: .debug, episode.title)
             } else if episode.state.isPlayed {
-                progressText = " • Completed"
+                statusText = " • Complete"
+                os_log("🚗 CarPlay: Episode '%@' marked as Complete", log: log, type: .debug, episode.title)
+            } else if episode.state.progress > 0 {
+                statusText = " • In Progress"
+                os_log("🚗 CarPlay: Episode '%@' showing as In Progress", log: log, type: .debug, episode.title)
             }
             
             let item = CPListItem(text: episode.title,
-                                 detailText: "\(duration)\(progressText)",
+                                 detailText: "\(duration)\(statusText)",
                                  image: carPlayManager.getPodcastArtwork(for: podcast))
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playEpisode(episode, completion: completion)
@@ -692,10 +756,39 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             episodeItems.append(item)
         }
         
-        // Update the template with new episode items
+        // Create a new section with updated episode items
         let section = CPListSection(items: episodeItems, header: "Episodes", sectionIndexTitle: nil)
-        template.updateSections([section])
         
-        os_log("🚗 CarPlay: Updated podcast episode list with %d episodes", log: log, type: .debug, episodeItems.count)
+        // Create a completely new template to ensure refresh
+        let newTemplate = CPListTemplate(title: podcast.title, sections: [section])
+        
+        // Update our reference to the new template
+        currentPodcastTemplate = newTemplate
+        
+        // Replace the current template if we're at the top of the stack
+        if let interfaceController = interfaceController,
+           let topTemplate = interfaceController.topTemplate as? CPListTemplate,
+           topTemplate.title == podcast.title {
+            
+            // Pop current template and push the new one
+            interfaceController.popTemplate(animated: false) { [weak self] success, error in
+                if success {
+                    interfaceController.pushTemplate(newTemplate, animated: false) { success, error in
+                        if success {
+                            os_log("🚗 CarPlay: Successfully recreated episode template with status updates", log: self?.log ?? OSLog.default, type: .info)
+                        } else {
+                            os_log("🚗 CarPlay: Failed to push new template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
+                        }
+                    }
+                } else {
+                    os_log("🚗 CarPlay: Failed to pop current template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
+                }
+            }
+        } else {
+            // If we're not at the top, just update our reference for when we return
+            os_log("🚗 CarPlay: Template not at top of stack, just updating reference", log: log, type: .debug)
+        }
+        
+        os_log("🚗 CarPlay: Recreated episode template with %d episodes (status indicators)", log: log, type: .debug, episodeItems.count)
     }
 } 
