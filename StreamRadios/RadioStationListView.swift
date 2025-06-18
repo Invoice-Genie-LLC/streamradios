@@ -330,17 +330,10 @@ struct RadioStationListView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.orange)
                 .font(.footnote)
-            Text("Cannot change favorite status while station is playing")
+            Text("Cannot favorite while playing")
                 .font(.caption)
                 .foregroundColor(.orange)
             Spacer()
-            Button("Dismiss") {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    showFavoriteError = false
-                }
-            }
-            .font(.caption)
-            .foregroundColor(.blue)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
