@@ -197,6 +197,12 @@ struct RadioStationListView: View {
     
     private func stationsListView(screenWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
+            // Add top padding when in editing mode
+            if isEditing {
+                Spacer()
+                    .frame(height: 50)
+            }
+            
             // Stations list using List for swipe actions
             List {
                 ForEach(filteredStations) { station in
@@ -377,7 +383,6 @@ struct RadioStationListView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.leading, isEditing ? 40 : 0) // Additional leading padding when in edit mode
         .padding(.vertical, 12)
         .background(Color.black)
         .overlay(
