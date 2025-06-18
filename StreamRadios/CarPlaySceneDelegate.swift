@@ -297,7 +297,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         let favoriteStations = carPlayManager.getFavoriteStations()
         
-        var favoriteItems: [CPListItem] = []
+        var favoriteStationItems: [CPListItem] = []
         for station in favoriteStations {
             let item = CPListItem(text: station.name,
                                  detailText: station.country,
@@ -305,16 +305,58 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playStation(station, completion: completion)
             }
-            favoriteItems.append(item)
+            favoriteStationItems.append(item)
         }
         
-        if favoriteItems.isEmpty {
+        if favoriteStationItems.isEmpty {
             let emptyItem = CPListItem(text: "No Favorite Stations", detailText: "Add stations to favorites to see them here")
-            favoriteItems.append(emptyItem)
+            favoriteStationItems.append(emptyItem)
         }
         
-        let favoriteSection = CPListSection(items: favoriteItems, header: "Your Favorite Stations", sectionIndexTitle: nil)
-        sections.append(favoriteSection)
+        let favoriteStationsSection = CPListSection(items: favoriteStationItems, header: "Favorite Stations", sectionIndexTitle: nil)
+        sections.append(favoriteStationsSection)
+        
+        // Get favorite podcast episodes from CarPlayManager
+        let favoriteEpisodes = carPlayManager.getFavoritePodcastEpisodes()
+        
+        var favoriteEpisodeItems: [CPListItem] = []
+        for episode in favoriteEpisodes {
+            let duration = formatDuration(episode.duration)
+            var statusText = ""
+            
+            // Determine episode status based on state and current playback
+            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+                statusText = " • Playing"
+            } else if episode.state.isPlayed {
+                statusText = " • Complete"
+            } else if episode.state.progress > 0 {
+                let progressPercent = Int(episode.state.progress * 100)
+                statusText = " • \(progressPercent)% complete"
+            }
+            
+            // Find the podcast feed for artwork
+            let podcastFeeds = carPlayManager.getPodcastFeeds()
+            let podcastFeed = podcastFeeds.first { feed in
+                feed.episodes.contains { $0.id == episode.id }
+            }
+            
+            let item = CPListItem(text: episode.title,
+                                 detailText: "\(duration)\(statusText)",
+                                 image: podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone"))
+            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.playEpisode(episode, completion: completion)
+            }
+            favoriteEpisodeItems.append(item)
+        }
+        
+        if favoriteEpisodeItems.isEmpty {
+            let emptyItem = CPListItem(text: "No Favorite Episodes", detailText: "Add podcast episodes to favorites to see them here")
+            favoriteEpisodeItems.append(emptyItem)
+        }
+        
+        let favoriteEpisodesSection = CPListSection(items: favoriteEpisodeItems, header: "Favorite Episodes", sectionIndexTitle: nil)
+        sections.append(favoriteEpisodesSection)
         
         let listTemplate = CPListTemplate(title: "Favorites", sections: sections)
         listTemplate.tabTitle = "Favorites"

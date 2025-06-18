@@ -1064,6 +1064,19 @@ class CarPlayManager: NSObject, ObservableObject {
         return recentPodcastEpisodes
     }
     
+    func getFavoritePodcastEpisodes() -> [PodcastEpisode] {
+        var allEpisodes: [PodcastEpisode] = []
+        for feed in podcastFeeds {
+            allEpisodes.append(contentsOf: feed.episodes)
+        }
+        
+        return allEpisodes
+            .filter { $0.state.isFavorite }
+            .sorted { $0.publicationDate > $1.publicationDate }
+            .prefix(10)
+            .map { $0 }
+    }
+    
     func getPodcastFeeds() -> [PodcastFeed] {
         return podcastFeeds
     }
