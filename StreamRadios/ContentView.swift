@@ -234,26 +234,8 @@ struct ContentView: View {
                         }
                         .padding(.horizontal, 16)
                         
-                        // Sub-tabs: Recent, Favorites, All
-                        HStack(spacing: 0) {
-                            ForEach(RadioSubTab.allCases, id: \.self) { subTab in
-                                Button(action: {
-                                    viewModel.selectedSubTab = subTab
-                                }) {
-                                    Text(subTab.title)
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(viewModel.selectedSubTab == subTab ? .blue : .gray)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(viewModel.selectedSubTab == subTab ? Color.blue.opacity(0.1) : Color.clear)
-                                        )
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                        .padding(.horizontal, 16)
+                        // Sub-tabs: Recent, Favorites, All - Elegant Design
+                        elegantTabBar
                     }
                     .padding(.top, topPadding)
                     .padding(.bottom, 10)
@@ -370,6 +352,58 @@ struct ContentView: View {
             .navigationBarHidden(true)
         }
         .navigationViewStyle(StackNavigationViewStyle())
+    }
+    
+    // MARK: - Simple Stylish Tab Bar
+    
+    @ViewBuilder
+    private var elegantTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(RadioSubTab.allCases, id: \.self) { subTab in
+                simpleTabButton(for: subTab)
+            }
+        }
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(10)
+        .padding(.horizontal, 16)
+    }
+    
+    @ViewBuilder
+    private func simpleTabButton(for subTab: RadioSubTab) -> some View {
+        let isSelected = viewModel.selectedSubTab == subTab
+        let buttonCornerRadius = cornerRadiusForTab(subTab)
+        
+        Button(action: {
+            withAnimation(.easeOut(duration: 0.2)) {
+                viewModel.selectedSubTab = subTab
+            }
+        }) {
+            VStack(spacing: 6) {
+                Image(systemName: subTab.iconName)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(isSelected ? .blue : .gray)
+                
+                Text(subTab.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(isSelected ? .blue : .gray)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: buttonCornerRadius)
+                    .fill(isSelected ? Color.blue.opacity(0.1) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func cornerRadiusForTab(_ subTab: RadioSubTab) -> CGFloat {
+        switch subTab {
+        case .recent: return 8    // Left button - rounded
+        case .favorites: return 0  // Middle button - square
+        case .all: return 8       // Right button - rounded
+        }
     }
     
     // MARK: - Helper Functions

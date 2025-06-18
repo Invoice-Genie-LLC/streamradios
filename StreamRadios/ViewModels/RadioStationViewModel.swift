@@ -22,6 +22,14 @@ enum RadioSubTab: Int, CaseIterable {
         case .all: return "All"
         }
     }
+    
+    var iconName: String {
+        switch self {
+        case .recent: return "clock.fill"
+        case .favorites: return "heart.fill"
+        case .all: return "list.bullet"
+        }
+    }
 }
 
 
