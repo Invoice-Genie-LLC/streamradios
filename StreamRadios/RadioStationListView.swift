@@ -326,7 +326,7 @@ struct RadioStationListView: View {
     @ViewBuilder
     private func modernStationCard(for station: RadioStation) -> some View {
         HStack(spacing: 12) {
-            // Tappable area for station info (excludes favorite button)
+            // Expanded tappable area for station info (includes more space after signal bars)
             Button(action: {
                 if !isEditing {
                     handleStationTap(station)
@@ -371,7 +371,12 @@ struct RadioStationListView: View {
                     } else {
                         staticSignalBars
                     }
+                    
+                    // Extra space to extend tappable area further right
+                    Spacer()
+                        .frame(width: 20)
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
             
