@@ -330,7 +330,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         let recentStations = carPlayManager.getRecentStations()
         
-        var recentItems: [CPListItem] = []
+        var recentStationItems: [CPListItem] = []
         for station in recentStations {
             let timeAgo = formatTimeAgo(station.lastPlayed)
             let item = CPListItem(text: station.name,
@@ -339,16 +339,58 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playStation(station, completion: completion)
             }
-            recentItems.append(item)
+            recentStationItems.append(item)
         }
         
-        if recentItems.isEmpty {
+        if recentStationItems.isEmpty {
             let emptyItem = CPListItem(text: "No Recent Stations", detailText: "Recently played stations will appear here")
-            recentItems.append(emptyItem)
+            recentStationItems.append(emptyItem)
         }
         
-        let recentSection = CPListSection(items: recentItems, header: "Recently Played", sectionIndexTitle: nil)
-        sections.append(recentSection)
+        let recentStationsSection = CPListSection(items: recentStationItems, header: "Recently Played Stations", sectionIndexTitle: nil)
+        sections.append(recentStationsSection)
+        
+        // Get recent podcast episodes from CarPlayManager
+        let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
+        
+        var recentEpisodeItems: [CPListItem] = []
+        for episode in recentEpisodes {
+            let duration = formatDuration(episode.duration)
+            var statusText = ""
+            
+            // Determine episode status based on state and current playback
+            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+                statusText = " • Playing"
+            } else if episode.state.isPlayed {
+                statusText = " • Complete"
+            } else if episode.state.progress > 0 {
+                let progressPercent = Int(episode.state.progress * 100)
+                statusText = " • \(progressPercent)% complete"
+            }
+            
+            // Find the podcast feed for artwork
+            let podcastFeeds = carPlayManager.getPodcastFeeds()
+            let podcastFeed = podcastFeeds.first { feed in
+                feed.episodes.contains { $0.id == episode.id }
+            }
+            
+            let item = CPListItem(text: episode.title,
+                                 detailText: "\(duration)\(statusText)",
+                                 image: podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone"))
+            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.playEpisode(episode, completion: completion)
+            }
+            recentEpisodeItems.append(item)
+        }
+        
+        if recentEpisodeItems.isEmpty {
+            let emptyItem = CPListItem(text: "No Recent Episodes", detailText: "Recently played podcast episodes will appear here")
+            recentEpisodeItems.append(emptyItem)
+        }
+        
+        let recentEpisodesSection = CPListSection(items: recentEpisodeItems, header: "Recently Played Episodes", sectionIndexTitle: nil)
+        sections.append(recentEpisodesSection)
         
         let listTemplate = CPListTemplate(title: "Recents", sections: sections)
         listTemplate.tabTitle = "Recents"

@@ -1060,6 +1060,10 @@ class CarPlayManager: NSObject, ObservableObject {
         return recentStations
     }
     
+    func getRecentPodcastEpisodes() -> [PodcastEpisode] {
+        return recentPodcastEpisodes
+    }
+    
     func getPodcastFeeds() -> [PodcastFeed] {
         return podcastFeeds
     }
