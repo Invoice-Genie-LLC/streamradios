@@ -18,9 +18,8 @@ struct ContentView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
     @State private var isAddStationViewPresented: Bool
     @State private var isPlayerSheetPresented: Bool
-    @State private var showSideMenu: Bool
+
     @State private var isEditingMode: Bool
-    @State private var isEditingStation: Bool
     @State private var selectedStationForEdit: RadioStation?
     @State private var bitrateMessage: String
     @State private var showAlertForCountryBeforeAddingStation: Bool
@@ -51,9 +50,8 @@ struct ContentView: View {
         
         self._isAddStationViewPresented = State(initialValue: false)
         self._isPlayerSheetPresented = State(initialValue: false)
-        self._showSideMenu = State(initialValue: false)
+
         self._isEditingMode = State(initialValue: false)
-        self._isEditingStation = State(initialValue: false)
         self._selectedStationForEdit = State(initialValue: nil)
         self._bitrateMessage = State(initialValue: "Loading bitrate information...")
         self._showAlertForCountryBeforeAddingStation = State(initialValue: false)
@@ -152,6 +150,12 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - Helper Functions
+    
+    private func flagImage(for country: String) -> UIImage? {
+        return Flag(countryCode: country)?.originalImage
+    }
+    
     // MARK: - Body
     
     var body: some View {
@@ -200,60 +204,108 @@ struct ContentView: View {
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack(spacing: 0) {
-                    HStack(spacing: 8) {
-                        Button(action: {
-                            withAnimation {
-                                showSideMenu.toggle()
+                    // Modern top navigation area
+                    VStack(spacing: 12) {
+                        // Top row with country picker, edit, and add buttons
+                        HStack(spacing: 12) {
+                            // Modern country picker
+                            HStack(spacing: 8) {
+                                if let flagImage = flagImage(for: viewModel.selectedCountry) {
+                                    Image(uiImage: flagImage)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 24, height: 16)
+                                        .clipShape(RoundedRectangle(cornerRadius: 2))
+                                }
+                                
+                                Menu {
+                                    ForEach(viewModel.countries, id: \.self) { country in
+                                        Button(action: {
+                                            viewModel.selectedCountry = country.name
+                                        }) {
+                                            HStack {
+                                                if let flagImage = flagImage(for: country.name) {
+                                                    Image(uiImage: flagImage)
+                                                        .resizable()
+                                                        .aspectRatio(contentMode: .fit)
+                                                        .frame(width: 20, height: 14)
+                                                }
+                                                Text(country.name)
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Text(viewModel.selectedCountry)
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.white)
+                                            .lineLimit(1)
+                                        
+                                        Image(systemName: "chevron.down")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(.gray)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color(red: 0.1, green: 0.1, blue: 0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
                             }
-                        }) {
-                            Image(systemName: "line.horizontal.3")
-                                .font(.title)
-                                .foregroundColor(.primary)
-                                .frame(width: menuButtonWidth)
+                            
+                            Spacer()
+                            
+
+                            
+                            // Add station button
+                            Button(action: {
+                                if viewModel.selectedCountry == "Select Country" {
+                                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                                } else {
+                                    activeSheet = .addStation
+                                }
+                            }) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.blue)
+                                    .clipShape(Circle())
+                            }
                         }
-                        .padding(.leading, 15)
-        
-                        StyledPickerView(
-                            selectedCountry: $viewModel.selectedCountry,
-                            countries: viewModel.countries
-                        )
-                        .frame(width: countryPickerWidth)
+                        .padding(.horizontal, 16)
                         
-                        Button(action: {
-                            isEditingMode.toggle()
-                            if isEditingMode {
-                                radioPlayer.stop()
-                                radioPlayer.metadata = nil
-                                radioPlayer.currentStationIndex = nil
+                        // Sub-tabs: Recent, Favorites, All
+                        HStack(spacing: 0) {
+                            ForEach(RadioSubTab.allCases, id: \.self) { subTab in
+                                Button(action: {
+                                    viewModel.selectedSubTab = subTab
+                                }) {
+                                    Text(subTab.title)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(viewModel.selectedSubTab == subTab ? .blue : .gray)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(viewModel.selectedSubTab == subTab ? Color.blue.opacity(0.1) : Color.clear)
+                                        )
+                                }
+                                .buttonStyle(PlainButtonStyle())
                             }
-                        }) {
-                            Text(isEditingMode ? "Done" : "Edit")
-                                .font(.title3)
-                                .foregroundColor(.primary)
                         }
-                        .frame(width: editButtonWidth)
-                        
-                        Button(action: {
-                            if viewModel.selectedCountry == "Select Country" {
-                                alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                            } else {
-                                activeSheet = .addStation
-                            }
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title)
-                                .foregroundColor(.primary)
-                        }
-                        .frame(width: addButtonWidth)
+                        .padding(.horizontal, 16)
                     }
                     .padding(.top, topPadding)
                     .padding(.bottom, 10)
+                    .background(Color.black)
                     
                     // RadioStationListView now handles its own sub-tabs internally
-                    RadioStationListView(isEditing: $isEditingMode,
-                                         isEditingStation: $isEditingStation,
+                                        RadioStationListView(isEditing: $isEditingMode,
                                          selectedStationForEdit: $selectedStationForEdit,
-                                         selectedTab: $viewModel.selectedTab, activeSheet: $activeSheet)
+                                         selectedTab: $viewModel.selectedTab, 
+                                         selectedSubTab: $viewModel.selectedSubTab,
+                                         activeSheet: $activeSheet,
+                                         isPlayerSheetPresented: $isPlayerSheetPresented)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
                     
@@ -306,26 +358,7 @@ struct ContentView: View {
                 }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
-                // Side Menu
-                GeometryReader { geometry in
-                    HStack(spacing: 0) {
-                        SideMenuView(showSideMenu: $showSideMenu)
-                            .frame(width: geometry.size.width / 2)
-                            .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-                        
-                        Spacer()
-                    }
-                    .background(
-                        Color.black.opacity(showSideMenu ? 0.5 : 0)
-                            .edgesIgnoringSafeArea(.all)
-                            .onTapGesture {
-                                withAnimation {
-                                    showSideMenu = false
-                                }
-                            }
-                    )
-                }
-                .zIndex(showSideMenu ? 1 : 0)
+
                 
                 if alertManager.showCustomAlert {
                     CustomAlertContainer()
@@ -336,12 +369,12 @@ struct ContentView: View {
                 case .addStation:
                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
                         viewModel.selectedCountry = savedCountry
-                        viewModel.selectedTab = .all
+                        viewModel.selectedSubTab = .all
                     }
                     .environmentObject(viewModel)
                 case .editStation:
                     if let station = selectedStationForEdit {
-                        EditStationView(station: station, isPresented: $selectedStationForEdit)
+                        EditStationView(station: station, activeSheet: $activeSheet)
                             .environmentObject(viewModel)
                     }
                 case .playerSheet:
@@ -350,10 +383,7 @@ struct ContentView: View {
                         .environmentObject(viewModel)
                 }
             }
-            .sheet(item: $selectedStationForEdit) { station in
-                EditStationView(station: station, isPresented: $selectedStationForEdit)
-                    .environmentObject(viewModel)
-            }
+
             .sheet(isPresented: $isPlayerSheetPresented) {
                 PlayerSheetView()
                     .environmentObject(radioPlayer)

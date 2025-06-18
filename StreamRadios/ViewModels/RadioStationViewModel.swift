@@ -9,6 +9,21 @@ import Combine
 import CoreData
 import UniformTypeIdentifiers
 
+// Sub-tab enum for radio filtering
+enum RadioSubTab: Int, CaseIterable {
+    case recent = 0
+    case favorites = 1
+    case all = 2
+    
+    var title: String {
+        switch self {
+        case .recent: return "Recent"
+        case .favorites: return "Favorites"
+        case .all: return "All"
+        }
+    }
+}
+
 
 class RadioStationViewModel: NSObject, ObservableObject {
     @Published var stations: [RadioStation] = []
@@ -263,6 +278,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
         Country(name: "Unknown Region", flag: "")
     ]
     @Published var selectedTab: Tab = .radio
+    @Published var selectedSubTab: RadioSubTab = .all {
+        didSet {
+            saveSelectedSubTab()
+        }
+    }
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
     @Published var isDeletingData: Bool = false
@@ -301,10 +321,20 @@ class RadioStationViewModel: NSObject, ObservableObject {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
     }
     
+    private func saveSelectedSubTab() {
+        UserDefaults.standard.set(selectedSubTab.rawValue, forKey: "selectedSubTab")
+    }
+    
     override init() {
         super.init()
         
             selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
+            
+            // Load saved sub-tab
+            if let savedSubTab = UserDefaults.standard.object(forKey: "selectedSubTab") as? Int,
+               let subTab = RadioSubTab(rawValue: savedSubTab) {
+                selectedSubTab = subTab
+            }
         
             syncStationsWithCloudKit()
     

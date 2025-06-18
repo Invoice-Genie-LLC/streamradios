@@ -15,7 +15,7 @@ struct EditStationView: View {
     @State private var showImagePicker = false
     @EnvironmentObject var viewModel: RadioStationViewModel
     @EnvironmentObject var permissionManager: PermissionManager
-    @Binding var isPresented: RadioStation?
+    @Binding var activeSheet: ActiveSheet?
     var station: RadioStation
     @StateObject private var podcastViewModel = PodcastViewModel()
     @StateObject private var podcastPlayer = PodcastPlayer.shared
@@ -26,12 +26,12 @@ struct EditStationView: View {
     
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
     
-    init(station: RadioStation, isPresented: Binding<RadioStation?>) {
+    init(station: RadioStation, activeSheet: Binding<ActiveSheet?>) {
         _name = State(initialValue: station.name)
         _urlString = State(initialValue: station.url)
         _selectedCountry = State(initialValue: station.country ?? "Unknown Region")
         self.station = station
-        _isPresented = isPresented
+        _activeSheet = activeSheet
         
         if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
             _iconImage = State(initialValue: image)
@@ -46,7 +46,7 @@ struct EditStationView: View {
                         // Custom toolbar
                         HStack {
                             Button(action: {
-                                isPresented = nil
+                                activeSheet = nil
                             }) {
                                 Text("Cancel")
                                     .foregroundColor(.primary)
@@ -227,14 +227,14 @@ struct EditStationView: View {
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
         viewModel.updateStation(station, name: name, url: urlString, iconData: iconData, country: selectedCountry)
         viewModel.saveStationsToCoreData()
-        isPresented = nil
+        activeSheet = nil
     }
 }
 
 struct EditStationView_Previews: PreviewProvider {
     static var previews: some View {
         let station = RadioStation(id: "ABC", name: "Sample Station", url: "http://samplestation.com", iconData: nil, country: "Unknown Region", favoriteOrder: nil)
-        EditStationView(station: station, isPresented: .constant(station))
+        EditStationView(station: station, activeSheet: .constant(.editStation))
             .environmentObject(RadioStationViewModel())
             .environmentObject(PermissionManager())
     }
