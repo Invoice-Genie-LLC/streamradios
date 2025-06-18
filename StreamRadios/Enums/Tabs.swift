@@ -7,8 +7,35 @@
 
 import Foundation
 
-enum Tab: Int {
-    case recent = 0
-    case favorites = 1
-    case all = 2
+enum Tab: Int, CaseIterable {
+    case radio = 0
+    case podcast = 1
+    case settings = 2
+    
+    var title: String {
+        switch self {
+        case .radio:
+            return "FM Radio"
+        case .podcast:
+            return "Podcast"
+        case .settings:
+            return "Settings"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .radio:
+            return "radio"
+        case .podcast:
+            return "airpods"
+        case .settings:
+            return "gearshape"
+        }
+    }
+    
+    // Legacy support for existing code
+    static let all = radio
+    static let favorites = radio
+    static let recent = radio
 }

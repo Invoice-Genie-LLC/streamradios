@@ -42,7 +42,7 @@ struct ContentView: View {
            let tab = Tab(rawValue: savedTabRawValue) {
             savedTab = tab
         } else {
-            savedTab = .all
+            savedTab = .radio
         }
         
         self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
@@ -155,25 +155,64 @@ struct ContentView: View {
     // MARK: - Body
     
     var body: some View {
+        TabView(selection: $selectedTab) {
+            // Radio Tab - Contains the original full interface
+            radioTabContent
+            .tabItem {
+                Image(systemName: Tab.radio.icon)
+                Text(Tab.radio.title)
+            }
+            .tag(Tab.radio)
+            
+            // Podcast Tab
+            PodcastListView()
+                .environmentObject(podcastViewModel)
+            .tabItem {
+                Image(systemName: Tab.podcast.icon)
+                Text(Tab.podcast.title)
+            }
+            .tag(Tab.podcast)
+            
+            // Settings Tab
+            SettingsView()
+                .environmentObject(viewModel)
+            .tabItem {
+                Image(systemName: Tab.settings.icon)
+                Text(Tab.settings.title)
+            }
+            .tag(Tab.settings)
+        }
+        .accentColor(.blue)
+        .onAppear {
+            setupTabView()
+        }
+        .onChange(of: selectedTab) { oldTab, newTab in
+            UserDefaults.standard.set(newTab.rawValue, forKey: "selectedTab")
+        }
+    }
+    
+    // MARK: - Radio Tab Content with Full Original Functionality
+    
+    private var radioTabContent: some View {
         NavigationView {
             ZStack {
                 Color(UIColor.systemBackground)
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack(spacing: 0) {
-                                    HStack(spacing: 8) {
-                                        Button(action: {
-                                            withAnimation {
-                                                showSideMenu.toggle()
-                                            }
-                                        }) {
-                                            Image(systemName: "line.horizontal.3")
-                                                .font(.title)
-                                                .foregroundColor(.primary)
-                                                .frame(width: menuButtonWidth)
-                                        }
-                                        .padding(.leading, 15)
-                        
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            withAnimation {
+                                showSideMenu.toggle()
+                            }
+                        }) {
+                            Image(systemName: "line.horizontal.3")
+                                .font(.title)
+                                .foregroundColor(.primary)
+                                .frame(width: menuButtonWidth)
+                        }
+                        .padding(.leading, 15)
+        
                         StyledPickerView(
                             selectedCountry: $viewModel.selectedCountry,
                             countries: viewModel.countries
@@ -210,90 +249,36 @@ struct ContentView: View {
                     .padding(.top, topPadding)
                     .padding(.bottom, 10)
                     
-                    Picker("", selection: $selectedTab) {
-                        Text("Recent").tag(Tab.recent)
-                        Text("Favorites").tag(Tab.favorites)
-                        Text("All").tag(Tab.all)
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .padding(.horizontal)
-                    .frame(width: sizeClass == .regular ? 650 : 410)
-                    .onChange(of: selectedTab) { newValue in
-                        saveSelectedTab(newValue)
-                    }
-                    
-                    Spacer()
-                    
+                    // RadioStationListView now handles its own sub-tabs internally
                     RadioStationListView(isEditing: $isEditingMode,
                                          isEditingStation: $isEditingStation,
                                          selectedStationForEdit: $selectedStationForEdit,
-                                         selectedTab: $selectedTab, activeSheet: $activeSheet)
+                                         selectedTab: $viewModel.selectedTab, activeSheet: $activeSheet)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
-                        .frame(width: sizeClass == .regular ? 615 : deviceType == .iPhoneSE || deviceType == .iPhoneSE2 ? 350 : 385)
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(16)
-                        .modifier(NeumorphicShadow())
-                        .padding(.top, deviceType == .iPhoneSE || deviceType == .iPhoneSE2 ? 5 : 10)
-                        .padding(.bottom, deviceType == .iPhoneSE || deviceType == .iPhoneSE2 ? 20 : 35)
                     
                     Spacer()
                     
-                    VStack(spacing: 0) {
-                        if let currentStation = viewModel.currentlyPlayingStation {
-                            CurrentlyPlayingView(currentStation: currentStation, metadata: radioPlayer.metadata)
-                                .environmentObject(radioPlayer)
-                                .background(
-                                    Color(UIColor.systemBackground)
-                                        .overlay(
-                                            Rectangle()
-                                                .fill(Color.primary.opacity(0.05))
-                                        )
-                                )
-                        }
-                        
-                        // Separator line
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.1))
-                            .frame(height: 0.5)
-                        
-                        PlayerView()
-                            .environmentObject(radioPlayer)
-                            .environmentObject(viewModel)
-                            .padding(.vertical, 12)
-                            .background(Color(UIColor.secondarySystemBackground))
-                    }
-                    .frame(width: playerViewWidth)
-                    .background(
-                        ZStack {
-                            Color(UIColor.secondarySystemBackground)
+                    // Compact mini-player matching screenshot design
+                    if let currentStation = viewModel.currentlyPlayingStation {
+                        VStack(spacing: 0) {
+                            // Top divider for visual separation
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 0.5)
                             
-                            // Top edge highlight
-                            VStack {
-                                Rectangle()
-                                    .fill(Color.primary.opacity(0.1))
-                                    .frame(height: 1)
-                                Spacer()
-                            }
+                            CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata)
+                                .environmentObject(radioPlayer)
+                                .environmentObject(viewModel)
+                                .onTapGesture {
+                                    isPlayerSheetPresented.toggle()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 4)
+                                .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 4))
+                                .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Darker gray
                         }
-                    )
-                    .overlay(
-                        // Side borders for definition
-                        HStack {
-                            Rectangle()
-                                .fill(Color.primary.opacity(0.05))
-                                .frame(width: 0.5)
-                            Spacer()
-                            Rectangle()
-                                .fill(Color.primary.opacity(0.05))
-                                .frame(width: 0.5)
-                        }
-                    )
-                    .onTapGesture {
-                        isPlayerSheetPresented.toggle()
                     }
-                    .frame(height: 140)
-                    .padding(.bottom, UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0)
                     
                     if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
                         MiniPlayerView(
@@ -322,36 +307,36 @@ struct ContentView: View {
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
                 
                 // Side Menu
-                                GeometryReader { geometry in
-                                    HStack(spacing: 0) {
-                                        SideMenuView(showSideMenu: $showSideMenu)
-                                            .frame(width: geometry.size.width / 2)
-                                            .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
-                                        
-                                        Spacer()
-                                    }
-                                    .background(
-                                        Color.black.opacity(showSideMenu ? 0.5 : 0)
-                                            .edgesIgnoringSafeArea(.all)
-                                            .onTapGesture {
-                                                withAnimation {
-                                                    showSideMenu = false
-                                                }
-                                            }
-                                    )
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        SideMenuView(showSideMenu: $showSideMenu)
+                            .frame(width: geometry.size.width / 2)
+                            .offset(x: showSideMenu ? 0 : -geometry.size.width / 2)
+                        
+                        Spacer()
+                    }
+                    .background(
+                        Color.black.opacity(showSideMenu ? 0.5 : 0)
+                            .edgesIgnoringSafeArea(.all)
+                            .onTapGesture {
+                                withAnimation {
+                                    showSideMenu = false
                                 }
-                                .zIndex(showSideMenu ? 1 : 0)
-                                
-                                if alertManager.showCustomAlert {
-                                    CustomAlertContainer()
-                                }
+                            }
+                    )
+                }
+                .zIndex(showSideMenu ? 1 : 0)
+                
+                if alertManager.showCustomAlert {
+                    CustomAlertContainer()
+                }
             }
             .sheet(item: $activeSheet, onDismiss: { activeSheet = nil }) { item in
                 switch item {
                 case .addStation:
                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
                         viewModel.selectedCountry = savedCountry
-                        selectedTab = .all
+                        viewModel.selectedTab = .all
                     }
                     .environmentObject(viewModel)
                 case .editStation:
@@ -390,171 +375,382 @@ struct ContentView: View {
                 }
             }
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
-                self.bitrateMessage = newBitrateMessage
+                bitrateMessage = newBitrateMessage
             }
-            .onReceive(NotificationCenter.default.publisher(for: .switchToAllTab)) { _ in
-                self.selectedTab = .all
-            }
+            .navigationBarHidden(true)
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .onDisappear {
-            podcastViewModel.saveContextIfNeeded()
-        }
-        .onAppear {
-            UIApplication.shared.addTapGestureRecognizer()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
-            selectedTab = .all
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
-            self.viewModel.objectWillChange.send()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
-                    viewModel.loadStationsFromCoreData()
-                }
-            }
-            
-            func saveSelectedTab(_ tab: Tab) {
-                UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
-            }
-        }
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func saveSelectedTab(_ tab: Tab) {
+        UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
+    }
+    
+    private func setupTabView() {
+        // Configure tab bar appearance
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor.systemBackground
+        
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+}
 
-        // MARK: - Helper Views
+// MARK: - Compact Player View
 
-        struct CurrentlyPlayingView: View {
-            let currentStation: RadioStation
-            let metadata: String?
-            @EnvironmentObject var radioPlayer: RadioPlayer
-            
-            var body: some View {
-                HStack(alignment: .center, spacing: 16) {
-                    // Priority: iTunes album art > stream album art > station icon > default radio icon
-                    ZStack {
-                        // Background gradient for the album art container
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.black.opacity(0.1), Color.black.opacity(0.05)]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .frame(width: 75, height: 75)
-                        
-                        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
-                            Image(uiImage: iTunesAlbumArt)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 75, height: 75)
-                                .clipped()
-                        } else if let albumArt = radioPlayer.albumArt {
-                            Image(uiImage: albumArt)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 75, height: 75)
-                                .clipped()
-                        } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 75, height: 75)
-                                .clipped()
-                        } else {
-                            Image(systemName: "radio")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 40, height: 40)
-                                .foregroundColor(.primary.opacity(0.7))
-                        }
-                        
-                        // Subtle border overlay for enhanced visual appeal
-                        Rectangle()
-                            .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
-                            .frame(width: 75, height: 75)
-                    }
+struct CompactPlayerView: View {
+    let currentStation: RadioStation
+    let metadata: String?
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    @EnvironmentObject var viewModel: RadioStationViewModel
+    
+    var body: some View {
+        VStack(spacing: 6) {
+            // Top row: Album artwork and controls
+            HStack(spacing: 16) {
+                // Album artwork - compact size
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: 56, height: 56)
                     
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(currentStation.name)
-                            .font(.system(size: 18, weight: .bold, design: .default))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        
-                        if let metadata = metadata {
-                            Text(metadata)
-                                .font(.system(size: 14, weight: .medium, design: .default))
-                                .foregroundColor(.secondary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                        } else {
-                            Text("Live Radio")
-                                .font(.system(size: 14, weight: .medium, design: .default))
-                                .foregroundColor(.secondary.opacity(0.8))
+                    albumArtworkView
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                
+                Spacer()
+                
+                // Control buttons - horizontal layout
+                HStack(spacing: 16) {
+                    // Previous button
+                    Button(action: {
+                        radioPlayer.previousStation(from: viewModel.stations)
+                    }) {
+                        Image(systemName: "backward.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .frame(width: 34, height: 34)
+                    .background(Color.gray.opacity(0.3))
+                    .clipShape(Circle())
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Play/pause button - primary control
+                    Button(action: {
+                        radioPlayer.playPause()
+                    }) {
+                        ZStack {
+                            if radioPlayer.isBuffering {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundColor(.white)
+                            }
                         }
                     }
+                    .frame(width: 44, height: 44)
+                    .background(Color.blue)
+                    .clipShape(Circle())
+                    .buttonStyle(PlainButtonStyle())
                     
-                    Spacer()
+                    // Next button
+                    Button(action: {
+                        radioPlayer.nextStation(from: viewModel.stations)
+                    }) {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .frame(width: 34, height: 34)
+                    .background(Color.gray.opacity(0.3))
+                    .clipShape(Circle())
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
             }
-        }
-
-        struct CustomAlertContainer: View {
-            @EnvironmentObject var alertManager: AlertManager
             
-            var body: some View {
-                GeometryReader { geometry in
-                    Color.black.opacity(0.4)
-                        .edgesIgnoringSafeArea(.all)
-                        .onTapGesture {
-                            alertManager.dismissAlert()
-                        }
-                    
-                    CustomAlertView(
-                        title: alertManager.customAlertTitle,
-                        message: alertManager.customAlertMessage,
-                        buttonText: alertManager.customAlertPrimaryButtonText,
-                        buttonAction: {
-                            alertManager.dismissAlert()
-                            alertManager.customAlertPrimaryAction?()
-                        },
-                        secondaryButtonText: alertManager.customAlertSecondaryButtonText,
-                        secondaryButtonAction: {
-                            alertManager.dismissAlert()
-                            alertManager.customAlertSecondaryAction?()
-                        }
-                    )
-                    .frame(width: 300)
-                    .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            // Bottom section: Dynamic full-width text information
+            VStack(alignment: .leading, spacing: 4) {
+                // Station name - full width, unlimited lines, dynamic height
+                Text(currentStation.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(nil) // Unlimited lines
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
+                
+                // Song metadata - full width, unlimited lines, dynamic height
+                if let metadata = metadata, !metadata.isEmpty {
+                    Text(metadata)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.gray)
+                        .lineLimit(nil) // Unlimited lines
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
+                } else {
+                    Text("Live Radio")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.gray)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .transition(.opacity)
-                .zIndex(2)
             }
         }
-
-        // MARK: - Device Type Enum
-
-        enum DeviceType {
-            case iPhoneSE
-            case iPhoneSE2
-            case iPhone11
-            case iPhone13
-            case iPhone14Pro
-            case iPhone14Plus
-            case iPhone15ProMax
-            case iPhone15Pro
-            case iPhone16Pro
-            case iPadMini
-            case iPadAir
-            case iPadPro
-            case other
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, dynamicBottomPadding)
+        .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Darker gray
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically
+    }
+    
+    // Dynamic bottom padding based on text content
+    private var dynamicBottomPadding: CGFloat {
+        let stationNameHeight = textHeight(for: currentStation.name, font: .systemFont(ofSize: 16, weight: .semibold))
+        let metadataText = (metadata?.isEmpty == false) ? metadata! : "Live Radio"
+        let metadataHeight = textHeight(for: metadataText, font: .systemFont(ofSize: 14, weight: .regular))
+        
+        let totalTextHeight = stationNameHeight + metadataHeight + 4 // 4 is the spacing between texts
+        let baseLineHeight: CGFloat = 20 // Approximate single line height
+        
+        // More precise padding calculation based on actual content
+        if totalTextHeight <= baseLineHeight * 1.5 { // Single line content
+            return 4
+        } else if totalTextHeight <= baseLineHeight * 2.5 { // Two lines
+            return 6
+        } else { // Three or more lines
+            return 8
         }
-
-        // MARK: - Previews
-
-        struct ContentView_Previews: PreviewProvider {
-            static var previews: some View {
-                ContentView()
-                    .preferredColorScheme(.dark)
-                    .environmentObject(AlertManager())
-                    .environmentObject(RadioStationViewModel())
+    }
+    
+    // Helper function to calculate text height
+    private func textHeight(for text: String, font: UIFont) -> CGFloat {
+        // More accurate width calculation: screen width - horizontal padding (32) - artwork (56) - spacing (16) - controls (~150)
+        let maxWidth = UIScreen.main.bounds.width - 32 - 56 - 16 - 150
+        let attributes = [NSAttributedString.Key.font: font]
+        let attributedString = NSAttributedString(string: text, attributes: attributes)
+        let rect = attributedString.boundingRect(
+            with: CGSize(width: max(maxWidth, 100), height: .greatestFiniteMagnitude), // Ensure minimum width
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
+        return ceil(rect.height)
+    }
+    
+    @ViewBuilder
+    private var albumArtworkView: some View {
+        // Priority: iTunes album art > stream album art > station icon > default
+        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+            Image(uiImage: iTunesAlbumArt)
+                .resizable()
+                .scaledToFill()
+                .clipped()
+        } else if let albumArt = radioPlayer.albumArt {
+            Image(uiImage: albumArt)
+                .resizable()
+                .scaledToFill()
+                .clipped()
+        } else if let iconData = currentStation.iconData, 
+                  let imageData = Data(base64Encoded: iconData),
+                  let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .background(Color.white.opacity(0.1))
+        } else {
+            ZStack {
+                Color.gray.opacity(0.3)
+                
+                if !currentStation.name.isEmpty {
+                    Text(String(currentStation.name.prefix(2)).uppercased())
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                } else {
+                    Image(systemName: "radio")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.white)
+                }
             }
         }
+    }
+}
+
+// MARK: - Currently Playing View
+
+struct CurrentlyPlayingView: View {
+    let currentStation: RadioStation
+    let metadata: String?
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Album artwork - modern 64x64 design matching station list
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 64, height: 64)
+                
+                albumArtworkView
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            
+            // Station and song info
+            VStack(alignment: .leading, spacing: 2) {
+                Text(currentStation.name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                
+                if let metadata = metadata, !metadata.isEmpty {
+                    Text(metadata)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text("Live Radio")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                }
+            }
+            
+            Spacer()
+            
+            // Play/pause button
+            Button(action: {
+                radioPlayer.playPause()
+            }) {
+                ZStack {
+                    if radioPlayer.isBuffering {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(.white)
+                    } else {
+                        Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                }
+            }
+            .frame(width: 44, height: 44)
+            .background(Color.blue)
+            .clipShape(Circle())
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.black)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    @ViewBuilder
+    private var albumArtworkView: some View {
+        // Priority: iTunes album art > stream album art > station icon > default
+        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+            Image(uiImage: iTunesAlbumArt)
+                .resizable()
+                .scaledToFill()
+                .clipped()
+        } else if let albumArt = radioPlayer.albumArt {
+            Image(uiImage: albumArt)
+                .resizable()
+                .scaledToFill()
+                .clipped()
+        } else if let iconData = currentStation.iconData, 
+                  let imageData = Data(base64Encoded: iconData),
+                  let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .background(Color.white.opacity(0.1))
+        } else {
+            ZStack {
+                Color.gray.opacity(0.3)
+                
+                if !currentStation.name.isEmpty {
+                    Text(String(currentStation.name.prefix(2)).uppercased())
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                } else {
+                    Image(systemName: "radio")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundColor(.white)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Custom Alert Container
+
+struct CustomAlertContainer: View {
+    @EnvironmentObject var alertManager: AlertManager
+    
+    var body: some View {
+        GeometryReader { geometry in
+            Color.black.opacity(0.4)
+                .edgesIgnoringSafeArea(.all)
+                .onTapGesture {
+                    alertManager.dismissAlert()
+                }
+            
+            CustomAlertView(
+                title: alertManager.customAlertTitle,
+                message: alertManager.customAlertMessage,
+                buttonText: alertManager.customAlertPrimaryButtonText,
+                buttonAction: {
+                    alertManager.dismissAlert()
+                    alertManager.customAlertPrimaryAction?()
+                },
+                secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                secondaryButtonAction: {
+                    alertManager.dismissAlert()
+                    alertManager.customAlertSecondaryAction?()
+                }
+            )
+            .frame(width: 300)
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+        }
+        .transition(.opacity)
+        .zIndex(2)
+    }
+}
+
+// MARK: - Device Type Enum
+
+enum DeviceType {
+    case iPhoneSE
+    case iPhoneSE2
+    case iPhone11
+    case iPhone13
+    case iPhone14Pro
+    case iPhone14Plus
+    case iPhone15ProMax
+    case iPhone15Pro
+    case iPhone16Pro
+    case iPadMini
+    case iPadAir
+    case iPadPro
+    case other
+}
+
+// MARK: - Previews
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .preferredColorScheme(.dark)
+            .environmentObject(AlertManager())
+            .environmentObject(RadioStationViewModel())
+    }
+}

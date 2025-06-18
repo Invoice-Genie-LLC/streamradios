@@ -262,7 +262,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         Country(name: "Åland Islands", flag: "AX"),
         Country(name: "Unknown Region", flag: "")
     ]
-    @Published var selectedTab: Tab = .all
+    @Published var selectedTab: Tab = .radio
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
     @Published var isDeletingData: Bool = false

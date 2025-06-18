@@ -13,46 +13,68 @@ struct PlayerView: View {
     @State private var bitrateMessage: String = "Playing at high bitrate: 256 kbps"
     
     var body: some View {
-        VStack {
-            HStack(spacing: 30) {
+        VStack(spacing: 16) {
+            // Main control buttons
+            HStack(spacing: 40) {
+                // Previous station button
                 Button(action: {
                     radioPlayer.previousStation(from: viewModel.stations)
                 }) {
                     Image(systemName: "backward.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(.primary) // Adjusted to primary color
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundColor(.white)
                 }
+                .frame(width: 44, height: 44)
+                .background(Color.gray.opacity(0.3))
+                .clipShape(Circle())
+                .buttonStyle(PlainButtonStyle())
                 
-                ZStack {
-                    if radioPlayer.isBuffering {
-                        CircularProgressView()
-                    }
-                    Button(action: {
-                        radioPlayer.playPause()
-                    }) {
-                        Image(systemName: radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundColor(.primary) // Adjusted to primary color
+                // Main play/pause button - larger and more prominent
+                Button(action: {
+                    radioPlayer.playPause()
+                }) {
+                    ZStack {
+                        if radioPlayer.isBuffering {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 32, weight: .medium))
+                                .foregroundColor(.white)
+                        }
                     }
                 }
+                .frame(width: 64, height: 64)
+                .background(Color.blue)
+                .clipShape(Circle())
+                .buttonStyle(PlainButtonStyle())
+                .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
                 
+                // Next station button
                 Button(action: {
                     radioPlayer.nextStation(from: viewModel.stations)
                 }) {
                     Image(systemName: "forward.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(.primary) // Adjusted to primary color
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundColor(.white)
                 }
+                .frame(width: 44, height: 44)
+                .background(Color.gray.opacity(0.3))
+                .clipShape(Circle())
+                .buttonStyle(PlainButtonStyle())
             }
             
+            // Bitrate information - compact and subtle
             Text(bitrateMessage)
-                .font(.footnote)
+                .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.gray)
-                .padding(.top, 5) // Add padding to separate from station title
+                .lineLimit(1)
                 .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                     self.bitrateMessage = newBitrateMessage
                 }
         }
+        .padding(.vertical, 8)
     }
 }
 
@@ -61,5 +83,7 @@ struct PlayerView_Previews: PreviewProvider {
         PlayerView()
             .environmentObject(RadioPlayer.shared)
             .environmentObject(RadioStationViewModel())
+            .preferredColorScheme(.dark)
+            .background(Color.black)
     }
 }

@@ -14,6 +14,21 @@ extension UIDevice {
     }
 }
 
+// Sub-tab enum for radio filtering
+enum RadioSubTab: Int, CaseIterable {
+    case recent = 0
+    case favorites = 1
+    case all = 2
+    
+    var title: String {
+        switch self {
+        case .recent: return "Recent"
+        case .favorites: return "Favorites"
+        case .all: return "All"
+        }
+    }
+}
+
 struct RadioStationListView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
     @EnvironmentObject var radioPlayer: RadioPlayer
@@ -22,30 +37,33 @@ struct RadioStationListView: View {
     @Binding var selectedStationForEdit: RadioStation?
     @Binding var selectedTab: Tab
     @Binding var activeSheet: ActiveSheet?
-
+    
+    @State private var selectedSubTab: RadioSubTab = .all
     @State private var draggingStation: RadioStation?
     @State private var originalMetadata: String?
     @StateObject private var alertManager = AlertManager()
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showFavoriteError = false
     
-    
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
                 VStack {
                     ProgressView("Loading stations...")
-                        .progressViewStyle(CircularProgressViewStyle())
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
                         .scaleEffect(1.5)
+                        .foregroundColor(.white)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
             } else if viewModel.stations.isEmpty {
                 emptyStateView
             } else {
-                stationsListView
+                stationsListView(screenWidth: geometry.size.width)
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
         .sheet(isPresented: $isEditingStation) {
             if let selectedStation = selectedStationForEdit {
                 AddStationView(station: selectedStation, activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
@@ -55,7 +73,6 @@ struct RadioStationListView: View {
                     .environmentObject(viewModel)
             }
         }
-        
         .sheet(item: $viewModel.activeSheet) { item in
             switch item {
             case .editStation:
@@ -70,19 +87,18 @@ struct RadioStationListView: View {
         }
         .onAppear(perform: setup)
         .onAppear {
-                   setup()
-                   playFavoriteStation()
-               }
+            setup()
+            playFavoriteStation()
+            loadSelectedSubTab()
+        }
         .onDisappear(perform: cleanup)
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
-            viewModel.loadStationsFromCoreData() // This will refresh the data in the view model
+            viewModel.loadStationsFromCoreData()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StationArtworkUpdated"))) { notification in
-            // Force refresh of the view when station artwork is updated
             if let userInfo = notification.userInfo,
                let stationId = userInfo["stationId"] as? String {
                 DispatchQueue.main.async {
-                    // Trigger view refresh by updating the viewModel
                     viewModel.objectWillChange.send()
                     print("📱 Station List: Refreshed for artwork update on station: \(stationId)")
                 }
@@ -91,7 +107,7 @@ struct RadioStationListView: View {
         .overlay(
             Group {
                 if alertManager.showCustomAlert {
-                    Color.black.opacity(0.4)
+                    Color.black.opacity(0.8)
                         .edgesIgnoringSafeArea(.all)
                         .overlay(
                             CustomAlertView(
@@ -118,88 +134,109 @@ struct RadioStationListView: View {
         VStack {
             Text("No stations configured")
                 .font(.title)
-                .foregroundColor(.gray)
+                .foregroundColor(.white)
                 .padding(.bottom, 15)
             Button(action: {
                 if viewModel.selectedCountry == "Select Country" {
                     alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
                 } else {
-                    self.selectedStationForEdit = nil  // Ensure no station is selected for editing
-                    self.activeSheet = .addStation   // Trigger the sheet to open
+                    self.selectedStationForEdit = nil
+                    self.activeSheet = .addStation
                 }}) {
                     Image(systemName: "plus.circle")
                         .font(.largeTitle)
-                        .foregroundColor(.primary)
+                        .foregroundColor(.white)
                 }
         }
-        
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
         .transition(.scale)
     }
     
-    
-    private var stationsListView: some View {
-        ScrollView {
-            ScrollViewReader { proxy in
-                LazyVStack {
-                    ForEach(filteredStations) { station in
-                        stationRow(for: station)
-                            .id(station.id) // Add ID for scroll targeting
+    private func stationsListView(screenWidth: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            // Sub-tab picker for Recent/Favorites/All
+            if selectedTab == .radio {
+                Picker("", selection: $selectedSubTab) {
+                    ForEach(RadioSubTab.allCases, id: \.self) { subTab in
+                        Text(subTab.title).tag(subTab)
                     }
                 }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal, 16)
                 .padding(.top, 10)
-                .padding(.vertical, 10)
-                .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
-                    // Auto-scroll to currently playing station when it changes
-                    scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                .padding(.bottom, 5)
+                .onChange(of: selectedSubTab) { oldValue, newValue in
+                    saveSelectedSubTab(newValue)
                 }
-                .onReceive(radioPlayer.$isPlaying) { isPlaying in
-                    // Auto-scroll when playback starts/stops
-                    if isPlaying, let currentIndex = radioPlayer.currentStationIndex {
+            }
+            
+            // Stations list
+            ScrollView {
+                ScrollViewReader { proxy in
+                    LazyVStack(spacing: 1) {
+                        ForEach(filteredStations) { station in
+                            modernStationRow(for: station)
+                                .id(station.id)
+                        }
+                    }
+                    .padding(.top, 10)
+                    .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
                         scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
                     }
-                }
-                .onChange(of: selectedTab) { oldTab, newTab in
-                    // Auto-scroll to currently playing station when tab changes
-                    if let currentIndex = radioPlayer.currentStationIndex {
-                        // Add a small delay to allow the filtered list to update
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    .onReceive(radioPlayer.$isPlaying) { isPlaying in
+                        if isPlaying, let currentIndex = radioPlayer.currentStationIndex {
                             scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
                         }
                     }
-                }
-                .onAppear {
-                    scrollProxy = proxy
-                    // Auto-scroll to currently playing station when view appears
-                    if let currentIndex = radioPlayer.currentStationIndex {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                    .onChange(of: selectedTab) { oldTab, newTab in
+                        if let currentIndex = radioPlayer.currentStationIndex {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                            }
+                        }
+                    }
+                    .onChange(of: selectedSubTab) { oldSubTab, newSubTab in
+                        if let currentIndex = radioPlayer.currentStationIndex {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                            }
+                        }
+                    }
+                    .onAppear {
+                        scrollProxy = proxy
+                        if let currentIndex = radioPlayer.currentStationIndex {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                scrollToCurrentStation(proxy: proxy, currentIndex: currentIndex)
+                            }
                         }
                     }
                 }
+            }
+        }
+        .frame(width: screenWidth)
+        .background(Color.black)
+    }
+    
+    private func playFavoriteStation() {
+        if let favoriteStation = viewModel.stations.first(where: { $0.name == "Favorite Station" }) {
+            if let index = viewModel.stations.firstIndex(where: { $0.id == favoriteStation.id }) {
+                viewModel.updateLastPlayed(for: viewModel.stations[index])
+                radioPlayer.playStation(at: index, from: viewModel.stations)
             }
         }
     }
     
-    private func playFavoriteStation() {
-            if let favoriteStation = viewModel.stations.first(where: { $0.name == "Favorite Station" }) {
-                if let index = viewModel.stations.firstIndex(where: { $0.id == favoriteStation.id }) {
-                    viewModel.updateLastPlayed(for: viewModel.stations[index])
-                    radioPlayer.playStation(at: index, from: viewModel.stations)
-                }
-            }
-        }
-    
     @ViewBuilder
-    private func stationRow(for station: RadioStation) -> some View {
+    private func modernStationRow(for station: RadioStation) -> some View {
         VStack(spacing: 0) {
             // Show inline error above currently playing station if favorite toggle was attempted
             if showFavoriteError && isStationPlaying(station) && radioPlayer.isPlaying {
                 errorBanner
             }
             
-            // Main station card
-            stationCard(for: station)
+            // Main modern station card
+            modernStationCard(for: station)
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -215,8 +252,6 @@ struct RadioStationListView: View {
             }
         }
         .buttonStyle(PlainButtonStyle())
-        .padding(.horizontal, 16)
-        .padding(.vertical, 3) // Reduced from 6 to 3
         .contextMenu {
             if !isEditing  {
                 Button(role: .destructive) {
@@ -241,7 +276,6 @@ struct RadioStationListView: View {
             selectedTab: selectedTab,
             filteredStations: filteredStations
         ))
-        // Auto-dismiss error after 5 seconds
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
             if showFavoriteError {
                 withAnimation(.easeOut(duration: 0.3)) {
@@ -271,272 +305,150 @@ struct RadioStationListView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.1))
+        .background(Color.orange.opacity(0.2))
         .cornerRadius(8)
         .padding(.horizontal)
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
     
     @ViewBuilder
-    private func stationCard(for station: RadioStation) -> some View {
-        HStack(spacing: 8) {
-            // Station artwork with modern styling - smaller size
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.gray.opacity(0.1))
-                    .frame(width: 60, height: 60)
-                
-                imageForStation(station)
-                    .frame(width: 60, height: 60)
-                    .cornerRadius(10)
-                    // Removed border overlay completely
-                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-            }
+    private func modernStationCard(for station: RadioStation) -> some View {
+        HStack(spacing: 12) {
+            // Station logo - 64x64 as per screenshot
+            modernStationLogo(for: station)
             
-            // Station information with proper layout - give it priority
-            VStack(alignment: .leading, spacing: 3) {
-                // Station name - one line, full width
+            // Station info
+            VStack(alignment: .leading, spacing: 4) {
+                // Station name - white text
                 Text(station.name)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundColor(isCurrentStation(station: station) && radioPlayer.isPlaying ? .blue : .primary)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundColor(.white)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 
-                // Song metadata - 2 lines max, only show when playing
+                // Country - blue text as per screenshot
+                Text(station.country)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(.blue)
+                    .lineLimit(1)
+                
+                // Show metadata if playing
                 if isCurrentStation(station: station) && radioPlayer.isPlaying {
                     if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                        HStack(spacing: 3) {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.blue)
-                            Text(metadata)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundColor(.secondary)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    } else {
-                        HStack(spacing: 3) {
-                            Image(systemName: "radio")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.blue)
-                            Text("Playing...")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundColor(.blue)
-                                .lineLimit(1)
-                        }
+                        Text(metadata)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(.gray)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
-                }
-                
-                // Country and favorite indicator - one line
-                HStack(spacing: 3) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.secondary)
-                    Text(station.country)
-                        .font(.system(size: 11, weight: .regular, design: .rounded))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    
-                    if station.isFavorite {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.red)
-                    }
-                    
-                    Spacer()
                 }
             }
-            .frame(maxWidth: .infinity)
             
-            // Action buttons - more compact
-            HStack(spacing: 6) {
-                favoriteButton(for: station)
-                playButton(for: station)
+            Spacer()
+            
+            // Signal bars and controls
+            HStack(spacing: 12) {
+                // Animated signal bars for playing station
+                if isCurrentStation(station: station) && radioPlayer.isPlaying {
+                    animatedSignalBars
+                } else {
+                    staticSignalBars
+                }
                 
-                // Only show hamburger buttons when in editing mode
-                if isEditing && selectedTab != .recent {
+                // Stylish heart favorite button
+                if !isEditing {
+                    heartFavoriteButton(for: station)
+                }
+                
+                // Edit controls if in editing mode
+                if isEditing && selectedTab == .radio {
                     editControls(for: station)
                 }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
+        .background(Color.black)
+        .overlay(
+            // Subtle separator line
+            Rectangle()
+                .fill(Color.gray.opacity(0.2))
+                .frame(height: 0.5)
+                .padding(.leading, 88), // Align with text content
+            alignment: .bottom
+        )
+    }
+    
+    @ViewBuilder
+    private func modernStationLogo(for station: RadioStation) -> some View {
+        ZStack {
+            // Background for logo
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.gray.opacity(0.2))
+                .frame(width: 64, height: 64)
+            
+            // Station image
+            imageForStation(station)
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+    
+    @ViewBuilder
+    private var animatedSignalBars: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<4, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.blue)
+                    .frame(width: 3, height: CGFloat(8 + index * 4))
+                    .scaleEffect(y: 1.0)
+                    .animation(
+                        Animation.easeInOut(duration: 0.5)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.1),
+                        value: radioPlayer.isPlaying
+                    )
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var staticSignalBars: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<4, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.gray.opacity(0.4))
+                    .frame(width: 3, height: CGFloat(8 + index * 4))
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func heartFavoriteButton(for station: RadioStation) -> some View {
+        Button(action: {
+            handleFavoriteButtonTap(for: station)
+        }) {
+            Image(systemName: station.isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(station.isFavorite ? .pink : .gray)
+                .scaleEffect(station.isFavorite ? 1.1 : 1.0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .contentShape(Rectangle())
+        .frame(width: 44, height: 44)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+            Circle()
+                .fill(station.isFavorite ? Color.pink.opacity(0.1) : Color.clear)
+                .scaleEffect(station.isFavorite ? 1.0 : 0.8)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    isCurrentStation(station: station) && radioPlayer.isPlaying 
-                    ? Color.blue.opacity(0.3) 
-                    : Color.clear, 
-                    lineWidth: 2
-                )
-        )
-    }
-    
-    @ViewBuilder
-    private func stationArtworkSection(for station: RadioStation) -> some View {
-        ZStack {
-            // Background gradient for image area
-            RoundedRectangle(cornerRadius: 12)
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.gray.opacity(0.1),
-                            Color.gray.opacity(0.05)
-                        ]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 60, height: 60)
-            
-            imageForStation(station)
-                .frame(width: 56, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                // Removed border overlay completely
-            
-            // Playing indicator overlay
-            if isCurrentStation(station: station) && radioPlayer.isPlaying {
-                playingIndicatorOverlay
-            }
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 12)
-    }
-    
-    @ViewBuilder
-    private var playingIndicatorOverlay: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .fill(Color.black.opacity(0.3))
-            .frame(width: 56, height: 56)
-            .overlay(
-                Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white)
-                    // Removed scaleEffect and animation to prevent jumping during scroll
-            )
-    }
-    
-    @ViewBuilder
-    private func stationInfoSection(for station: RadioStation) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            stationNameRow(for: station)
-            stationMetadataRow(for: station)
-            stationDetailsRow(for: station)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    
-    @ViewBuilder
-    private func stationNameRow(for station: RadioStation) -> some View {
-        HStack(spacing: 6) {
-            Text(station.name)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundColor(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            
-            // Live indicator for currently playing station
-            if isCurrentStation(station: station) && radioPlayer.isPlaying {
-                liveIndicator
-            }
-            
-            Spacer()
-        }
-    }
-    
-    @ViewBuilder
-    private var liveIndicator: some View {
-        HStack(spacing: 2) {
             Circle()
-                .fill(Color.red)
-                .frame(width: 6, height: 6)
-                // Removed scaleEffect and animation to prevent jumping during scroll
-            Text("LIVE")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundColor(.red)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Color.red.opacity(0.1))
-        .clipShape(Capsule())
-    }
-    
-    @ViewBuilder
-    private func stationMetadataRow(for station: RadioStation) -> some View {
-        HStack(spacing: 6) {
-            if isCurrentStation(station: station) {
-                currentStationMetadata
-            } else {
-                nonPlayingStationMetadata
-            }
-            Spacer()
-        }
-    }
-    
-    @ViewBuilder
-    private var currentStationMetadata: some View {
-        if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-            HStack(spacing: 4) {
-                Image(systemName: "music.note")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.blue)
-                Text(metadata)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-        } else {
-            HStack(spacing: 4) {
-                Image(systemName: "radio")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.blue)
-                Text("Playing...")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.blue)
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private var nonPlayingStationMetadata: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "radio")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary)
-            Text("Tap to play")
-                .font(.system(size: 13, weight: .regular, design: .rounded))
-                .foregroundColor(.secondary)
-        }
-    }
-    
-    @ViewBuilder
-    private func stationDetailsRow(for station: RadioStation) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "globe")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.secondary)
-            Text(station.country)
-                .font(.system(size: 11, weight: .regular, design: .rounded))
-                .foregroundColor(.secondary)
-            
-            if station.isFavorite {
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.red)
-            }
-            
-            Spacer()
-        }
+                .stroke(station.isFavorite ? Color.pink.opacity(0.3) : Color.clear, lineWidth: 1)
+                .scaleEffect(station.isFavorite ? 1.0 : 0.8)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
+        )
     }
     
     @ViewBuilder
@@ -564,138 +476,23 @@ struct RadioStationListView: View {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()
+                .background(Color.white.opacity(0.1))
         } 
-        // Default radio icon
+        // Default radio icon with station initials
         else {
-            Image(systemName: "radio")
-                .resizable()
-                .scaledToFit()
-        }
-    }
-    
-    @ViewBuilder
-    private func stationControlsSection(for station: RadioStation) -> some View {
-        HStack(spacing: 8) {
-            if isEditing {
-                editControls(for: station)
-            } else {
-                playbackControlsSection(for: station)
-            }
-        }
-        .padding(.trailing, 16)
-    }
-    
-    @ViewBuilder
-    private func playbackControlsSection(for station: RadioStation) -> some View {
-        VStack(spacing: 8) {
-            playButton(for: station)
-            favoriteButton(for: station)
-        }
-    }
-    
-    @ViewBuilder
-    private func playButton(for station: RadioStation) -> some View {
-        Button(action: {
-            handlePlayButtonTap(for: station)
-        }) {
             ZStack {
-                Circle()
-                    .fill(
-                        isStationPlaying(station) ? 
-                        Color.blue.opacity(0.15) : 
-                        Color.gray.opacity(0.1)
-                    )
-                    .frame(width: 36, height: 36)
+                Color.gray.opacity(0.3)
                 
-                Image(systemName: isStationPlaying(station) ? 
-                      (radioPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill") : 
-                      "play.circle.fill")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundColor(
-                        isStationPlaying(station) ? .blue : .primary
-                    )
+                if !station.name.isEmpty {
+                    Text(String(station.name.prefix(2)).uppercased())
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                } else {
+                    Image(systemName: "radio")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundColor(.white)
+                }
             }
-        }
-        .buttonStyle(PlainButtonStyle())
-        .accessibilityIdentifier("playButton-\(station.id)")
-    }
-    
-    @ViewBuilder
-    private func favoriteButton(for station: RadioStation) -> some View {
-        Button(action: {
-            handleFavoriteButtonTap(for: station)
-        }) {
-            ZStack {
-                Circle()
-                    .fill(
-                        station.isFavorite ? 
-                        Color.red.opacity(0.15) : 
-                        Color.gray.opacity(0.1)
-                    )
-                    .frame(width: 28, height: 28)
-                
-                Image(systemName: station.isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(station.isFavorite ? .red : .primary)
-            }
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-    
-    @ViewBuilder
-    private func stationCardBackground(for station: RadioStation) -> some View {
-        RoundedRectangle(cornerRadius: 16)
-            .fill(cardBackgroundGradient(for: station))
-    }
-    
-    @ViewBuilder
-    private func stationCardBorder(for station: RadioStation) -> some View {
-        RoundedRectangle(cornerRadius: 16)
-            .strokeBorder(
-                isCurrentStation(station: station) && radioPlayer.isPlaying ? 
-                LinearGradient(
-                    gradient: Gradient(colors: [Color.blue.opacity(0.3), Color.blue.opacity(0.1)]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ) : 
-                LinearGradient(
-                    gradient: Gradient(colors: [Color.clear]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                lineWidth: 1.5
-            )
-            // Removed animation to prevent jumping during scroll
-    }
-    
-    private func cardBackgroundGradient(for station: RadioStation) -> LinearGradient {
-        if self.draggingStation?.id == station.id {
-            return LinearGradient(
-                gradient: Gradient(colors: [
-                    Color.gray.opacity(0.15),
-                    Color.gray.opacity(0.05)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else if isCurrentStation(station: station) && radioPlayer.isPlaying {
-            return LinearGradient(
-                gradient: Gradient(colors: [
-                    Color.blue.opacity(0.08),
-                    Color.blue.opacity(0.02)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else {
-            return LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(UIColor.systemBackground),
-                    Color(UIColor.systemGray6).opacity(0.3)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
         }
     }
     
@@ -705,11 +502,9 @@ struct RadioStationListView: View {
         if isEditing {
             selectedStationForEdit = station
         } else {
-            // If this station is currently playing, open the Shazam sheet
             if isStationPlaying(station) && radioPlayer.isPlaying {
                 activeSheet = .playerSheet
             } else {
-                // Otherwise, play this station
                 if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
                     viewModel.updateLastPlayed(for: viewModel.stations[index])
                     radioPlayer.playStation(at: index, from: viewModel.stations)
@@ -730,16 +525,12 @@ struct RadioStationListView: View {
     }
     
     private func handleFavoriteButtonTap(for station: RadioStation) {
-        // Check if this station is currently playing
         if isStationPlaying(station) && radioPlayer.isPlaying {
-            // Show error message instead of toggling favorite
             withAnimation(.easeIn(duration: 0.3)) {
                 showFavoriteError = true
             }
-            // Provide haptic feedback for the error
             UIDevice.playHapticFeedback()
         } else {
-            // Allow normal favorite toggle for non-playing stations
             withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                 viewModel.toggleFavorite(for: station)
             }
@@ -748,8 +539,7 @@ struct RadioStationListView: View {
     }
     
     private func handleDragStart(for station: RadioStation) -> NSItemProvider {
-        // Only allow dragging for All and Favorites tabs, not Recent
-        guard selectedTab != .recent else {
+        guard selectedTab == .radio else {
             return NSItemProvider()
         }
         UIDevice.playHapticFeedback()
@@ -760,14 +550,20 @@ struct RadioStationListView: View {
     }
     
     private var filteredStations: [RadioStation] {
+        // Only filter for radio tab
+        guard selectedTab == .radio else {
+            return []
+        }
+        
         let allStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
-        switch selectedTab {
-        case .recent:
-            return viewModel.recentStations()
-        case .favorites:
-            return viewModel.favoriteStations()
+        
+        switch selectedSubTab {
         case .all:
             return allStations
+        case .recent:
+            return viewModel.recentStations().filter { $0.country == viewModel.selectedCountry }
+        case .favorites:
+            return viewModel.favoriteStations().filter { $0.country == viewModel.selectedCountry }
         }
     }
     
@@ -782,8 +578,6 @@ struct RadioStationListView: View {
                     if success {
                         print("Station successfully deleted from CloudKit.")
                         self.viewModel.stations.remove(at: index)
-                        
-                        // Delete from CoreData
                         self.viewModel.deleteStationFromCoreData(station)
                         self.adjustRadioPlayerIndexAfterDeletion(at: index)
                     } else {
@@ -806,7 +600,7 @@ struct RadioStationListView: View {
     private func handleDismiss() {
         selectedStationForEdit = nil
         if !viewModel.stations.isEmpty {
-            selectedTab = .all
+            selectedTab = .radio
         }
     }
     
@@ -830,7 +624,6 @@ struct RadioStationListView: View {
         
         let currentStation = viewModel.stations[currentIndex]
         
-        // Check if the current station is in the filtered list
         if filteredStations.contains(where: { $0.id == currentStation.id }) {
             withAnimation(.easeInOut(duration: 0.6)) {
                 proxy.scrollTo(currentStation.id, anchor: .center)
@@ -842,23 +635,27 @@ struct RadioStationListView: View {
         NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
     }
     
+    private func loadSelectedSubTab() {
+        if let savedSubTab = UserDefaults.standard.object(forKey: "selectedSubTab") as? Int,
+           let subTab = RadioSubTab(rawValue: savedSubTab) {
+            selectedSubTab = subTab
+        }
+    }
+    
+    private func saveSelectedSubTab(_ subTab: RadioSubTab) {
+        UserDefaults.standard.set(subTab.rawValue, forKey: "selectedSubTab")
+    }
+    
     @ViewBuilder
     private func editControls(for station: RadioStation) -> some View {
         Button(action: {}) {
-            ZStack {
-                Circle()
-                    .fill(Color.gray.opacity(0.1))
-                    .frame(width: 36, height: 36)
-                
-                Image(systemName: "line.horizontal.3")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.primary)
-            }
+            Image(systemName: "line.horizontal.3")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.gray)
         }
         .buttonStyle(PlainButtonStyle())
         .onDrag {
-            // Only allow dragging for All and Favorites tabs, not Recent
-            guard selectedTab != .recent else {
+            guard selectedTab == .radio else {
                 return NSItemProvider()
             }
             UIDevice.playHapticFeedback()
@@ -900,48 +697,33 @@ struct StationDropDelegate: DropDelegate {
     }
     
     func dropEntered(info: DropInfo) {
-        guard selectedTab != .recent else { return } // Don't allow reordering in Recent tab
+        guard selectedTab == .radio else { return }
         
         guard let draggingStation = draggingStation else { return }
         
-        if selectedTab == .favorites {
-            // Handle favorites reordering
-            guard let fromIndex = filteredStations.firstIndex(of: draggingStation),
-                  let toIndex = filteredStations.firstIndex(of: station),
-                  fromIndex != toIndex else { return }
-            
-            withAnimation {
-                moveFavoriteStation(from: fromIndex, to: toIndex)
-            }
-        } else {
-            // Handle all stations reordering
-            guard let fromIndex = stations.firstIndex(of: draggingStation),
-                  let toIndex = stations.firstIndex(of: station),
-                  fromIndex != toIndex else { return }
-            
-            withAnimation {
-                moveAllStation(from: fromIndex, to: toIndex)
-            }
+        guard let fromIndex = stations.firstIndex(of: draggingStation),
+              let toIndex = stations.firstIndex(of: station),
+              fromIndex != toIndex else { return }
+        
+        withAnimation {
+            moveAllStation(from: fromIndex, to: toIndex)
         }
     }
     
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard selectedTab != .recent else { 
+        guard selectedTab == .radio else { 
             return DropProposal(operation: .forbidden)
         }
         return DropProposal(operation: .move)
     }
     
     func moveFavoriteStation(from sourceIndex: Int, to destinationIndex: Int) {
-        // Reorder favorites by updating their favoriteOrder values
         let favoriteStations = filteredStations
         
-        // Create new order array
         var newOrderedFavorites = favoriteStations
         let movingStation = newOrderedFavorites.remove(at: sourceIndex)
         newOrderedFavorites.insert(movingStation, at: destinationIndex)
         
-        // Update favoriteOrder for all favorites based on new positions
         for (index, favStation) in newOrderedFavorites.enumerated() {
             if let stationIndex = viewModel.stations.firstIndex(where: { $0.id == favStation.id }) {
                 viewModel.stations[stationIndex].favoriteOrder = index
@@ -955,7 +737,6 @@ struct StationDropDelegate: DropDelegate {
         let itemToMove = viewModel.stations.remove(at: sourceIndex)
         viewModel.stations.insert(itemToMove, at: destinationIndex)
         
-        // Save the new station order to CoreData
         viewModel.saveStationsToCoreData()
     }
 }
@@ -963,13 +744,14 @@ struct StationDropDelegate: DropDelegate {
 struct RadioStationListView_Previews: PreviewProvider {
     @StateObject static var viewModel = RadioStationViewModel()
     @StateObject static var radioPlayer = RadioPlayer()
-    @State static var activeSheet: ActiveSheet? = nil  // Create a state to pass as a binding
+    @State static var activeSheet: ActiveSheet? = nil
     
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false), isEditingStation: .constant(false),
-                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.recent),
-                             activeSheet: $activeSheet)  // Pass the binding to the preview
+                             selectedStationForEdit: .constant(nil), selectedTab: .constant(.radio),
+                             activeSheet: $activeSheet)
         .environmentObject(viewModel)
         .environmentObject(radioPlayer)
+        .preferredColorScheme(.dark)
     }
 }
