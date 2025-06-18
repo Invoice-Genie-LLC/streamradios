@@ -124,8 +124,10 @@ struct RadioStationListView: View {
                             Text("Drag to Reorder Stations")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundColor(.gray)
+                                .allowsHitTesting(false) // Prevent text from blocking gestures
                             
                             Spacer()
+                                .allowsHitTesting(false) // Prevent spacer from blocking gestures
                             
                             Button("Done") {
                                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -205,13 +207,6 @@ struct RadioStationListView: View {
                         .listRowInsets(EdgeInsets())
                 }
                 .onMove(perform: selectedTab == .radio && isEditing ? moveStations : nil)
-                .onDelete { indexSet in
-                    for index in indexSet {
-                        let station = filteredStations[index]
-                        stationToDelete = station
-                        showDeleteAlert = true
-                    }
-                }
             }
             .listStyle(PlainListStyle())
             .background(Color.black)
@@ -262,38 +257,22 @@ struct RadioStationListView: View {
             }
             
             // Main modern station card with gesture handling
-            ZStack {
-                // Background tap area - this will handle the main tap
-                modernStationCard(for: station)
-                
-                // Overlay with tap gesture that excludes the favorite button area
-                HStack {
-                    // Main tappable area (everything except the rightmost 60 points where the favorite button is)
-                    Rectangle()
-                        .fill(Color.clear)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            handleStationTap(station)
-                        }
-                        .onLongPressGesture(minimumDuration: 0.5) {
-                            // Long press activates sorting mode
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                if !isEditing && selectedTab == .radio {
-                                    isEditing = true
-                                    // Haptic feedback for long press
-                                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                                    impactFeedback.impactOccurred()
-                                }
-                            }
-                        }
-                    
-                    // Reserve space for favorite button (no tap gesture here)
-                    Rectangle()
-                        .fill(Color.clear)
-                        .frame(width: 60)
-                        .allowsHitTesting(false) // This area doesn't capture taps
+            modernStationCard(for: station)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    handleStationTap(station)
                 }
-            }
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    // Long press activates sorting mode
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        if !isEditing && selectedTab == .radio {
+                            isEditing = true
+                            // Haptic feedback for long press
+                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                            impactFeedback.impactOccurred()
+                        }
+                    }
+                }
         }
         .swipeActions(edge: .leading) {
             Button {
@@ -455,31 +434,32 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func heartFavoriteButton(for station: RadioStation) -> some View {
-        Image(systemName: station.isFavorite ? "heart.fill" : "heart")
-            .font(.system(size: 20, weight: .medium))
-            .foregroundColor(station.isFavorite ? .pink : .gray)
-            .scaleEffect(station.isFavorite ? 1.1 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
-            .contentShape(Circle())
-            .frame(width: 44, height: 44)
-            .highPriorityGesture(
-                TapGesture()
-                    .onEnded { _ in
-                        handleFavoriteButtonTap(for: station)
-                    }
-            )
-        .background(
-            Circle()
-                .fill(station.isFavorite ? Color.pink.opacity(0.1) : Color.clear)
-                .scaleEffect(station.isFavorite ? 1.0 : 0.8)
+        Button(action: {
+            handleFavoriteButtonTap(for: station)
+        }) {
+            Image(systemName: station.isFavorite ? "heart.fill" : "heart")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(station.isFavorite ? .pink : .gray)
+                .scaleEffect(station.isFavorite ? 1.1 : 1.0)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
-        )
-        .overlay(
-            Circle()
-                .stroke(station.isFavorite ? Color.pink.opacity(0.3) : Color.clear, lineWidth: 1)
-                .scaleEffect(station.isFavorite ? 1.0 : 0.8)
-                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
-        )
+                .frame(width: 44, height: 44)
+                .background(
+                    Circle()
+                        .fill(station.isFavorite ? Color.pink.opacity(0.1) : Color.clear)
+                        .scaleEffect(station.isFavorite ? 1.0 : 0.8)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(station.isFavorite ? Color.pink.opacity(0.3) : Color.clear, lineWidth: 1)
+                        .scaleEffect(station.isFavorite ? 1.0 : 0.8)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .allowsHitTesting(true)
+        .zIndex(999) // High z-index to ensure it captures taps first
     }
     
     @ViewBuilder
@@ -530,12 +510,19 @@ struct RadioStationListView: View {
     // MARK: - Action Handlers
     
     private func handleStationTap(_ station: RadioStation) {
+        print("🎯 Station tapped: \(station.name), isEditing: \(isEditing)")
+        
         // Don't handle tap if in editing mode - let native drag handle it
-        guard !isEditing else { return }
+        guard !isEditing else { 
+            print("⚠️ Ignoring tap because in editing mode")
+            return 
+        }
         
         if isStationPlaying(station) && radioPlayer.isPlaying {
+            print("📱 Opening player sheet for playing station")
             isPlayerSheetPresented = true
         } else {
+            print("▶️ Playing station: \(station.name)")
             if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
                 viewModel.updateLastPlayed(for: viewModel.stations[index])
                 radioPlayer.playStation(at: index, from: viewModel.stations)
@@ -555,12 +542,16 @@ struct RadioStationListView: View {
     }
     
     private func handleFavoriteButtonTap(for station: RadioStation) {
+        print("🔄 Favorite button tapped for: \(station.name), isPlaying: \(isStationPlaying(station))")
+        
         if isStationPlaying(station) && radioPlayer.isPlaying {
+            print("⚠️ Station is playing, showing error")
             withAnimation(.easeIn(duration: 0.3)) {
                 showFavoriteError = true
             }
             UIDevice.playHapticFeedback()
         } else {
+            print("❤️ Toggling favorite for: \(station.name)")
             withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                 viewModel.toggleFavorite(for: station)
             }
