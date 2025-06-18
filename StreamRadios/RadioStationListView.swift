@@ -53,14 +53,6 @@ struct RadioStationListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        .onTapGesture {
-            // Tap outside to exit edit mode
-            if isEditing {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    isEditing = false
-                }
-            }
-        }
         .sheet(item: $activeSheet) { item in
             switch item {
             case .editStation:
@@ -118,7 +110,7 @@ struct RadioStationListView: View {
                 }
                 
                 // Edit mode header
-                if isEditing {
+                if isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) {
                     VStack {
                         HStack {
                             Text("Drag to Reorder Stations")
@@ -130,9 +122,7 @@ struct RadioStationListView: View {
                                 .allowsHitTesting(false) // Prevent spacer from blocking gestures
                             
                             Button("Done") {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    isEditing = false
-                                }
+                                isEditing = false
                             }
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.blue)
@@ -197,8 +187,8 @@ struct RadioStationListView: View {
     
     private func stationsListView(screenWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
-            // Add top padding when in editing mode
-            if isEditing {
+            // Add top padding when in editing mode for All and Favorites tabs
+            if isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) {
                 Spacer()
                     .frame(height: 50)
             }
@@ -212,7 +202,7 @@ struct RadioStationListView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets())
                 }
-                .onMove(perform: selectedTab == .radio && isEditing ? moveStations : nil)
+                .onMove(perform: selectedTab == .radio && isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) ? moveStations : nil)
             }
             .listStyle(PlainListStyle())
             .background(Color.black)
@@ -242,7 +232,15 @@ struct RadioStationListView: View {
             }
         }
         .frame(width: screenWidth)
-        .background(Color.black)
+        .background(
+            Color.black
+                .onTapGesture {
+                    // Tap on background to exit edit mode
+                    if isEditing {
+                        isEditing = false
+                    }
+                }
+        )
     }
     
     private func playFavoriteStation() {
@@ -264,24 +262,19 @@ struct RadioStationListView: View {
             
             // Main modern station card with gesture handling
             modernStationCard(for: station)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if !isEditing {
-                        handleStationTap(station)
-                    }
-                }
-                .onLongPressGesture(minimumDuration: 0.5) {
-                    // Long press activates sorting mode
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        if !isEditing && selectedTab == .radio {
-                            isEditing = true
-                            // Haptic feedback for long press
-                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                            impactFeedback.impactOccurred()
-                        }
-                    }
-                }
         }
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in
+                    // Long press activates sorting mode for All and Favorites tabs
+                    if !isEditing && selectedTab == .radio && (selectedSubTab == .all || selectedSubTab == .favorites) {
+                        isEditing = true
+                        // Haptic feedback for long press
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                        impactFeedback.impactOccurred()
+                    }
+                }
+        )
         .swipeActions(edge: .leading) {
             Button {
                 // Ensure we have a valid station before setting up edit
@@ -333,53 +326,58 @@ struct RadioStationListView: View {
     @ViewBuilder
     private func modernStationCard(for station: RadioStation) -> some View {
         HStack(spacing: 12) {
-            // Station logo - 64x64 as per screenshot
-            modernStationLogo(for: station)
-            
-            // Station info
-            VStack(alignment: .leading, spacing: 4) {
-                // Station name - white text
-                Text(station.name)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                
-                // Country - blue text as per screenshot
-                Text(station.country)
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(.blue)
-                    .lineLimit(1)
-                
-                // Show metadata if playing
-                if isCurrentStation(station: station) && radioPlayer.isPlaying {
-                    if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                        Text(metadata)
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundColor(.gray)
+            // Tappable area for station info (excludes favorite button)
+            Button(action: {
+                if !isEditing {
+                    handleStationTap(station)
+                }
+            }) {
+                HStack(spacing: 12) {
+                    // Station logo - 64x64 as per screenshot
+                    modernStationLogo(for: station)
+                    
+                    // Station info
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Station name - white text
+                        Text(station.name)
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(.white)
                             .lineLimit(1)
                             .truncationMode(.tail)
+                        
+                        // Country - blue text as per screenshot
+                        Text(station.country)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.blue)
+                            .lineLimit(1)
+                        
+                        // Show metadata if playing
+                        if isCurrentStation(station: station) && radioPlayer.isPlaying {
+                            if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+                                Text(metadata)
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(.gray)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Signal bars (part of tappable area)
+                    if isCurrentStation(station: station) && radioPlayer.isPlaying {
+                        animatedSignalBars
+                    } else {
+                        staticSignalBars
                     }
                 }
             }
+            .buttonStyle(PlainButtonStyle())
             
-            Spacer()
-            
-            // Signal bars and controls
-            HStack(spacing: 12) {
-                // Animated signal bars for playing station
-                if isCurrentStation(station: station) && radioPlayer.isPlaying {
-                    animatedSignalBars
-                } else {
-                    staticSignalBars
-                }
-                
-                // Stylish heart favorite button
-                if !isEditing {
-                    heartFavoriteButton(for: station)
-                }
-                
-                // No edit controls needed - using native List drag handles
+            // Favorite button (separate from tappable area)
+            if !isEditing {
+                heartFavoriteButton(for: station)
             }
         }
         .padding(.horizontal, 16)
@@ -462,9 +460,9 @@ struct RadioStationListView: View {
                         .scaleEffect(station.isFavorite ? 1.0 : 0.8)
                         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
                 )
+                .contentShape(Circle())
         }
         .buttonStyle(PlainButtonStyle())
-        .allowsHitTesting(true)
     }
     
     @ViewBuilder
@@ -647,15 +645,29 @@ struct RadioStationListView: View {
         // Handle different subtab scenarios
         switch selectedSubTab {
         case .all:
-            // Move within all stations for selected country
-            var filteredStations = self.filteredStations
-            filteredStations.move(fromOffsets: source, toOffset: destination)
+            // Get the current filtered stations (all stations for this country)
+            let countryStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
+            var reorderedStations = countryStations
+            reorderedStations.move(fromOffsets: source, toOffset: destination)
             
-            // Update the main stations array
-            for (index, station) in filteredStations.enumerated() {
-                if let mainIndex = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                    viewModel.stations[mainIndex] = station
+            // Update the main stations array by replacing all stations for this country
+            // First, remove all existing stations for this country
+            viewModel.stations.removeAll { $0.country == viewModel.selectedCountry }
+            
+            // Then add the reordered stations back in the correct positions
+            for (index, station) in reorderedStations.enumerated() {
+                viewModel.stations.append(station)
+            }
+            
+            // Sort the full array to maintain order consistency
+            viewModel.stations.sort { first, second in
+                if first.country != second.country {
+                    return first.country < second.country
                 }
+                // Within the same country, maintain the order we just set
+                let firstIndex = reorderedStations.firstIndex { $0.id == first.id } ?? 0
+                let secondIndex = reorderedStations.firstIndex { $0.id == second.id } ?? 0
+                return firstIndex < secondIndex
             }
             
         case .favorites:
@@ -679,13 +691,12 @@ struct RadioStationListView: View {
         viewModel.saveStationsToCoreData()
         
         // Update radio player index if needed
-        if let currentIndex = radioPlayer.currentStationIndex {
+        if let currentStationIndex = radioPlayer.currentStationIndex,
+           currentStationIndex < viewModel.stations.count {
+            let currentStationId = viewModel.stations[currentStationIndex].id
             // Find the new index of the currently playing station
-            for (newIndex, station) in viewModel.stations.enumerated() {
-                if station.id == viewModel.stations[currentIndex].id {
-                    radioPlayer.currentStationIndex = newIndex
-                    break
-                }
+            if let newIndex = viewModel.stations.firstIndex(where: { $0.id == currentStationId }) {
+                radioPlayer.currentStationIndex = newIndex
             }
         }
     }
@@ -712,3 +723,27 @@ struct RadioStationListView_Previews: PreviewProvider {
         .preferredColorScheme(.dark)
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
