@@ -106,12 +106,15 @@ struct AddStationView: View {
                                             }
                                         }
                                         
-                                        Picker("Select Country", selection: $selectedCountry) {
-                                            ForEach(viewModel.countries, id: \.name) { country in
-                                                Text(country.name).tag(country.name)
-                                            }
+                                        HStack {
+                                            Text("Country")
+                                                .foregroundColor(.primary)
+                                            Spacer()
+                                            ElegantCountryPickerButton(
+                                                selectedCountry: $selectedCountry,
+                                                countries: viewModel.countries
+                                            )
                                         }
-                                        .pickerStyle(MenuPickerStyle())
                                     }
                                     
                                     Section(header: Text("Icon")) {

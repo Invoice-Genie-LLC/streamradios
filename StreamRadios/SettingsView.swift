@@ -262,16 +262,19 @@ struct SettingsView: View {
             Text("Select Country")
                 .font(.headline)
                 .foregroundColor(.primary)
-            StyledPickerView(selectedCountry: $viewModel.selectedCountry, countries: viewModel.countries)
-                .onChange(of: viewModel.selectedCountry) { newValue in
-                                // This will trigger the didSet in the ViewModel, which will post the notification
-                                viewModel.selectedCountry = newValue
-                            }
-                .padding()
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                
+            
+            ElegantCountryPickerButton(
+                selectedCountry: $viewModel.selectedCountry,
+                countries: viewModel.countries
+            )
+            .onChange(of: viewModel.selectedCountry) { newValue in
+                // This will trigger the didSet in the ViewModel, which will post the notification
+                viewModel.selectedCountry = newValue
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(12)
+            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
         }
     }
     

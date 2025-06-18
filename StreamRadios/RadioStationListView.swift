@@ -260,7 +260,9 @@ struct RadioStationListView: View {
             modernStationCard(for: station)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    handleStationTap(station)
+                    if !isEditing {
+                        handleStationTap(station)
+                    }
                 }
                 .onLongPressGesture(minimumDuration: 0.5) {
                     // Long press activates sorting mode
@@ -455,11 +457,9 @@ struct RadioStationListView: View {
                         .scaleEffect(station.isFavorite ? 1.0 : 0.8)
                         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
                 )
-                .contentShape(Circle())
         }
         .buttonStyle(PlainButtonStyle())
         .allowsHitTesting(true)
-        .zIndex(999) // High z-index to ensure it captures taps first
     }
     
     @ViewBuilder

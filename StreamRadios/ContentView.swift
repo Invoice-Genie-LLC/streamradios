@@ -208,49 +208,11 @@ struct ContentView: View {
                     VStack(spacing: 12) {
                         // Top row with country picker, edit, and add buttons
                         HStack(spacing: 12) {
-                            // Modern country picker
-                            HStack(spacing: 8) {
-                                if let flagImage = flagImage(for: viewModel.selectedCountry) {
-                                    Image(uiImage: flagImage)
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 24, height: 16)
-                                        .clipShape(RoundedRectangle(cornerRadius: 2))
-                                }
-                                
-                                Menu {
-                                    ForEach(viewModel.countries, id: \.self) { country in
-                                        Button(action: {
-                                            viewModel.selectedCountry = country.name
-                                        }) {
-                                            HStack {
-                                                if let flagImage = flagImage(for: country.name) {
-                                                    Image(uiImage: flagImage)
-                                                        .resizable()
-                                                        .aspectRatio(contentMode: .fit)
-                                                        .frame(width: 20, height: 14)
-                                                }
-                                                Text(country.name)
-                                            }
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Text(viewModel.selectedCountry)
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(.white)
-                                            .lineLimit(1)
-                                        
-                                        Image(systemName: "chevron.down")
-                                            .font(.system(size: 12, weight: .medium))
-                                            .foregroundColor(.gray)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(Color(red: 0.1, green: 0.1, blue: 0.1))
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                }
-                            }
+                            // Modern elegant country picker
+                            ElegantCountryPickerButton(
+                                selectedCountry: $viewModel.selectedCountry,
+                                countries: viewModel.countries
+                            )
                             
                             Spacer()
                             
@@ -265,11 +227,9 @@ struct ContentView: View {
                                 }
                             }) {
                                 Image(systemName: "plus")
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundColor(.white)
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundColor(.blue)
                                     .frame(width: 36, height: 36)
-                                    .background(Color.blue)
-                                    .clipShape(Circle())
                             }
                         }
                         .padding(.horizontal, 16)
