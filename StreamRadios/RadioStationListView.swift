@@ -193,42 +193,44 @@ struct RadioStationListView: View {
                     .frame(height: 50)
             }
             
-            // Stations list using List for swipe actions
-            List {
-                ForEach(filteredStations) { station in
-                    modernStationRow(for: station)
-                        .id(station.id)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets())
+            // Stations list using List for swipe actions with ScrollViewReader for tab focus
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(filteredStations) { station in
+                        modernStationRow(for: station)
+                            .id(station.id)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
+                    }
+                    .onMove(perform: selectedTab == .radio && isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) ? moveStations : nil)
                 }
-                .onMove(perform: selectedTab == .radio && isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) ? moveStations : nil)
-            }
-            .listStyle(PlainListStyle())
-            .background(Color.black)
-            .scrollContentBackground(.hidden)
-            .environment(\.editMode, .constant(isEditing ? .active : .inactive))
-            .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
-                if let currentIndex = currentIndex, currentIndex < filteredStations.count {
-                    // Find the station in filtered list and scroll to it
-                    let currentStationId = viewModel.stations[currentIndex].id
-                    if filteredStations.contains(where: { $0.id == currentStationId }) {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            // Note: ScrollViewReader functionality needs to be handled differently with List
+                .listStyle(PlainListStyle())
+                .background(Color.black)
+                .scrollContentBackground(.hidden)
+                .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+                .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
+                    scrollToCurrentStation(proxy: proxy)
+                }
+                .onReceive(radioPlayer.$isPlaying) { isPlaying in
+                    if isPlaying {
+                        scrollToCurrentStation(proxy: proxy)
+                    }
+                }
+                .onChange(of: selectedTab) { oldTab, newTab in
+                    // Handle tab changes - scroll to current station if switching to radio tab
+                    if newTab == .radio {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            scrollToCurrentStation(proxy: proxy)
                         }
                     }
                 }
-            }
-            .onReceive(radioPlayer.$isPlaying) { isPlaying in
-                if isPlaying, let currentIndex = radioPlayer.currentStationIndex {
-                    // Handle scroll to current station for List
+                .onChange(of: selectedSubTab) { oldSubTab, newSubTab in
+                    // Handle sub-tab changes - scroll to current station if it exists in new tab
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        scrollToCurrentStation(proxy: proxy)
+                    }
                 }
-            }
-            .onChange(of: selectedTab) { oldTab, newTab in
-                // Handle tab changes
-            }
-            .onChange(of: selectedSubTab) { oldSubTab, newSubTab in
-                // Handle sub-tab changes
             }
         }
         .frame(width: screenWidth)
@@ -638,6 +640,20 @@ struct RadioStationListView: View {
                viewModel.stations[radioPlayer.currentStationIndex!].id == station.id
     }
     
+    private func scrollToCurrentStation(proxy: ScrollViewProxy) {
+        guard let currentIndex = radioPlayer.currentStationIndex,
+              currentIndex < viewModel.stations.count else { return }
+        
+        let currentStationId = viewModel.stations[currentIndex].id
+        
+        // Check if the current station exists in the filtered list for the current tab
+        if filteredStations.contains(where: { $0.id == currentStationId }) {
+            withAnimation(.easeInOut(duration: 0.5)) {
+                proxy.scrollTo(currentStationId, anchor: .center)
+            }
+            print("📱 Scrolled to current playing station: \(viewModel.stations[currentIndex].name) in \(selectedSubTab.title) tab")
+        }
+    }
 
     
     private func cleanup() {
