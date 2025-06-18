@@ -540,7 +540,7 @@ class CarPlayManager: NSObject, ObservableObject {
             "Colombia": "CO", "Peru": "PE", "Russia": "RU", "Turkey": "TR",
             "Israel": "IL", "Egypt": "EG", "South Africa": "ZA", "Nigeria": "NG",
             "Kenya": "KE", "Morocco": "MA", "Tunisia": "TN", "Algeria": "DZ",
-            "New Zealand": "NZ", "Indonesia": "ID", "Malaysia": "MY",
+            "Albania": "AL", "New Zealand": "NZ", "Indonesia": "ID", "Malaysia": "MY",
             "Singapore": "SG", "Thailand": "TH", "Philippines": "PH", "Vietnam": "VN",
             // Common variations and other names
             "United States of America": "US", "Estados Unidos": "US",
