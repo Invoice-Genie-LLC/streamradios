@@ -18,7 +18,7 @@ import FlagKit
 class CarPlayManager: NSObject, ObservableObject {
     static let shared = CarPlayManager()
     
-    private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "CarPlay")
+    private let log = OSLog(subsystem: "com.streamradios.carplay", category: "CarPlayManager")
     private var cancellables = Set<AnyCancellable>()
     
     // Data caches for CarPlay
@@ -36,6 +36,10 @@ class CarPlayManager: NSObject, ObservableObject {
     // Image cache for artwork
     private var imageCache: [String: UIImage] = [:]
     private var imageCacheAccessTimes: [String: Date] = [:]
+    
+    // Add tracking for recently played episodes with timestamps
+    private var recentlyPlayedEpisodes: [(episode: PodcastEpisode, playedAt: Date)] = []
+    private let maxRecentEpisodes = 10
     
     private override init() {
         super.init()
@@ -977,19 +981,38 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     private func updateRecentPodcastEpisodes() {
-        // Extract recent episodes from all feeds (last 10 episodes across all feeds)
-        var allEpisodes: [PodcastEpisode] = []
-        for feed in podcastFeeds {
-            allEpisodes.append(contentsOf: feed.episodes)
+        // Use recently played episodes if available, otherwise fall back to episodes with progress
+        if !recentlyPlayedEpisodes.isEmpty {
+            // Sort by actual play time (most recent first) and get unique episodes
+            var seenEpisodeIds = Set<String>()
+            recentPodcastEpisodes = recentlyPlayedEpisodes
+                .sorted(by: { $0.playedAt > $1.playedAt })
+                .compactMap { item in
+                    if seenEpisodeIds.contains(item.episode.id) {
+                        return nil
+                    }
+                    seenEpisodeIds.insert(item.episode.id)
+                    return item.episode
+                }
+                .prefix(maxRecentEpisodes)
+                .map { $0 }
+        } else {
+            // Fallback: Extract episodes with progress from all feeds
+            var allEpisodes: [PodcastEpisode] = []
+            for feed in podcastFeeds {
+                allEpisodes.append(contentsOf: feed.episodes)
+            }
+            
+            // Sort by episodes with progress first, then by publish date
+            recentPodcastEpisodes = allEpisodes
+                .filter { $0.state.progress > 0 || $0.state.isPlayed }
+                .sorted(by: { $0.publicationDate > $1.publicationDate })
+                .prefix(maxRecentEpisodes)
+                .map { $0 }
         }
         
-        // Sort by publish date and take the most recent
-        recentPodcastEpisodes = allEpisodes
-            .sorted(by: { $0.publicationDate > $1.publicationDate })
-            .prefix(10)
-            .map { $0 }
-        
-        os_log("CarPlay: Updated recent podcast episodes - %d episodes", log: log, type: .debug, recentPodcastEpisodes.count)
+        os_log("CarPlay: Updated recent podcast episodes - %d episodes (from %d tracked plays)", 
+               log: log, type: .debug, recentPodcastEpisodes.count, recentlyPlayedEpisodes.count)
     }
     
     // MARK: - Public Artwork Helper Methods
@@ -1345,6 +1368,28 @@ class CarPlayManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             MPPlayableContentManager.shared().reloadData()
         }
+    }
+    
+    // Add episode to recently played list when it starts playing
+    func addEpisodeToRecentlyPlayed(_ episode: PodcastEpisode) {
+        let now = Date()
+        
+        // Remove any existing entry for this episode to avoid duplicates
+        recentlyPlayedEpisodes.removeAll { $0.episode.id == episode.id }
+        
+        // Add to the beginning of the list
+        recentlyPlayedEpisodes.insert((episode: episode, playedAt: now), at: 0)
+        
+        // Keep only the most recent episodes
+        if recentlyPlayedEpisodes.count > maxRecentEpisodes {
+            recentlyPlayedEpisodes = Array(recentlyPlayedEpisodes.prefix(maxRecentEpisodes))
+        }
+        
+        // Update the recent episodes list
+        updateRecentPodcastEpisodes()
+        
+        os_log("CarPlay: Added episode '%@' to recently played list (now %d total)", 
+               log: log, type: .info, episode.title, recentlyPlayedEpisodes.count)
     }
     
     // Make this method public so CarPlaySceneDelegate can call it

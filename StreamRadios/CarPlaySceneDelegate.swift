@@ -790,8 +790,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Use the existing PodcastPlayer to play the episode
         DispatchQueue.main.async { [self] in
             let podcastPlayer = PodcastPlayer.shared
-            // Find the feed that contains this episode
             let carPlayManager = CarPlayManager.shared
+            
+            // Immediately add episode to recently played list
+            carPlayManager.addEpisodeToRecentlyPlayed(episode)
+            
+            // Find the feed that contains this episode
             let podcastFeeds = carPlayManager.getPodcastFeeds()
             if let feed = podcastFeeds.first(where: { $0.episodes.contains(where: { $0.id == episode.id }) }) {
                 // Ensure the episode has the latest progress data from the feed
@@ -805,6 +809,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             } else {
                 os_log("🚗 CarPlay: Warning - Could not find feed for episode '%@'", log: self.log, type: .error, episode.title)
             }
+            
+            // Update the recents tab immediately without navigating away
+            self.refreshRecentsTabTemplate()
+            
             completion()
         }
     }
