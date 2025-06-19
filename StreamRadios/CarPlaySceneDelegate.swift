@@ -908,27 +908,85 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Find the recents tab (should be index 2: Stations, Favorites, Recents, Podcasts)
         let recentsTabIndex = 2
-        if recentsTabIndex < tabBarTemplate.templates.count {
-            // Create a new recents tab with updated data
-            let newRecentsTab = createRecentsTab()
+        if recentsTabIndex < tabBarTemplate.templates.count,
+           let recentsTab = tabBarTemplate.templates[recentsTabIndex] as? CPListTemplate {
             
-            // Replace the recents tab in the tab bar
-            var updatedTemplates = tabBarTemplate.templates
-            updatedTemplates[recentsTabIndex] = newRecentsTab
+            // Instead of recreating the entire tab bar template, update the existing recents tab in place
+            // Get fresh recents data
+            let carPlayManager = CarPlayManager.shared
+            let recentStations = carPlayManager.getRecentStations()
+            let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
             
-            // Create a new tab bar template with the updated recents tab
-            let newTabBarTemplate = CPTabBarTemplate(templates: updatedTemplates)
+            // Create new sections with updated data
+            var newSections: [CPListSection] = []
             
-            // Update the root template
-            interfaceController.setRootTemplate(newTabBarTemplate, animated: false, completion: { success, error in
-                if success {
-                    os_log("🚗 CarPlay: Successfully refreshed recents tab", log: self.log, type: .info)
-                } else {
-                    os_log("🚗 CarPlay: Failed to refresh recents tab: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+            // Recent stations section
+            var recentStationItems: [CPListItem] = []
+            for station in recentStations {
+                let timeAgo = formatTimeAgo(station.lastPlayed)
+                let item = CPListItem(text: station.name,
+                                     detailText: "Played \(timeAgo) • \(station.country)",
+                                     image: carPlayManager.getStationArtwork(for: station))
+                item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                    self?.playStation(station, completion: completion)
                 }
-            })
+                recentStationItems.append(item)
+            }
+            
+            if recentStationItems.isEmpty {
+                let emptyItem = CPListItem(text: "No Recent Stations", detailText: "Recently played stations will appear here")
+                recentStationItems.append(emptyItem)
+            }
+            
+            let recentStationsSection = CPListSection(items: recentStationItems, header: "Recently Played Stations", sectionIndexTitle: nil)
+            newSections.append(recentStationsSection)
+            
+            // Recent episodes section
+            var recentEpisodeItems: [CPListItem] = []
+            for episode in recentEpisodes {
+                let duration = formatDuration(episode.duration)
+                var statusText = ""
+                
+                // Determine episode status based on state and current playback
+                if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+                   currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+                    statusText = " • Playing"
+                } else if episode.state.isPlayed {
+                    statusText = " • Complete"
+                } else if episode.state.progress > 0 {
+                    let progressPercent = Int(episode.state.progress * 100)
+                    statusText = " • \(progressPercent)% complete"
+                }
+                
+                // Find the podcast feed for artwork
+                let podcastFeeds = carPlayManager.getPodcastFeeds()
+                let podcastFeed = podcastFeeds.first { feed in
+                    feed.episodes.contains { $0.id == episode.id }
+                }
+                
+                let item = CPListItem(text: episode.title,
+                                     detailText: "\(duration)\(statusText)",
+                                     image: podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone"))
+                item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                    self?.playEpisode(episode, completion: completion)
+                }
+                recentEpisodeItems.append(item)
+            }
+            
+            if recentEpisodeItems.isEmpty {
+                let emptyItem = CPListItem(text: "No Recent Episodes", detailText: "Recently played episodes will appear here")
+                recentEpisodeItems.append(emptyItem)
+            }
+            
+            let recentEpisodesSection = CPListSection(items: recentEpisodeItems, header: "Recently Played Episodes", sectionIndexTitle: nil)
+            newSections.append(recentEpisodesSection)
+            
+            // Update the sections directly on the existing template - this preserves navigation
+            recentsTab.updateSections(newSections)
+            
+            os_log("🚗 CarPlay: Successfully updated recents tab sections without changing navigation", log: self.log, type: .info)
         } else {
-            os_log("🚗 CarPlay: Recents tab index out of bounds", log: log, type: .error)
+            os_log("🚗 CarPlay: Recents tab index out of bounds or not a list template", log: log, type: .error)
         }
     }
     
