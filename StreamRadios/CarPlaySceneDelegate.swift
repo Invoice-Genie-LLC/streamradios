@@ -310,10 +310,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         for episode in favoriteEpisodes {
             let duration = formatDuration(episode.duration)
             var statusText = ""
+            let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
             
             // Determine episode status based on state and current playback
-            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+            if isCurrentlyPlaying {
                 statusText = " • Playing"
             } else if episode.state.isPlayed {
                 statusText = " • Complete"
@@ -328,9 +328,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 feed.episodes.contains { $0.id == episode.id }
             }
             
+            // Use standard podcast artwork for all episodes
+            let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
+            
             let item = CPListItem(text: episode.title,
                                  detailText: "\(duration)\(statusText)",
-                                 image: podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone"))
+                                 image: itemImage)
+            
+            // Set Apple standard highlighting for currently playing episode
+            if #available(iOS 14.0, *) {
+                item.isPlaying = isCurrentlyPlaying
+            }
+            
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playEpisode(episode, completion: completion)
             }
@@ -362,9 +371,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         var recentStationItems: [CPListItem] = []
         for station in recentStations {
             let timeAgo = formatTimeAgo(station.lastPlayed)
+            let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+            
             let item = CPListItem(text: station.name,
                                  detailText: "Played \(timeAgo) • \(station.country)",
                                  image: carPlayManager.getStationArtwork(for: station))
+            
+            // Set Apple standard highlighting for currently playing station
+            if #available(iOS 14.0, *) {
+                item.isPlaying = isCurrentlyPlaying
+            }
+            
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playStation(station, completion: completion)
             }
@@ -386,10 +403,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         for episode in recentEpisodes {
             let duration = formatDuration(episode.duration)
             var statusText = ""
+            let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
             
             // Determine episode status based on state and current playback
-            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+            if isCurrentlyPlaying {
                 statusText = " • Playing"
             } else if episode.state.isPlayed {
                 statusText = " • Complete"
@@ -404,9 +421,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 feed.episodes.contains { $0.id == episode.id }
             }
             
+            // Use standard podcast artwork for all episodes
+            let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
+            
             let item = CPListItem(text: episode.title,
                                  detailText: "\(duration)\(statusText)",
-                                 image: podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone"))
+                                 image: itemImage)
+            
+            // Set Apple standard highlighting for currently playing episode
+            if #available(iOS 14.0, *) {
+                item.isPlaying = isCurrentlyPlaying
+            }
+            
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playEpisode(episode, completion: completion)
             }
@@ -469,9 +495,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         var stationItems: [CPListItem] = []
         for station in stations {
+            let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+            
             let item = CPListItem(text: station.name,
                                  detailText: station.country,
                                  image: carPlayManager.getStationArtwork(for: station))
+            
+            // Set Apple standard highlighting for currently playing station
+            if #available(iOS 14.0, *) {
+                item.isPlaying = isCurrentlyPlaying
+            }
+            
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playStation(station, completion: completion)
             }
@@ -645,10 +679,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func createEpisodeListItem(episode: PodcastEpisode, podcast: PodcastFeed, carPlayManager: CarPlayManager) -> CPListItem {
         let duration = formatDuration(episode.duration)
         var statusText = ""
+        let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
         
         // Determine episode status based on state and current playback
-        if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-           currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+        if isCurrentlyPlaying {
             statusText = " • Playing"
         } else if episode.state.isPlayed {
             statusText = " • Complete"
@@ -661,9 +695,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             statusText += " • Downloaded"
         }
         
+        // Use standard podcast artwork for all episodes
+        let itemImage = carPlayManager.getPodcastArtwork(for: podcast)
+        
         let item = CPListItem(text: episode.title,
                              detailText: "\(duration)\(statusText)",
-                             image: carPlayManager.getPodcastArtwork(for: podcast))
+                             image: itemImage)
+        
+        // Set Apple standard highlighting for currently playing episode
+        if #available(iOS 14.0, *) {
+            item.isPlaying = isCurrentlyPlaying
+        }
+        
         item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
             self?.playEpisode(episode, completion: completion)
         }
@@ -736,10 +779,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         for episode in downloadedEpisodes {
             let duration = formatDuration(episode.duration)
             var statusText = ""
+            let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
             
             // Determine episode status based on state and current playback
-            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+            if isCurrentlyPlaying {
                 statusText = " • Playing"
             } else if episode.state.isPlayed {
                 statusText = " • Complete"
@@ -747,9 +790,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 statusText = " • In Progress"
             }
             
+            // Use download icon for all downloaded episodes
+            let itemImage = UIImage(systemName: "arrow.down.circle.fill")
+            
             let item = CPListItem(text: episode.title,
                                  detailText: "\(duration)\(statusText)",
-                                 image: UIImage(systemName: "arrow.down.circle.fill"))
+                                 image: itemImage)
+            
+            // Set Apple standard highlighting for currently playing episode
+            if #available(iOS 14.0, *) {
+                item.isPlaying = isCurrentlyPlaying
+            }
+            
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playEpisode(episode, completion: completion)
             }
@@ -768,8 +820,6 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             completion()
         })
     }
-    
-
     
     private func playStation(_ station: RadioStation, completion: @escaping () -> Void) {
         os_log("CarPlay: Playing station %@", log: log, type: .info, station.name)
@@ -863,9 +913,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             sections.append(emptySection)
         } else {
             let stationItems = stations.map { station in
+                let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                
                 let item = CPListItem(text: station.name, 
                                      detailText: station.country, // Use country instead of genre
                                      image: carPlayManager.getStationArtwork(for: station))
+                
+                // Set Apple standard highlighting for currently playing station
+                if #available(iOS 14.0, *) {
+                    item.isPlaying = isCurrentlyPlaying
+                }
                 
                 item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                     print("🚗 CarPlay: Playing station \\(station.name)")
@@ -1024,8 +1081,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         os_log("🚗 CarPlay: Playback state changed for episode ID: %@, isPlaying: %@", log: log, type: .info, episodeId, isPlaying ? "YES" : "NO")
         
-        // Update the episode status display immediately
+        // Update the episode status display immediately on the current template
         refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
+        
+        // Also refresh the recents tab to show/hide the highlighted playing state
+        refreshRecentsTabTemplate()
+        
+        // Force a complete UI refresh to ensure highlighting is updated everywhere
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
     }
     
     private func handleStationPlayedForRecents(_ notification: Notification) {
@@ -1099,9 +1164,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             var recentStationItems: [CPListItem] = []
             for station in recentStations {
                 let timeAgo = formatTimeAgo(station.lastPlayed)
+                let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                
                 let item = CPListItem(text: station.name,
                                      detailText: "Played \(timeAgo) • \(station.country)",
                                      image: carPlayManager.getStationArtwork(for: station))
+                
+                // Set Apple standard highlighting for currently playing station
+                if #available(iOS 14.0, *) {
+                    item.isPlaying = isCurrentlyPlaying
+                }
+                
                 item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                     self?.playStation(station, completion: completion)
                 }
@@ -1121,10 +1194,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             for episode in recentEpisodes {
                 let duration = formatDuration(episode.duration)
                 var statusText = ""
+                let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
                 
                 // Determine episode status based on state and current playback
-                if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-                   currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+                if isCurrentlyPlaying {
                     statusText = " • Playing"
                 } else if episode.state.isPlayed {
                     statusText = " • Complete"
@@ -1139,9 +1212,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     feed.episodes.contains { $0.id == episode.id }
                 }
                 
+                // Use standard podcast artwork for all episodes
+                let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
+                
                 let item = CPListItem(text: episode.title,
                                      detailText: "\(duration)\(statusText)",
-                                     image: podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone"))
+                                     image: itemImage)
+                
+                // Set Apple standard highlighting for currently playing episode
+                if #available(iOS 14.0, *) {
+                    item.isPlaying = isCurrentlyPlaying
+                }
+                
                 item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                     self?.playEpisode(episode, completion: completion)
                 }
