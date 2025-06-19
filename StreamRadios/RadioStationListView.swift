@@ -329,10 +329,10 @@ struct RadioStationListView: View {
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
                         
-                        // Country info with flag for Recent tab
+                        // Country info with flag for Recent and Favorites tabs
                         HStack(spacing: 6) {
-                            // Show country flag only in Recent tab since it shows stations from all countries
-                            if selectedSubTab == .recent {
+                            // Show country flag in Recent and Favorites tabs since they show stations from all countries
+                            if selectedSubTab == .recent || selectedSubTab == .favorites {
                                 if let flagImage = flagImage(for: station.country) {
                                     Image(uiImage: flagImage)
                                         .resizable()
@@ -656,8 +656,8 @@ struct RadioStationListView: View {
             // Recent tab shows recent stations from ALL countries
             return viewModel.recentStations()
         case .favorites:
-            // Favorites tab shows favorites from the selected country only
-            return viewModel.favoriteStations().filter { $0.country == viewModel.selectedCountry }
+            // Favorites tab shows favorites from ALL countries
+            return viewModel.favoriteStations()
         }
     }
     
@@ -748,7 +748,7 @@ struct RadioStationListView: View {
             viewModel.stations.removeAll { $0.country == viewModel.selectedCountry }
             
             // Then add the reordered stations back in the correct positions
-            for (index, station) in reorderedStations.enumerated() {
+            for (_, station) in reorderedStations.enumerated() {
                 viewModel.stations.append(station)
             }
             
@@ -764,7 +764,7 @@ struct RadioStationListView: View {
             }
             
         case .favorites:
-            // Move within favorites (country-specific)
+            // Move within favorites (all countries)
             var favoriteStations = filteredStations
             favoriteStations.move(fromOffsets: source, toOffset: destination)
             
@@ -803,61 +803,16 @@ struct RadioStationListView: View {
     // MARK: - Edit Station Handler
     
     private func editStation(_ station: RadioStation) {
-        // Ensure we have a valid station before proceeding
-        guard !station.name.isEmpty else {
-            print("❌ EditStation: Invalid station provided")
-            return
-        }
-        
         print("📝 EditStation: Starting edit for station: \(station.name)")
         
-        // Set the station immediately on the main queue
+        // Set the station first
         selectedStationForEdit = station
         
-        // Verify the station was set correctly
-        guard selectedStationForEdit?.id == station.id else {
-            print("❌ EditStation: Failed to set selectedStationForEdit")
-            return
-        }
-        
-        print("✅ EditStation: selectedStationForEdit set successfully")
-        
-        // Present the sheet with multiple fallback attempts
-        var attempts = 0
-        let maxAttempts = 5
-        
-        func attemptSheetPresentation() {
-            attempts += 1
-            
-            // Verify the selected station is still valid
-            guard let selected = selectedStationForEdit, selected.id == station.id else {
-                print("❌ EditStation: selectedStationForEdit lost on attempt \(attempts)")
-                if attempts < maxAttempts {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05 * Double(attempts)) {
-                        selectedStationForEdit = station
-                        attemptSheetPresentation()
-                    }
-                }
-                return
-            }
-            
-            print("📱 EditStation: Presenting sheet (attempt \(attempts))")
-            activeSheet = .editStation
-            
-            // Verify the sheet was set
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                if activeSheet == .editStation {
-                    print("✅ EditStation: Sheet presentation successful")
-                } else if attempts < maxAttempts {
-                    print("⚠️ EditStation: Sheet presentation failed, retrying...")
-                    attemptSheetPresentation()
-                }
-            }
-        }
-        
-        // Start the presentation attempt
-        DispatchQueue.main.async {
-            attemptSheetPresentation()
+        // Add a small delay to ensure the binding propagates before presenting the sheet
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+            print("📝 EditStation: selectedStationForEdit is now: \(self.selectedStationForEdit?.name ?? "nil")")
+            self.activeSheet = .editStation
+            print("✅ EditStation: Sheet presented for station: \(station.name)")
         }
     }
 

@@ -307,10 +307,7 @@ struct ContentView: View {
                     CustomAlertContainer()
                 }
             }
-            .sheet(item: $activeSheet, onDismiss: { 
-                activeSheet = nil
-                selectedStationForEdit = nil
-            }) { item in
+            .sheet(item: $activeSheet) { item in
                 switch item {
                 case .addStation:
                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
@@ -394,6 +391,12 @@ struct ContentView: View {
             }
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                 bitrateMessage = newBitrateMessage
+            }
+            .onChange(of: activeSheet) { oldValue, newValue in
+                // Clear selectedStationForEdit when activeSheet becomes nil
+                if newValue == nil {
+                    selectedStationForEdit = nil
+                }
             }
             .navigationBarHidden(true)
         }
