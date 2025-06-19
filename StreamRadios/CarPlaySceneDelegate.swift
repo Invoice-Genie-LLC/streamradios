@@ -396,7 +396,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let recentStationsSection = CPListSection(items: recentStationItems, header: "Recently Played Stations", sectionIndexTitle: nil)
         sections.append(recentStationsSection)
         
-        // Get recent podcast episodes from CarPlayManager
+        // Get recent podcast episodes from CarPlayManager SECOND (after stations)
         let recentEpisodes = carPlayManager.getRecentPodcastEpisodes()
         
         var recentEpisodeItems: [CPListItem] = []
@@ -1115,7 +1115,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func handleCarPlayRefreshRequest(_ notification: Notification) {
-        os_log("🚗 CarPlay: Received refresh request", log: log, type: .info)
+        let source = notification.userInfo?["source"] as? String ?? "unknown"
+        os_log("🚗 CarPlay: Received refresh request from source: %@", log: log, type: .info, source)
         
         // Force refresh all data
         let carPlayManager = CarPlayManager.shared
@@ -1159,7 +1160,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Create new sections with updated data
             var newSections: [CPListSection] = []
             
-            // Recent stations section
+            // Recent stations section FIRST (as requested)
             var recentStationItems: [CPListItem] = []
             for station in recentStations {
                 let timeAgo = formatTimeAgo(station.lastPlayed)
@@ -1188,7 +1189,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             let recentStationsSection = CPListSection(items: recentStationItems, header: "Recently Played Stations", sectionIndexTitle: nil)
             newSections.append(recentStationsSection)
             
-            // Recent episodes section
+            // Recent episodes section SECOND (after stations)
             var recentEpisodeItems: [CPListItem] = []
             for episode in recentEpisodes {
                 let duration = formatDuration(episode.duration)

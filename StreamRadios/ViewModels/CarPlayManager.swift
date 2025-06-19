@@ -43,6 +43,7 @@ class CarPlayManager: NSObject, ObservableObject {
     
     private override init() {
         super.init()
+        loadRecentlyPlayedEpisodes()
     }
     
     func setupCarPlay() {
@@ -247,24 +248,37 @@ class CarPlayManager: NSObject, ObservableObject {
             feed.episodes.contains { $0.state.isDownloaded }
         }
         
-        // Get recent podcast episodes (last 5 played)
-        var allEpisodes: [PodcastEpisode] = []
-        for feed in podcastFeeds {
-            allEpisodes.append(contentsOf: feed.episodes)
-        }
+        // CRITICAL: Use the recently played episodes that track actual play times
+        // Do NOT overwrite recentPodcastEpisodes here - it should only be updated by updateRecentPodcastEpisodes()
+        // The updateRecentPodcastEpisodes() function properly handles the recently played episodes
         
-        // Sort by play history and take the 5 most recent
-        recentPodcastEpisodes = allEpisodes
-            .filter { episode in
-                // Filter episodes that have been played or have progress
-                episode.state.progress > 0 || episode.state.isPlayed
+        // If we have no recently played episodes, fall back to episodes with progress
+        if recentPodcastEpisodes.isEmpty {
+            var allEpisodes: [PodcastEpisode] = []
+            for feed in podcastFeeds {
+                allEpisodes.append(contentsOf: feed.episodes)
             }
-            .sorted { episode1, episode2 in
-                // Sort by publication date as a proxy for recent activity
-                episode1.publicationDate > episode2.publicationDate
+            
+            // Only use this fallback if we truly have no recently played episodes
+            let fallbackEpisodes = allEpisodes
+                .filter { episode in
+                    episode.state.progress > 0 || episode.state.isPlayed
+                }
+                .sorted { episode1, episode2 in
+                    episode1.publicationDate > episode2.publicationDate
+                }
+                .prefix(5)
+                .map { $0 }
+            
+            if fallbackEpisodes.count > 0 {
+                recentPodcastEpisodes = fallbackEpisodes
+                os_log("CarPlay: Using fallback recent episodes (%d episodes) since no recently played episodes found", 
+                       log: log, type: .info, fallbackEpisodes.count)
             }
-            .prefix(5)
-            .map { $0 }
+        } else {
+            os_log("CarPlay: Preserving %d recently played episodes (not overwriting with fallback)", 
+                   log: log, type: .info, recentPodcastEpisodes.count)
+        }
         
         os_log("CarPlay: Updated podcast data - %d feeds, %d favorites, %d downloads, %d recent episodes", 
                log: log, type: .info, podcastFeeds.count, favoritePodcasts.count, downloadedPodcasts.count, recentPodcastEpisodes.count)
@@ -1148,6 +1162,15 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     func getRecentPodcastEpisodes() -> [PodcastEpisode] {
+        os_log("CarPlay: getRecentPodcastEpisodes() called - returning %d episodes", 
+               log: log, type: .info, recentPodcastEpisodes.count)
+        
+        // Debug: Log the first few episodes
+        for (index, episode) in recentPodcastEpisodes.prefix(3).enumerated() {
+            os_log("CarPlay: Recent episode %d: '%@'", 
+                   log: log, type: .debug, index + 1, episode.title)
+        }
+        
         return recentPodcastEpisodes
     }
     
@@ -1374,6 +1397,11 @@ class CarPlayManager: NSObject, ObservableObject {
     func addEpisodeToRecentlyPlayed(_ episode: PodcastEpisode) {
         let now = Date()
         
+        os_log("🎵 CarPlay: addEpisodeToRecentlyPlayed() called for episode: '%@'", 
+               log: log, type: .info, episode.title)
+        os_log("🎵 CarPlay: Current recentlyPlayedEpisodes count before adding: %d", 
+               log: log, type: .debug, recentlyPlayedEpisodes.count)
+        
         // Remove any existing entry for this episode to avoid duplicates
         recentlyPlayedEpisodes.removeAll { $0.episode.id == episode.id }
         
@@ -1388,7 +1416,19 @@ class CarPlayManager: NSObject, ObservableObject {
         // Update the recent episodes list
         updateRecentPodcastEpisodes()
         
-        os_log("CarPlay: Added episode '%@' to recently played list (now %d total)", 
+        // Save to UserDefaults for persistence
+        saveRecentlyPlayedEpisodes()
+        
+        // Trigger CarPlay UI refresh to immediately show the new recently played episode
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("CarPlayRefreshRequested"), 
+                object: nil,
+                userInfo: ["source": "recentlyPlayedEpisode"]
+            )
+        }
+        
+        os_log("CarPlay: Added episode '%@' to recently played list (now %d total) and triggered UI refresh", 
                log: log, type: .info, episode.title, recentlyPlayedEpisodes.count)
     }
     
@@ -1414,6 +1454,93 @@ class CarPlayManager: NSObject, ObservableObject {
         // Update recent episodes list
         updateRecentPodcastEpisodes()
     }
+    
+    // MARK: - Recently Played Episodes Persistence
+    
+    private func saveRecentlyPlayedEpisodes() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        
+        do {
+            let recentEpisodesData = recentlyPlayedEpisodes.map { item in
+                RecentlyPlayedEpisodeData(
+                    episodeId: item.episode.id,
+                    episodeTitle: item.episode.title,
+                    episodeUrl: item.episode.audioUrl,
+                    episodeDuration: item.episode.duration,
+                    episodePublicationDate: item.episode.publicationDate,
+                    playedAt: item.playedAt,
+                    podcastTitle: "", // We don't store podcast title in episode, will get from feed
+                    podcastId: item.episode.feedId ?? ""
+                )
+            }
+            
+            let data = try encoder.encode(recentEpisodesData)
+            UserDefaults.standard.set(data, forKey: "carPlayRecentlyPlayedEpisodes")
+            
+            os_log("CarPlay: Saved %d recently played episodes to UserDefaults", 
+                   log: log, type: .debug, recentEpisodesData.count)
+        } catch {
+            os_log("CarPlay: Failed to save recently played episodes: %@", 
+                   log: log, type: .error, error.localizedDescription)
+        }
+    }
+    
+    private func loadRecentlyPlayedEpisodes() {
+        guard let data = UserDefaults.standard.data(forKey: "carPlayRecentlyPlayedEpisodes") else {
+            os_log("CarPlay: No saved recently played episodes found", log: log, type: .debug)
+            return
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        do {
+            let recentEpisodesData = try decoder.decode([RecentlyPlayedEpisodeData].self, from: data)
+            
+            // Convert back to our internal format
+            recentlyPlayedEpisodes = recentEpisodesData.map { data in
+                let episode = PodcastEpisode(
+                    id: data.episodeId,
+                    title: data.episodeTitle,
+                    descriptionText: "", // We don't persist description for recently played
+                    audioUrl: data.episodeUrl,
+                    publicationDate: data.episodePublicationDate,
+                    duration: data.episodeDuration,
+                    state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
+                    feedId: data.podcastId
+                )
+                return (episode: episode, playedAt: data.playedAt)
+            }
+            
+            // Remove episodes older than 30 days
+            let thirtyDaysAgo = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+            recentlyPlayedEpisodes = recentlyPlayedEpisodes.filter { $0.playedAt > thirtyDaysAgo }
+            
+            // Update the recent episodes list
+            updateRecentPodcastEpisodes()
+            
+            os_log("CarPlay: Loaded %d recently played episodes from UserDefaults", 
+                   log: log, type: .info, recentlyPlayedEpisodes.count)
+        } catch {
+            os_log("CarPlay: Failed to load recently played episodes: %@", 
+                   log: log, type: .error, error.localizedDescription)
+            // Clear corrupted data
+            UserDefaults.standard.removeObject(forKey: "carPlayRecentlyPlayedEpisodes")
+        }
+    }
+}
+
+// MARK: - Recently Played Episode Data Structure for Persistence
+private struct RecentlyPlayedEpisodeData: Codable {
+    let episodeId: String
+    let episodeTitle: String
+    let episodeUrl: String
+    let episodeDuration: TimeInterval
+    let episodePublicationDate: Date
+    let playedAt: Date
+    let podcastTitle: String
+    let podcastId: String
 }
 
 // MARK: - MPPlayableContentDataSource
