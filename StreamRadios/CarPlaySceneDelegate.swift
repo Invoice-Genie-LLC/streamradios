@@ -247,9 +247,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let favoriteStations = carPlayManager.getFavoriteStations()
         
         var favoriteStationItems: [CPListItem] = []
-        // Apple CarPlay Best Practice: Limit list items for optimal performance
-        let maxFavoriteStations = min(favoriteStations.count, 12)
-        for station in favoriteStations.prefix(maxFavoriteStations) {
+        // Show ALL favorite stations - no artificial limits
+        for station in favoriteStations {
             let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
             
             let item = CPListItem(text: station.name,
@@ -284,9 +283,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             sections.append(emptySection)
         } else {
             var countryItems: [CPListItem] = []
-            // Apple CarPlay Best Practice: Limit to 12 countries for optimal performance and compliance
-            let maxCountries = min(availableCountries.count, 12)
-            for country in availableCountries.prefix(maxCountries) {
+            // Show ALL countries - no artificial limits
+            for country in availableCountries {
                 let stations = carPlayManager.getStations(for: country)
                 print("🚗 CarPlay: Country \(country) has \(stations.count) stations")
                 let item = CPListItem(text: country, 
@@ -536,10 +534,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let stations = carPlayManager.getStations(for: country)
         
         var stationItems: [CPListItem] = []
-        // Apply CarPlay compliance limits
-        let limitedStations = enforceListItemLimits(stations, maxItems: 12, context: "stations for \(country)")
         
-        for station in limitedStations {
+        // Show ALL stations for the country - no artificial limits
+        for station in stations {
             let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
             
             let item = CPListItem(text: station.name,
@@ -557,14 +554,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             stationItems.append(item)
         }
         
-        // Add indicator if list was truncated for compliance
-        if stations.count > 12 {
-            let moreItem = CPListItem(text: "More Stations Available", 
-                                     detailText: "\(stations.count - 12) additional stations in \(country)")
-            stationItems.append(moreItem)
-        }
-        
-        let section = CPListSection(items: stationItems, header: "\(country) Stations", sectionIndexTitle: nil)
+        let section = CPListSection(items: stationItems, header: "\(country) Stations (\(stations.count))", sectionIndexTitle: nil)
         let listTemplate = CPListTemplate(title: country, sections: [section])
         
         interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in

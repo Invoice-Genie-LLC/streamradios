@@ -205,37 +205,55 @@ struct ContentView: View {
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack(spacing: 0) {
-                    // Modern top navigation area
-                    VStack(spacing: 12) {
-                        // Top row with country picker, edit, and add buttons
-                        HStack(spacing: 12) {
-                            // Modern elegant country picker
-                            ElegantCountryPickerButton(
-                                selectedCountry: $viewModel.selectedCountry,
-                                countries: viewModel.countries
-                            )
-                            
-                            Spacer()
-                            
-
-                            
-                            // Add station button
-                            Button(action: {
-                                if viewModel.selectedCountry == "Select Country" {
-                                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                                } else {
-                                    activeSheet = .addStation
-                                }
-                            }) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 20, weight: .medium))
+                    // Modern top navigation area - Browse by Country section prominently at top
+                    VStack(spacing: 16) {
+                        // Browse by Country section - now prominently at the top
+                        VStack(spacing: 12) {
+                            // Section header
+                            HStack {
+                                Image(systemName: "globe")
+                                    .font(.system(size: 18, weight: .medium))
                                     .foregroundColor(.blue)
-                                    .frame(width: 36, height: 36)
+                                
+                                Text("Browse by Country")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                                
+                                Spacer()
+                                
+                                // Add station button
+                                Button(action: {
+                                    if viewModel.selectedCountry == "Select Country" {
+                                        alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                                    } else {
+                                        activeSheet = .addStation
+                                    }
+                                }) {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 20, weight: .medium))
+                                        .foregroundColor(.blue)
+                                        .frame(width: 36, height: 36)
+                                }
                             }
+                            .padding(.horizontal, 16)
+                            
+                            // Country picker - now more prominent
+                            HStack {
+                                ElegantCountryPickerButton(
+                                    selectedCountry: $viewModel.selectedCountry,
+                                    countries: viewModel.countries
+                                )
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
                         }
+                        .padding(.vertical, 12)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(12)
                         .padding(.horizontal, 16)
                         
-                        // Sub-tabs: Recent, Favorites, All - Elegant Design
+                        // Sub-tabs: Recent, Favorites, All - moved below country selection
                         elegantTabBar
                     }
                     .padding(.top, topPadding)
