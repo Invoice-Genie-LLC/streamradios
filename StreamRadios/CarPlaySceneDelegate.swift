@@ -65,44 +65,31 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         await withCheckedContinuation { continuation in
             context.perform {
                 do {
-                    // Load podcast feeds first
+                    // Load podcast feeds first (without episodes for performance)
                     let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                     feedRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
                     
                     let managedFeeds = try context.fetch(feedRequest)
                     os_log("🚗 CarPlay: Found %d podcast feeds in Core Data", log: self.log, type: .info, managedFeeds.count)
                     
-                    // Convert each managed feed to PodcastFeed and load its episodes
+                    // Convert each managed feed to PodcastFeed (without loading episodes yet)
                     for managedFeed in managedFeeds {
                         var feed = managedFeed.toPodcastFeed()
                         
-                        // Load episodes for this feed on the same context
-                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                        episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                        episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                        // Count episodes for this feed (much faster than loading all episodes)
+                        let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                        episodeCountRequest.includesPropertyValues = false // Only count, don't load data
                         
                         do {
-                            let managedEpisodes = try context.fetch(episodeRequest)
-                            let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
-                                var episode = managedEpisode.toPodcastEpisode()
-                                episode.state.isPlayed = managedEpisode.isPlayed
-                                episode.state.progress = managedEpisode.progress
-                                episode.state.isFavorite = managedEpisode.isFavorite
-                                episode.state.isDownloaded = managedEpisode.isDownloaded
-                                
-                                // Log progress for debugging
-                                if managedEpisode.progress > 0 {
-                                    os_log("🚗 CarPlay: Episode '%@' has progress: %.2f%%", log: self.log, type: .debug, episode.title, managedEpisode.progress * 100)
-                                }
-                                
-                                return episode
-                            }
-                            
-                            feed.episodes = episodes
-                            os_log("🚗 CarPlay: Loaded %d episodes for feed '%@'", log: self.log, type: .debug, episodes.count, feed.title)
+                            let episodeCount = try context.count(for: episodeCountRequest)
+                            // Initialize with empty episodes array - will be loaded on-demand
+                            feed.episodes = []
+                            os_log("🚗 CarPlay: Feed '%@' has %d episodes (will load on-demand)", log: self.log, type: .debug, feed.title, episodeCount)
                             
                         } catch {
-                            os_log("🚗 CarPlay: Error loading episodes for feed '%@': %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                            os_log("🚗 CarPlay: Error counting episodes for feed '%@': %@", log: self.log, type: .error, feed.title, error.localizedDescription)
+                            feed.episodes = []
                         }
                         
                         podcastFeeds.append(feed)
@@ -121,7 +108,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Configure CarPlayManager with the loaded podcast data on main actor
         await MainActor.run {
             CarPlayManager.shared.configurePodcastData(podcastFeeds)
-            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds", log: self.log, type: .info, podcastFeeds.count)
+            os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, podcastFeeds.count)
             print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds")
         }
     }
@@ -454,7 +441,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                                  detailText: "\(podcast.episodes.count) episodes",
                                  image: carPlayManager.getPodcastArtwork(for: podcast))
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                self?.showPodcastEpisodes(podcast, completion: completion)
+                self?.showPodcastDetails(podcast, completion: completion)
             }
             podcastItems.append(item)
         }
@@ -499,60 +486,46 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         })
     }
     
-    private func showPodcastEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
-        let carPlayManager = CarPlayManager.shared
-        var sections: [CPListSection] = []
+    private func showPodcastDetails(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        os_log("🚗 CarPlay: Showing podcast details for '%@'", log: log, type: .info, podcast.title)
         
-        // Add Downloaded episodes filter option at the top
-        let downloadedEpisodes = podcast.episodes.filter { $0.state.isDownloaded }
-        if !downloadedEpisodes.isEmpty {
-            let downloadedItem = CPListItem(text: "Downloaded Episodes",
-                                           detailText: "\(downloadedEpisodes.count) downloaded",
-                                           image: UIImage(systemName: "arrow.down.circle.fill"))
-            downloadedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                self?.showDownloadedEpisodes(podcast, completion: completion)
+        // First, get the total episode count from CoreData
+        getEpisodeCount(for: podcast) { [weak self] totalEpisodes in
+            guard let self = self else { return }
+            
+            if totalEpisodes == 0 {
+                // No episodes - show empty state
+                self.showEmptyPodcastState(podcast, completion: completion)
+                return
             }
             
-            let filterSection = CPListSection(items: [downloadedItem], header: "Filter", sectionIndexTitle: nil)
-            sections.append(filterSection)
+            // Apple's CarPlay guide: "Some cars dynamically limit lists to 12 list items"
+            // We use this as our page size to ensure optimal performance across all vehicles
+            let episodesPerPage = 12 // CarPlay's suggested limit
+            let totalPages = Int(ceil(Double(totalEpisodes) / Double(episodesPerPage)))
+            
+            os_log("🚗 CarPlay: Podcast '%@' has %d episodes, will create %d pages", log: self.log, type: .info, podcast.title, totalEpisodes, totalPages)
+            
+            // Load episodes efficiently based on count
+            if totalEpisodes <= episodesPerPage {
+                // Small number of episodes - load all at once
+                self.loadEpisodesForPodcast(podcast) { episodes in
+                    var updatedPodcast = podcast
+                    updatedPodcast.episodes = episodes
+                    self.displayPodcastWithAllEpisodes(updatedPodcast, totalEpisodes: totalEpisodes, completion: completion)
+                }
+            } else {
+                // Large number of episodes - implement efficient pagination
+                self.displayPodcastWithPagination(podcast, totalEpisodes: totalEpisodes, episodesPerPage: episodesPerPage, completion: completion)
+            }
         }
+    }
+    
+    private func showEmptyPodcastState(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        let emptyItem = CPListItem(text: "No Episodes", detailText: "This podcast doesn't have any episodes yet")
+        let section = CPListSection(items: [emptyItem], header: "Episodes", sectionIndexTitle: nil)
+        let listTemplate = CPListTemplate(title: podcast.title, sections: [section])
         
-        // Show all episodes
-        var episodeItems: [CPListItem] = []
-        for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
-            let duration = formatDuration(episode.duration)
-            var statusText = ""
-            
-            // Determine episode status based on state and current playback
-            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
-                statusText = " • Playing"
-            } else if episode.state.isPlayed {
-                statusText = " • Complete"
-            } else if episode.state.progress > 0 {
-                statusText = " • In Progress"
-            }
-            
-            // Add download indicator
-            if episode.state.isDownloaded {
-                statusText += " • Downloaded"
-            }
-            
-            let item = CPListItem(text: episode.title,
-                                 detailText: "\(duration)\(statusText)",
-                                 image: carPlayManager.getPodcastArtwork(for: podcast))
-            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                self?.playEpisode(episode, completion: completion)
-            }
-            episodeItems.append(item)
-        }
-        
-        let episodesSection = CPListSection(items: episodeItems, header: "All Episodes", sectionIndexTitle: nil)
-        sections.append(episodesSection)
-        
-        let listTemplate = CPListTemplate(title: podcast.title, sections: sections)
-        
-        // Track the current template and feed for real-time updates
         currentPodcastTemplate = listTemplate
         currentPodcastFeed = podcast
         
@@ -561,13 +534,205 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         })
     }
     
-    private func showDownloadedEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+    private func displayPodcastWithAllEpisodes(_ podcast: PodcastFeed, totalEpisodes: Int, completion: @escaping () -> Void) {
         let carPlayManager = CarPlayManager.shared
+        var sections: [CPListSection] = []
         
-        // Filter to only downloaded episodes
+        // Add "Downloaded Episodes" filter if there are any downloaded episodes
         let downloadedEpisodes = podcast.episodes.filter { $0.state.isDownloaded }
+        if !downloadedEpisodes.isEmpty {
+            let downloadedItem = CPListItem(text: "Downloaded Episodes",
+                                           detailText: "\(downloadedEpisodes.count) downloaded",
+                                           image: UIImage(systemName: "arrow.down.circle"))
+            downloadedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.showDownloadedEpisodesFromList(downloadedEpisodes, podcastTitle: podcast.title, completion: completion)
+            }
+            
+            let filterSection = CPListSection(items: [downloadedItem], header: "Filter", sectionIndexTitle: nil)
+            sections.append(filterSection)
+        }
         
+        // Show all episodes in one section
         var episodeItems: [CPListItem] = []
+        for episode in podcast.episodes {
+            let item = self.createEpisodeListItem(episode: episode, podcast: podcast, carPlayManager: carPlayManager)
+            episodeItems.append(item)
+        }
+        
+        let episodesSection = CPListSection(items: episodeItems, header: "All Episodes (\(totalEpisodes))", sectionIndexTitle: nil)
+        sections.append(episodesSection)
+        
+        let listTemplate = CPListTemplate(title: podcast.title, sections: sections)
+        
+        currentPodcastTemplate = listTemplate
+        currentPodcastFeed = podcast
+        
+        interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+            completion()
+        })
+    }
+    
+    private func displayPodcastWithPagination(_ podcast: PodcastFeed, totalEpisodes: Int, episodesPerPage: Int, completion: @escaping () -> Void) {
+        let carPlayManager = CarPlayManager.shared
+        var sections: [CPListSection] = []
+        
+        // Add Downloaded episodes filter section (load count on-demand)
+        let downloadedCountRequest = { [weak self] in
+            guard let self = self else { return }
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    let downloadedRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    downloadedRequest.predicate = NSPredicate(format: "feedId == %@ AND isDownloaded == YES", podcast.id)
+                    downloadedRequest.includesPropertyValues = false
+                    let downloadedCount = try context.count(for: downloadedRequest)
+                    
+                    if downloadedCount > 0 {
+                        DispatchQueue.main.async {
+                            // Add downloaded filter option
+                            let downloadedItem = CPListItem(text: "Downloaded Episodes",
+                                                           detailText: "\(downloadedCount) downloaded",
+                                                           image: UIImage(systemName: "arrow.down.circle"))
+                            downloadedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                                self?.loadAndShowDownloadedEpisodes(podcast, completion: completion)
+                            }
+                            
+                            // Add to existing template if possible, or note for next recreation
+                            os_log("🚗 CarPlay: Found %d downloaded episodes for pagination view", log: self.log, type: .debug, downloadedCount)
+                        }
+                    }
+                } catch {
+                    os_log("🚗 CarPlay: Error counting downloaded episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                }
+            }
+        }
+        downloadedCountRequest()
+        
+        // Create pagination sections
+        let totalPages = Int(ceil(Double(totalEpisodes) / Double(episodesPerPage)))
+        for page in 0..<totalPages {
+            let startIndex = page * episodesPerPage
+            let endIndex = min(startIndex + episodesPerPage, totalEpisodes)
+            
+            let pageTitle: String
+            if totalPages == 1 {
+                pageTitle = "All Episodes (\(totalEpisodes))"
+            } else {
+                let episodeRange = "\(startIndex + 1)-\(endIndex)"
+                pageTitle = "Episodes \(episodeRange) of \(totalEpisodes)"
+            }
+            
+            // Create a loading item that will be replaced with actual episodes
+            let loadingItem = CPListItem(text: "Loading episodes...", detailText: "Tap to load \(pageTitle.lowercased())")
+            loadingItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.loadAndDisplayEpisodePage(podcast: podcast, page: page, episodesPerPage: episodesPerPage, pageTitle: pageTitle, completion: completion)
+            }
+            
+            let pageSection = CPListSection(items: [loadingItem], header: pageTitle, sectionIndexTitle: nil)
+            sections.append(pageSection)
+        }
+        
+        let listTemplate = CPListTemplate(title: podcast.title, sections: sections)
+        
+        currentPodcastTemplate = listTemplate
+        currentPodcastFeed = podcast
+        
+        interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+            completion()
+        })
+    }
+    
+    private func createEpisodeListItem(episode: PodcastEpisode, podcast: PodcastFeed, carPlayManager: CarPlayManager) -> CPListItem {
+        let duration = formatDuration(episode.duration)
+        var statusText = ""
+        
+        // Determine episode status based on state and current playback
+        if let currentEpisode = PodcastPlayer.shared.currentEpisode,
+           currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
+            statusText = " • Playing"
+        } else if episode.state.isPlayed {
+            statusText = " • Complete"
+        } else if episode.state.progress > 0 {
+            statusText = " • In Progress"
+        }
+        
+        // Add download indicator
+        if episode.state.isDownloaded {
+            statusText += " • Downloaded"
+        }
+        
+        let item = CPListItem(text: episode.title,
+                             detailText: "\(duration)\(statusText)",
+                             image: carPlayManager.getPodcastArtwork(for: podcast))
+        item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+            self?.playEpisode(episode, completion: completion)
+        }
+        
+        return item
+    }
+    
+    private func loadAndDisplayEpisodePage(podcast: PodcastFeed, page: Int, episodesPerPage: Int, pageTitle: String, completion: @escaping () -> Void) {
+        loadEpisodesPage(for: podcast, page: page, episodesPerPage: episodesPerPage) { [weak self] episodes in
+            guard let self = self else { return }
+            
+            let carPlayManager = CarPlayManager.shared
+            var episodeItems: [CPListItem] = []
+            
+            for episode in episodes {
+                let item = self.createEpisodeListItem(episode: episode, podcast: podcast, carPlayManager: carPlayManager)
+                episodeItems.append(item)
+            }
+            
+            if episodeItems.isEmpty {
+                let emptyItem = CPListItem(text: "No episodes found", detailText: "This page doesn't contain any episodes")
+                episodeItems.append(emptyItem)
+            }
+            
+            let pageSection = CPListSection(items: episodeItems, header: pageTitle, sectionIndexTitle: nil)
+            let listTemplate = CPListTemplate(title: "\(podcast.title) - \(pageTitle)", sections: [pageSection])
+            
+            self.interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+                completion()
+            })
+        }
+    }
+    
+    private func loadAndShowDownloadedEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        let context = CoreDataStack.shared.context
+        
+        context.perform {
+            do {
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@ AND isDownloaded == YES", podcast.id)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                
+                let managedEpisodes = try context.fetch(episodeRequest)
+                let downloadedEpisodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    episode.state.isFavorite = managedEpisode.isFavorite
+                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    return episode
+                }
+                
+                DispatchQueue.main.async { [weak self] in
+                    self?.showDownloadedEpisodesFromList(downloadedEpisodes, podcastTitle: podcast.title, completion: completion)
+                }
+                
+            } catch {
+                os_log("🚗 CarPlay: Error loading downloaded episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                DispatchQueue.main.async {
+                    completion()
+                }
+            }
+        }
+    }
+    
+    private func showDownloadedEpisodesFromList(_ downloadedEpisodes: [PodcastEpisode], podcastTitle: String, completion: @escaping () -> Void) {
+        let carPlayManager = CarPlayManager.shared
+        var episodeItems: [CPListItem] = []
+        
         for episode in downloadedEpisodes {
             let duration = formatDuration(episode.duration)
             var statusText = ""
@@ -584,7 +749,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             
             let item = CPListItem(text: episode.title,
                                  detailText: "\(duration)\(statusText)",
-                                 image: carPlayManager.getPodcastArtwork(for: podcast))
+                                 image: UIImage(systemName: "arrow.down.circle.fill"))
             item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.playEpisode(episode, completion: completion)
             }
@@ -597,12 +762,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         let section = CPListSection(items: episodeItems, header: "Downloaded Episodes", sectionIndexTitle: nil)
-        let listTemplate = CPListTemplate(title: "\(podcast.title) - Downloaded", sections: [section])
+        let listTemplate = CPListTemplate(title: "\(podcastTitle) - Downloaded", sections: [section])
         
         interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
             completion()
         })
     }
+    
+
     
     private func playStation(_ station: RadioStation, completion: @escaping () -> Void) {
         os_log("CarPlay: Playing station %@", log: log, type: .info, station.name)
@@ -1032,68 +1199,133 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func recreatePodcastEpisodeTemplate(for podcast: PodcastFeed) {
-        let carPlayManager = CarPlayManager.shared
-        
-        var episodeItems: [CPListItem] = []
-        for episode in podcast.episodes.prefix(20) { // Limit to first 20 episodes
-            let duration = formatDuration(episode.duration)
-            var statusText = ""
-            
-            // Determine episode status based on state and current playback
-            if let currentEpisode = PodcastPlayer.shared.currentEpisode,
-               currentEpisode.id == episode.id && PodcastPlayer.shared.isPlaying {
-                statusText = " • Playing"
-                os_log("🚗 CarPlay: Episode '%@' showing as Playing", log: log, type: .debug, episode.title)
-            } else if episode.state.isPlayed {
-                statusText = " • Complete"
-                os_log("🚗 CarPlay: Episode '%@' marked as Complete", log: log, type: .debug, episode.title)
-            } else if episode.state.progress > 0 {
-                statusText = " • In Progress"
-                os_log("🚗 CarPlay: Episode '%@' showing as In Progress", log: log, type: .debug, episode.title)
-            }
-            
-            let item = CPListItem(text: episode.title,
-                                 detailText: "\(duration)\(statusText)",
-                                 image: carPlayManager.getPodcastArtwork(for: podcast))
-            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
-                self?.playEpisode(episode, completion: completion)
-            }
-            episodeItems.append(item)
-        }
-        
-        // Create a new section with updated episode items
-        let section = CPListSection(items: episodeItems, header: "Episodes", sectionIndexTitle: nil)
-        
-        // Create a completely new template to ensure refresh
-        let newTemplate = CPListTemplate(title: podcast.title, sections: [section])
-        
-        // Update our reference to the new template
-        currentPodcastTemplate = newTemplate
-        
-        // Replace the current template if we're at the top of the stack
+        // For real-time updates, we need to recreate the entire template structure
+        // This will call showPodcastDetails which now handles pagination properly
         if let interfaceController = interfaceController,
            let topTemplate = interfaceController.topTemplate as? CPListTemplate,
            topTemplate.title == podcast.title {
             
-            // Pop current template and push the new one
+            // Pop current template and recreate with updated data
             interfaceController.popTemplate(animated: false) { [weak self] success, error in
                 if success {
-                    interfaceController.pushTemplate(newTemplate, animated: false) { success, error in
-                        if success {
-                            os_log("🚗 CarPlay: Successfully recreated episode template with status updates", log: self?.log ?? OSLog.default, type: .info)
-                        } else {
-                            os_log("🚗 CarPlay: Failed to push new template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
-                        }
+                    self?.showPodcastDetails(podcast) {
+                        os_log("🚗 CarPlay: Successfully recreated podcast template with all episodes", log: self?.log ?? OSLog.default, type: .info)
                     }
                 } else {
                     os_log("🚗 CarPlay: Failed to pop current template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
                 }
             }
         } else {
-            // If we're not at the top, just update our reference for when we return
-            os_log("🚗 CarPlay: Template not at top of stack, just updating reference", log: log, type: .debug)
+            // If we're not at the top, just log that we skipped the update
+            os_log("🚗 CarPlay: Template not at top of stack, skipping recreation", log: log, type: .debug)
         }
+    }
+    
+    // MARK: - On-Demand Episode Loading
+    
+    /// Load episodes for a specific podcast feed from CoreData on-demand
+    private func loadEpisodesForPodcast(_ podcastFeed: PodcastFeed, completion: @escaping ([PodcastEpisode]) -> Void) {
+        os_log("🚗 CarPlay: Loading episodes on-demand for podcast '%@'", log: log, type: .info, podcastFeed.title)
         
-        os_log("🚗 CarPlay: Recreated episode template with %d episodes (status indicators)", log: log, type: .debug, episodeItems.count)
+        let context = CoreDataStack.shared.context
+        
+        context.perform {
+            do {
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                
+                let managedEpisodes = try context.fetch(episodeRequest)
+                let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    episode.state.isFavorite = managedEpisode.isFavorite
+                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    
+                    return episode
+                }
+                
+                os_log("🚗 CarPlay: Successfully loaded %d episodes for podcast '%@'", log: self.log, type: .info, episodes.count, podcastFeed.title)
+                
+                DispatchQueue.main.async {
+                    completion(episodes)
+                }
+                
+            } catch {
+                os_log("🚗 CarPlay: Error loading episodes for podcast '%@': %@", log: self.log, type: .error, podcastFeed.title, error.localizedDescription)
+                
+                DispatchQueue.main.async {
+                    completion([])
+                }
+            }
+        }
+    }
+    
+    /// Load a specific page of episodes for pagination
+    private func loadEpisodesPage(for podcastFeed: PodcastFeed, page: Int, episodesPerPage: Int, completion: @escaping ([PodcastEpisode]) -> Void) {
+        os_log("🚗 CarPlay: Loading page %d of episodes for podcast '%@'", log: log, type: .info, page + 1, podcastFeed.title)
+        
+        let context = CoreDataStack.shared.context
+        
+        context.perform {
+            do {
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                episodeRequest.fetchOffset = page * episodesPerPage
+                episodeRequest.fetchLimit = episodesPerPage
+                
+                let managedEpisodes = try context.fetch(episodeRequest)
+                let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    episode.state.isFavorite = managedEpisode.isFavorite
+                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    
+                    return episode
+                }
+                
+                os_log("🚗 CarPlay: Successfully loaded page %d with %d episodes", log: self.log, type: .debug, page + 1, episodes.count)
+                
+                DispatchQueue.main.async {
+                    completion(episodes)
+                }
+                
+            } catch {
+                os_log("🚗 CarPlay: Error loading episode page for podcast '%@': %@", log: self.log, type: .error, podcastFeed.title, error.localizedDescription)
+                
+                DispatchQueue.main.async {
+                    completion([])
+                }
+            }
+        }
+    }
+    
+    /// Get total episode count from CoreData
+    private func getEpisodeCount(for podcastFeed: PodcastFeed, completion: @escaping (Int) -> Void) {
+        let context = CoreDataStack.shared.context
+        
+        context.perform {
+            do {
+                let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
+                episodeCountRequest.includesPropertyValues = false
+                
+                let count = try context.count(for: episodeCountRequest)
+                
+                DispatchQueue.main.async {
+                    completion(count)
+                }
+                
+            } catch {
+                os_log("🚗 CarPlay: Error counting episodes for podcast '%@': %@", log: self.log, type: .error, podcastFeed.title, error.localizedDescription)
+                
+                DispatchQueue.main.async {
+                    completion(0)
+                }
+            }
+        }
     }
 } 
