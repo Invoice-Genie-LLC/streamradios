@@ -348,16 +348,16 @@ struct RadioStationListView: View {
                     
                     Spacer()
                     
-                    // Signal bars (part of tappable area)
+                    // Equalizer (part of tappable area)
                     if isCurrentStation(station: station) && radioPlayer.isPlaying {
-                        animatedSignalBars
+                        animatedEqualizer
                     } else {
-                        staticSignalBars
+                        staticEqualizer
                     }
                     
                     // Extra space to extend tappable area further right
                     Spacer()
-                        .frame(width: 20)
+                        .frame(width: 8)
                 }
                 .contentShape(Rectangle())
             }
@@ -396,33 +396,108 @@ struct RadioStationListView: View {
         }
     }
     
-    @ViewBuilder
-    private var animatedSignalBars: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<4, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.blue)
-                    .frame(width: 3, height: CGFloat(8 + index * 4))
-                    .scaleEffect(y: 1.0)
-                    .animation(
-                        Animation.easeInOut(duration: 0.5)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.1),
-                        value: radioPlayer.isPlaying
+    // MARK: - Equalizer Components
+    
+    struct EqualizerBar: View {
+        let baseHeight: CGFloat
+        let maxHeight: CGFloat
+        let animationDelay: Double
+        let isAnimating: Bool
+        
+        @State private var currentHeight: CGFloat
+        @State private var animationTimer: Timer?
+        
+        init(baseHeight: CGFloat, maxHeight: CGFloat, animationDelay: Double, isAnimating: Bool) {
+            self.baseHeight = baseHeight
+            self.maxHeight = maxHeight
+            self.animationDelay = animationDelay
+            self.isAnimating = isAnimating
+            self._currentHeight = State(initialValue: baseHeight)
+        }
+        
+        var body: some View {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.blue.opacity(0.8),
+                            Color.cyan.opacity(0.6),
+                            Color.blue
+                        ]),
+                        startPoint: .bottom,
+                        endPoint: .top
                     )
+                )
+                .frame(width: 2.5, height: currentHeight)
+                .animation(.easeInOut(duration: 0.3), value: currentHeight)
+                .onAppear {
+                    startAnimation()
+                }
+                .onChange(of: isAnimating) { _, newValue in
+                    if newValue {
+                        startAnimation()
+                    } else {
+                        stopAnimation()
+                    }
+                }
+                .onDisappear {
+                    stopAnimation()
+                }
+        }
+        
+        private func startAnimation() {
+            guard isAnimating else { return }
+            
+            // Initial delay for staggered effect
+            DispatchQueue.main.asyncAfter(deadline: .now() + animationDelay) {
+                animateBar()
             }
         }
+        
+        private func animateBar() {
+            guard isAnimating else { return }
+            
+            // Random height between base and max for realistic equalizer effect
+            let randomHeight = CGFloat.random(in: baseHeight...(maxHeight * 0.9))
+            currentHeight = randomHeight
+            
+            // Schedule next animation with slight randomness for organic feel
+            let nextDelay = Double.random(in: 0.2...0.4)
+            DispatchQueue.main.asyncAfter(deadline: .now() + nextDelay) {
+                animateBar()
+            }
+        }
+        
+        private func stopAnimation() {
+            currentHeight = baseHeight
+        }
+    }
+
+    @ViewBuilder
+    private var animatedEqualizer: some View {
+        HStack(spacing: 1.5) {
+            ForEach(0..<5, id: \.self) { index in
+                EqualizerBar(
+                    baseHeight: CGFloat([6, 10, 14, 8, 12][index]),
+                    maxHeight: CGFloat([16, 20, 24, 18, 22][index]),
+                    animationDelay: Double(index) * 0.15,
+                    isAnimating: radioPlayer.isPlaying
+                )
+            }
+        }
+        .frame(width: 28, height: 24)
     }
     
     @ViewBuilder
-    private var staticSignalBars: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<4, id: \.self) { index in
+    private var staticEqualizer: some View {
+        HStack(spacing: 1.5) {
+            ForEach(0..<5, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 1)
                     .fill(Color.gray.opacity(0.4))
-                    .frame(width: 3, height: CGFloat(8 + index * 4))
+                    .frame(width: 2.5, height: CGFloat([6, 10, 14, 8, 12][index]))
             }
         }
+        .frame(width: 28, height: 24)
     }
     
     @ViewBuilder
