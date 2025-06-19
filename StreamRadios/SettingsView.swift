@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.colorScheme) var colorScheme
     @State private var showingDeleteAlert = false
     @State private var isDeleting = false
     @State private var deletionComplete = false
@@ -25,8 +26,8 @@ struct SettingsView: View {
     @EnvironmentObject var alertManager: AlertManager
     var onImportComplete: ((String) -> Void)?
     @StateObject private var podcastViewModel = PodcastViewModel()
-        @State private var isCleaningPodcasts = false
-        @State private var podcastCleanupComplete = false
+    @State private var isCleaningPodcasts = false
+    @State private var podcastCleanupComplete = false
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
@@ -34,375 +35,342 @@ struct SettingsView: View {
     @State private var safeAreaBottom: CGFloat = 0
     @State private var miniPlayerHeight: CGFloat = 60
     
+    // Modern color system for adaptive theming
+    private var backgroundColor: Color {
+        colorScheme == .dark ? .black : Color(.systemGray6)
+    }
+    
+    private var cardBackgroundColor: Color {
+        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
+    }
+    
+    private var primaryTextColor: Color {
+        colorScheme == .dark ? .white : .primary
+    }
+    
+    private var secondaryTextColor: Color {
+        colorScheme == .dark ? .gray : .secondary
+    }
+    
     var body: some View {
-           NavigationView {
-               VStack(spacing: 0) {
-                   ScrollView {
-                       VStack(alignment: .leading, spacing: 20) {
-                           playbackSettingsSection
-                           displaySettingsSection
-                           streamFileUploadSection
-                           dataManagementSection
-                           podcastDataManagementSection
-                       }
-                      
-                   }
-                   .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
-
-                   // Fixed Mini Player
-                   if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                       MiniPlayerView(
-                           podcastPlayer: podcastPlayer,
-                           viewModel: podcastViewModel,
-                           selectedPodcast: $selectedPodcast,
-                           onListButtonTap: {
-                               if let currentFeed = podcastPlayer.currentFeed {
-                                   selectedPodcast = currentFeed
-                                   podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                   scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                   showPodcastPlayerSheet = true
-                               }
-                           },
-                           onCloseButtonTap: {
-                               podcastPlayer.pause()
-                               podcastPlayer.currentEpisode = nil
-                               podcastPlayer.currentFeed = nil
-                           },
-                           isPlaylistButtonDisabled: false
-                       )
-                       .transition(.move(edge: .bottom))
-                       .frame(height: miniPlayerHeight)
-                   }
-               }
-               .navigationTitle("Settings")
-               .navigationBarBackButtonHidden(true)
-              
-               .onChange(of: isDarkMode) { newValue in
-                   updateDarkMode(to: newValue)
-               }
-               .onAppear {
-                   if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
-                       notificationManager.requestAuthorization()
-                       UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
-                   }
-               }
-               .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
-                   if viewModel.selectedCountry != "Select Country" {
-                       showAlertForCountrySelection = false
-                   }
-               }
-               .sheet(isPresented: $showDocumentPicker) {
-                   DocumentPicker(url: $importURL)
-               }
-               .onChange(of: importURL) { url in
-                   guard let url = url else { return }
-                   handleImport(url: url)
-               }
-           }
-           .sheet(isPresented: $showPodcastPlayerSheet) {
-               if let podcast = selectedPodcast {
-                   PodcastPlayerView(
-                       viewModel: podcastViewModel,
-                       feed: podcast,
-                       initialScrollToEpisodeID: scrollToEpisodeID,
-                       podcastPlayer: podcastPlayer,
-                       selectedPodcast: $selectedPodcast,
-                       episodeToScrollTo: Binding(
-                           get: { podcastPlayer.currentEpisode },
-                           set: { _ in }
-                       )
-                   )
-               }
-           }
-           .overlay(
-               Group {
-                   if alertManager.showCustomAlert {
-                       Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
-                       CustomAlertView(
-                           title: alertManager.customAlertTitle,
-                           message: alertManager.customAlertMessage,
-                           buttonText: alertManager.customAlertPrimaryButtonText,
-                           buttonAction: {
-                               alertManager.dismissAlert()
-                               alertManager.customAlertPrimaryAction?()
-                           },
-                           secondaryButtonText: alertManager.customAlertSecondaryButtonText,
-                           secondaryButtonAction: {
-                               alertManager.dismissAlert()
-                               alertManager.customAlertSecondaryAction?()
-                           }
-                       )
-                       .transition(.opacity)
-                   }
-               }
-           )
-       }
-    
-    
-    private var podcastDataManagementSection: some View {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Podcast Data Management")
-                        .font(.headline)
-                        .padding(.top)
-                    
-                    VStack(alignment: .leading, spacing: 15) {
-                        Button("Clear All Podcast Episodes") {
-                            showAlert(for: .clearAllPodcasts)
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemBackground))
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                        
-                        if isCleaningPodcasts {
-                            ProgressView("Clearing podcast data...")
-                                .padding()
-                        } else if podcastCleanupComplete {
-                            Text("All podcast episodes have been cleared.")
-                                .foregroundColor(.green)
-                                .padding()
-                        }
-                        
-                        podcastCleanupWarningText
-                    }
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+        NavigationView {
+            VStack(spacing: 0) {
+                ScrollView {
+                                         LazyVStack(spacing: 24) {
+                         modernPlaybackSettings
+                         modernDisplaySettings
+                         modernAlarmSettings
+                         modernImportExportSettings
+                         modernDataManagement
+                         modernPodcastDataManagement
+                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 120 : 80)
+                }
+                
+                // Fixed Mini Player
+                if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
+                    MiniPlayerView(
+                        podcastPlayer: podcastPlayer,
+                        viewModel: podcastViewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            if let currentFeed = podcastPlayer.currentFeed {
+                                selectedPodcast = currentFeed
+                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                showPodcastPlayerSheet = true
+                            }
+                        },
+                        onCloseButtonTap: {
+                            podcastPlayer.pause()
+                            podcastPlayer.currentEpisode = nil
+                            podcastPlayer.currentFeed = nil
+                        },
+                        isPlaylistButtonDisabled: false
                     )
+                    .transition(.move(edge: .bottom))
+                    .frame(height: miniPlayerHeight)
                 }
-                .padding(.bottom, 100)
-                .animation(.default, value: isCleaningPodcasts)
-                .animation(.default, value: podcastCleanupComplete)
             }
-    
-    private var podcastCleanupWarningText: some View {
-            Text("Warning: ")
-                .fontWeight(.bold)
-                .foregroundColor(.red)
-                .font(.footnote) +
-            Text("Clearing all podcast episodes will permanently erase ALL podcast-related data from your device's local storage, including:\n\n• All downloaded episodes\n• Playback progress for all episodes\n• All bookmarked episodes\n• All favorited episodes\n• Episode listening history\n• Custom sort preferences\n\nThis action cannot be undone.")
-                .font(.footnote)
-                .foregroundColor(.gray)
-        }
-    
-    
-    private var playbackSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Playback Settings")
-                .font(.headline)
-                .padding(.top)
-            
-            VStack(alignment: .leading, spacing: 15) {
-                Toggle("Auto-Play Last Station", isOn: $autoPlayLastStation)
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+            .background(backgroundColor)
+            .navigationTitle("Settings")
+            .navigationBarBackButtonHidden(true)
+            .navigationBarTitleDisplayMode(.large)
+            .onChange(of: isDarkMode) { newValue in
+                updateDarkMode(to: newValue)
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-            )
-        }
-    }
-    
-    private var displaySettingsSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Display Settings")
-                .font(.headline)
-                .padding(.top)
-            
-            VStack(alignment: .leading, spacing: 15) {
-                Toggle("Dark Mode", isOn: $isDarkMode)
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-            )
-        }
-    }
-    
-    private var streamFileUploadSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Station Playlist Export/Import")
-                .font(.headline)
-                .padding(.top)
-            
-            VStack(alignment: .leading, spacing: 20) {
-                countrySelectionView
-                fileExportView
-                fileImportView
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-            )
-        }
-    }
-    
-    private var countrySelectionView: some View {
-        VStack(alignment: .leading) {
-            Text("Select Country")
-                .font(.headline)
-                .foregroundColor(.primary)
-            
-            ElegantCountryPickerButton(
-                selectedCountry: $viewModel.selectedCountry,
-                countries: viewModel.countries
-            )
-            .onChange(of: viewModel.selectedCountry) { newValue in
-                // This will trigger the didSet in the ViewModel, which will post the notification
-                viewModel.selectedCountry = newValue
-            }
-            .padding()
-            .background(Color(.systemBackground))
-            .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-        }
-    }
-    
-    private var fileExportView: some View {
-        VStack(alignment: .leading) {
-            Text("Playlist Export")
-                .font(.headline)
-                .foregroundColor(.primary)
-            Button(action: exportAction) {
-                HStack {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                    Text("Export Playlist File")
-                        .font(.headline)
-                        .foregroundColor(.blue)
+            .onAppear {
+                if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
+                    notificationManager.requestAuthorization()
+                    UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
                 }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .countrySelected)) { _ in
+                if viewModel.selectedCountry != "Select Country" {
+                    showAlertForCountrySelection = false
+                }
+            }
+            .sheet(isPresented: $showDocumentPicker) {
+                DocumentPicker(url: $importURL)
+            }
+            .onChange(of: importURL) { url in
+                guard let url = url else { return }
+                handleImport(url: url)
+            }
+        }
+        .sheet(isPresented: $showPodcastPlayerSheet) {
+            if let podcast = selectedPodcast {
+                PodcastPlayerView(
+                    viewModel: podcastViewModel,
+                    feed: podcast,
+                    initialScrollToEpisodeID: scrollToEpisodeID,
+                    podcastPlayer: podcastPlayer,
+                    selectedPodcast: $selectedPodcast,
+                    episodeToScrollTo: Binding(
+                        get: { podcastPlayer.currentEpisode },
+                        set: { _ in }
+                    )
+                )
+            }
+        }
+        .overlay(
+            Group {
+                if alertManager.showCustomAlert {
+                    Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                    CustomAlertView(
+                        title: alertManager.customAlertTitle,
+                        message: alertManager.customAlertMessage,
+                        buttonText: alertManager.customAlertPrimaryButtonText,
+                        buttonAction: {
+                            alertManager.dismissAlert()
+                            alertManager.customAlertPrimaryAction?()
+                        },
+                        secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                        secondaryButtonAction: {
+                            alertManager.dismissAlert()
+                            alertManager.customAlertSecondaryAction?()
+                        }
+                    )
+                    .transition(.opacity)
+                }
+            }
+        )
+    }
+    
+    // MARK: - Modern Settings Sections
+    
+    @ViewBuilder
+    private var modernPlaybackSettings: some View {
+        ModernSettingsCard(
+            title: "Playback Settings",
+            icon: ""
+        ) {
+            ModernToggleRow(
+                title: "Auto-Play Last Station",
+                subtitle: "Automatically resume the last played station when opening the app",
+                isOn: $autoPlayLastStation,
+                icon: "play.circle.fill"
+            )
         }
     }
     
-    private var fileImportView: some View {
-        VStack(alignment: .leading) {
-            Text("Playlist Import")
-                .font(.headline)
-                .foregroundColor(.primary)
-            Button(action: importAction) {
-                HStack {
-                    Image(systemName: "doc.text.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                    Text("Import Playlist File")
-                        .font(.headline)
-                        .foregroundColor(.blue)
-                }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-            }
-            if isImporting {
-                VStack {
-                    ProgressView(value: importProgress, total: 1.0) {
-                        Text("Importing station playlists...")
+             @ViewBuilder 
+    private var modernDisplaySettings: some View {
+        ModernSettingsCard(
+            title: "Display Settings", 
+            icon: ""
+        ) {
+             ModernToggleRow(
+                 title: "Dark Mode",
+                 subtitle: "Use dark appearance throughout the app",
+                 isOn: $isDarkMode,
+                 icon: "paintbrush.fill"
+             )
+         }
+     }
+     
+     @ViewBuilder
+     private var modernAlarmSettings: some View {
+         ModernSettingsCard(
+             title: "Alarm Settings",
+             icon: ""
+         ) {
+                                     NavigationLink(destination: AlarmConfigurationView()) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "alarm.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.blue)
+                            .frame(width: 20)
+                        
+                        Text("Configure Alarms")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(colorScheme == .dark ? .white : .primary)
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray)
                     }
-                    .progressViewStyle(LinearProgressViewStyle())
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    
+                    Text("Set up wake-up alarms with your favorite stations")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
-                .padding(.top, 10)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+         }
+     }
+    
+    @ViewBuilder
+    private var modernImportExportSettings: some View {
+        ModernSettingsCard(
+            title: "Station Playlist Export/Import",
+            icon: ""
+        ) {
+            VStack(spacing: 16) {
+                                 // Country Selection
+                 VStack(alignment: .leading, spacing: 8) {
+                     HStack(spacing: 8) {
+                         Image(systemName: "globe")
+                             .font(.system(size: 16, weight: .medium))
+                             .foregroundColor(.blue)
+                             .frame(width: 20)
+                         
+                         Text("Country Selection")
+                             .font(.system(size: 16, weight: .semibold))
+                             .foregroundColor(primaryTextColor)
+                         
+                         Spacer()
+                     }
+                    
+                    ElegantCountryPickerButton(
+                        selectedCountry: $viewModel.selectedCountry,
+                        countries: viewModel.countries
+                    )
+                    .onChange(of: viewModel.selectedCountry) { newValue in
+                        viewModel.selectedCountry = newValue
+                    }
+                }
+                
+                // Export Button
+                ModernActionButton(
+                    title: "Export Playlist",
+                    subtitle: "Save your stations to a file",
+                    icon: "arrow.up.circle.fill",
+                    action: exportAction
+                )
+                
+                // Import Button and Progress
+                VStack(spacing: 12) {
+                    ModernActionButton(
+                        title: "Import Playlist", 
+                        subtitle: "Load stations from a file",
+                        icon: "arrow.down.circle.fill",
+                        action: importAction
+                    )
+                    
+                    if isImporting {
+                        ModernProgressView(
+                            title: "Importing station playlists...",
+                            progress: importProgress
+                        )
+                    }
+                }
             }
         }
     }
     
-    private var dataManagementSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Data Management")
-                .font(.headline)
-                .padding(.top)
-            
-            VStack(alignment: .leading, spacing: 15) {
-                Button("Delete All Data") {
-                    showAlert(for: .deleteAllData)
-                }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color(.systemBackground))
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+    @ViewBuilder
+    private var modernDataManagement: some View {
+        ModernSettingsCard(
+            title: "Data Management",
+            icon: "",
+            isDestructive: true
+        ) {
+            VStack(spacing: 16) {
+                ModernDestructiveButton(
+                    title: "Delete All Data",
+                    subtitle: "Permanently remove all stations and settings",
+                    icon: "internaldrive.fill",
+                    action: { showAlert(for: .deleteAllData) }
+                )
                 
                 if viewModel.isDeletingData {
-                    ProgressView("Deleting data...")
-                        .padding()
+                    ModernProgressView(title: "Deleting data...")
                 } else if viewModel.deletionComplete {
-                    Text("All data has been deleted.")
-                        .foregroundColor(.green)
-                        .padding()
+                    ModernStatusMessage(
+                        text: "All data has been deleted.",
+                        isSuccess: true
+                    )
                 }
                 
-                deletionWarningText
+                ModernWarningText(text: deletionWarningString)
             }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-            )
-        }
-        .animation(.default, value: viewModel.isDeletingData)
-        .animation(.default, value: viewModel.deletionComplete)
-    }
-    
-    private var deletionWarningText: some View {
-        Text("Warning: ")
-            .fontWeight(.bold)
-            .foregroundColor(.red)
-            .font(.footnote) +
-        Text("Deleting your data will permanently erase all stored stations and their associated information from both iCloud and your device's local storage. While you can restore default stations by reinstalling the app from the App Store, any custom stations you've configured will be lost permanently.")
-            .font(.footnote)
-            .foregroundColor(.gray)
-        +
-        Text("\n\n")
-        +
-        Text("Please keep the app running in the background. You can use other apps, but do not force close this one. We'll notify you when the deletion is fully completed. The duration of this operation may vary, but it could take up to 5 minutes depending on the number of custom stations configured. This action cannot be undone.")
-            .font(.footnote)
-            .foregroundColor(.gray)
-    }
-    
-    private var backButton: some View {
-        Button(action: {
-            presentationMode.wrappedValue.dismiss()
-        }) {
-            HStack {
-                Image(systemName: "chevron.left")
-                Text("Back")
-            }
-            .foregroundColor(.primary)
         }
     }
+    
+    @ViewBuilder
+    private var modernPodcastDataManagement: some View {
+        ModernSettingsCard(
+            title: "Podcast Data Management",
+            icon: "",
+            isDestructive: true
+        ) {
+            VStack(spacing: 16) {
+                ModernDestructiveButton(
+                    title: "Clear All Podcast Episodes",
+                    subtitle: "Remove all podcast downloads and progress",
+                    icon: "microphone",
+                    action: { showAlert(for: .clearAllPodcasts) }
+                )
+                
+                if isCleaningPodcasts {
+                    ModernProgressView(title: "Clearing podcast data...")
+                } else if podcastCleanupComplete {
+                    ModernStatusMessage(
+                        text: "All podcast episodes have been cleared.",
+                        isSuccess: true
+                    )
+                }
+                
+                ModernWarningText(text: podcastWarningString)
+            }
+        }
+    }
+    
+    // MARK: - Helper Properties
+    
+    private var deletionWarningString: String {
+        """
+        Warning: Deleting your data will permanently erase all stored stations and their associated information from both iCloud and your device's local storage. While you can restore default stations by reinstalling the app from the App Store, any custom stations you've configured will be lost permanently.
+        
+        Please keep the app running in the background. You can use other apps, but do not force close this one. We'll notify you when the deletion is fully completed. The duration of this operation may vary, but it could take up to 5 minutes depending on the number of custom stations configured. This action cannot be undone.
+        """
+    }
+    
+    private var podcastWarningString: String {
+        """
+        Warning: Clearing all podcast episodes will permanently erase ALL podcast-related data from your device's local storage, including:
+        
+        • All downloaded episodes
+        • Playback progress for all episodes  
+        • All bookmarked episodes
+        • All favorited episodes
+        • Episode listening history
+        • Custom sort preferences
+        
+        This action cannot be undone.
+        """
+    }
+    
+    // MARK: - Action Methods (Preserved from original)
     
     private func updateDarkMode(to newValue: Bool) {
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
@@ -412,17 +380,17 @@ struct SettingsView: View {
     }
     
     private func showAlert(for alertType: AlertType) {
-            alertManager.showCustomAlert(for: alertType, deleteAction: {
-                switch alertType {
-                case .deleteAllData:
-                    initiateDataDeletion()
-                case .clearAllPodcasts:
-                    initiatePodcastCleanup()
-                default:
-                    break
-                }
-            })
-        }
+        alertManager.showCustomAlert(for: alertType, deleteAction: {
+            switch alertType {
+            case .deleteAllData:
+                initiateDataDeletion()
+            case .clearAllPodcasts:
+                initiatePodcastCleanup()
+            default:
+                break
+            }
+        })
+    }
     
     private func initiatePodcastCleanup() {
         isCleaningPodcasts = true
@@ -489,27 +457,314 @@ struct SettingsView: View {
     }
     
     private func handleImport(url: URL) {
-            isImporting = true
-            importProgress = 0.0
-            
-            viewModel.importStationsFromFile(url: url) { progress in
-                DispatchQueue.main.async {
-                    importProgress = progress
+        isImporting = true
+        importProgress = 0.0
+        
+        viewModel.importStationsFromFile(url: url) { progress in
+            DispatchQueue.main.async {
+                importProgress = progress
+            }
+        } completion: {
+            DispatchQueue.main.async {
+                isImporting = false
+                importURL = nil
+                onImportComplete?(viewModel.selectedCountry)
+            }
+        }
+    }
+}
+
+// MARK: - Modern UI Components
+
+struct ModernSettingsCard<Content: View>: View {
+    let title: String
+    let icon: String
+    let isDestructive: Bool
+    let content: () -> Content
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    init(title: String, icon: String, isDestructive: Bool = false, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.isDestructive = isDestructive
+        self.content = content
+    }
+    
+    private var cardBackgroundColor: Color {
+        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
+    }
+    
+    private var titleColor: Color {
+        if isDestructive {
+            return .red
+        }
+        return colorScheme == .dark ? .white : .primary
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header
+            HStack(spacing: 12) {
+                if !icon.isEmpty {
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(isDestructive ? .red : .blue)
+                        .frame(width: 24, height: 24)
                 }
-            } completion: {
-                DispatchQueue.main.async {
-                    isImporting = false
-                    importURL = nil
-                    onImportComplete?(viewModel.selectedCountry)
+                
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(titleColor)
+                
+                Spacer()
+            }
+            
+            // Content
+            content()
+        }
+        .padding(20)
+        .background(cardBackgroundColor)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+        )
+    }
+}
+
+struct ModernToggleRow: View {
+    let title: String
+    let subtitle: String?
+    @Binding var isOn: Bool
+    let icon: String
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    init(title: String, subtitle: String? = nil, isOn: Binding<Bool>, icon: String) {
+        self.title = title
+        self.subtitle = subtitle
+        self._isOn = isOn
+        self.icon = icon
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .frame(width: 20)
+                
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                
+                Spacer()
+                
+                Toggle("", isOn: $isOn)
+                    .labelsHidden()
+            }
+            
+            if let subtitle = subtitle {
+                Text(subtitle)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+            }
+        }
+    }
+}
+
+struct ModernActionButton: View {
+    let title: String
+    let subtitle: String?
+    let icon: String
+    let action: () -> Void
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.blue)
+                        .frame(width: 20)
+                    
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                
+                if let subtitle = subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct ModernDestructiveButton: View {
+    let title: String
+    let subtitle: String?
+    let icon: String
+    let action: () -> Void
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.red)
+                        .frame(width: 20)
+                    
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.red)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                
+                if let subtitle = subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct ModernProgressView: View {
+    let title: String
+    let progress: Double?
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    init(title: String, progress: Double? = nil) {
+        self.title = title
+        self.progress = progress
+    }
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            if let progress = progress {
+                ProgressView(value: progress, total: 1.0) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                }
+                .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .tint(.blue)
+                    
+                    Text(title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
                 }
             }
         }
+        .padding(12)
+        .background(Color.blue.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+struct ModernStatusMessage: View {
+    let text: String
+    let isSuccess: Bool
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(isSuccess ? .green : .orange)
+            
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(colorScheme == .dark ? .white : .primary)
+        }
+        .padding(12)
+        .background((isSuccess ? Color.green : Color.orange).opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+struct ModernWarningText: View {
+    let text: String
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.red)
+                
+                Text("Important")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.red)
+            }
+            
+            Text(text)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                .lineLimit(nil)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.1))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+        )
+    }
 }
 
 struct SettingsView_Previews: PreviewProvider {
     static var previews: some View {
-        SettingsView()
-            .environmentObject(RadioStationViewModel())
-            .environmentObject(AlertManager())
+        Group {
+            SettingsView()
+                .environmentObject(RadioStationViewModel())
+                .environmentObject(AlertManager())
+                .preferredColorScheme(.dark)
+                .previewDisplayName("Dark Mode")
+            
+            SettingsView()
+                .environmentObject(RadioStationViewModel())
+                .environmentObject(AlertManager())
+                .preferredColorScheme(.light)
+                .previewDisplayName("Light Mode")
+        }
     }
 }

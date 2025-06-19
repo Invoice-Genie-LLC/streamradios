@@ -37,6 +37,13 @@ class PlaybackManager {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             
+            // Check if audio session is already configured by another component
+            if audioSession.category != .ambient {
+                print("⚠️ PlaybackManager: Audio session already configured with category: \(audioSession.category.rawValue)")
+                audioSessionConfigured = true
+                return
+            }
+            
             // Use a unified audio session configuration that works for both radio and podcasts
             // and ensures proper "Playing Now" functionality
             try audioSession.setCategory(.playback, 
@@ -48,6 +55,8 @@ class PlaybackManager {
             
         } catch {
             print("❌ PlaybackManager: Failed to configure centralized audio session: \(error)")
+            // Mark as configured even on error to prevent repeated attempts
+            audioSessionConfigured = true
         }
     }
     
@@ -58,8 +67,18 @@ class PlaybackManager {
         }
         
         do {
+            let audioSession = AVAudioSession.sharedInstance()
+            
+            // Ensure the category is correct for our use case
+            if audioSession.category != .playback {
+                try audioSession.setCategory(.playback, 
+                                           mode: .default, 
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                print("🔄 PlaybackManager: Corrected audio session category to playback")
+            }
+            
             // Always activate with notifyOthersOnDeactivation to ensure proper handoff
-            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
             print("✅ PlaybackManager: Audio session activated for \(player)")
             
             // Clear any existing Now Playing info when switching players
@@ -67,6 +86,14 @@ class PlaybackManager {
             
         } catch {
             print("❌ PlaybackManager: Failed to activate audio session for \(player): \(error)")
+            
+            // Retry with a brief delay if the error is related to conflicts
+            if let nsError = error as NSError?, nsError.code == -50 {
+                print("🔄 PlaybackManager: Retrying audio session activation after conflict...")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.activateAudioSessionForPlayer(player)
+                }
+            }
         }
     }
     

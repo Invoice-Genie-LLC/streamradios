@@ -16,6 +16,7 @@ extension UIApplication {
 struct ContentView: View {
     @StateObject private var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @EnvironmentObject var permissionManager: PermissionManager
     @State private var isAddStationViewPresented: Bool
     @State private var isPlayerSheetPresented: Bool
 
@@ -306,7 +307,10 @@ struct ContentView: View {
                     CustomAlertContainer()
                 }
             }
-            .sheet(item: $activeSheet, onDismiss: { activeSheet = nil }) { item in
+            .sheet(item: $activeSheet, onDismiss: { 
+                activeSheet = nil
+                selectedStationForEdit = nil
+            }) { item in
                 switch item {
                 case .addStation:
                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
@@ -318,6 +322,48 @@ struct ContentView: View {
                     if let station = selectedStationForEdit {
                         EditStationView(station: station, activeSheet: $activeSheet)
                             .environmentObject(viewModel)
+                            .environmentObject(permissionManager)
+                    } else {
+                        // Enhanced fallback view with better error handling
+                        VStack(spacing: 24) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .tint(.blue)
+                            
+                            VStack(spacing: 8) {
+                                Text("Loading Station...")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                                
+                                Text("Please wait while we prepare the edit screen")
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                            }
+                            
+                            Button("Cancel") {
+                                activeSheet = nil
+                            }
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 12)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                        .onAppear {
+                            print("⚠️ ContentView: EditStation sheet opened with nil selectedStationForEdit")
+                            
+                            // Auto-dismiss if station is still nil after timeout
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                                if selectedStationForEdit == nil {
+                                    print("❌ ContentView: Auto-dismissing edit sheet due to timeout")
+                                    activeSheet = nil
+                                }
+                            }
+                        }
                     }
                 case .playerSheet:
                     PlayerSheetView()

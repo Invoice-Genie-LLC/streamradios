@@ -53,21 +53,6 @@ struct RadioStationListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
-        .sheet(item: $activeSheet) { item in
-            switch item {
-            case .editStation:
-                if let selectedStation = selectedStationForEdit {
-                    EditStationView(station: selectedStation, activeSheet: $activeSheet)
-                        .environmentObject(viewModel)
-                }
-            case .addStation:
-                AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry)
-                    .environmentObject(viewModel)
-            case .playerSheet:
-                // PlayerSheet is now handled via isPlayerSheetPresented binding
-                EmptyView()
-            }
-        }
         .onAppear(perform: setup)
         .onAppear {
             setup()
@@ -279,11 +264,7 @@ struct RadioStationListView: View {
         )
         .swipeActions(edge: .leading) {
             Button {
-                // Ensure we have a valid station before setting up edit
-                DispatchQueue.main.async {
-                    selectedStationForEdit = station
-                    activeSheet = .editStation
-                }
+                editStation(station)
             } label: {
                 Label("Edit", systemImage: "pencil")
             }
@@ -722,6 +703,66 @@ struct RadioStationListView: View {
         }
     }
     
+    // MARK: - Edit Station Handler
+    
+    private func editStation(_ station: RadioStation) {
+        // Ensure we have a valid station before proceeding
+        guard !station.name.isEmpty else {
+            print("❌ EditStation: Invalid station provided")
+            return
+        }
+        
+        print("📝 EditStation: Starting edit for station: \(station.name)")
+        
+        // Set the station immediately on the main queue
+        selectedStationForEdit = station
+        
+        // Verify the station was set correctly
+        guard selectedStationForEdit?.id == station.id else {
+            print("❌ EditStation: Failed to set selectedStationForEdit")
+            return
+        }
+        
+        print("✅ EditStation: selectedStationForEdit set successfully")
+        
+        // Present the sheet with multiple fallback attempts
+        var attempts = 0
+        let maxAttempts = 5
+        
+        func attemptSheetPresentation() {
+            attempts += 1
+            
+            // Verify the selected station is still valid
+            guard let selected = selectedStationForEdit, selected.id == station.id else {
+                print("❌ EditStation: selectedStationForEdit lost on attempt \(attempts)")
+                if attempts < maxAttempts {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05 * Double(attempts)) {
+                        selectedStationForEdit = station
+                        attemptSheetPresentation()
+                    }
+                }
+                return
+            }
+            
+            print("📱 EditStation: Presenting sheet (attempt \(attempts))")
+            activeSheet = .editStation
+            
+            // Verify the sheet was set
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if activeSheet == .editStation {
+                    print("✅ EditStation: Sheet presentation successful")
+                } else if attempts < maxAttempts {
+                    print("⚠️ EditStation: Sheet presentation failed, retrying...")
+                    attemptSheetPresentation()
+                }
+            }
+        }
+        
+        // Start the presentation attempt
+        DispatchQueue.main.async {
+            attemptSheetPresentation()
+        }
+    }
 
     
 }

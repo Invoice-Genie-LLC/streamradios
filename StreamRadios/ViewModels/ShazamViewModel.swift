@@ -42,10 +42,26 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     private func configureAudioSession() {
         let audioSession = AVAudioSession.sharedInstance()
         do {
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
+            // Store the current category to restore it later
+            let currentCategory = audioSession.category
+            let currentMode = audioSession.mode
+            let currentOptions = audioSession.categoryOptions
+            
+            // Temporarily set category for recording if needed
+            if currentCategory != .playAndRecord {
+                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
+                print("🎤 ShazamViewModel: Temporarily set audio session to playAndRecord for Shazam")
+            }
+            
             try audioSession.setActive(true)
+            
+            // Store original configuration for restoration
+            UserDefaults.standard.set(currentCategory.rawValue, forKey: "ShazamOriginalAudioCategory")
+            UserDefaults.standard.set(currentMode.rawValue, forKey: "ShazamOriginalAudioMode") 
+            UserDefaults.standard.set(currentOptions.rawValue, forKey: "ShazamOriginalAudioOptions")
+            
         } catch {
-            print("Failed to set up the audio session: \(error)")
+            print("❌ ShazamViewModel: Failed to set up audio session: \(error)")
         }
     }
     
@@ -151,8 +167,41 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             self.audioEngine.stop()
             self.audioEngine.inputNode.removeTap(onBus: 0)
             
+            // Restore original audio session configuration
+            self.restoreOriginalAudioSession()
+            
             DispatchQueue.main.async {
                 self.isRecording = false
+            }
+        }
+    }
+    
+    private func restoreOriginalAudioSession() {
+        let audioSession = AVAudioSession.sharedInstance()
+        
+        // Get the stored original configuration
+        let originalCategoryRaw = UserDefaults.standard.string(forKey: "ShazamOriginalAudioCategory") ?? AVAudioSession.Category.playback.rawValue
+        let originalModeRaw = UserDefaults.standard.string(forKey: "ShazamOriginalAudioMode") ?? AVAudioSession.Mode.default.rawValue
+        let originalOptionsRaw = UserDefaults.standard.object(forKey: "ShazamOriginalAudioOptions") as? UInt ?? AVAudioSession.CategoryOptions.allowBluetooth.rawValue
+        
+        do {
+            let originalCategory = AVAudioSession.Category(rawValue: originalCategoryRaw)
+            let originalMode = AVAudioSession.Mode(rawValue: originalModeRaw)
+            let originalOptions = AVAudioSession.CategoryOptions(rawValue: originalOptionsRaw)
+            
+            try audioSession.setCategory(originalCategory, mode: originalMode, options: originalOptions)
+            print("✅ ShazamViewModel: Restored original audio session configuration")
+            
+            // Clean up stored values
+            UserDefaults.standard.removeObject(forKey: "ShazamOriginalAudioCategory")
+            UserDefaults.standard.removeObject(forKey: "ShazamOriginalAudioMode")
+            UserDefaults.standard.removeObject(forKey: "ShazamOriginalAudioOptions")
+            
+        } catch {
+            print("❌ ShazamViewModel: Failed to restore original audio session: \(error)")
+            // Fallback: Let PlaybackManager reconfigure
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                PlaybackManager.shared.activateAudioSessionForPlayer(PlaybackManager.shared.activePlayer)
             }
         }
     }

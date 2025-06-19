@@ -14,6 +14,7 @@ import BackgroundTasks
 struct AlarmConfigurationView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.colorScheme) var colorScheme
     @AppStorage("alarmTimeString") private var alarmTimeString = ""
     @AppStorage("isAlarmEnabled") private var isAlarmEnabled = false
     @AppStorage("selectedStationIndex") private var selectedStationIndex = 0
@@ -33,9 +34,26 @@ struct AlarmConfigurationView: View {
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
     
-    private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
+    private let miniPlayerHeight: CGFloat = 60
     
     let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    
+    // Modern color system for adaptive theming
+    private var backgroundColor: Color {
+        colorScheme == .dark ? .black : Color(.systemGray6)
+    }
+    
+    private var cardBackgroundColor: Color {
+        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
+    }
+    
+    private var primaryTextColor: Color {
+        colorScheme == .dark ? .white : .primary
+    }
+    
+    private var secondaryTextColor: Color {
+        colorScheme == .dark ? .gray : .secondary
+    }
     
     init() {
         _alarmTime = State(initialValue: Self.loadAlarmTime())
@@ -49,166 +67,51 @@ struct AlarmConfigurationView: View {
     var body: some View {
         NavigationView {
             ZStack(alignment: .bottom) {
-                    VStack(spacing: 0) {
-                        Form {
-                            Section(header: Text("Setup Station")) {
-                                if isAlarmEnabled && hasFavoriteStations {
-                                    let favoriteStations = viewModel.stations.filter { $0.isFavorite }
-                                    if favoriteStations.indices.contains(selectedStationIndex) {
-                                        Picker("Favorite Station", selection: $selectedStationIndex) {
-                                            ForEach(favoriteStations.indices, id: \.self) { index in
-                                                Text(favoriteStations[index].name).tag(index)
-                                            }
-                                        }
-                                        .onChange(of: selectedStationIndex) { _ in
-                                            saveAlarm()
-                                        }
-                                    } else {
-                                        Text("Please select a favorite station")
-                                            .foregroundColor(.red)
-                                    }
-                                } else if !hasFavoriteStations {
-                                    ButtonWithNonClickableText(
-                                        text: "No favorite stations have been configured. Please add a station to your favorites in the 'Favorites' tab before scheduling an alert.",
-                                        buttonText: "Go to All Stations"
-                                    ) {
-                                        self.presentationMode.wrappedValue.dismiss()
-                                        DispatchQueue.main.async {
-                                            NotificationCenter.default.post(name: .switchToAllTab, object: nil)
-                                        }
-                                    }
-                                } else {
-                                    Text("Enable alert to select a station")
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                            Section {
-                                Toggle("Enable Alert", isOn: $isAlarmEnabled)
-                                    .onChange(of: isAlarmEnabled) { newValue in
-                                        if newValue {
-                                            if hasFavoriteStations {
-                                                requestCalendarAccess()
-                                            } else {
-                                                isAlarmEnabled = false
-                                            }
-                                        } else {
-                                            cancelAlarm()
-                                        }
-                                    }
-                                    .disabled(!hasFavoriteStations)
-                            }
-                            Section(header: Text("Alert Type")) {
-                                Picker("Alert Type", selection: $isSingleTimeAlert) {
-                                    Text("Repeating").tag(false)
-                                    Text("Single Time").tag(true)
-                                }
-                                .pickerStyle(SegmentedPickerStyle())
-                                .disabled(!isAlarmEnabled || !hasFavoriteStations)
-                                .onChange(of: isSingleTimeAlert) { newValue in
-                                    saveAlarm()
-                                }
-                            }
-                            Section(header: Text("Radio Program Alert Time")) {
-                                DatePicker("Setup Alert Time", selection: $alarmTime, displayedComponents: .hourAndMinute)
-                                    .onChange(of: alarmTime) { _ in
-                                        saveAlarm()
-                                    }
-                                    .disabled(!isAlarmEnabled || !hasFavoriteStations)
-                            }
-                            if !isSingleTimeAlert {
-                                Section(header: Text("Select day of the week to repeat alert")) {
-                                    ForEach(0..<7) { index in
-                                        Toggle(daysOfWeek[index], isOn: $selectedDays[index])
-                                            .onChange(of: selectedDays[index]) { _ in
-                                                saveAlarm()
-                                            }
-                                            .disabled(!isAlarmEnabled || !hasFavoriteStations)
-                                    }
-                                }
-                            }
-                            Section(header: Text("Show Name")) {
-                                if isAlarmEnabled {
-                                    HStack {
-                                        TextField("Enter Show Name", text: $showName)
-                                            .padding(.trailing, 30)
-                                        
-                                        if !showName.isEmpty {
-                                            Button(action: {
-                                                showName = ""
-                                            }) {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .foregroundColor(.gray)
-                                            }
-                                            .padding(.trailing, 8)
-                                        }
-                                    }
-                                    .onAppear {
-                                        updateSelectedStationIndex()
-                                    }
-                                    .onChange(of: viewModel.stations) { _ in
-                                        updateSelectedStationIndex()
-                                    }
-                                    .onChange(of: showName) { _ in
-                                        saveAlarm()
-                                    }
-                                    .onChange(of: shouldRequestCalendarAccess) { newValue in
-                                        if newValue {
-                                            requestCalendarAccess { granted in
-                                                if granted {
-                                                    saveAlarm()
-                                                } else {
-                                                    isAlarmEnabled = false
-                                                }
-                                                shouldRequestCalendarAccess = false
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Text("Enable alert to enter show name")
-                                        .foregroundColor(.gray)
-                                }
-                            }
-                            .disabled(!isAlarmEnabled || !hasFavoriteStations)
-                            
-                            if showSavedIndicator {
-                                HStack {
-                                    Spacer()
-                                    Text("Changes saved")
-                                        .foregroundColor(.green)
-                                    Spacer()
-                                }
-                            }
+                VStack(spacing: 0) {
+                    ScrollView {
+                        LazyVStack(spacing: 24) {
+                            modernAlarmToggleSection
+                            modernStationSelectionSection
+                            modernAlarmTypeSection
+                            modernTimeSection
+                            modernDaysSection
+                            modernShowNameSection
+                            modernSavedIndicator
                         }
-                        // Add padding to prevent content from being hidden behind the mini player
-                        .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 100 : 0)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 120 : 80)
                     }
-                
-                // Fixed Mini Player
-                if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                    MiniPlayerView(
-                        podcastPlayer: podcastPlayer,
-                        viewModel: podcastViewModel,
-                        selectedPodcast: $selectedPodcast,
-                        onListButtonTap: {
-                            if let currentFeed = podcastPlayer.currentFeed {
-                                selectedPodcast = currentFeed
-                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                showPodcastPlayerSheet = true
-                            }
-                        },
-                        onCloseButtonTap: {
-                            podcastPlayer.pause()
-                            podcastPlayer.currentEpisode = nil
-                            podcastPlayer.currentFeed = nil
-                        },
-                        isPlaylistButtonDisabled: false
-                    )
-                    .transition(.move(edge: .bottom))
-                    .frame(height: miniPlayerHeight)
+                    
+                    // Fixed Mini Player
+                    if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
+                        MiniPlayerView(
+                            podcastPlayer: podcastPlayer,
+                            viewModel: podcastViewModel,
+                            selectedPodcast: $selectedPodcast,
+                            onListButtonTap: {
+                                if let currentFeed = podcastPlayer.currentFeed {
+                                    selectedPodcast = currentFeed
+                                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                    scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                    showPodcastPlayerSheet = true
+                                }
+                            },
+                            onCloseButtonTap: {
+                                podcastPlayer.pause()
+                                podcastPlayer.currentEpisode = nil
+                                podcastPlayer.currentFeed = nil
+                            },
+                            isPlaylistButtonDisabled: false
+                        )
+                        .transition(.move(edge: .bottom))
+                        .frame(height: miniPlayerHeight)
+                    }
                 }
+                .background(backgroundColor)
             }
             .navigationTitle("Set Program Alert")
+            .navigationBarTitleDisplayMode(.large)
         }
         .navigationViewStyle(StackNavigationViewStyle())
         .alert(isPresented: $showCalendarAccessAlert) {
@@ -235,6 +138,191 @@ struct AlarmConfigurationView: View {
             }
         }
     }
+    
+    // MARK: - Modern UI Sections
+    
+    @ViewBuilder
+    private var modernAlarmToggleSection: some View {
+        ModernAlarmCard(
+            title: "Alert Configuration",
+            icon: ""
+        ) {
+            ModernAlarmToggleRow(
+                title: "Enable Alert",
+                subtitle: hasFavoriteStations ? "Turn on to receive radio program alerts" : "Add favorite stations first to enable alerts",
+                isOn: $isAlarmEnabled,
+                icon: "bell.badge",
+                isEnabled: hasFavoriteStations
+            )
+            .onChange(of: isAlarmEnabled) { newValue in
+                if newValue {
+                    if hasFavoriteStations {
+                        requestCalendarAccess()
+                    } else {
+                        isAlarmEnabled = false
+                    }
+                } else {
+                    cancelAlarm()
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var modernStationSelectionSection: some View {
+        if hasFavoriteStations {
+            ModernAlarmCard(
+                title: "Station Selection",
+                icon: ""
+            ) {
+                if isAlarmEnabled {
+                    let favoriteStations = viewModel.stations.filter { $0.isFavorite }
+                    if favoriteStations.indices.contains(selectedStationIndex) {
+                        ModernStationPicker(
+                            stations: favoriteStations,
+                            selectedIndex: $selectedStationIndex
+                        )
+                        .onChange(of: selectedStationIndex) { _ in
+                            saveAlarm()
+                        }
+                    } else {
+                        ModernErrorMessage(
+                            text: "Please select a favorite station",
+                            icon: "exclamationmark.triangle.fill"
+                        )
+                    }
+                } else {
+                    ModernDisabledMessage(
+                        text: "Enable alert to select a station",
+                        icon: "radio"
+                    )
+                }
+            }
+        } else {
+            ModernAlarmCard(
+                title: "Station Selection",
+                icon: "",
+                isWarning: true
+            ) {
+                ModernNoStationsMessage(
+                    onNavigateToStations: {
+                        presentationMode.wrappedValue.dismiss()
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: .switchToAllTab, object: nil)
+                        }
+                    }
+                )
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var modernAlarmTypeSection: some View {
+        ModernAlarmCard(
+            title: "Alert Type",
+            icon: ""
+        ) {
+            ModernSegmentedControl(
+                title: "Choose alert frequency",
+                options: ["Repeating", "Single Time"],
+                selection: Binding(
+                    get: { isSingleTimeAlert ? 1 : 0 },
+                    set: { isSingleTimeAlert = $0 == 1 }
+                ),
+                isEnabled: isAlarmEnabled && hasFavoriteStations
+            )
+            .onChange(of: isSingleTimeAlert) { _ in
+                saveAlarm()
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var modernTimeSection: some View {
+        ModernAlarmCard(
+            title: "Alert Time",
+            icon: ""
+        ) {
+            ModernTimePicker(
+                time: $alarmTime,
+                isEnabled: isAlarmEnabled && hasFavoriteStations
+            )
+            .onChange(of: alarmTime) { _ in
+                saveAlarm()
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var modernDaysSection: some View {
+        if !isSingleTimeAlert {
+            ModernAlarmCard(
+                title: "Repeat Days",
+                icon: ""
+            ) {
+                ModernDaySelector(
+                    selectedDays: $selectedDays,
+                    daysOfWeek: daysOfWeek,
+                    isEnabled: isAlarmEnabled && hasFavoriteStations
+                )
+                .onChange(of: selectedDays) { _ in
+                    saveAlarm()
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var modernShowNameSection: some View {
+        ModernAlarmCard(
+            title: "Show Name",
+            icon: ""
+        ) {
+            if isAlarmEnabled && hasFavoriteStations {
+                ModernShowNameField(
+                    showName: $showName,
+                    placeholder: "Enter Show Name (Optional)"
+                )
+                .onChange(of: showName) { _ in
+                    saveAlarm()
+                }
+                .onAppear {
+                    updateSelectedStationIndex()
+                }
+                .onChange(of: viewModel.stations) { _ in
+                    updateSelectedStationIndex()
+                }
+                .onChange(of: shouldRequestCalendarAccess) { newValue in
+                    if newValue {
+                        requestCalendarAccess { granted in
+                            if granted {
+                                saveAlarm()
+                            } else {
+                                isAlarmEnabled = false
+                            }
+                            shouldRequestCalendarAccess = false
+                        }
+                    }
+                }
+            } else {
+                ModernDisabledMessage(
+                    text: "Enable alert to enter show name",
+                    icon: "text.bubble"
+                )
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var modernSavedIndicator: some View {
+        if showSavedIndicator {
+            ModernSavedIndicator()
+        }
+    }
+    
+
+    
+    // MARK: - Helper Methods (Preserved from original)
     
     private func updateSelectedStationIndex() {
         let favoriteStations = viewModel.stations.filter { $0.isFavorite }
@@ -603,6 +691,394 @@ struct AlarmConfigurationView: View {
     }
 }
 
+// MARK: - Modern UI Components for Alarm Configuration
+
+struct ModernAlarmCard<Content: View>: View {
+    let title: String
+    let icon: String
+    let isWarning: Bool
+    let content: () -> Content
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    init(title: String, icon: String, isWarning: Bool = false, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.isWarning = isWarning
+        self.content = content
+    }
+    
+    private var cardBackgroundColor: Color {
+        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
+    }
+    
+    private var titleColor: Color {
+        if isWarning {
+            return .orange
+        }
+        return colorScheme == .dark ? .white : .primary
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header
+            HStack {
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(titleColor)
+                
+                Spacer()
+            }
+            
+            // Content
+            content()
+        }
+        .padding(20)
+        .background(cardBackgroundColor)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+        )
+    }
+}
+
+struct ModernAlarmToggleRow: View {
+    let title: String
+    let subtitle: String
+    @Binding var isOn: Bool
+    let icon: String
+    let isEnabled: Bool
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(isEnabled ? .blue : .gray)
+                .frame(width: 20)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                
+                Text(subtitle)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(isEnabled ? (colorScheme == .dark ? .gray : .secondary) : .red)
+            }
+            
+            Spacer()
+            
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .disabled(!isEnabled)
+        }
+    }
+}
+
+struct ModernStationPicker: View {
+    let stations: [RadioStation]
+    @Binding var selectedIndex: Int
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "radio")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .frame(width: 20)
+                
+                Text("Selected Station")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                
+                Spacer()
+            }
+            
+            Picker("Favorite Station", selection: $selectedIndex) {
+                ForEach(stations.indices, id: \.self) { index in
+                    Text(stations[index].name).tag(index)
+                }
+            }
+            .pickerStyle(MenuPickerStyle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(8)
+        }
+    }
+}
+
+struct ModernSegmentedControl: View {
+    let title: String
+    let options: [String]
+    @Binding var selection: Int
+    let isEnabled: Bool
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+            
+            Picker(title, selection: $selection) {
+                ForEach(0..<options.count, id: \.self) { index in
+                    Text(options[index]).tag(index)
+                }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .disabled(!isEnabled)
+            .opacity(isEnabled ? 1.0 : 0.6)
+        }
+    }
+}
+
+struct ModernTimePicker: View {
+    @Binding var time: Date
+    let isEnabled: Bool
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "clock")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .frame(width: 20)
+                
+                Text("Alert Time")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                
+                Spacer()
+            }
+            
+            DatePicker("Setup Alert Time", selection: $time, displayedComponents: .hourAndMinute)
+                .datePickerStyle(WheelDatePickerStyle())
+                .labelsHidden()
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1.0 : 0.6)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
+        }
+    }
+}
+
+struct ModernDaySelector: View {
+    @Binding var selectedDays: [Bool]
+    let daysOfWeek: [String]
+    let isEnabled: Bool
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .frame(width: 20)
+                
+                Text("Repeat on these days")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                
+                Spacer()
+            }
+            
+            VStack(spacing: 8) {
+                ForEach(0..<7, id: \.self) { index in
+                    HStack(spacing: 12) {
+                        Image(systemName: selectedDays[index] ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(selectedDays[index] ? .blue : .gray)
+                        
+                        Text(daysOfWeek[index])
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(colorScheme == .dark ? .white : .primary)
+                        
+                        Spacer()
+                        
+                        Toggle("", isOn: $selectedDays[index])
+                            .labelsHidden()
+                            .disabled(!isEnabled)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(selectedDays[index] ? Color.blue.opacity(0.1) : Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+                    .onTapGesture {
+                        if isEnabled {
+                            selectedDays[index].toggle()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ModernShowNameField: View {
+    @Binding var showName: String
+    let placeholder: String
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                    .frame(width: 20)
+                
+                Text("Show Name")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                
+                Spacer()
+            }
+            
+            HStack {
+                TextField(placeholder, text: $showName)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .padding(.leading, 4)
+                
+                if !showName.isEmpty {
+                    Button(action: {
+                        showName = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(8)
+        }
+    }
+}
+
+struct ModernErrorMessage: View {
+    let text: String
+    let icon: String
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.red)
+            
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.red)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+struct ModernDisabledMessage: View {
+    let text: String
+    let icon: String
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.gray)
+            
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.gray)
+        }
+        .padding(12)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+struct ModernNoStationsMessage: View {
+    let onNavigateToStations: () -> Void
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.orange)
+                
+                Text("No Favorite Stations")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.orange)
+            }
+            
+            Text("No favorite stations have been configured. Please add a station to your favorites in the 'Favorites' tab before scheduling an alert.")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                .lineLimit(nil)
+            
+            Button(action: onNavigateToStations) {
+                HStack(spacing: 8) {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("Go to All Stations")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.blue)
+                .foregroundColor(.white)
+                .cornerRadius(8)
+            }
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.1))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 0.5)
+        )
+    }
+}
+
+struct ModernSavedIndicator: View {
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.green)
+            
+            Text("Changes saved")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(colorScheme == .dark ? .white : .primary)
+        }
+        .padding(12)
+        .background(Color.green.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
 struct AlarmDetails: Codable {
     let time: Date
     let days: [Bool]
@@ -614,39 +1090,20 @@ struct AlarmDetails: Codable {
 
 struct AlarmConfigurationView_Previews: PreviewProvider {
     static var previews: some View {
-        AlarmConfigurationView()
-            .environmentObject(RadioStationViewModel())
+        Group {
+            AlarmConfigurationView()
+                .environmentObject(RadioStationViewModel())
+                .preferredColorScheme(.dark)
+                .previewDisplayName("Dark Mode")
+            
+            AlarmConfigurationView()
+                .environmentObject(RadioStationViewModel())
+                .preferredColorScheme(.light)
+                .previewDisplayName("Light Mode")
+        }
     }
 }
 
 extension Notification.Name {
     static let switchToAllTab = Notification.Name("switchToAllTab")
-}
-
-struct ButtonWithNonClickableText: View {
-    let text: String
-    let buttonText: String
-    let action: () -> Void
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(text)
-                .foregroundColor(.red)
-                .font(.callout)
-            
-            Button(action: action) {
-                HStack {
-                    Image(systemName: "list.bullet")
-                    Text(buttonText)
-                }
-                .padding(8)
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(8)
-            }
-            .buttonStyle(PlainButtonStyle()) // This ensures only the button itself is clickable
-        }
-        .contentShape(Rectangle()) // This makes the whole VStack tappable
-        .onTapGesture {} // This consumes taps on the VStack, preventing row highlight
-    }
 }
