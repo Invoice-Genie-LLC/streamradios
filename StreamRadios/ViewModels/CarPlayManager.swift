@@ -41,6 +41,12 @@ class CarPlayManager: NSObject, ObservableObject {
     private var recentlyPlayedEpisodes: [(episode: PodcastEpisode, playedAt: Date)] = []
     private let maxRecentEpisodes = 10
     
+    // CarPlay connection status for performance optimizations
+    @Published var isCarPlayConnected: Bool = false
+    
+    // Data properties
+    private var radioStations: [RadioStation] = []
+    
     private override init() {
         super.init()
         loadRecentlyPlayedEpisodes()

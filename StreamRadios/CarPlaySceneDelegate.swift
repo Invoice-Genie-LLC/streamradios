@@ -159,6 +159,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         os_log("🚗 CarPlay scene disconnected", log: log, type: .info)
         print("🚗 CarPlay: Scene delegate didDisconnect called")
         
+        // Clear CarPlay connection status for performance optimizations
+        CarPlayManager.shared.isCarPlayConnected = false
+        
         // Clean up notification observers
         NotificationCenter.default.removeObserver(self)
         
@@ -175,6 +178,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                                 didConnect interfaceController: CPInterfaceController) {
         os_log("🚗 CarPlay: Scene delegate didConnect called", log: log, type: .info)
         print("🚗 CarPlay: Scene delegate didConnect called")
+        
+        // Set CarPlay connection status for performance optimizations
+        CarPlayManager.shared.isCarPlayConnected = true
         
         // Store the interface controller
         self.interfaceController = interfaceController
@@ -1017,14 +1023,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         carPlayManager.updateEpisodeProgress(episodeId: episodeId, progress: progress, isCompleted: progress >= 0.99)
         
-        // CRITICAL: Do NOT refresh CarPlay templates for progress updates to prevent CPU spikes
-        // Progress updates happen frequently and would cause constant template refreshes leading to 100%+ CPU usage
-        // Only update internal data, not UI - CarPlay UI updates should only happen for play/pause/completion events
+        // CRITICAL: COMPLETELY ELIMINATE ALL UI REFRESHES for progress updates to maximize CPU performance
+        // Progress updates happen frequently and ANY UI refresh causes significant CPU spikes
+        // CarPlay will handle progress display through MPNowPlayingInfoCenter which is much more efficient
+        // Only update internal data, never refresh templates or UI for progress updates
         
-        // Only refresh legacy CarPlay content for older systems (minimal CPU impact)
-        DispatchQueue.main.async {
-            MPPlayableContentManager.shared().reloadData()
-        }
+        // Remove even the legacy CarPlay refresh as it's not needed and causes CPU overhead
+        // MPNowPlayingInfoCenter handles progress display in CarPlay more efficiently
     }
     
     private func handleEpisodeCompletion(_ notification: Notification) {
@@ -1361,10 +1366,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func refreshCurrentPodcastTemplateIfNeeded(episodeId: String) {
-        // Throttle updates to prevent too frequent template refreshes (allow every 1 second for status changes)
+        // Increase throttling to prevent frequent template refreshes (allow every 2 seconds for better CPU performance)
         let now = Date()
-        if let lastUpdate = lastProgressUpdateTime, now.timeIntervalSince(lastUpdate) < 1.0 {
-            // Skip if we updated less than 1 second ago
+        if let lastUpdate = lastProgressUpdateTime, now.timeIntervalSince(lastUpdate) < 2.0 {
+            // Skip if we updated less than 2 seconds ago (increased from 1 second)
             return
         }
         
