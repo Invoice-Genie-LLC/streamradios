@@ -96,7 +96,52 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     func updateContent() {
-        updateRadioStations(RadioStationViewModel.shared.stations)
+        // Get fresh data from RadioStationViewModel
+        let allStations = RadioStationViewModel.shared.stations
+        
+        // Update all station-related arrays with fresh data
+        self.allStations = allStations
+        favoriteStations = allStations.filter { $0.isFavorite }.sorted { 
+            if let first = $0.favoriteOrder, let second = $1.favoriteOrder {
+                return first < second
+            } else if $0.favoriteOrder != nil {
+                return true
+            } else if $1.favoriteOrder != nil {
+                return false
+            } else {
+                return ($0.favoritedAt ?? Date.distantPast) > ($1.favoritedAt ?? Date.distantPast)
+            }
+        }
+        
+        // Update recent stations with fresh data, sorted by most recent
+        recentStations = allStations
+            .filter { $0.lastPlayed != nil }
+            .sorted { 
+                ($0.lastPlayed ?? Date.distantPast) > ($1.lastPlayed ?? Date.distantPast) 
+            }
+            .prefix(10)
+            .map { $0 }
+        
+        stationsByCountry = Dictionary(grouping: allStations) { $0.country }
+        availableCountries = Array(stationsByCountry.keys).sorted()
+        
+        // Update podcast data
+        updatePodcastData()
+        
+        os_log("CarPlay: Content updated - total: %d, favorites: %d, recent: %d, countries: %d", 
+               log: log, type: .info, allStations.count, favoriteStations.count, recentStations.count, availableCountries.count)
+        
+        // Log recent stations for debugging
+        for (index, station) in recentStations.prefix(3).enumerated() {
+            let timeAgo = station.lastPlayed?.timeIntervalSinceNow ?? 0
+            os_log("CarPlay: Updated recent station %d: '%@' played %.0f seconds ago", 
+                   log: log, type: .debug, index + 1, station.name, abs(timeAgo))
+        }
+        
+        // Trigger CarPlay interface refresh
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
     }
     
     private func updateRadioStations(_ stations: [RadioStation]) {
@@ -1057,6 +1102,25 @@ class CarPlayManager: NSObject, ObservableObject {
     }
     
     func getRecentStations() -> [RadioStation] {
+        // Always get fresh data from RadioStationViewModel and sort by most recent
+        let allStations = RadioStationViewModel.shared.stations
+        let recentStations = allStations
+            .filter { $0.lastPlayed != nil }
+            .sorted { 
+                ($0.lastPlayed ?? Date.distantPast) > ($1.lastPlayed ?? Date.distantPast) 
+            }
+            .prefix(10) // Limit to 10 most recent
+            .map { $0 }
+        
+        os_log("CarPlay: Returning %d recent stations (sorted by lastPlayed)", log: log, type: .info, recentStations.count)
+        
+        // Log the first few recent stations for debugging
+        for (index, station) in recentStations.prefix(3).enumerated() {
+            let timeAgo = station.lastPlayed?.timeIntervalSinceNow ?? 0
+            os_log("CarPlay: Recent station %d: '%@' played %.0f seconds ago", 
+                   log: log, type: .debug, index + 1, station.name, abs(timeAgo))
+        }
+        
         return recentStations
     }
     

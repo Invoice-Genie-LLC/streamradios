@@ -751,6 +751,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         ) { [weak self] notification in
             self?.handlePlaybackStateChange(notification)
         }
+        
+        // Listen for station played events to update recents list immediately
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("StationPlayedForRecents"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleStationPlayedForRecents(notification)
+        }
+        
+        // Listen for CarPlay refresh requests from CarPlayManager
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("CarPlayRefreshRequested"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleCarPlayRefreshRequest(notification)
+        }
     }
     
     private func handlePodcastProgressUpdate(_ notification: Notification) {
@@ -833,6 +851,85 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Update the episode status display immediately
         refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
+    }
+    
+    private func handleStationPlayedForRecents(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            os_log("🚗 CarPlay: Invalid station played notification", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Station played for recents update - ID: %@", log: log, type: .info, stationId)
+        
+        // Update CarPlayManager's recents data immediately
+        let carPlayManager = CarPlayManager.shared
+        carPlayManager.updateContent() // This will refresh the recent stations list
+        
+        // Force refresh the recents tab template if it's currently displayed
+        refreshRecentsTabTemplate()
+        
+        // Also trigger the legacy CarPlay content refresh
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
+    }
+    
+    private func handleCarPlayRefreshRequest(_ notification: Notification) {
+        os_log("🚗 CarPlay: Received refresh request", log: log, type: .info)
+        
+        // Force refresh all data
+        let carPlayManager = CarPlayManager.shared
+        carPlayManager.updateContent()
+        
+        // Refresh current templates
+        refreshRecentsTabTemplate()
+        refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+        
+        // Also trigger the legacy CarPlay content refresh
+        DispatchQueue.main.async {
+            MPPlayableContentManager.shared().reloadData()
+        }
+    }
+    
+    private func refreshRecentsTabTemplate() {
+        guard let interfaceController = self.interfaceController else {
+            os_log("🚗 CarPlay: Cannot refresh recents - no interface controller", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Refreshing recents tab template", log: log, type: .info)
+        
+        // Get the current root template
+        guard let tabBarTemplate = interfaceController.rootTemplate as? CPTabBarTemplate else {
+            os_log("🚗 CarPlay: Root template is not a tab bar template", log: log, type: .error)
+            return
+        }
+        
+        // Find the recents tab (should be index 2: Stations, Favorites, Recents, Podcasts)
+        let recentsTabIndex = 2
+        if recentsTabIndex < tabBarTemplate.templates.count {
+            // Create a new recents tab with updated data
+            let newRecentsTab = createRecentsTab()
+            
+            // Replace the recents tab in the tab bar
+            var updatedTemplates = tabBarTemplate.templates
+            updatedTemplates[recentsTabIndex] = newRecentsTab
+            
+            // Create a new tab bar template with the updated recents tab
+            let newTabBarTemplate = CPTabBarTemplate(templates: updatedTemplates)
+            
+            // Update the root template
+            interfaceController.setRootTemplate(newTabBarTemplate, animated: false, completion: { success, error in
+                if success {
+                    os_log("🚗 CarPlay: Successfully refreshed recents tab", log: self.log, type: .info)
+                } else {
+                    os_log("🚗 CarPlay: Failed to refresh recents tab: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+                }
+            })
+        } else {
+            os_log("🚗 CarPlay: Recents tab index out of bounds", log: log, type: .error)
+        }
     }
     
     private func refreshCurrentPodcastTemplateIfNeeded(episodeId: String) {

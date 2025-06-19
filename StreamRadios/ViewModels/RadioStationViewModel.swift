@@ -624,12 +624,20 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     
     func updateLastPlayed(for station: RadioStation) {
-            if let index = stations.firstIndex(where: { $0.id == station.id }) {
-                stations[index].lastPlayed = Date()
-                saveStationsToCoreData()
-                objectWillChange.send()  // Notify observers of the change
-            }
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            stations[index].lastPlayed = Date()
+            saveStationsToCoreData()
+            objectWillChange.send()  // Notify observers of the change
+            
+            // Post notification for real-time CarPlay recents update
+            NotificationCenter.default.post(
+                name: NSNotification.Name("StationPlayedForRecents"),
+                object: nil,
+                userInfo: ["stationId": station.id, "station": stations[index]]
+            )
+            print("🚗 Posted recents update notification for station: \(station.name)")
         }
+    }
     
     
     func loadImageData(named name: String) -> String? {

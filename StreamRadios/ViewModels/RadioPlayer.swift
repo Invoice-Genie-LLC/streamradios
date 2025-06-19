@@ -463,21 +463,22 @@ class RadioPlayer: NSObject, ObservableObject {
        }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
-        stopPodcastPlayback()
+        // Ensure PlaybackManager knows radio is the active player
+        PlaybackManager.shared.setActivePlayer(.radio)
         
-        guard index >= 0 && index < stations.count else { return }
-        
-        let station = stations[index]
-        
-        // Clear artwork from previous station if switching to a different station
-        if let previousID = previousStationID, previousID != station.id {
-            clearPreviousStationArtwork(previousID: previousID)
+        guard index >= 0 && index < stations.count else {
+            print("Invalid station index: \(index)")
+            return
         }
         
-        stopCurrentStation()
-        currentStationIndex = index
+        let station = stations[index]
+        print("Playing station: \(station.name) at index \(index)")
         
-        // Clear ALL metadata and artwork when switching stations
+        // Set the current station index and station
+        currentStationIndex = index
+        currentlyPlayingStation = station
+        
+        // Clear all metadata and artwork when switching stations
         metadata = nil
         iTunesAlbumArt = nil
         albumArt = nil
@@ -485,18 +486,18 @@ class RadioPlayer: NSObject, ObservableObject {
         artistName = ""
         lastMetadataSearched = ""
         
-        // Reset artwork persistence tracking for new station
-        currentTrackArtwork = nil
-        currentTrackKey = nil
-        
         // Cancel any pending iTunes searches
         artworkSearchTimer?.invalidate()
+
+        guard let url = URL(string: station.url) else {
+            print("Invalid URL for station: \(station.name)")
+            return
+        }
         
-        currentlyPlayingStation = station
-        previousStationID = station.id
+        setStationURL(url)
         
-        if let url = URL(string: station.url) {
-            setStationURL(url)
+        // Only play if we're not already playing this station
+        if !isPlaying || player?.currentItem?.asset as? AVURLAsset == nil || (player?.currentItem?.asset as? AVURLAsset)?.url != url {
             play()
         }
         
@@ -505,6 +506,14 @@ class RadioPlayer: NSObject, ObservableObject {
         updateWidget()
         updateLastPlayed(station)
         saveLastPlayedStation()
+        
+        // Post notification for real-time CarPlay recents update
+        NotificationCenter.default.post(
+            name: NSNotification.Name("StationPlayedForRecents"),
+            object: nil,
+            userInfo: ["stationId": station.id, "station": station]
+        )
+        print("🚗 Posted notification for CarPlay recents update: \(station.name)")
     }
     
     func playStationForAlarm(station: RadioStation) {
@@ -986,7 +995,7 @@ class RadioPlayer: NSObject, ObservableObject {
                 artist = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
                 
                 // Look for album/year in remaining components (skip timestamps and IDs)
-                for (index, component) in components[2...].enumerated() {
+                for (_, component) in components[2...].enumerated() {
                     let cleaned = component.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !cleaned.isEmpty && 
                        !cleaned.contains("-") && 
@@ -1810,7 +1819,7 @@ class RadioPlayer: NSObject, ObservableObject {
         // Enhanced track name matching with normalization (handles "Love Cats" vs "Lovecats")
         let normalizedQuery = normalizeTrackName(queryLower)
         let normalizedTrack = normalizeTrackName(trackLower)
-        let normalizedArtist = normalizeTrackName(artistLower)
+        _ = normalizeTrackName(artistLower)
         
         // Check for normalized track name match (highest priority)
         if normalizedQuery == normalizedTrack || 
