@@ -286,11 +286,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         Country(name: "Unknown Region", flag: "")
     ]
     @Published var selectedTab: Tab = .radio
-    @Published var selectedSubTab: RadioSubTab = .all {
-        didSet {
-            saveSelectedSubTab()
-        }
-    }
+    @Published var selectedSubTab: RadioSubTab = .recent
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
     @Published var isDeletingData: Bool = false
@@ -301,9 +297,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
+            // Switch to All tab when country changes (except during initialization)
+            if oldValue != selectedCountry && oldValue != "" {
+                selectedSubTab = .all
+                print("🌍 Country changed from '\(oldValue)' to '\(selectedCountry)' - switching to All tab")
+            }
+            
             saveSelectedCountry()
-                NotificationCenter.default.post(name: .countrySelected, object: nil)
-                NotificationCenter.default.post(name: .countryChanged, object: nil)
+            NotificationCenter.default.post(name: .countrySelected, object: nil)
+            NotificationCenter.default.post(name: .countryChanged, object: nil)
         }
     }
     private var notificationManager = NotificationManager.shared
@@ -329,20 +331,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
         UserDefaults.standard.set(selectedCountry, forKey: "selectedCountry")
     }
     
-    private func saveSelectedSubTab() {
-        UserDefaults.standard.set(selectedSubTab.rawValue, forKey: "selectedSubTab")
-    }
+
+    
+
     
     override init() {
         super.init()
         
             selectedCountry = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country"
             
-            // Load saved sub-tab
-            if let savedSubTab = UserDefaults.standard.object(forKey: "selectedSubTab") as? Int,
-               let subTab = RadioSubTab(rawValue: savedSubTab) {
-                selectedSubTab = subTab
-            }
+            // Always start with Recent tab (no persistence)
+            selectedSubTab = .recent
         
             syncStationsWithCloudKit()
     

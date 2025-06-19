@@ -96,27 +96,59 @@ class RadioPlayer: NSObject, ObservableObject {
                 // Only auto-play if we're not currently handling an alarm
                 if !self.isHandlingAlarm {
                     // Use shared UserDefaults consistently for CarPlay compatibility
-                    if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID"),
-                       let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
-                        // Play the last played station
-                        self.currentlyPlayingStation = lastStation
-                        if let url = URL(string: lastStation.url) {
-                            self.setStationURL(url)
-                            if let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
-                                self.currentStationIndex = index
-                                self.userDefaults?.set(index, forKey: "lastStationIndex")
+                    if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID") {
+                        print("🔍 Auto-play: Found LastPlayedStationID: \(lastStationID)")
+                        
+                        if let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
+                            print("✅ Auto-play: Found matching station: \(lastStation.name)")
+                            print("🌍 Auto-play: Station from \(lastStation.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
+                            print("📍 Auto-play: Country picker will remain unchanged")
+                        
+
+                        
+                        // Play the last played station using the proper playStation method
+                        if let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+                            print("🎵 Auto-play: Playing last station using playStation method to ensure Recent tab update")
+                            self.playStation(at: index, from: self.viewModel?.stations ?? [])
+                        } else {
+                            // Fallback to manual setup if index not found
+                            print("⚠️ Auto-play: Station index not found, using fallback method")
+                            self.currentlyPlayingStation = lastStation
+                            if let url = URL(string: lastStation.url) {
+                                self.setStationURL(url)
+                                self.play()
+                                // Manually update lastPlayed for Recent tab
+                                self.updateLastPlayed(lastStation)
                             }
+                        }
+                        } else {
+                            print("❌ Auto-play: Station with ID \(lastStationID) not found in stations array")
+                        }
+                    } else {
+                        print("❌ Auto-play: No LastPlayedStationID found in UserDefaults")
+                    }
+                    
+                    if let lastStationURL = self.userDefaults?.url(forKey: "lastStationURL") {
+                        // Fall back to the old method if LastPlayedStationID is not available
+                        let storedIndex = self.userDefaults?.integer(forKey: "lastStationIndex") ?? 0
+                        if storedIndex < self.viewModel?.stations.count ?? 0,
+                           let stations = self.viewModel?.stations, !stations.isEmpty {
+                            let station = stations[storedIndex]
+                            
+                            print("🌍 Auto-play (fallback): Station from \(station.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
+                            print("📍 Auto-play (fallback): Country picker will remain unchanged")
+                            
+
+                            
+                            // Use proper playStation method to ensure Recent tab update
+                            print("🎵 Auto-play (fallback): Playing last station using playStation method")
+                            self.playStation(at: storedIndex, from: stations)
+                        } else {
+                            // Ultimate fallback - manual setup
+                            self.setStationURL(lastStationURL)
+                            self.currentStationIndex = storedIndex
                             self.play()
                         }
-                    } else if let lastStationURL = self.userDefaults?.url(forKey: "lastStationURL") {
-                        // Fall back to the old method if LastPlayedStationID is not available
-                        self.setStationURL(lastStationURL)
-                        self.currentStationIndex = self.userDefaults?.integer(forKey: "lastStationIndex")
-                        if let index = self.currentStationIndex,
-                           index < self.viewModel?.stations.count ?? 0 {
-                            self.currentlyPlayingStation = self.viewModel?.stations[index]
-                        }
-                        self.play()
                     }
                 }
             }
@@ -126,6 +158,8 @@ class RadioPlayer: NSObject, ObservableObject {
     func resetAlarmState() {
         isHandlingAlarm = false
     }
+    
+
     
     func setViewModel(_ viewModel: RadioStationViewModel) {
         self.viewModel = viewModel
@@ -542,21 +576,25 @@ class RadioPlayer: NSObject, ObservableObject {
     
      func saveLastPlayedStation() {
         if let currentStation = currentlyPlayingStation {
-            UserDefaults.standard.set(currentStation.id, forKey: "LastPlayedStationID")
+            // Use shared UserDefaults consistently for CarPlay compatibility
+            userDefaults?.set(currentStation.id, forKey: "LastPlayedStationID")
             if let index = viewModel?.stations.firstIndex(where: { $0.id == currentStation.id }) {
-                UserDefaults.standard.set(index, forKey: "lastStationIndex")
+                userDefaults?.set(index, forKey: "lastStationIndex")
             }
+            print("💾 Saved last played station: \(currentStation.name) (ID: \(currentStation.id))")
         }
     }
 
     private func loadLastPlayedStation() {
-        if let lastStationID = UserDefaults.standard.string(forKey: "LastPlayedStationID"),
+        // Use shared UserDefaults consistently for CarPlay compatibility
+        if let lastStationID = userDefaults?.string(forKey: "LastPlayedStationID"),
            let lastStation = viewModel?.stations.first(where: { $0.id == lastStationID }) {
             currentlyPlayingStation = lastStation
             if let url = URL(string: lastStation.url) {
                 setStationURL(url)
                 play()
             }
+            print("📻 Loaded last played station: \(lastStation.name) (ID: \(lastStationID))")
         }
     }
     

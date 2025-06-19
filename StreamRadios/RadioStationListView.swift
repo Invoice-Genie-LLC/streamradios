@@ -6,6 +6,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import FlagKit
 
 extension UIDevice {
     static func playHapticFeedback() {
@@ -328,11 +329,25 @@ struct RadioStationListView: View {
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
                         
-                        // Country - blue text as per screenshot
-                        Text(station.country)
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(.blue)
-                            .lineLimit(1)
+                        // Country info with flag for Recent tab
+                        HStack(spacing: 6) {
+                            // Show country flag only in Recent tab since it shows stations from all countries
+                            if selectedSubTab == .recent {
+                                if let flagImage = flagImage(for: station.country) {
+                                    Image(uiImage: flagImage)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 16, height: 12)
+                                        .clipShape(RoundedRectangle(cornerRadius: 2))
+                                }
+                            }
+                            
+                            // Country text - blue text as per screenshot
+                            Text(station.country)
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(.blue)
+                                .lineLimit(1)
+                        }
                         
                         // Show metadata if playing
                         if isCurrentStation(station: station) && radioPlayer.isPlaying {
@@ -633,14 +648,15 @@ struct RadioStationListView: View {
             return []
         }
         
-        let allStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
-        
         switch selectedSubTab {
         case .all:
-            return allStations
+            // All tab shows stations from the selected country only
+            return viewModel.stations.filter { $0.country == viewModel.selectedCountry }
         case .recent:
-            return viewModel.recentStations().filter { $0.country == viewModel.selectedCountry }
+            // Recent tab shows recent stations from ALL countries
+            return viewModel.recentStations()
         case .favorites:
+            // Favorites tab shows favorites from the selected country only
             return viewModel.favoriteStations().filter { $0.country == viewModel.selectedCountry }
         }
     }
@@ -748,7 +764,7 @@ struct RadioStationListView: View {
             }
             
         case .favorites:
-            // Move within favorites
+            // Move within favorites (country-specific)
             var favoriteStations = filteredStations
             favoriteStations.move(fromOffsets: source, toOffset: destination)
             
@@ -760,7 +776,7 @@ struct RadioStationListView: View {
             }
             
         case .recent:
-            // Recent stations can't be reordered manually
+            // Recent stations can't be reordered manually (they're sorted by play time across all countries)
             return
         }
         
@@ -776,6 +792,12 @@ struct RadioStationListView: View {
                 radioPlayer.currentStationIndex = newIndex
             }
         }
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func flagImage(for country: String) -> UIImage? {
+        return Flag(countryCode: country)?.originalImage
     }
     
     // MARK: - Edit Station Handler
