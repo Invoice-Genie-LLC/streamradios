@@ -489,7 +489,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
-        stopRadioPlayback()
+        // Stop radio playback if it's currently playing
+        RadioPlayer.shared.stopCurrentStation()
         
         // If there's a currently playing episode, mark it as "In Progress" before switching
         if let currentEpisode = currentEpisode, currentEpisode.id != episode.id {
