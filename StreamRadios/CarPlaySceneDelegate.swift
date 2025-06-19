@@ -1068,11 +1068,22 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         os_log("🚗 CarPlay: Playback state changed for episode ID: %@, isPlaying: %@", log: log, type: .info, episodeId, isPlaying ? "YES" : "NO")
         
-        // Use efficient immediate refresh for playback state changes (bypasses throttling to prevent delays)
-        refreshCurrentPodcastTemplateImmediately(episodeId: episodeId)
+        // Get current playing episode for debugging
+        let currentPlayingEpisodeId = PodcastPlayer.shared.currentEpisode?.id
+        let playerIsPlaying = PodcastPlayer.shared.isPlaying
+        os_log("🚗 CarPlay: PodcastPlayer state - current episode: %@, is playing: %@", log: log, type: .info, currentPlayingEpisodeId ?? "none", playerIsPlaying ? "YES" : "NO")
         
-        // Also refresh the recents tab to show/hide the highlighted playing state
+        // CRITICAL: Update CarPlayManager's data immediately before refreshing templates
+        let carPlayManager = CarPlayManager.shared
+        carPlayManager.updateContent() // Refresh all data from core data to get latest state
+        
+        // Use the same efficient section update approach that works perfectly for Recents tab
+        // This provides immediate visual highlighting changes just like Recents does
+        forceImmediateSectionUpdate(episodeId: episodeId)
+        
+        // Also refresh the recents tab and favorites tab to show/hide the highlighted playing state
         refreshRecentsTabTemplate()
+        refreshFavoritesTabTemplate()
         
         // Minimal UI refresh to avoid CPU spikes
         DispatchQueue.main.async {
@@ -1093,8 +1104,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         carPlayManager.updateContent() // This will refresh the recent stations list
         
-        // Force refresh the recents tab template if it's currently displayed
+        // Force refresh the recents tab and favorites tab to show/hide highlighting
         refreshRecentsTabTemplate()
+        refreshFavoritesTabTemplate()
         
         // Also trigger the legacy CarPlay content refresh
         DispatchQueue.main.async {
@@ -1234,6 +1246,119 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
+    private func refreshFavoritesTabTemplate() {
+        guard let interfaceController = self.interfaceController else {
+            os_log("🚗 CarPlay: Cannot refresh favorites - no interface controller", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Refreshing favorites tab template", log: log, type: .info)
+        
+        // Get the current root template
+        guard let tabBarTemplate = interfaceController.rootTemplate as? CPTabBarTemplate else {
+            os_log("🚗 CarPlay: Root template is not a tab bar template", log: log, type: .error)
+            return
+        }
+        
+        // Find the favorites tab (should be index 1: Stations, Favorites, Recents, Podcasts)
+        let favoritesTabIndex = 1
+        if favoritesTabIndex < tabBarTemplate.templates.count,
+           let favoritesTab = tabBarTemplate.templates[favoritesTabIndex] as? CPListTemplate {
+            
+            // Get fresh favorites data
+            let carPlayManager = CarPlayManager.shared
+            let favoriteStations = carPlayManager.getFavoriteStations()
+            let favoriteEpisodes = carPlayManager.getFavoritePodcastEpisodes()
+            
+            // Create new sections with updated data
+            var newSections: [CPListSection] = []
+            
+            // Favorite stations section
+            var favoriteStationItems: [CPListItem] = []
+            for station in favoriteStations {
+                let isCurrentlyPlaying = RadioPlayer.shared.currentlyPlayingStation?.id == station.id && RadioPlayer.shared.isPlaying
+                
+                let item = CPListItem(text: station.name,
+                                     detailText: station.country,
+                                     image: carPlayManager.getStationArtwork(for: station))
+                
+                // Set Apple standard highlighting for currently playing station
+                if #available(iOS 14.0, *) {
+                    item.isPlaying = isCurrentlyPlaying
+                }
+                
+                item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                    self?.playStation(station, completion: completion)
+                }
+                favoriteStationItems.append(item)
+            }
+            
+            if favoriteStationItems.isEmpty {
+                let emptyItem = CPListItem(text: "No Favorite Stations", detailText: "Add stations to favorites to see them here")
+                favoriteStationItems.append(emptyItem)
+            }
+            
+            let favoriteStationsSection = CPListSection(items: favoriteStationItems, header: "Favorite Stations", sectionIndexTitle: nil)
+            newSections.append(favoriteStationsSection)
+            
+            // Favorite episodes section
+            var favoriteEpisodeItems: [CPListItem] = []
+            for episode in favoriteEpisodes {
+                let duration = formatDuration(episode.duration)
+                var statusText = ""
+                let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
+                
+                // Determine episode status based on state and current playback
+                if isCurrentlyPlaying {
+                    statusText = " • Playing"
+                } else if episode.state.isPlayed {
+                    statusText = " • Complete"
+                } else if episode.state.progress > 0 {
+                    let progressPercent = Int(episode.state.progress * 100)
+                    statusText = " • \(progressPercent)% complete"
+                }
+                
+                // Find the podcast feed for artwork
+                let podcastFeeds = carPlayManager.getPodcastFeeds()
+                let podcastFeed = podcastFeeds.first { feed in
+                    feed.episodes.contains { $0.id == episode.id }
+                }
+                
+                // Use standard podcast artwork for all episodes
+                let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
+                
+                let item = CPListItem(text: episode.title,
+                                     detailText: "\(duration)\(statusText)",
+                                     image: itemImage)
+                
+                // Set Apple standard highlighting for currently playing episode
+                if #available(iOS 14.0, *) {
+                    item.isPlaying = isCurrentlyPlaying
+                }
+                
+                item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                    self?.playEpisode(episode, completion: completion)
+                }
+                favoriteEpisodeItems.append(item)
+            }
+            
+            if favoriteEpisodeItems.isEmpty {
+                let emptyItem = CPListItem(text: "No Favorite Episodes", detailText: "Add podcast episodes to favorites to see them here")
+                favoriteEpisodeItems.append(emptyItem)
+            }
+            
+            let favoriteEpisodesSection = CPListSection(items: favoriteEpisodeItems, header: "Favorite Episodes", sectionIndexTitle: nil)
+            newSections.append(favoriteEpisodesSection)
+            
+            // Update the sections directly on the existing template - this preserves navigation
+            favoritesTab.updateSections(newSections)
+            
+            os_log("🚗 CarPlay: Successfully updated favorites tab sections without changing navigation", log: self.log, type: .info)
+        } else {
+            os_log("🚗 CarPlay: Favorites tab index out of bounds or not a list template", log: log, type: .error)
+        }
+    }
+    
     private func refreshCurrentPodcastTemplateIfNeeded(episodeId: String) {
         // Throttle updates to prevent too frequent template refreshes (allow every 1 second for status changes)
         let now = Date()
@@ -1319,6 +1444,47 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         isUpdatingTemplate = false
     }
     
+    private func forceImmediateSectionUpdate(episodeId: String) {
+        // Since Recents tab works perfectly with updateSections(), let's use the same approach for podcast episode lists
+        // This should provide immediate highlighting updates just like Recents does
+        os_log("🚗 CarPlay: Forcing immediate section update for episode ID: %@", log: log, type: .info, episodeId)
+        
+        // Check if we're currently showing a podcast episode list
+        guard let currentFeed = currentPodcastFeed else {
+            os_log("🚗 CarPlay: No current podcast feed set for section update", log: log, type: .debug)
+            return
+        }
+        
+        // Get the currently playing episode to determine if we need to update this feed
+        let currentPlayingEpisodeId = PodcastPlayer.shared.currentEpisode?.id
+        
+        // Check if the currently playing episode is in this feed OR if any episode in this feed was previously playing
+        // This ensures we update when switching between episodes within the same podcast
+        let shouldUpdate = currentPlayingEpisodeId == nil || 
+                          currentFeed.episodes.contains(where: { $0.id == currentPlayingEpisodeId }) ||
+                          currentFeed.episodes.contains(where: { $0.id == episodeId })
+        
+        if !shouldUpdate {
+            os_log("🚗 CarPlay: No episodes in current feed need section update", log: log, type: .debug)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Updating sections for podcast '%@' - current playing: %@, notification episode: %@", log: log, type: .info, currentFeed.title, currentPlayingEpisodeId ?? "none", episodeId)
+        
+        // Use the same efficient section update approach that works perfectly for Recents
+        // Reset the updating flag to ensure this critical update goes through
+        isUpdatingTemplate = false
+        
+        // Use immediate section updates - same approach as Recents tab which works perfectly
+        updateCurrentPodcastTemplateSections(for: currentFeed)
+    }
+    
+    private func forceImmediateHighlightingUpdate(episodeId: String) {
+        // Legacy function - now redirects to the section update approach that works like Recents
+        // This ensures backward compatibility while using the same approach as the working Recents tab
+        forceImmediateSectionUpdate(episodeId: episodeId)
+    }
+    
     private func updateCurrentPodcastTemplateSections(for podcast: PodcastFeed) {
         guard let interfaceController = self.interfaceController else {
             os_log("🚗 CarPlay: Cannot refresh podcast episodes - no interface controller", log: log, type: .error)
@@ -1363,12 +1529,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let currentPlayingEpisodeId = PodcastPlayer.shared.currentEpisode?.id
         let isPlayerPlaying = PodcastPlayer.shared.isPlaying
         
+        os_log("🚗 CarPlay: Current playing episode ID: %@, player is playing: %@", log: log, type: .info, currentPlayingEpisodeId ?? "none", isPlayerPlaying ? "YES" : "NO")
+        
         for episode in podcast.episodes {
             let duration = formatDuration(episode.duration)
             var statusText = ""
             
             // Get playing state directly from PodcastPlayer for real-time accuracy
             let isCurrentlyPlaying = currentPlayingEpisodeId == episode.id && isPlayerPlaying
+            
+            if isCurrentlyPlaying {
+                os_log("🚗 CarPlay: Episode '%@' is currently playing - will show highlighting", log: log, type: .info, episode.title)
+            }
             
             // Determine episode status based on state and current playback
             if isCurrentlyPlaying {
@@ -1413,25 +1585,53 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func recreatePodcastEpisodeTemplate(for podcast: PodcastFeed) {
-        // For real-time updates, we need to recreate the entire template structure
-        // This will call showPodcastDetails which now handles pagination properly
-        if let interfaceController = interfaceController,
-           let topTemplate = interfaceController.topTemplate as? CPListTemplate,
-           topTemplate.title == podcast.title {
-            
-            // Pop current template and recreate with updated data
-            interfaceController.popTemplate(animated: false) { [weak self] success, error in
-                if success {
+        // Complete template recreation is required to overcome CarPlay's section update limitations
+        // This ensures immediate visual highlighting changes that updateSections() cannot provide
+        guard let interfaceController = interfaceController else {
+            os_log("🚗 CarPlay: No interface controller for template recreation", log: log, type: .error)
+            return
+        }
+        
+        guard let topTemplate = interfaceController.topTemplate as? CPListTemplate else {
+            os_log("🚗 CarPlay: Top template is not a CPListTemplate, cannot recreate", log: log, type: .debug)
+            return
+        }
+        
+        guard topTemplate.title == podcast.title else {
+            os_log("🚗 CarPlay: Template title mismatch - current: '%@', expected: '%@'", log: log, type: .debug, topTemplate.title ?? "nil", podcast.title)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Recreating podcast template to overcome CarPlay section update limitations", log: log, type: .info)
+        
+        // Clear current references to force fresh state
+        currentPodcastTemplate = nil
+        currentPodcastFeed = nil
+        
+        // Set updating flag to prevent other updates during recreation
+        isUpdatingTemplate = true
+        
+        // Pop current template with no animation for immediate update
+        interfaceController.popTemplate(animated: false) { [weak self] success, error in
+            if success {
+                os_log("🚗 CarPlay: Successfully popped old template, creating new one", log: self?.log ?? OSLog.default, type: .info)
+                
+                // Force a small delay to ensure CarPlay clears its internal state
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    // Immediately show the new template with fresh highlighting state
                     self?.showPodcastDetails(podcast) {
-                        os_log("🚗 CarPlay: Successfully recreated podcast template with all episodes", log: self?.log ?? OSLog.default, type: .info)
+                        os_log("🚗 CarPlay: Successfully recreated podcast template with fresh highlighting state", log: self?.log ?? OSLog.default, type: .info)
+                        self?.isUpdatingTemplate = false
                     }
-                } else {
-                    os_log("🚗 CarPlay: Failed to pop current template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
                 }
+            } else {
+                os_log("🚗 CarPlay: Failed to pop current template: %@", log: self?.log ?? OSLog.default, type: .error, error?.localizedDescription ?? "Unknown error")
+                self?.isUpdatingTemplate = false
+                
+                // Fallback: try to update sections anyway
+                self?.currentPodcastFeed = podcast
+                self?.updateCurrentPodcastTemplateSections(for: podcast)
             }
-        } else {
-            // If we're not at the top, just log that we skipped the update
-            os_log("🚗 CarPlay: Template not at top of stack, skipping recreation", log: log, type: .debug)
         }
     }
     
