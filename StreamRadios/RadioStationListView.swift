@@ -325,8 +325,8 @@ struct RadioStationListView: View {
                         Text(station.name)
                             .font(.system(size: 17, weight: .medium))
                             .foregroundColor(.white)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                         
                         // Country - blue text as per screenshot
                         Text(station.country)
@@ -340,8 +340,8 @@ struct RadioStationListView: View {
                                 Text(metadata)
                                     .font(.system(size: 12, weight: .regular))
                                     .foregroundColor(.gray)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                                    .lineLimit(nil)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
