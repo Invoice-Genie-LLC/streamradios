@@ -1,0 +1,10 @@
+version: "Apple Swift version 6.0.3 (swiftlang-6.0.3.1.10 clang-1600.0.30.1)"
+options: "695822861d4b9deb767176f87eb8203171308657345b1fbc9a00c5b7eba64c01"
+build_start_time: [1750459688, 614536000]
+build_end_time: [1750459690, 104206000]
+inputs:
+  ? "/Users/kley/Documents/StreamRadios/build/StreamRadios.build/Release-iphonesimulator/StreamRadioWidgets.build/DerivedSources/GeneratedAssetSymbols.swift"
+  : !dirty [1750458420, 486720098]
+  "/Users/kley/Documents/StreamRadios/streamRadiosWidget/streamRadiosWidget.swift": !dirty [1750080806, 105281124]
+  "/Users/kley/Documents/StreamRadios/streamRadiosWidget/streamRadiosWidgetBundle.swift": !dirty [1722051426, 439582155]
+  "/Users/kley/Documents/StreamRadios/streamRadiosWidget/streamRadiosWidgetLiveActivity.swift": !dirty [1722051426, 439932085]

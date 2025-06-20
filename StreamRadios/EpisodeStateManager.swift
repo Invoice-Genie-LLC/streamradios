@@ -28,7 +28,7 @@ enum EpisodePlaybackState: String, Codable, Equatable {
     
     var statusColor: Color {
         switch self {
-        case .new: return .green
+        case .new: return Color(red: 0.0, green: 0.5, blue: 0.0) // Darker green
         case .playing: return .blue
         case .inProgress: return .orange
         case .played: return .gray

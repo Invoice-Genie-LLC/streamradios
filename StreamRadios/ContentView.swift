@@ -275,51 +275,41 @@ struct ContentView: View {
                     // Player area - show podcast players when podcast is playing, radio players when radio is playing
                     if !isEditingMode {
                         if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                            // Podcast is playing - show podcast compact player
-                            VStack(spacing: 0) {
-                                // Top divider for visual separation
-                                Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
-                                    .frame(height: 0.5)
-                                
-                                CompactPodcastPlayerView(
-                                    currentEpisode: currentEpisode,
-                                    currentFeed: currentFeed,
-                                    podcastPlayer: podcastPlayer,
-                                    viewModel: podcastViewModel,
-                                    selectedPodcast: $selectedPodcast,
-                                    onListButtonTap: {
-                                        // Switch to podcast tab and set the current feed
-                                        selectedPodcast = currentFeed
-                                        podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                        selectedTab = .podcast
-                                    },
-                                    onCloseButtonTap: {
-                                        podcastPlayer.pause()
-                                        podcastPlayer.currentEpisode = nil
-                                        podcastPlayer.currentFeed = nil
-                                    }
-                                )
-                                .onTapGesture {
-                                    if let currentFeed = podcastPlayer.currentFeed {
-                                        // Switch to podcast tab and set the current feed
-                                        selectedPodcast = currentFeed
-                                        podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                        selectedTab = .podcast
-                                    }
+                            // Podcast is playing - show podcast compact player with enhanced separation
+                            CompactPodcastPlayerView(
+                                currentEpisode: currentEpisode,
+                                currentFeed: currentFeed,
+                                podcastPlayer: podcastPlayer,
+                                viewModel: podcastViewModel,
+                                selectedPodcast: $selectedPodcast,
+                                onListButtonTap: {
+                                    // Switch to podcast tab and set the current feed
+                                    selectedPodcast = currentFeed
+                                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                    selectedTab = .podcast
+                                },
+                                onCloseButtonTap: {
+                                    podcastPlayer.pause()
+                                    podcastPlayer.currentEpisode = nil
+                                    podcastPlayer.currentFeed = nil
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.top, 4)
-                                .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 4))
-                                .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Darker gray
+                            )
+                            .onTapGesture {
+                                if let currentFeed = podcastPlayer.currentFeed {
+                                    // Switch to podcast tab and set the current feed
+                                    selectedPodcast = currentFeed
+                                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                    selectedTab = .podcast
+                                }
                             }
+                            .padding(.horizontal, 16)
                         } else if let currentStation = viewModel.currentlyPlayingStation, radioPlayer.isPlaying {
-                            // Radio is playing - show radio compact player
+                            // Radio is playing - show compact radio player
                             VStack(spacing: 0) {
-                                // Top divider for visual separation
+                                // Minimal top separator
                                 Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
-                                    .frame(height: 0.5)
+                                    .fill(Color.blue.opacity(0.5))
+                                    .frame(height: 1)
                                 
                                 CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata)
                                     .environmentObject(radioPlayer)
@@ -328,10 +318,11 @@ struct ContentView: View {
                                         isPlayerSheetPresented.toggle()
                                     }
                                     .padding(.horizontal, 16)
-                                    .padding(.top, 4)
-                                    .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 4))
-                                    .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Darker gray
+                                    .padding(.vertical, 8)
                             }
+                            .background(Color(red: 0.05, green: 0.05, blue: 0.05))
+                            .frame(height: 60) // Match podcast player height
+                            .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
                         }
                     }
                 }
@@ -688,8 +679,6 @@ struct UnifiedPodcastPlayerView: View {
     var onListButtonTap: (() -> Void)?
     var onCloseButtonTap: (() -> Void)?
     
-    @State private var isDragging = false
-    @State private var sliderProgress: Double = 0
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.horizontalSizeClass) var sizeClass
     
@@ -723,188 +712,105 @@ struct UnifiedPodcastPlayerView: View {
     }
     
     var body: some View {
-        VStack(spacing: sizeClass == .compact ? 10 : 14) {
-            // Top row: Artwork and Controls
-            HStack(spacing: sizeClass == .compact ? 12 : 16) {
-                // Album artwork - responsive size
+        VStack(spacing: 0) {
+            // Safe space at top instead of blue line
+            Rectangle()
+                .fill(Color.clear)
+                .frame(height: 8)
+            
+            // Compact single-row layout
+            HStack(spacing: 12) {
+                // Small artwork
                 ZStack {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.gray.opacity(0.2))
-                        .frame(width: artworkSize, height: artworkSize)
+                        .frame(width: 44, height: 44)
                     
                     feedArtworkView
-                        .frame(width: artworkSize, height: artworkSize)
+                        .frame(width: 44, height: 44)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                
+                // Episode info - compact
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(currentEpisode.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Text(currentFeed.title)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 
                 Spacer()
                 
-                // Control buttons - compact layout
-                HStack(spacing: buttonSpacing) {
-                    // Skip backward 15s
+                // Essential controls only
+                HStack(spacing: 8) {
+                    // Skip backward 15s - smaller
                     Button(action: podcastPlayer.skipBackward) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.15))
-                                .frame(width: buttonSize, height: buttonSize)
-                            
-                            Image(systemName: "gobackward.15")
-                                .font(.system(size: iconSize, weight: .medium))
-                                .foregroundColor(.white)
-                        }
+                        Image(systemName: "gobackward.15")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: 32, height: 32)
                     }
                     
-                    // Main play/pause button
+                    // Main play/pause button - compact
                     Button(action: podcastPlayer.togglePlayPause) {
                         ZStack {
                             Circle()
                                 .fill(Color.blue)
-                                .frame(width: playButtonSize, height: playButtonSize)
+                                .frame(width: 36, height: 36)
                             
                             Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: playIconSize, weight: .bold))
+                                .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(.white)
                         }
                     }
                     
-                    // Skip forward 30s
+                    // Skip forward 30s - smaller
                     Button(action: podcastPlayer.skipForward) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.15))
-                                .frame(width: buttonSize, height: buttonSize)
-                            
-                            Image(systemName: "goforward.30")
-                                .font(.system(size: iconSize, weight: .medium))
-                                .foregroundColor(.white)
-                        }
+                        Image(systemName: "goforward.30")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: 32, height: 32)
                     }
                     
-                    // List button (only show if provided)
+                    // List button (only show if provided) - smaller
                     if onListButtonTap != nil {
                         Button(action: {
                             onListButtonTap?()
                         }) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.white.opacity(0.15))
-                                    .frame(width: buttonSize, height: buttonSize)
-                                
-                                Image(systemName: "list.bullet")
-                                    .font(.system(size: iconSize, weight: .medium))
-                                    .foregroundColor(.white)
-                            }
+                            Image(systemName: "list.bullet")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.gray)
+                                .frame(width: 28, height: 28)
                         }
                     }
                     
-                    // Close button (only show if provided)
+                    // Close button (only show if provided) - smaller
                     if onCloseButtonTap != nil {
                         Button(action: {
                             onCloseButtonTap?()
                         }) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.white.opacity(0.15))
-                                    .frame(width: buttonSize, height: buttonSize)
-                                
-                                Image(systemName: "xmark")
-                                    .font(.system(size: iconSize, weight: .medium))
-                                    .foregroundColor(.white)
-                            }
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.gray)
+                                .frame(width: 28, height: 28)
                         }
                     }
                 }
             }
-            .padding(.horizontal, horizontalPadding)
-            .padding(.top, sizeClass == .compact ? 8 : 12)
-            
-            // Titles section - full width
-            VStack(alignment: .leading, spacing: 6) {
-                Text(currentEpisode.title)
-                    .font(.system(size: sizeClass == .compact ? 14 : 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(nil) // Allow unlimited lines for full display
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                Text(currentFeed.title)
-                    .font(.system(size: sizeClass == .compact ? 12 : 14, weight: .regular))
-                    .foregroundColor(.gray)
-                    .lineLimit(nil) // Allow unlimited lines for full display
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, horizontalPadding)
-            .padding(.bottom, 4) // Add bottom padding to titles section
-            
-            // Progress slider - compact and responsive
-            VStack(spacing: sizeClass == .compact ? 4 : 6) {
-                // Custom slider
-                GeometryReader { geometry in
-                    let progress = isDragging ? sliderProgress : (podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0)
-                    let thumbSize: CGFloat = sizeClass == .compact ? 16 : 20
-                    
-                    ZStack(alignment: .leading) {
-                        // Track background
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.gray.opacity(0.4))
-                            .frame(height: sizeClass == .compact ? 3 : 4)
-                        
-                        // Progress fill
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.blue)
-                            .frame(width: max(0, min(geometry.size.width, geometry.size.width * progress)), height: sizeClass == .compact ? 3 : 4)
-                        
-                        // Thumb
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: thumbSize, height: thumbSize)
-                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                            .offset(x: max(0, min(geometry.size.width - thumbSize, (geometry.size.width - thumbSize) * progress)))
-                    }
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                isDragging = true
-                                let progress = max(0, min(1, value.location.x / geometry.size.width))
-                                sliderProgress = progress
-                            }
-                            .onEnded { _ in
-                                let newTime = sliderProgress * podcastPlayer.duration
-                                podcastPlayer.seek(to: newTime)
-                                isDragging = false
-                            }
-                    )
-                }
-                .frame(height: sizeClass == .compact ? 16 : 20)
-                .padding(.horizontal, horizontalPadding)
-                
-                // Time display
-                HStack {
-                    Text(formatTime(isDragging ? sliderProgress * podcastPlayer.duration : podcastPlayer.currentTime))
-                        .font(.system(size: sizeClass == .compact ? 11 : 12, weight: .medium))
-                        .foregroundColor(.gray)
-                    
-                    Spacer()
-                    
-                    Text(formatTime(podcastPlayer.duration))
-                        .font(.system(size: sizeClass == .compact ? 11 : 12, weight: .medium))
-                        .foregroundColor(.gray)
-                }
-                .padding(.horizontal, horizontalPadding)
-            }
-            .padding(.top, sizeClass == .compact ? 6 : 8)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Match radio player background
-        .padding(.bottom, sizeClass == .compact ? 16 : 20) // Increased bottom padding to prevent text cutoff
-        .onAppear {
-            sliderProgress = podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0
-        }
-        .onChange(of: podcastPlayer.currentTime) { _ in
-            if !isDragging {
-                sliderProgress = podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0
-            }
-        }
+        .background(
+            Color(red: 0.05, green: 0.05, blue: 0.05)
+        )
+        .frame(height: 60) // Fixed compact height
     }
 
     
@@ -979,7 +885,7 @@ struct CompactPodcastPlayerView: View {
             currentFeed: currentFeed,
             podcastPlayer: podcastPlayer,
             viewModel: viewModel,
-            selectedPodcast: .constant(selectedPodcast),
+            selectedPodcast: $selectedPodcast,
             onListButtonTap: onListButtonTap,
             onCloseButtonTap: onCloseButtonTap
         )

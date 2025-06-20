@@ -1,0 +1,20 @@
+{
+  "" : {
+    "const-values" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability-master.swiftconstvalues",
+    "dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability-master.d",
+    "diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability-master.dia",
+    "emit-module-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability-master-emit-module.d",
+    "emit-module-diagnostics" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability-master-emit-module.dia",
+    "swift-dependencies" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability-master.swiftdeps"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/Sources/Reachability.swift" : {
+    "index-unit-output-path" : "/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/Reachability.o"
+  },
+  "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "index-unit-output-path" : "/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/Reachability.swift/build/Reachability.build/Release-iphonesimulator/Reachability.build/Objects-normal/arm64/resource_bundle_accessor.o"
+  }
+}

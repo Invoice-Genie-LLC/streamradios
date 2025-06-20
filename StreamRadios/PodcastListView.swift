@@ -38,7 +38,7 @@ struct PodcastListView: View {
 
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
-    private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
+    private let miniPlayerHeight: CGFloat = 60 // Compact mini player height
     
     // Default initializer for backward compatibility
     init() {
@@ -634,6 +634,15 @@ struct EpisodeRowView: View {
     @State private var bannerAlertMessage = ""
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
+    
+    // Static formatter to avoid recreation
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
+    
     private var remainingTime: Double {
         if isPlaying {
             return podcastPlayer.remainingTime
@@ -693,20 +702,32 @@ struct EpisodeRowView: View {
                         .foregroundColor(.primary)
                     
                     // Episode info and status
-                    HStack(spacing: 2) {
-                        episodeStatusIndicator
-                            .fixedSize()
-                        Text("•")
-                            .fixedSize()
-                        Text(formatDate(episode.publicationDate))
-                            .lineLimit(1)
-                        Text("•")
-                            .fixedSize()
-                        Text(formatRemainingTime())
-                            .lineLimit(1)
+                    HStack(spacing: 8) {
+                        // Status indicator
+                        episodeStatusChip
+                        
+                        // Date
+                        Text(Self.dateFormatter.string(from: episode.publicationDate))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.blue)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        // Duration/remaining time
+                        if let timeInfo = formatTimeInfo() {
+                            Text("•")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                            
+                            Text(timeInfo)
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        
+                        Spacer()
                     }
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
@@ -792,6 +813,38 @@ struct EpisodeRowView: View {
     }
     
     
+    private var episodeStatusChip: some View {
+        Group {
+            if episode.state.isPlayed || episode.state.progress >= 0.99 {
+                Text("Played")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.gray))
+            } else if isPlaying {
+                Text("Playing")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue))
+            } else if episode.state.progress > 0 || podcastPlayer.getCurrentProgress(for: episode) > 0 {
+                Text("In Progress")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange))
+            } else {
+                Text("New")
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.green))
+            }
+        }
+        .font(.system(size: 10, weight: .bold))
+        .fixedSize() // Ensure full text is displayed without truncation
+    }
+
     private var episodeStatusIndicator: some View {
             Group {
                 if episode.state.isPlayed || episode.state.progress >= 0.99 {
@@ -863,6 +916,43 @@ struct EpisodeRowView: View {
         }
     }
     
+    private func formatTimeInfo() -> String? {
+        let remainingDuration: Double
+        if isPlaying {
+            remainingDuration = podcastPlayer.remainingTime
+        } else if episode.state.progress > 0 {
+            remainingDuration = episode.duration * (1 - episode.state.progress)
+        } else {
+            remainingDuration = episode.duration
+        }
+        
+        guard remainingDuration > 0 else { return nil }
+        
+        let hours = Int(remainingDuration) / 3600
+        let minutes = (Int(remainingDuration) % 3600) / 60
+        
+        if episode.state.progress > 0 {
+            if hours > 0 {
+                return String(format: "%dh %dm left", hours, minutes)
+            } else {
+                return String(format: "%dm left", minutes)
+            }
+        } else {
+            if hours > 0 {
+                return String(format: "%dh %dm", hours, minutes)
+            } else {
+                return String(format: "%dm", minutes)
+            }
+        }
+    }
+    
+    private func formatFileSize(_ size: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
+    }
+    
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -875,14 +965,7 @@ struct EpisodeRowView: View {
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-    
-    
-    private func formatFileSize(_ size: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: size)
-    }
+
     
     private func formatRemainingTime() -> String {
         return formatTime(remainingTime)
@@ -962,9 +1045,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
         .alert(isPresented: $showingDeleteConfirmation) {
             Alert(
-                title: Text("Delete Downloaded Episode"),
-                message: Text("Are you sure you want to delete this downloaded episode?"),
-                primaryButton: .destructive(Text("Delete")) {
+                title: Text("Delete Download"),
+                message: Text("Are you sure you want to delete the downloaded file? The episode will remain in the list but will need to be downloaded again to listen offline."),
+                primaryButton: .destructive(Text("Delete Download")) {
                     viewModel.deleteDownloadedEpisode(episode)
                 },
                 secondaryButton: .cancel()
@@ -984,81 +1067,131 @@ struct OptimizedEpisodeRowView: View, Equatable {
             .padding(.bottom, 4)
     }
     
-    // MARK: - Modern Card Design (Matching Radio Station Style)
+    // MARK: - Enhanced Episode Card Design
     private var modernEpisodeCard: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 16) {
-                // Leading play button with modern styling
-                modernPlayButton
-                    .frame(width: 50, height: 50)
+            // Main episode content with enhanced visual separation
+            Group {
+                if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                    episodeContentWithSwipe
+                } else {
+                    episodeContent
+                }
+            }
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        isPlaying ? Color.blue.opacity(0.05) : Color.clear,
+                        Color.clear
+                    ]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            
+            // Compact separator
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 0.5)
+                    .padding(.horizontal, 16)
                 
-                // Episode content
-                VStack(alignment: .leading, spacing: 6) {
-                    // Episode title with proper typography
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(height: 4) // Reduced spacing between episodes
+            }
+        }
+    }
+    
+    private var episodeContent: some View {
+        VStack(spacing: 0) {
+            // 3-column layout for perfect alignment
+            HStack(alignment: .top, spacing: 0) {
+                // Column 1: Play button (fixed width)
+                modernPlayButton
+                    .frame(width: 50, height: 40, alignment: .leading)
+                
+                // Column 2: Episode content (flexible width)
+                VStack(alignment: .leading, spacing: 4) {
+                    // Episode title - allow full display
                     Text(episode.title)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(2)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(isPlaying ? .white : .primary)
+                        .lineLimit(nil) // Allow unlimited lines for full display
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     
-                    // Episode metadata row
-                    HStack(spacing: 8) {
-                        // Status indicator
+                    // Metadata row - flexible layout to show all content
+                    HStack(spacing: 6) {
+                        // Status indicator - more compact
                         episodeStatusChip
                         
-                        // Date
+                        // Date - more compact
                         Text(Self.dateFormatter.string(from: episode.publicationDate))
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.blue)
-                            .lineLimit(1)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.blue.opacity(0.1))
+                            )
+                            .fixedSize() // Prevent truncation
                         
-                        // Duration/remaining time
+                        // Duration/remaining time - more compact
                         if let timeInfo = formatTimeInfo() {
-                            Text("•")
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                            
                             Text(timeInfo)
-                                .font(.system(size: 12))
+                                .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.gray)
-                                .lineLimit(1)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.gray.opacity(0.1))
+                                )
+                                .fixedSize() // Prevent truncation
                         }
                         
-                        Spacer()
-                    }
-                    
-                    // Progress bar (only show if in progress or playing)
-                    if shouldShowProgress {
-                        modernProgressIndicator
-                            .padding(.top, 4)
+                        Spacer(minLength: 0) // Allow space to expand/contract as needed
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
                 
-                // Trailing action buttons
-                VStack(spacing: 12) {
+                // Column 3: Action buttons (fixed width)
+                VStack(alignment: .center, spacing: 4) {
                     modernBookmarkButton
                     modernDownloadButton
                 }
-                .frame(width: 44)
+                .frame(width: 50, alignment: .center)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(UIColor.systemGray6).opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isPlaying ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
-                    )
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onPlay()
+            
+            // Progress bar - only show when actually playing (not just in progress)
+            if isPlaying {
+                interactiveProgressBar
+                    .padding(.top, 8)
+                    .padding(.horizontal, 4)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 16) // Consistent horizontal padding for all episodes
+        .padding(.vertical, 12) // Consistent vertical padding for all episodes
+        .background(Color.clear) // Remove all background styling
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onPlay()
+        }
+    }
+    
+    private var episodeContentWithSwipe: some View {
+        episodeContent
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(action: {
+                    showingDeleteConfirmation = true
+                }) {
+                    Label("Delete Download", systemImage: "trash.fill")
+                }
+                .tint(.red)
+            }
     }
     
     // MARK: - Modern Components
@@ -1075,22 +1208,23 @@ struct OptimizedEpisodeRowView: View, Equatable {
             }
         }) {
             ZStack {
-                // Background circle with gradient
+                // Background circle with gradient - more compact
                 Circle()
                     .fill(playButtonGradient)
-                    .frame(width: 50, height: 50)
-                    .shadow(color: playButtonShadowColor, radius: 4, x: 0, y: 2)
+                    .frame(width: 40, height: 40)
+                    .shadow(color: playButtonShadowColor, radius: 2, x: 0, y: 1)
                 
-                // Icon
+                // Icon - smaller
                 Image(systemName: playButtonIcon)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
-                    .offset(x: playButtonIcon == "play.fill" ? 2 : 0) // Slight offset for play icon
+                    .offset(x: playButtonIcon == "play.fill" ? 1 : 0) // Slight offset for play icon
             }
         }
         .buttonStyle(PlainButtonStyle())
         .scaleEffect(isPlaying ? 1.05 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isPlaying)
+        .frame(width: 40, height: 40, alignment: .leading) // Ensure consistent alignment
     }
     
     private var playButtonGradient: LinearGradient {
@@ -1109,7 +1243,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             )
         } else {
             return LinearGradient(
-                gradient: Gradient(colors: [Color.green, Color.green.opacity(0.8)]),
+                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -1117,13 +1251,19 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }
     
     private var playButtonIcon: String {
-        let progress = podcastPlayer.getCurrentProgress(for: episode)
-        if episode.state.isPlayed || progress >= 0.99 {
-            return "arrow.counterclockwise"
-        } else if isPlaying {
+        // Prioritize current playing state over finished state
+        if isPlaying {
             return "pause.fill"
         } else {
-            return "play.fill"
+            let progress = podcastPlayer.getCurrentProgress(for: episode)
+            // If episode was rewound (progress is very low), show play icon even if previously marked as played
+            if progress < 0.05 {
+                return "play.fill"
+            } else if episode.state.isPlayed || progress >= 0.99 {
+                return "arrow.counterclockwise"
+            } else {
+                return "play.fill"
+            }
         }
     }
     
@@ -1145,6 +1285,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(episodeState.statusColor)
             )
+            .fixedSize() // Ensure full text is displayed without truncation
     }
     
     private var modernProgressIndicator: some View {
@@ -1171,6 +1312,56 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .frame(height: 4)
     }
     
+    private var interactiveProgressBar: some View {
+        GeometryReader { geometry in
+            let currentProgress = isPlaying ? podcastPlayer.currentProgress : episode.state.progress
+            
+            ZStack(alignment: .leading) {
+                // Background track
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 3)
+                
+                // Progress fill with gradient
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.blue, Color.cyan]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: geometry.size.width * CGFloat(currentProgress), height: 3)
+                    .animation(.easeInOut(duration: 0.3), value: currentProgress)
+                
+                // Interactive thumb (only visible when playing)
+                if isPlaying {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 12, height: 12)
+                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                        .offset(x: max(0, min(geometry.size.width - 12, (geometry.size.width - 12) * currentProgress)))
+                }
+            }
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard isPlaying else { return }
+                        let progress = max(0, min(1, value.location.x / geometry.size.width))
+                        let newTime = progress * podcastPlayer.duration
+                        podcastPlayer.seek(to: newTime)
+                    }
+            )
+            .onTapGesture { value in
+                guard isPlaying else { return }
+                let progress = max(0, min(1, value.x / geometry.size.width))
+                let newTime = progress * podcastPlayer.duration
+                podcastPlayer.seek(to: newTime)
+            }
+        }
+        .frame(height: isPlaying ? 12 : 3)
+    }
+    
     private var shouldShowProgress: Bool {
         isPlaying || episode.state.progress > 0.01
     }
@@ -1193,16 +1384,16 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }) {
             ZStack {
                 Circle()
-                    .fill(episode.state.isFavorite ? Color.blue.opacity(0.2) : Color.clear)
-                    .frame(width: 36, height: 36)
+                    .fill(episode.state.isFavorite ? Color.red.opacity(0.2) : Color.clear)
+                    .frame(width: 34, height: 34) // Made bigger
                 
                 Image(systemName: episode.state.isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(episode.state.isFavorite ? .blue : .gray)
+                    .font(.system(size: 16, weight: .medium)) // Made bigger
+                    .foregroundColor(episode.state.isFavorite ? .red : .gray)
             }
         }
         .buttonStyle(PlainButtonStyle())
-        .scaleEffect(episode.state.isFavorite ? 1.1 : 1.0)
+        .scaleEffect(episode.state.isFavorite ? 1.05 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: episode.state.isFavorite)
     }
     
@@ -1217,39 +1408,39 @@ struct OptimizedEpisodeRowView: View, Equatable {
             ZStack {
                 Circle()
                     .fill(downloadButtonBackgroundColor)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34) // Made bigger
                 
-                if episode.state.isDownloaded {
+                if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 14, weight: .medium)) // Made bigger
+                        .foregroundColor(.red)
+                } else if episode.state.isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold)) // Made bigger
                         .foregroundColor(.green)
                 } else if isDownloading {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                        .scaleEffect(0.7)
-                } else if viewModel.currentTab == 2 {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.red)
+                        .scaleEffect(0.8) // Made bigger
                 } else {
                     Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.system(size: 16, weight: .medium)) // Made bigger
                         .foregroundColor(.gray)
                 }
             }
         }
         .buttonStyle(PlainButtonStyle())
-        .scaleEffect(isDownloading ? 1.1 : 1.0)
+        .scaleEffect(isDownloading ? 1.05 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isDownloading)
     }
     
     private var downloadButtonBackgroundColor: Color {
-        if episode.state.isDownloaded {
+        if viewModel.currentTab == 2 && episode.state.isDownloaded {
+            return Color.red.opacity(0.2)
+        } else if episode.state.isDownloaded {
             return Color.green.opacity(0.2)
         } else if isDownloading {
             return Color.blue.opacity(0.2)
-        } else if viewModel.currentTab == 2 {
-            return Color.red.opacity(0.2)
         } else {
             return Color.clear
         }
@@ -1368,10 +1559,25 @@ struct PodcastPlayerView: View {
                 episodeListContent
             }
             
-            // Mini Player
-            if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                // Mini player removed for now
-                EmptyView()
+            // Compact Mini Player
+            if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+                MiniPodcastPlayerView(
+                    currentEpisode: currentEpisode,
+                    currentFeed: currentFeed,
+                    podcastPlayer: podcastPlayer,
+                    viewModel: viewModel,
+                    selectedPodcast: $selectedPodcast,
+                    onListButtonTap: {
+                        // Already in episode list, no action needed
+                    },
+                    onCloseButtonTap: {
+                        podcastPlayer.pause()
+                        podcastPlayer.currentEpisode = nil
+                        podcastPlayer.currentFeed = nil
+                    }
+                )
+                .transition(.move(edge: .bottom))
+                .frame(height: 60) // Fixed compact height
             }
         }
         .navigationBarHidden(true)
@@ -1412,87 +1618,225 @@ struct PodcastPlayerView: View {
     // MARK: - View Components
     private var playerHeader: some View {
         VStack(spacing: 0) {
-            // Navigation Bar
+            // Enhanced Navigation Bar with gradient background
             HStack {
                 Button(action: { selectedPodcast = nil }) {
-                    Image(systemName: "chevron.left")
-                        .foregroundColor(.primary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Back")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.blue.opacity(0.1))
+                    )
                 }
+                
                 Spacer()
+                
                 Text(feed.title)
-                    .font(.headline)
+                    .font(.system(size: 18, weight: .bold))
                     .lineLimit(1)
+                    .foregroundColor(.primary)
+                
                 Spacer()
+                
                 AirPlayButton()
                     .frame(width: 30, height: 30)
+                    .background(
+                        Circle()
+                            .fill(Color.gray.opacity(0.1))
+                    )
             }
-            .padding(.horizontal)
-            .frame(height: 44)
-            .background(Color(UIColor.systemBackground))
+            .padding(.horizontal, 20)
+            .frame(height: 54)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(UIColor.systemBackground),
+                        Color(UIColor.systemBackground).opacity(0.95)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay(
+                Rectangle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 1),
+                alignment: .bottom
+            )
             
-            // Feed Info Area
+            // Enhanced Feed Info Area with better hierarchy
             GeometryReader { geometry in
-                HStack(alignment: .top, spacing: 16) {
-                    AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                    } placeholder: {
-                        Image(systemName: "music.note")
-                            .foregroundColor(.gray)
-                            .frame(width: 60, height: 60)
-                    }
-                    .frame(width: min(120, geometry.size.width * 0.3))
-                    .cornerRadius(12)
-                    .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        ScrollView {
-                            Text(feed.descriptionText ?? "No description available")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 6)
-                        }
-                        .frame(height: 60)
-                        
-                        Divider()
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            ScrollView(.vertical, showsIndicators: false) {
-                                Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .fixedSize(horizontal: false, vertical: true)
+                VStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 20) {
+                        // Enhanced artwork with shadow and border
+                        AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                        } placeholder: {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.gray.opacity(0.2))
+                                
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 30))
+                                    .foregroundColor(.gray)
                             }
-                            .frame(height: 60)
+                        }
+                        .frame(width: min(130, geometry.size.width * 0.35))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Podcast description section
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("ABOUT")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.blue)
+                                    .tracking(1.2)
+                                
+                                ScrollView {
+                                    Text(feed.descriptionText ?? "No description available")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(4)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                .frame(height: 50)
+                            }
                             
-                            if let currentEpisode = podcastPlayer.currentEpisode {
-                                Text(formatDate(currentEpisode.publicationDate))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                            // Visual separator
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 1)
+                            
+                            // Currently playing section
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("NOW PLAYING")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.blue)
+                                    .tracking(1.2)
+                                
+                                ScrollView(.vertical, showsIndicators: false) {
+                                    Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                        .lineLimit(3)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .frame(height: 45)
+                                
+                                if let currentEpisode = podcastPlayer.currentEpisode {
+                                    Text(formatDate(currentEpisode.publicationDate))
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.blue)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .fill(Color.blue.opacity(0.1))
+                                        )
+                                }
                             }
                         }
-                        .padding(.trailing, 10)
+                        .frame(width: geometry.size.width - min(130, geometry.size.width * 0.35) - 40)
                     }
-                    .frame(width: geometry.size.width - min(120, geometry.size.width * 0.3) - 32)
+                    .padding(20)
                 }
-                .padding()
             }
-            .frame(height: 180)
-            .background(Color(UIColor.secondarySystemBackground))
+            .frame(height: 190)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(UIColor.secondarySystemBackground).opacity(0.8),
+                        Color(UIColor.secondarySystemBackground)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            
+            // Bottom separator with gradient
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.blue.opacity(0.3))
+                    .frame(height: 2)
+                
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.blue.opacity(0.2), Color.clear]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(height: 4)
+            }
         }
     }
     
     private var episodeFilterTabs: some View {
-        Picker("", selection: $selectedTab) {
-            Text("All").tag(0)
-            Text("Favorites").tag(1)
-            Text("Downloads").tag(2)
+        VStack(spacing: 0) {
+            // Section header
+            HStack {
+                Text("EPISODES")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.primary)
+                    .tracking(1.0)
+                
+                Spacer()
+                
+                Text("\(viewModel.currentEpisodes.count) episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.blue.opacity(0.1))
+                    )
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            
+            // Enhanced filter tabs
+            Picker("", selection: $selectedTab) {
+                Text("All").tag(0)
+                Text("Favorites").tag(1)
+                Text("Downloads").tag(2)
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
         }
-        .pickerStyle(SegmentedPickerStyle())
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(UIColor.systemBackground))
+        .background(
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(UIColor.systemBackground),
+                    Color(UIColor.systemBackground).opacity(0.95)
+                ]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(
+            Rectangle()
+                .fill(Color.gray.opacity(0.2))
+                .frame(height: 1),
+            alignment: .bottom
+        )
         .onChange(of: selectedTab) { newValue in
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
         }
@@ -1542,10 +1886,10 @@ struct PodcastPlayerView: View {
                     }
                 }
                 
-                // Bottom padding for mini player
+                // Bottom padding for compact mini player
                 Rectangle()
                     .fill(Color.clear)
-                    .frame(height: 100)
+                    .frame(height: 70)
             }
         }
         .background(Color.black)
