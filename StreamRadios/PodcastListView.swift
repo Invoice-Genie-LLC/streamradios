@@ -35,6 +35,8 @@ struct PodcastListView: View {
     @State private var editPodcastTitle = ""
     @State private var editPodcastURL = ""
     
+
+    
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
     
@@ -264,6 +266,17 @@ struct PodcastListView: View {
             }
             .listStyle(PlainListStyle())
             .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { _ in
+                        UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                    }
+                    .onEnded { _ in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                        }
+                    }
+            )
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
@@ -287,6 +300,8 @@ struct PodcastListView: View {
         viewModel.loadFeedOrder()
         viewModel.fetchPodcastFeeds()
     }
+    
+
     
     private func addPodcast() {
         let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
@@ -874,14 +889,13 @@ struct EpisodeRowView: View {
     }
     
     private func formatTime(_ time: TimeInterval) -> String {
-        let hours = Int(time) / 3600
-        let minutes = (Int(time) % 3600) / 60
+        let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d remaining", hours, minutes, seconds)
+        if minutes > 0 {
+            return String(format: "%dm %ds left", minutes, seconds)
         } else {
-            return String(format: "%d:%02d remaining", minutes, seconds)
+            return String(format: "%ds left", seconds)
         }
     }
     
@@ -941,105 +955,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
     var body: some View {
         VStack(spacing: 0) {
             if showingBannerAlert {
-                Text(bannerAlertMessage)
-                    .font(.caption)
-                    .foregroundColor(.white)
-                    .padding(4)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.red)
+                bannerAlertView
             }
             
-            HStack(alignment: .center, spacing: 10) {
-                // Play/Pause button
-                playButton
-                    .frame(width: buttonSize, height: buttonSize)
-                
-                // Episode info
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(episode.title)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .lineLimit(2)
-                        .foregroundColor(.primary)
-                    
-                    HStack(spacing: 2) {
-                        episodeStatusIndicator
-                            .fixedSize()
-                        Text("•")
-                            .fixedSize()
-                        Text(Self.dateFormatter.string(from: episode.publicationDate))
-                            .lineLimit(1)
-                        if let remainingTime = formatRemainingTime() {
-                            Text("•")
-                                .fixedSize()
-                            Text(remainingTime)
-                                .lineLimit(1)
-                        }
-                    }
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-                // Right column: File size, Bookmark button, Download button
-                VStack(alignment: .trailing, spacing: 4) {
-                    if let fileSize = episode.fileSize, fileSize > 0 {
-                        Text(formatFileSize(fileSize))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    // Bookmark button
-                    Button(action: {
-                        if isPlaying {
-                            showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
-                        } else {
-                            viewModel.toggleFavorite(for: episode)
-                        }
-                    }) {
-                        Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                            .foregroundColor(episode.state.isFavorite ? .blue : .gray)
-                            .frame(width: buttonSize, height: buttonSize)
-                    }
-                    
-                    // Download button or trash can
-                    Group {
-                        if viewModel.currentTab == 2 && episode.state.isDownloaded {
-                            Button(action: {
-                                showingDeleteConfirmation = true
-                            }) {
-                                Image(systemName: "trash")
-                                    .foregroundColor(.red)
-                                    .frame(width: buttonSize, height: buttonSize)
-                            }
-                        } else {
-                            downloadButton
-                        }
-                    }
-                    .frame(width: buttonSize, height: buttonSize)
-                }
-            }
-            .frame(height: 70)
-            .padding(.horizontal, 10)
-            
-            // Progress bar (only for playing episode)
-            if isPlaying {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 3)
-                        
-                        Rectangle()
-                            .fill(Color.blue)
-                            .frame(width: geometry.size.width * CGFloat(playbackProgress), height: 3)
-                    }
-                }
-                .frame(height: 3)
-            }
+            modernEpisodeCard
         }
-        .background(Color(UIColor.secondarySystemBackground))
-        .cornerRadius(8)
         .alert(isPresented: $showingDeleteConfirmation) {
             Alert(
                 title: Text("Delete Downloaded Episode"),
@@ -1052,69 +972,299 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
     
-    private var episodeStatusIndicator: some View {
-        Text(episodeState.statusText)
-            .foregroundColor(episodeState.statusColor)
-            .font(.caption2)
-            .fontWeight(.semibold)
+    private var bannerAlertView: some View {
+        Text(bannerAlertMessage)
+            .font(.caption)
+            .foregroundColor(.white)
+            .padding(8)
+            .frame(maxWidth: .infinity)
+            .background(Color.red)
+            .cornerRadius(6)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
     }
     
-    private var playButton: some View {
+    // MARK: - Modern Card Design (Matching Radio Station Style)
+    private var modernEpisodeCard: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                // Leading play button with modern styling
+                modernPlayButton
+                    .frame(width: 50, height: 50)
+                
+                // Episode content
+                VStack(alignment: .leading, spacing: 6) {
+                    // Episode title with proper typography
+                    Text(episode.title)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    
+                    // Episode metadata row
+                    HStack(spacing: 8) {
+                        // Status indicator
+                        episodeStatusChip
+                        
+                        // Date
+                        Text(Self.dateFormatter.string(from: episode.publicationDate))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.blue)
+                            .lineLimit(1)
+                        
+                        // Duration/remaining time
+                        if let timeInfo = formatTimeInfo() {
+                            Text("•")
+                                .font(.caption2)
+                                .foregroundColor(.gray)
+                            
+                            Text(timeInfo)
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray)
+                                .lineLimit(1)
+                        }
+                        
+                        Spacer()
+                    }
+                    
+                    // Progress bar (only show if in progress or playing)
+                    if shouldShowProgress {
+                        modernProgressIndicator
+                            .padding(.top, 4)
+                    }
+                }
+                
+                // Trailing action buttons
+                VStack(spacing: 12) {
+                    modernBookmarkButton
+                    modernDownloadButton
+                }
+                .frame(width: 44)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(UIColor.systemGray6).opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isPlaying ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
+                    )
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onPlay()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+    
+    // MARK: - Modern Components
+    
+    private var modernPlayButton: some View {
         Button(action: {
-            switch episodeState {
-            case .played:
+            let progress = podcastPlayer.getCurrentProgress(for: episode)
+            if episode.state.isPlayed || progress >= 0.99 {
                 podcastPlayer.rewindAndPlay(episode: episode)
-            case .playing:
+            } else if isPlaying {
                 onStop()
-            default:
+            } else {
                 onPlay()
             }
         }) {
-            Image(systemName: episodeState.buttonImage)
-                .resizable()
-                .frame(width: buttonSize, height: buttonSize)
-                .foregroundColor(episodeState.buttonColor)
+            ZStack {
+                // Background circle with gradient
+                Circle()
+                    .fill(playButtonGradient)
+                    .frame(width: 50, height: 50)
+                    .shadow(color: playButtonShadowColor, radius: 4, x: 0, y: 2)
+                
+                // Icon
+                Image(systemName: playButtonIcon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.white)
+                    .offset(x: playButtonIcon == "play.fill" ? 2 : 0) // Slight offset for play icon
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isPlaying ? 1.05 : 1.0)
+        .animation(.easeInOut(duration: 0.2), value: isPlaying)
+    }
+    
+    private var playButtonGradient: LinearGradient {
+        let progress = podcastPlayer.getCurrentProgress(for: episode)
+        if episode.state.isPlayed || progress >= 0.99 {
+            return LinearGradient(
+                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        } else if isPlaying {
+            return LinearGradient(
+                gradient: Gradient(colors: [Color.orange, Color.red]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        } else {
+            return LinearGradient(
+                gradient: Gradient(colors: [Color.green, Color.green.opacity(0.8)]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         }
     }
     
-    private var downloadButton: some View {
+    private var playButtonIcon: String {
+        let progress = podcastPlayer.getCurrentProgress(for: episode)
+        if episode.state.isPlayed || progress >= 0.99 {
+            return "arrow.counterclockwise"
+        } else if isPlaying {
+            return "pause.fill"
+        } else {
+            return "play.fill"
+        }
+    }
+    
+    private var playButtonShadowColor: Color {
+        if isPlaying {
+            return Color.orange.opacity(0.3)
+        } else {
+            return Color.black.opacity(0.2)
+        }
+    }
+    
+    private var episodeStatusChip: some View {
+        Text(episodeState.statusText)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(episodeState.statusColor)
+            )
+    }
+    
+    private var modernProgressIndicator: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                // Background track
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 4)
+                
+                // Progress fill with gradient
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.blue, Color.cyan]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: geometry.size.width * CGFloat(currentProgress), height: 4)
+                    .animation(.easeInOut(duration: 0.3), value: currentProgress)
+            }
+        }
+        .frame(height: 4)
+    }
+    
+    private var shouldShowProgress: Bool {
+        isPlaying || episode.state.progress > 0.01
+    }
+    
+    private var currentProgress: Double {
+        if isPlaying {
+            return podcastPlayer.currentProgress
+        } else {
+            return episode.state.progress
+        }
+    }
+    
+    private var modernBookmarkButton: some View {
         Button(action: {
             if isPlaying {
-                showBannerAlert(message: "You can't download episodes while playing.")
-            } else if !episode.state.isDownloaded && !isDownloading {
-                isDownloading = true
-                viewModel.downloadEpisode(episode) { result in
-                    DispatchQueue.main.async {
-                        isDownloading = false
-                    }
-                }
+                showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
+            } else {
+                viewModel.toggleFavorite(for: episode)
             }
         }) {
             ZStack {
                 Circle()
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 2)
-                    .frame(width: buttonSize, height: buttonSize)
+                    .fill(episode.state.isFavorite ? Color.blue.opacity(0.2) : Color.clear)
+                    .frame(width: 36, height: 36)
+                
+                Image(systemName: episode.state.isFavorite ? "heart.fill" : "heart")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(episode.state.isFavorite ? .blue : .gray)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(episode.state.isFavorite ? 1.1 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: episode.state.isFavorite)
+    }
+    
+    private var modernDownloadButton: some View {
+        Button(action: {
+            if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                showingDeleteConfirmation = true
+            } else {
+                handleDownloadAction()
+            }
+        }) {
+            ZStack {
+                Circle()
+                    .fill(downloadButtonBackgroundColor)
+                    .frame(width: 36, height: 36)
                 
                 if episode.state.isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
-                        .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.green)
                 } else if isDownloading {
-                    Circle()
-                        .trim(from: 0, to: CGFloat(viewModel.downloadProgress[episode.id] ?? 0))
-                        .stroke(Color.blue, lineWidth: 2)
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: buttonSize, height: buttonSize)
-                    
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: buttonSize * 0.5))
-                        .foregroundColor(.blue)
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                        .scaleEffect(0.7)
+                } else if viewModel.currentTab == 2 {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.red)
                 } else {
                     Image(systemName: "arrow.down.circle")
-                        .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.gray)
+                }
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isDownloading ? 1.1 : 1.0)
+        .animation(.easeInOut(duration: 0.2), value: isDownloading)
+    }
+    
+    private var downloadButtonBackgroundColor: Color {
+        if episode.state.isDownloaded {
+            return Color.green.opacity(0.2)
+        } else if isDownloading {
+            return Color.blue.opacity(0.2)
+        } else if viewModel.currentTab == 2 {
+            return Color.red.opacity(0.2)
+        } else {
+            return Color.clear
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func handleDownloadAction() {
+        if isPlaying {
+            showBannerAlert(message: "You can't download episodes while playing.")
+        } else if !episode.state.isDownloaded && !isDownloading {
+            isDownloading = true
+            viewModel.downloadEpisode(episode) { result in
+                DispatchQueue.main.async {
+                    isDownloading = false
                 }
             }
         }
@@ -1128,18 +1278,33 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
     
-    private func formatRemainingTime() -> String? {
-        let duration = isPlaying ? podcastPlayer.remainingTime : (episode.duration * (1 - episode.state.progress))
-        guard duration > 0 else { return nil }
-        
-        let hours = Int(duration) / 3600
-        let minutes = (Int(duration) % 3600) / 60
-        let seconds = Int(duration) % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d remaining", hours, minutes, seconds)
+    private func formatTimeInfo() -> String? {
+        let remainingDuration: Double
+        if isPlaying {
+            remainingDuration = podcastPlayer.remainingTime
+        } else if episode.state.progress > 0 {
+            remainingDuration = episode.duration * (1 - episode.state.progress)
         } else {
-            return String(format: "%d:%02d remaining", minutes, seconds)
+            remainingDuration = episode.duration
+        }
+        
+        guard remainingDuration > 0 else { return nil }
+        
+        let hours = Int(remainingDuration) / 3600
+        let minutes = (Int(remainingDuration) % 3600) / 60
+        
+        if episode.state.progress > 0 {
+            if hours > 0 {
+                return String(format: "%dh %dm left", hours, minutes)
+            } else {
+                return String(format: "%dm left", minutes)
+            }
+        } else {
+            if hours > 0 {
+                return String(format: "%dh %dm", hours, minutes)
+            } else {
+                return String(format: "%dm", minutes)
+            }
         }
     }
     
@@ -1150,6 +1315,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         return formatter.string(fromByteCount: size)
     }
 }
+
 struct PodcastPlayerView: View {
     // MARK: - Properties
     @ObservedObject var viewModel: PodcastViewModel
@@ -1204,8 +1370,8 @@ struct PodcastPlayerView: View {
             
             // Mini Player
             if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                miniPlayer
-                    .transition(.move(edge: .bottom))
+                // Mini player removed for now
+                EmptyView()
             }
         }
         .navigationBarHidden(true)
@@ -1223,7 +1389,7 @@ struct PodcastPlayerView: View {
                 .onChange(of: viewModel.podcastFeedOrder) { _ in 
                     // Only refresh if episodes haven't been loaded yet or if there's a significant change
                     if viewModel.currentEpisodes.isEmpty {
-                        refreshEpisodes()
+                        viewModel.fetchAllEpisodes(for: feed)
                     }
                 }
                 .sheet(isPresented: $showPodcastPlayerSheet) {
@@ -1248,7 +1414,7 @@ struct PodcastPlayerView: View {
         VStack(spacing: 0) {
             // Navigation Bar
             HStack {
-                Button(action: updateViewModelAndDismiss) {
+                Button(action: { selectedPodcast = nil }) {
                     Image(systemName: "chevron.left")
                         .foregroundColor(.primary)
                 }
@@ -1338,161 +1504,68 @@ struct PodcastPlayerView: View {
                 ProgressView("Loading episodes...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                optimizedEpisodeList
+                modernEpisodeList
             }
         }
     }
     
-    private var optimizedEpisodeList: some View {
+    private var modernEpisodeList: some View {
         ScrollView {
-            ScrollViewReader { proxy in
-                LazyVStack(spacing: 8) {
-                    ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
-                        OptimizedEpisodeRowView(
-                            episode: episode,
-                            isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                            onPlay: { playEpisode(episode) },
-                            onStop: { podcastPlayer.togglePlayPause() },
-                            viewModel: viewModel,
-                            podcastPlayer: podcastPlayer
-                        )
-                        .id(episode.compositeID)
-                    }
-                    
-                    if viewModel.hasMoreEpisodes && !viewModel.isLoadingMoreEpisodes {
+            LazyVStack(spacing: 0) {
+                ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
+                    OptimizedEpisodeRowView(
+                        episode: episode,
+                        isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                        onPlay: { playEpisode(episode) },
+                        onStop: { podcastPlayer.togglePlayPause() },
+                        viewModel: viewModel,
+                        podcastPlayer: podcastPlayer
+                    )
+                    .id(episode.compositeID)
+                }
+                
+                if viewModel.hasMoreEpisodes && !viewModel.isLoadingMoreEpisodes {
+                    HStack {
+                        Spacer()
                         ProgressView()
-                            .padding()
-                            .onAppear {
-                                loadMoreIfNeeded()
-                            }
+                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                            .scaleEffect(1.0)
+                        Text("Loading more episodes...")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                            .padding(.leading, 8)
+                        Spacer()
                     }
-                    
-                    Spacer(minLength: 100)
+                    .padding(.vertical, 24)
+                    .onAppear {
+                        loadMoreIfNeeded()
+                    }
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .trackScrollOffset(coordinateSpace: "scrollArea", offset: $scrollOffset)
-                .onAppear {
-                    scrollProxy = proxy
-                    // Perform initial scroll to the current episode only once when view first opens
-                    performInitialScrollIfNeeded(proxy: proxy)
-                }
-                .onChange(of: scrollOffset) { newOffset in
-                    handleScrollOffsetChange(newOffset)
-                }
+                
+                // Bottom padding for mini player
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(height: 100)
             }
         }
-        .coordinateSpace(name: "scrollArea")
+        .background(Color.black)
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { _ in
+                    UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                }
+                .onEnded { _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                    }
+                }
+        )
     }
 
-    private func performInitialScrollIfNeeded(proxy: ScrollViewProxy) {
-        // Only perform initial scroll if:
-        // 1. We haven't already performed it
-        // 2. There's a current episode playing
-        // 3. The episode exists in the current list
-        // 4. User hasn't manually scrolled yet
-        // 5. Episodes have actually loaded (not empty)
-        // 6. User is not currently scrolling
-        guard !hasPerformedInitialScroll,
-              !hasManuallyScrolled,
-              !userIsScrolling,
-              !viewModel.currentEpisodes.isEmpty,
-              let currentEpisode = podcastPlayer.currentEpisode,
-              podcastPlayer.isPlaying,
-              viewModel.currentEpisodes.contains(where: { $0.compositeID == currentEpisode.compositeID }) else {
-            return
-        }
-        
-        // Mark as performed immediately to prevent multiple calls
-        hasPerformedInitialScroll = true
-        
-        // Add a slight delay to ensure the view is properly laid out
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Double-check that we should still scroll (user might have scrolled in the meantime)
-            guard !self.hasManuallyScrolled, !self.userIsScrolling else { return }
-            
-            withAnimation(.easeInOut(duration: 0.5)) {
-                proxy.scrollTo(currentEpisode.compositeID, anchor: .center)
-            }
-        }
-    }
-    
-    private func handleScrollOffsetChange(_ newOffset: CGPoint) {
-        // Detect if user is actively scrolling
-        let scrollDistance = abs(newOffset.y - lastScrollOffset.y)
-        
-        // Only consider it user scrolling if:
-        // 1. The distance is significant enough
-        // 2. We're not in the middle of an initial auto-scroll
-        // 3. The initial scroll has been completed or enough time has passed
-        if scrollDistance > userScrollThreshold && hasPerformedInitialScroll {
-            // User is scrolling - mark as manual scroll and disable auto-scroll
-            if !userIsScrolling {
-                userIsScrolling = true
-                hasManuallyScrolled = true
-                scrollStartOffset = lastScrollOffset
-                
-                // Notify that user started scrolling to prevent UI updates
-                UserDefaults.standard.set(true, forKey: "isUserScrolling")
-                NotificationCenter.default.post(name: .userIsScrolling, object: true)
-            }
-            
-            // Reset the debounce timer
-            scrollDebounceTimer?.invalidate()
-            scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
-                self.userIsScrolling = false
-                
-                // Notify that user stopped scrolling to allow UI updates again
-                UserDefaults.standard.set(false, forKey: "isUserScrolling")
-                NotificationCenter.default.post(name: .userStoppedScrolling, object: false)
-            }
-        }
-        
-        lastScrollOffset = newOffset
-        
-        // Check if we should load more content
-        checkIfShouldLoadMore()
-    }
-    
-    private var miniPlayer: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            if let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                MiniPodcastPlayerView(
-                    currentEpisode: currentEpisode,
-                    currentFeed: currentFeed,
-                    podcastPlayer: podcastPlayer,
-                    viewModel: viewModel,
-                    selectedPodcast: $selectedPodcast,
-                    onListButtonTap: handleMiniPlayerListTap,
-                    onCloseButtonTap: handleMiniPlayerClose
-                )
-                .padding(.top, 15)
-                .padding(.bottom, 20)
-                .background(Color(UIColor.systemBackground))
-            }
-        }
-        .edgesIgnoringSafeArea(.bottom)
-    }
-    
-    // MARK: - Helper Methods
-    private func checkIfShouldLoadMore() {
-        let threshold: CGFloat = 50
-        let contentHeight = CGFloat(viewModel.currentEpisodes.count) * rowHeight
-        let triggerPoint = contentHeight - viewportHeight - threshold
-
-        if -scrollOffset.y > triggerPoint && !isLoadingMore && viewModel.hasMoreEpisodes {
-            loadMoreIfNeeded()
-        }
-    }
-    
     private func handleOnAppear() {
-        // Check if current episodes belong to this feed or if episodes are empty
         let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
         
         if viewModel.currentEpisodes.isEmpty || !currentEpisodesForThisFeed {
-            // Either no episodes loaded or episodes are for a different feed
-            // Reset scroll state and load episodes for this feed
             hasPerformedInitialScroll = false
             hasManuallyScrolled = false
             userIsScrolling = false
@@ -1501,136 +1574,33 @@ struct PodcastPlayerView: View {
             
             loadInitialEpisodes()
         } else {
-            // View already has episodes loaded for this feed, just ensure we have the latest data
-            // but don't reset scroll state
             viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
         }
     }
     
-    private func handleMiniPlayerListTap() {
-        if let currentFeed = podcastPlayer.currentFeed {
-            selectedPodcast = currentFeed
-            viewModel.fetchAllEpisodes(for: currentFeed)
-            showPodcastPlayerSheet = true
-        }
-    }
-    
-    private func handleMiniPlayerClose() {
-        podcastPlayer.pause()
-        podcastPlayer.currentEpisode = nil
-        podcastPlayer.currentFeed = nil
-    }
-    
     private func loadInitialEpisodes() {
-            viewModel.loadAllEpisodesForFeed(feed)
-        }
-    
-    private func refreshEpisodes() {
-            guard !viewModel.isLoadingEpisodes else { return }
-            viewModel.clearCache(for: feed.id)
-            viewModel.loadAllEpisodesForFeed(feed)
-        }
+        viewModel.loadAllEpisodesForFeed(feed)
+    }
     
     private func loadMoreIfNeeded() {
-           guard !isLoadingMore && viewModel.hasMoreEpisodes else { return }
-           
-           isLoadingMore = true
-           viewModel.loadMoreEpisodes(for: feed) { _ in
-               isLoadingMore = false
-           }
-       }
-    
-    // Removed redundant scrolling methods to prevent interference with user scrolling
-    // All auto-scrolling is now handled only in performInitialScrollIfNeeded(proxy:)
-    
-    private func isEpisodeVisible(_ episodeCompositeId: String) -> Bool {
-        guard let episodeIndex = viewModel.currentEpisodes.firstIndex(where: { $0.compositeID == episodeCompositeId }) else {
-            return false
+        guard !isLoadingMore && viewModel.hasMoreEpisodes else { return }
+        
+        isLoadingMore = true
+        viewModel.loadMoreEpisodes(for: feed) { _ in
+            isLoadingMore = false
         }
-        
-        let episodeYPosition = CGFloat(episodeIndex) * rowHeight
-        let visibleRangeStart = -scrollOffset.y
-        let visibleRangeEnd = -scrollOffset.y + viewportHeight
-        
-        return episodeYPosition >= visibleRangeStart && episodeYPosition <= visibleRangeEnd
     }
     
     private func playEpisode(_ episode: PodcastEpisode) {
-            if podcastPlayer.currentEpisode?.id == episode.id {
-                if episode.state.isPlayed || podcastPlayer.currentProgress >= 0.99 {
-                    podcastPlayer.rewindAndPlay(episode: episode)
-                } else {
-                    podcastPlayer.togglePlayPause()
-                }
+        if podcastPlayer.currentEpisode?.id == episode.id {
+            if episode.state.isPlayed || podcastPlayer.currentProgress >= 0.99 {
+                podcastPlayer.rewindAndPlay(episode: episode)
             } else {
-                podcastPlayer.playEpisode(episode, feed: feed)
+                podcastPlayer.togglePlayPause()
             }
+        } else {
+            podcastPlayer.playEpisode(episode, feed: feed)
         }
-    
-    private func updateViewModelAndDismiss() {
-        // First, handle the currently playing episode status
-        podcastPlayer.handleNavigationAway()
-        
-        // Then proceed with the existing logic
-        if let currentEpisode = podcastPlayer.currentEpisode {
-            podcastPlayer.saveProgressIfNeeded()
-            
-            let progress = podcastPlayer.getCurrentProgress(for: currentEpisode)
-            var updatedEpisode = currentEpisode
-            
-            if progress >= 0.99 {
-                updatedEpisode.state.isPlayed = true
-                updatedEpisode.state.progress = 1.0
-            } else if progress > 0 {
-                updatedEpisode.state.isPlayed = false
-                updatedEpisode.state.progress = progress
-            }
-            
-            viewModel.updateEpisode(updatedEpisode)
-            
-            if updatedEpisode.state.isFavorite != viewModel.favoriteEpisodes.contains(where: { $0.id == updatedEpisode.id }) {
-                viewModel.toggleFavorite(for: updatedEpisode)
-            }
-            
-            let isDownloaded = viewModel.downloadedEpisodes.contains(where: { $0.id == updatedEpisode.id })
-            if updatedEpisode.state.isDownloaded != isDownloaded {
-                if isDownloaded {
-                    updatedEpisode.state.isDownloaded = true
-                    viewModel.updateEpisode(updatedEpisode)
-                } else {
-                    viewModel.deleteDownloadedEpisode(updatedEpisode)
-                }
-            }
-            
-            // Update progress for all episodes in the current feed
-            for episode in viewModel.currentEpisodes {
-                let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
-                if episodeProgress > 0 {
-                    var updatedPlayedEpisode = episode
-                    updatedPlayedEpisode.state.progress = episodeProgress
-                    
-                    // Preserve existing "finished" status - only mark as finished if progress >= 0.99
-                    // but don't unmark episodes that were already marked as finished
-                    if episodeProgress >= 0.99 {
-                        updatedPlayedEpisode.state.isPlayed = true
-                    } else if !episode.state.isPlayed {
-                        // Only update isPlayed to false if it wasn't already marked as finished
-                        updatedPlayedEpisode.state.isPlayed = false
-                    }
-                    
-                    viewModel.updateEpisode(updatedPlayedEpisode)
-                }
-            }
-        }
-        
-        viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: viewModel.currentTab)
-        
-        DispatchQueue.main.async {
-            viewModel.objectWillChange.send()
-        }
-        
-        // Go back to podcast list by setting selectedPodcast to nil
-        selectedPodcast = nil
     }
 }
 
@@ -1828,3 +1798,5 @@ struct DebouncedAction: ViewModifier {
             }
     }
 }
+
+

@@ -91,6 +91,10 @@ class EpisodeStateManager: ObservableObject {
     private let progressKey = "EpisodeProgress"
     private let currentTimeKey = "EpisodeCurrentTime"
     
+    // Throttling for UI updates to prevent CPU spikes
+    private var lastUpdateTime = Date()
+    private let updateThrottleInterval: TimeInterval = 3.0 // 3 seconds between updates
+    
     private init() {
         loadSavedStates()
         setupAppTerminationObserver()
@@ -144,7 +148,7 @@ class EpisodeStateManager: ObservableObject {
                     self.episodeProgress = progress
                     self.episodeCurrentTime = currentTimes
                     self.currentlyPlayingEpisodeId = nil // Clear any playing episode
-                    self.objectWillChange.send()
+                    self.sendThrottledUpdate()
                 }
             } catch {
                 print("Error loading saved states: \(error)")
@@ -164,6 +168,23 @@ class EpisodeStateManager: ObservableObject {
         } catch {
             print("Error saving states: \(error)")
         }
+    }
+    
+    // Throttled update method to prevent excessive UI updates
+    private func sendThrottledUpdate() {
+        let now = Date()
+        
+        // Skip update if user is scrolling or if we updated too recently
+        if UserDefaults.standard.bool(forKey: "isUserScrolling") {
+            return
+        }
+        
+        if now.timeIntervalSince(lastUpdateTime) < updateThrottleInterval {
+            return
+        }
+        
+        lastUpdateTime = now
+        objectWillChange.send()
     }
     
     func getState(for episodeId: String) -> EpisodePlaybackState {
@@ -202,7 +223,7 @@ class EpisodeStateManager: ObservableObject {
         episodeStates[episodeId] = .playing
         currentlyPlayingEpisodeId = episodeId
         saveCurrentStates()
-        objectWillChange.send()
+        sendThrottledUpdate()
     }
     
     func pausePlayback(episodeId: String, progress: Double) {
@@ -219,7 +240,7 @@ class EpisodeStateManager: ObservableObject {
         }
         
         saveCurrentStates()
-        objectWillChange.send()
+        sendThrottledUpdate()
     }
     
     func switchToEpisode(newEpisodeId: String, previousEpisodeId: String, previousProgress: Double) {
@@ -242,7 +263,7 @@ class EpisodeStateManager: ObservableObject {
         currentlyPlayingEpisodeId = newEpisodeId
         
         saveCurrentStates()
-        objectWillChange.send()
+        sendThrottledUpdate()
     }
     
     func completeEpisode(episodeId: String) {
@@ -254,7 +275,7 @@ class EpisodeStateManager: ObservableObject {
         }
         
         saveCurrentStates()
-        objectWillChange.send()
+        sendThrottledUpdate()
     }
     
     func rewindAndPlay(episodeId: String) {
@@ -280,7 +301,7 @@ class EpisodeStateManager: ObservableObject {
         currentlyPlayingEpisodeId = episodeId
         
         saveCurrentStates()
-        objectWillChange.send()
+        sendThrottledUpdate()
     }
     
     func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool, currentTime: Double? = nil) {
@@ -351,7 +372,7 @@ class EpisodeStateManager: ObservableObject {
             }
             
             saveCurrentStates()
-            objectWillChange.send()
+            sendThrottledUpdate()
         }
     }
     
@@ -363,7 +384,7 @@ class EpisodeStateManager: ObservableObject {
         userDefaults.removeObject(forKey: statesKey)
         userDefaults.removeObject(forKey: progressKey)
         
-        objectWillChange.send()
+        sendThrottledUpdate()
     }
     
     func forceSave() {

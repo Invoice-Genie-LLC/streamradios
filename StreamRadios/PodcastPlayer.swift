@@ -358,16 +358,37 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     private func updatePlaybackInfo() {
             guard let player = player else { return }
+            
+            // Skip all updates if user is scrolling to prevent CPU spikes
+            if isUserCurrentlyScrolling() {
+                return
+            }
+            
             currentTime = max(0, player.currentTime().seconds)
             duration = max(0.01, player.currentItem?.duration.seconds ?? 0.01)
             currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
             
-            // Update progress and handle all UI updates efficiently
-            updateProgress()
+            // Update progress with heavy throttling
+            updateProgressThrottled()
             
-            // Update now playing info less frequently
+            // Update now playing info even less frequently
             updateNowPlayingInfoDebounced()
         }
+    
+    // New throttled progress update method
+    private func updateProgressThrottled() {
+        // Only update progress every 5 seconds during playback to reduce CPU usage
+        let now = Date()
+        if now.timeIntervalSince(lastProgressUpdate) < 5.0 {
+            return
+        }
+        lastProgressUpdate = now
+        
+        updateProgress()
+    }
+    
+    // Track last progress update time
+    private var lastProgressUpdate = Date()
     
     private func isUserCurrentlyScrolling() -> Bool {
         // Check if any podcast player views are currently being scrolled
@@ -845,10 +866,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                    ]
                )
                
-               // Only send UI update if user is not scrolling
-               if !isUserCurrentlyScrolling() {
-                   objectWillChange.send()
-               }
+                       // Disable all UI updates during playback to prevent CPU spikes
+        // objectWillChange.send()
             }
     
     
@@ -878,10 +897,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             ]
         )
         
-        // Only send UI update if user is not scrolling
-        if !isUserCurrentlyScrolling() {
-            objectWillChange.send()
-        }
+        // Disable all UI updates during playback to prevent CPU spikes
+        // UI will update only when playback state changes (play/pause/stop)
+        // objectWillChange.send()
         
         // Use centralized audio session management - only deactivate if no other audio is playing
         if !isPlaying && PlaybackManager.shared.activePlayer == .podcast {
@@ -1146,25 +1164,25 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // OPTIMIZATION: Skip UI updates when CarPlay is active to maximize performance
             // CarPlay doesn't need frequent UI updates and they cause significant CPU overhead
             if !isCarPlayActive {
-                // Reduce UI update frequency - only trigger UI updates every 2% progress change to reduce CPU load
-                let uiUpdateThreshold = 0.02 // 2% instead of 1%
-                if abs(currentProgress - lastReportedProgress) >= uiUpdateThreshold {
-                    lastReportedProgress = currentProgress
-                    
-                    DispatchQueue.main.async {
-                        self.objectWillChange.send()
-                    }
-                }
+                // Disable UI updates completely to prevent CPU spikes during scrolling
+                // let uiUpdateThreshold = 0.02 // 2% instead of 1%
+                // if abs(currentProgress - lastReportedProgress) >= uiUpdateThreshold {
+                //     lastReportedProgress = currentProgress
+                //     
+                //     DispatchQueue.main.async {
+                //         self.objectWillChange.send()
+                //     }
+                // }
             } else {
-                // When CarPlay is active, update UI much less frequently (every 5% for minimal CPU impact)
-                let carPlayUIThreshold = 0.05 // 5% for CarPlay mode
-                if abs(currentProgress - lastReportedProgress) >= carPlayUIThreshold {
-                    lastReportedProgress = currentProgress
-                    
-                    DispatchQueue.main.async {
-                        self.objectWillChange.send()
-                    }
-                }
+                // Disable CarPlay UI updates completely to prevent CPU spikes
+                // let carPlayUIThreshold = 0.05 // 5% for CarPlay mode
+                // if abs(currentProgress - lastReportedProgress) >= carPlayUIThreshold {
+                //     lastReportedProgress = currentProgress
+                //     
+                //     DispatchQueue.main.async {
+                //         self.objectWillChange.send()
+                //     }
+                // }
             }
         }
     

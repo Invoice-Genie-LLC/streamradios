@@ -132,6 +132,10 @@ class PodcastViewModel: ObservableObject {
         var currentPage = 1
     private var isInitialLoadComplete = false
     
+    // Throttling for UI updates to prevent CPU spikes
+    private var lastUpdateTime = Date()
+    private let updateThrottleInterval: TimeInterval = 2.0 // 2 seconds between updates
+    
     init(context: NSManagedObjectContext = CoreDataStack.shared.context) {
         self.context = context
         self.backgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
@@ -167,7 +171,24 @@ class PodcastViewModel: ObservableObject {
         // Notify CarPlay that podcast data is now available
         CarPlayManager.shared.configurePodcastData(self.podcastFeeds)
         
-        self.objectWillChange.send()
+        self.sendThrottledUpdate()
+    }
+    
+    // Throttled update method to prevent excessive UI updates
+    private func sendThrottledUpdate() {
+        let now = Date()
+        
+        // Skip update if user is scrolling or if we updated too recently
+        if UserDefaults.standard.bool(forKey: "isUserScrolling") {
+            return
+        }
+        
+        if now.timeIntervalSince(lastUpdateTime) < updateThrottleInterval {
+            return
+        }
+        
+        lastUpdateTime = now
+        objectWillChange.send()
     }
 
     
@@ -782,7 +803,7 @@ class PodcastViewModel: ObservableObject {
             allEpisodes[index].state.isFavorite = favoriteEpisodes.contains(where: { $0.id == episode.id })
             allEpisodes[index].state.isDownloaded = downloadedEpisodes.contains(where: { $0.id == episode.id })
         }
-        objectWillChange.send() // Trigger a UI update across all tabs
+        sendThrottledUpdate() // Trigger a throttled UI update across all tabs
     }
     
     func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
@@ -1922,9 +1943,9 @@ class PodcastViewModel: ObservableObject {
         // Update episodeProgress dictionary
         episodeProgress[updatedEpisode.id] = updatedEpisode.state.progress
         
-        // Trigger a UI update
+        // Trigger a throttled UI update
         DispatchQueue.main.async {
-            self.objectWillChange.send()
+            self.sendThrottledUpdate()
         }
     }
     
@@ -1983,13 +2004,13 @@ class PodcastViewModel: ObservableObject {
             // Update cache immediately
             updateEpisodeInCache(updatedEpisode)
             
-            // Trigger immediate UI update
-            DispatchQueue.main.async {
-                self.objectWillChange.send()
-                // Update filtered episodes for immediate tab filtering
-                print("DEBUG: About to call updateFilteredEpisodes from toggleFavorite with currentTab: \(self.currentTab)")
-                self.updateFilteredEpisodes(for: episode.feedId, selectedTab: self.currentTab)
-            }
+                    // Trigger throttled UI update
+        DispatchQueue.main.async {
+            self.sendThrottledUpdate()
+            // Update filtered episodes for immediate tab filtering
+            print("DEBUG: About to call updateFilteredEpisodes from toggleFavorite with currentTab: \(self.currentTab)")
+            self.updateFilteredEpisodes(for: episode.feedId, selectedTab: self.currentTab)
+        }
             
             // Then save to Core Data in the background
             let context = CoreDataStack.shared.context
@@ -2041,9 +2062,9 @@ class PodcastViewModel: ObservableObject {
             // Update cache immediately
             updateEpisodeInCache(updatedEpisode)
             
-            // Trigger immediate UI update
+            // Trigger throttled UI update
             DispatchQueue.main.async {
-                self.objectWillChange.send()
+                self.sendThrottledUpdate()
                 self.updateFilteredEpisodes(for: episode.feedId, selectedTab: self.currentTab)
             }
             
@@ -2183,6 +2204,11 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func updateEpisodeInLists(_ episode: PodcastEpisode) {
+            // Skip updates if user is scrolling to prevent CPU spikes
+            if UserDefaults.standard.bool(forKey: "isUserScrolling") {
+                return
+            }
+            
             print("DEBUG: Updating episode in lists: \(episode.title), isFavorite: \(episode.state.isFavorite)")
             
             // Update in allEpisodes
