@@ -295,6 +295,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var isDeletionInProgress = false
     @Published var isUploadingToCloudKit = false
     
+    // Flag to prevent infinite loop in favorite timestamp migration
+    private var isMigrationInProgress = false
+    
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             // Switch to All tab when country changes (except during initialization)
@@ -575,7 +578,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     func recentStations() -> [RadioStation] {
         let recentStations = stations.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
-        saveStationsToCoreData()  // Save the updated order to CoreData
+        // No need to save to CoreData - this method only filters and sorts, doesn't modify data
         return recentStations
     }
     
@@ -599,7 +602,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     private func migrateFavoriteTimestamps() {
+        // Prevent infinite loop by checking if migration is already in progress
+        guard !isMigrationInProgress else { return }
+        
         Task { @MainActor in
+            self.isMigrationInProgress = true
+            defer { self.isMigrationInProgress = false }
+            
             var needsUpdate = false
             let now = Date()
             
@@ -611,6 +620,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             if needsUpdate {
+                print("Migrating favorite timestamps for \(stations.filter { $0.isFavorite && $0.favoritedAt == now }.count) stations")
                 saveStationsToCoreData()
             }
         }

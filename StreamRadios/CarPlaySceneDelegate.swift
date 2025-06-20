@@ -1041,6 +1041,28 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         carPlayManager.updateContent() // Refresh all data from core data to get latest state
         
+        // For episode START events (isPlaying = true), delay UI updates to prevent blank sheet
+        // For episode STOP events (isPlaying = false), update immediately
+        if isPlaying {
+            // CRITICAL: Delay UI updates when episode starts to prevent blank sheet issue
+            // Allow episode to fully initialize before updating CarPlay UI
+            os_log("🚗 CarPlay: Episode starting - delaying UI updates to prevent blank sheet", log: log, type: .info)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.performDelayedPlaybackUIUpdates(episodeId: episodeId)
+            }
+        } else {
+            // Episode stopped/paused - update UI immediately
+            os_log("🚗 CarPlay: Episode stopped/paused - updating UI immediately", log: log, type: .info)
+            performImmediatePlaybackUIUpdates(episodeId: episodeId)
+        }
+        
+        // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
+        // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
+    }
+    
+    private func performDelayedPlaybackUIUpdates(episodeId: String) {
+        os_log("🚗 CarPlay: Performing delayed UI updates for episode ID: %@", log: log, type: .info, episodeId)
+        
         // Use the same efficient section update approach that works perfectly for Recents tab
         // This provides immediate visual highlighting changes just like Recents does
         forceImmediateSectionUpdate(episodeId: episodeId)
@@ -1048,9 +1070,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Also refresh the recents tab and favorites tab to show/hide the highlighted playing state
         refreshRecentsTabTemplate()
         refreshFavoritesTabTemplate()
+    }
+    
+    private func performImmediatePlaybackUIUpdates(episodeId: String) {
+        os_log("🚗 CarPlay: Performing immediate UI updates for episode ID: %@", log: log, type: .info, episodeId)
         
-        // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
-        // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
+        // Use the same efficient section update approach that works perfectly for Recents tab
+        // This provides immediate visual highlighting changes just like Recents does
+        forceImmediateSectionUpdate(episodeId: episodeId)
+        
+        // Also refresh the recents tab and favorites tab to show/hide the highlighted playing state
+        refreshRecentsTabTemplate()
+        refreshFavoritesTabTemplate()
     }
     
     private func handleStationPlayedForRecents(_ notification: Notification) {
