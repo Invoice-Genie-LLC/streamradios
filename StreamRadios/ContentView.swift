@@ -272,49 +272,67 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    // Compact mini-player matching screenshot design - hide during sorting mode
-                    if let currentStation = viewModel.currentlyPlayingStation, !isEditingMode {
-                        VStack(spacing: 0) {
-                            // Top divider for visual separation
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 0.5)
-                            
-                            CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata)
-                                .environmentObject(radioPlayer)
-                                .environmentObject(viewModel)
+                    // Player area - show podcast players when podcast is playing, radio players when radio is playing
+                    if !isEditingMode {
+                        if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+                            // Podcast is playing - show podcast compact player
+                            VStack(spacing: 0) {
+                                // Top divider for visual separation
+                                Rectangle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(height: 0.5)
+                                
+                                CompactPodcastPlayerView(
+                                    currentEpisode: currentEpisode,
+                                    currentFeed: currentFeed,
+                                    podcastPlayer: podcastPlayer,
+                                    viewModel: podcastViewModel,
+                                    selectedPodcast: $selectedPodcast,
+                                    onListButtonTap: {
+                                        selectedPodcast = currentFeed
+                                        podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                        scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                        showPodcastPlayerSheet = true
+                                    },
+                                    onCloseButtonTap: {
+                                        podcastPlayer.pause()
+                                        podcastPlayer.currentEpisode = nil
+                                        podcastPlayer.currentFeed = nil
+                                    }
+                                )
                                 .onTapGesture {
-                                    isPlayerSheetPresented.toggle()
+                                    if let currentFeed = podcastPlayer.currentFeed {
+                                        selectedPodcast = currentFeed
+                                        podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                                        scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                                        showPodcastPlayerSheet = true
+                                    }
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.top, 4)
                                 .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 4))
                                 .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Darker gray
+                            }
+                        } else if let currentStation = viewModel.currentlyPlayingStation, radioPlayer.isPlaying {
+                            // Radio is playing - show radio compact player
+                            VStack(spacing: 0) {
+                                // Top divider for visual separation
+                                Rectangle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(height: 0.5)
+                                
+                                CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata)
+                                    .environmentObject(radioPlayer)
+                                    .environmentObject(viewModel)
+                                    .onTapGesture {
+                                        isPlayerSheetPresented.toggle()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 4)
+                                    .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 4))
+                                    .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Darker gray
+                            }
                         }
-                    }
-                    
-                    if podcastPlayer.isPlaying && !radioPlayer.isPlaying && podcastPlayer.currentEpisode != nil && !isEditingMode {
-                        MiniPlayerView(
-                            podcastPlayer: podcastPlayer,
-                            viewModel: podcastViewModel,
-                            selectedPodcast: $selectedPodcast,
-                            onListButtonTap: {
-                                if let currentFeed = podcastPlayer.currentFeed {
-                                    selectedPodcast = currentFeed
-                                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                    scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                    showPodcastPlayerSheet = true
-                                }
-                            },
-                            onCloseButtonTap: {
-                                podcastPlayer.pause()
-                                podcastPlayer.currentEpisode = nil
-                                podcastPlayer.currentFeed = nil
-                            },
-                            isPlaylistButtonDisabled: false
-                        )
-                        .transition(.move(edge: .bottom))
-                        .zIndex(1)
                     }
                 }
                 .padding(.bottom, sizeClass == .regular ? 40 : 0)
@@ -671,6 +689,315 @@ struct CompactPlayerView: View {
             }
         }
     }
+}
+
+// MARK: - Compact Podcast Player View
+
+struct UnifiedPodcastPlayerView: View {
+    let currentEpisode: PodcastEpisode
+    let currentFeed: PodcastFeed
+    @ObservedObject var podcastPlayer: PodcastPlayer
+    @ObservedObject var viewModel: PodcastViewModel
+    @Binding var selectedPodcast: PodcastFeed?
+    var onListButtonTap: (() -> Void)?
+    var onCloseButtonTap: (() -> Void)?
+    
+    @State private var isDragging = false
+    @State private var sliderProgress: Double = 0
+    @Environment(\.colorScheme) var colorScheme
+    @Environment(\.horizontalSizeClass) var sizeClass
+    
+    // Responsive sizing
+    private var artworkSize: CGFloat {
+        sizeClass == .compact ? 50 : 60
+    }
+    
+    private var buttonSize: CGFloat {
+        sizeClass == .compact ? 36 : 44
+    }
+    
+    private var playButtonSize: CGFloat {
+        sizeClass == .compact ? 44 : 52
+    }
+    
+    private var iconSize: CGFloat {
+        sizeClass == .compact ? 14 : 16
+    }
+    
+    private var playIconSize: CGFloat {
+        sizeClass == .compact ? 18 : 20
+    }
+    
+    private var horizontalPadding: CGFloat {
+        sizeClass == .compact ? 12 : 16
+    }
+    
+    private var buttonSpacing: CGFloat {
+        sizeClass == .compact ? 8 : 12
+    }
+    
+    var body: some View {
+        VStack(spacing: sizeClass == .compact ? 8 : 12) {
+            // Top row: Artwork and Controls
+            HStack(spacing: sizeClass == .compact ? 12 : 16) {
+                // Album artwork - responsive size
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(width: artworkSize, height: artworkSize)
+                    
+                    feedArtworkView
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                
+                Spacer()
+                
+                // Control buttons - compact layout
+                HStack(spacing: buttonSpacing) {
+                    // Skip backward 15s
+                    Button(action: podcastPlayer.skipBackward) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.15))
+                                .frame(width: buttonSize, height: buttonSize)
+                            
+                            Image(systemName: "gobackward.15")
+                                .font(.system(size: iconSize, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                    }
+                    
+                    // Main play/pause button
+                    Button(action: podcastPlayer.togglePlayPause) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.blue)
+                                .frame(width: playButtonSize, height: playButtonSize)
+                            
+                            Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: playIconSize, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                    
+                    // Skip forward 30s
+                    Button(action: podcastPlayer.skipForward) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.15))
+                                .frame(width: buttonSize, height: buttonSize)
+                            
+                            Image(systemName: "goforward.30")
+                                .font(.system(size: iconSize, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                    }
+                    
+                    // List button (only show if provided)
+                    if onListButtonTap != nil {
+                        Button(action: {
+                            onListButtonTap?()
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white.opacity(0.15))
+                                    .frame(width: buttonSize, height: buttonSize)
+                                
+                                Image(systemName: "list.bullet")
+                                    .font(.system(size: iconSize, weight: .medium))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                    }
+                    
+                    // Close button (only show if provided)
+                    if onCloseButtonTap != nil {
+                        Button(action: {
+                            onCloseButtonTap?()
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white.opacity(0.15))
+                                    .frame(width: buttonSize, height: buttonSize)
+                                
+                                Image(systemName: "xmark")
+                                    .font(.system(size: iconSize, weight: .medium))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, horizontalPadding)
+            .padding(.top, sizeClass == .compact ? 8 : 12)
+            
+            // Titles section - full width
+            VStack(alignment: .leading, spacing: 4) {
+                Text(currentEpisode.title)
+                    .font(.system(size: sizeClass == .compact ? 14 : 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(nil) // Allow unlimited lines for full display
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Text(currentFeed.title)
+                    .font(.system(size: sizeClass == .compact ? 12 : 14, weight: .regular))
+                    .foregroundColor(.gray)
+                    .lineLimit(nil) // Allow unlimited lines for full display
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, horizontalPadding)
+            
+            // Progress slider - compact and responsive
+            VStack(spacing: sizeClass == .compact ? 4 : 6) {
+                // Custom slider
+                GeometryReader { geometry in
+                    let progress = isDragging ? sliderProgress : (podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0)
+                    let thumbSize: CGFloat = sizeClass == .compact ? 16 : 20
+                    
+                    ZStack(alignment: .leading) {
+                        // Track background
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.gray.opacity(0.4))
+                            .frame(height: sizeClass == .compact ? 3 : 4)
+                        
+                        // Progress fill
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.blue)
+                            .frame(width: max(0, min(geometry.size.width, geometry.size.width * progress)), height: sizeClass == .compact ? 3 : 4)
+                        
+                        // Thumb
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: thumbSize, height: thumbSize)
+                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                            .offset(x: max(0, min(geometry.size.width - thumbSize, (geometry.size.width - thumbSize) * progress)))
+                    }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                isDragging = true
+                                let progress = max(0, min(1, value.location.x / geometry.size.width))
+                                sliderProgress = progress
+                            }
+                            .onEnded { _ in
+                                let newTime = sliderProgress * podcastPlayer.duration
+                                podcastPlayer.seek(to: newTime)
+                                isDragging = false
+                            }
+                    )
+                }
+                .frame(height: sizeClass == .compact ? 16 : 20)
+                .padding(.horizontal, horizontalPadding)
+                
+                // Time display
+                HStack {
+                    Text(formatTime(isDragging ? sliderProgress * podcastPlayer.duration : podcastPlayer.currentTime))
+                        .font(.system(size: sizeClass == .compact ? 11 : 12, weight: .medium))
+                        .foregroundColor(.gray)
+                    
+                    Spacer()
+                    
+                    Text(formatTime(podcastPlayer.duration))
+                        .font(.system(size: sizeClass == .compact ? 11 : 12, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                .padding(.horizontal, horizontalPadding)
+            }
+            .padding(.top, sizeClass == .compact ? 6 : 8)
+        }
+        .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Match radio player background
+        .padding(.bottom, sizeClass == .compact ? 8 : 12)
+        .onAppear {
+            sliderProgress = podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0
+        }
+        .onChange(of: podcastPlayer.currentTime) { _ in
+            if !isDragging {
+                sliderProgress = podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0
+            }
+        }
+    }
+
+    
+    @ViewBuilder
+    private var feedArtworkView: some View {
+        // Priority: Direct image data > Base64 icon data > default
+        if let imageData = currentFeed.imageData, !imageData.isEmpty {
+            if let image = UIImage(data: imageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+            } else {
+                defaultPodcastIcon
+            }
+        } else if let iconData = currentFeed.iconData, !iconData.isEmpty {
+            if let data = Data(base64Encoded: iconData), let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+            } else {
+                defaultPodcastIcon
+            }
+        } else {
+            defaultPodcastIcon
+        }
+    }
+    
+    @ViewBuilder
+    private var defaultPodcastIcon: some View {
+        ZStack {
+            Color.gray.opacity(0.3)
+            
+            Image(systemName: "podcast")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(.white)
+        }
+    }
+    
+    private func formatTime(_ time: TimeInterval) -> String {
+        guard time.isFinite && time >= 0 else { return "0:00" }
+        
+        let hours = Int(time) / 3600
+        let minutes = (Int(time) % 3600) / 60
+        let seconds = Int(time) % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+}
+
+// MARK: - Mini Podcast Player View (Full Player Style)
+
+typealias MiniPodcastPlayerView = UnifiedPodcastPlayerView
+
+struct CompactPodcastPlayerView: View {
+    let currentEpisode: PodcastEpisode
+    let currentFeed: PodcastFeed
+    @ObservedObject var podcastPlayer: PodcastPlayer
+    @ObservedObject var viewModel: PodcastViewModel
+    @Binding var selectedPodcast: PodcastFeed?
+    var onListButtonTap: (() -> Void)?
+    var onCloseButtonTap: (() -> Void)?
+    
+    var body: some View {
+        UnifiedPodcastPlayerView(
+            currentEpisode: currentEpisode,
+            currentFeed: currentFeed,
+            podcastPlayer: podcastPlayer,
+            viewModel: viewModel,
+            selectedPodcast: .constant(selectedPodcast),
+            onListButtonTap: onListButtonTap,
+            onCloseButtonTap: onCloseButtonTap
+        )
+    }
+
 }
 
 // MARK: - Currently Playing View

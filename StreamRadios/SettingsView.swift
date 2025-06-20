@@ -70,25 +70,24 @@ struct SettingsView: View {
                 }
                 
                 // Fixed Mini Player
-                if podcastPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                    MiniPlayerView(
+                if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+                    MiniPodcastPlayerView(
+                        currentEpisode: currentEpisode,
+                        currentFeed: currentFeed,
                         podcastPlayer: podcastPlayer,
                         viewModel: podcastViewModel,
                         selectedPodcast: $selectedPodcast,
                         onListButtonTap: {
-                            if let currentFeed = podcastPlayer.currentFeed {
-                                selectedPodcast = currentFeed
-                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                showPodcastPlayerSheet = true
-                            }
+                            selectedPodcast = currentFeed
+                            podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                            scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                            showPodcastPlayerSheet = true
                         },
                         onCloseButtonTap: {
                             podcastPlayer.pause()
                             podcastPlayer.currentEpisode = nil
                             podcastPlayer.currentFeed = nil
-                        },
-                        isPlaylistButtonDisabled: false
+                        }
                     )
                     .transition(.move(edge: .bottom))
                     .frame(height: miniPlayerHeight)

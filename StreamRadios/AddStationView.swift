@@ -254,28 +254,29 @@ struct AddStationView: View {
     
     @ViewBuilder
     private func FloatingMiniPlayer() -> some View {
-        MiniPlayerView(
-            podcastPlayer: podcastPlayer,
-            viewModel: podcastViewModel,
-            selectedPodcast: $selectedPodcast,
-            onListButtonTap: {
-                if let currentFeed = podcastPlayer.currentFeed {
+        if let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+            MiniPodcastPlayerView(
+                currentEpisode: currentEpisode,
+                currentFeed: currentFeed,
+                podcastPlayer: podcastPlayer,
+                viewModel: podcastViewModel,
+                selectedPodcast: $selectedPodcast,
+                onListButtonTap: {
                     selectedPodcast = currentFeed
                     podcastViewModel.fetchAllEpisodes(for: currentFeed)
                     scrollToEpisodeID = podcastPlayer.currentEpisode?.id
                     activeSheet = .podcastPlayer(podcast: currentFeed)
+                },
+                onCloseButtonTap: {
+                    podcastPlayer.pause()
+                    podcastPlayer.currentEpisode = nil
+                    podcastPlayer.currentFeed = nil
                 }
-            },
-            onCloseButtonTap: {
-                podcastPlayer.pause()
-                podcastPlayer.currentEpisode = nil
-                podcastPlayer.currentFeed = nil
-            },
-            isPlaylistButtonDisabled: false
-        )
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
     
     // MARK: - Helper Methods

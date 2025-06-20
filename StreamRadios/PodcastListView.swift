@@ -112,23 +112,22 @@ struct PodcastListView: View {
                    .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
                    
                    // Fixed Mini Player
-                   if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                       MiniPlayerView(
+                   if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+                       MiniPodcastPlayerView(
+                           currentEpisode: currentEpisode,
+                           currentFeed: currentFeed,
                            podcastPlayer: podcastPlayer,
                            viewModel: viewModel,
                            selectedPodcast: $selectedPodcast,
                            onListButtonTap: {
-                               if let currentFeed = podcastPlayer.currentFeed {
-                                   selectedPodcast = currentFeed
-                                   scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                               }
+                               selectedPodcast = currentFeed
+                               scrollToEpisodeID = podcastPlayer.currentEpisode?.id
                            },
                            onCloseButtonTap: {
                                podcastPlayer.pause()
                                podcastPlayer.currentEpisode = nil
                                podcastPlayer.currentFeed = nil
-                           },
-                           isPlaylistButtonDisabled: false
+                           }
                        )
                        .transition(.move(edge: .bottom))
                    }
@@ -397,11 +396,19 @@ struct PodcastRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 HStack(alignment: .top, spacing: 12) {
-                    PodcastIconView(iconData: feed.iconData, imageData: feed.imageData, artworkUrl: feed.artworkUrl)
-                        .frame(width: iconSize, height: iconSize)
-                        .onTapGesture {
-                            onTap()
-                        }
+                                         AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } placeholder: {
+                        Image(systemName: "music.note")
+                            .foregroundColor(.gray)
+                            .frame(width: 60, height: 60)
+                    }
+                    .frame(width: iconSize, height: iconSize)
+                    .onTapGesture {
+                        onTap()
+                    }
                 
                 VStack(alignment: .leading, spacing: 4) {
                     if isExpanded {
@@ -1240,11 +1247,18 @@ struct PodcastPlayerView: View {
             // Feed Info Area
             GeometryReader { geometry in
                 HStack(alignment: .top, spacing: 16) {
-                    FeedImageView(feed: feed)
-                        .frame(width: min(120, geometry.size.width * 0.3))
-                        .aspectRatio(contentMode: .fit)
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
+                    AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } placeholder: {
+                        Image(systemName: "music.note")
+                            .foregroundColor(.gray)
+                            .frame(width: 60, height: 60)
+                    }
+                    .frame(width: min(120, geometry.size.width * 0.3))
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
                     
                     VStack(alignment: .leading, spacing: 8) {
                         ScrollView {
@@ -1423,17 +1437,20 @@ struct PodcastPlayerView: View {
     private var miniPlayer: some View {
         VStack(spacing: 0) {
             Spacer()
-            MiniPlayerView(
-                podcastPlayer: podcastPlayer,
-                viewModel: viewModel,
-                selectedPodcast: $selectedPodcast,
-                onListButtonTap: handleMiniPlayerListTap,
-                onCloseButtonTap: handleMiniPlayerClose,
-                isPlaylistButtonDisabled: true
-            )
-            .padding(.top, 15)
-            .padding(.bottom, 20)
-            .background(Color(UIColor.systemBackground))
+            if let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+                MiniPodcastPlayerView(
+                    currentEpisode: currentEpisode,
+                    currentFeed: currentFeed,
+                    podcastPlayer: podcastPlayer,
+                    viewModel: viewModel,
+                    selectedPodcast: $selectedPodcast,
+                    onListButtonTap: handleMiniPlayerListTap,
+                    onCloseButtonTap: handleMiniPlayerClose
+                )
+                .padding(.top, 15)
+                .padding(.bottom, 20)
+                .background(Color(UIColor.systemBackground))
+            }
         }
         .edgesIgnoringSafeArea(.bottom)
     }
