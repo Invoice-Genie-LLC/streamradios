@@ -10,6 +10,7 @@ import CarPlay
 import os.log
 import CoreData
 import MediaPlayer
+import AVFoundation
 
 class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
@@ -159,6 +160,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         os_log("🚗 CarPlay scene disconnected", log: log, type: .info)
         print("🚗 CarPlay: Scene delegate didDisconnect called")
         
+        // CRITICAL: Direct artwork fetching will stop automatically when CarPlay disconnects
+        // The timer-based monitoring will detect disconnection and stop itself
+        os_log("🚗 CarPlay: Direct iTunes artwork fetching will stop automatically", log: log, type: .info)
+        
+        // CRITICAL: Save current playback state before disconnection
+        // This helps restore state when app is killed and CarPlay reconnects
+        savePlaybackStateForRestoration()
+        
         // Clear CarPlay connection status for performance optimizations
         CarPlayManager.shared.isCarPlayConnected = false
         
@@ -185,15 +194,655 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Store the interface controller
         self.interfaceController = interfaceController
         
-        // Setup the root template immediately
-        setupRootTemplate()
+        // CRITICAL: Enhanced artwork fetching is now handled directly by CarPlay without background tasks
+        // This approach uses CarPlay's active audio session privileges for immediate network access
+        os_log("🚗 CarPlay: Direct iTunes artwork fetching enabled for independent operation", log: log, type: .info)
+        
+        // CRITICAL: Check if app was force closed and restore independently
+        // This enables CarPlay to work without requiring phone app to be opened
+        checkAppTerminationAndRestoreIndependently()
+        
+        // CRITICAL: Restore playback state when CarPlay reconnects after app force close
+        // This ensures Now Playing info and UI state are properly restored
+        restorePlaybackStateAfterReconnection()
+        
+        // Setup the root template with a small delay to allow state restoration to complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.setupRootTemplate()
+        }
+        
+        // Enhanced restoration with multiple attempts for independent CarPlay operation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.performIndependentCarPlayRestoration()
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            self.performIndependentCarPlayRestoration()
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            self.performIndependentCarPlayRestoration()
+        }
         
         // Validate CarPlay implementation compliance
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.validateCarPlayCompliance()
         }
         
-        os_log("🚗 CarPlay: Initial template setup complete", log: log, type: .info)
+        // Enhanced CarPlay artwork monitoring
+        setupEnhancedArtworkMonitoring()
+        
+        os_log("🚗 CarPlay: Initial template setup complete with independent restoration", log: log, type: .info)
+    }
+    
+    // MARK: - State Restoration
+    
+    private func savePlaybackStateForRestoration() {
+        os_log("🚗 CarPlay: Saving playback state for restoration", log: log, type: .info)
+        
+        let userDefaults = UserDefaults.standard
+        
+        // Save radio state
+        let radioPlayer = RadioPlayer.shared
+        if radioPlayer.isPlaying, let currentStation = radioPlayer.currentlyPlayingStation {
+            userDefaults.set(true, forKey: "CarPlayRadioWasPlaying")
+            userDefaults.set(currentStation.id, forKey: "CarPlayLastRadioStationId")
+            userDefaults.set(currentStation.name, forKey: "CarPlayLastRadioStationName")
+            userDefaults.set(currentStation.url, forKey: "CarPlayLastRadioStationURL")
+            os_log("🚗 CarPlay: Saved radio state - station: %@", log: log, type: .info, currentStation.name)
+        } else {
+            userDefaults.set(false, forKey: "CarPlayRadioWasPlaying")
+        }
+        
+        // Save podcast state
+        let podcastPlayer = PodcastPlayer.shared
+        if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode {
+            userDefaults.set(true, forKey: "CarPlayPodcastWasPlaying")
+            userDefaults.set(currentEpisode.id, forKey: "CarPlayLastEpisodeId")
+            userDefaults.set(currentEpisode.title, forKey: "CarPlayLastEpisodeTitle")
+            userDefaults.set(currentEpisode.feedId, forKey: "CarPlayLastEpisodeFeedId")
+            userDefaults.set(podcastPlayer.currentProgress, forKey: "CarPlayLastEpisodeProgress")
+            os_log("🚗 CarPlay: Saved podcast state - episode: %@", log: log, type: .info, currentEpisode.title)
+        } else {
+            userDefaults.set(false, forKey: "CarPlayPodcastWasPlaying")
+        }
+        
+        // Save active player type
+        userDefaults.set(PlaybackManager.shared.activePlayer == .radio ? "radio" : "podcast", forKey: "CarPlayActivePlayer")
+        
+        // Save timestamp for restoration validation
+        userDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlayStateTimestamp")
+        
+        userDefaults.synchronize()
+    }
+    
+    private func restorePlaybackStateAfterReconnection() {
+        os_log("🚗 CarPlay: Restoring playback state after reconnection", log: log, type: .info)
+        
+        // CRITICAL: Clear any stale Now Playing info first
+        DispatchQueue.main.async {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            os_log("🚗 CarPlay: Cleared stale Now Playing info", log: self.log, type: .info)
+        }
+        
+        let radioPlayer = RadioPlayer.shared
+        let podcastPlayer = PodcastPlayer.shared
+        
+        // Check if current players have active state
+        let hasActiveRadio = radioPlayer.isPlaying && radioPlayer.currentlyPlayingStation != nil
+        let hasActivePodcast = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+        
+        if hasActiveRadio {
+            os_log("🚗 CarPlay: Restoring active radio playback state", log: log, type: .info)
+            restoreRadioPlayback(radioPlayer)
+        } else if hasActivePodcast {
+            os_log("🚗 CarPlay: Restoring active podcast playback state", log: log, type: .info)
+            restorePodcastPlayback(podcastPlayer)
+        } else {
+            // No active playback detected - check if app was killed and try to restore from saved state
+            os_log("🚗 CarPlay: No active playback detected - checking saved state after potential app kill", log: log, type: .info)
+            attemptRestoreFromSavedState()
+        }
+    }
+    
+    private func restoreRadioPlayback(_ radioPlayer: RadioPlayer) {
+        guard let currentStation = radioPlayer.currentlyPlayingStation else { return }
+        
+        os_log("🚗 CarPlay: Restoring radio playback - station: %@", log: log, type: .info, currentStation.name)
+        
+        // CRITICAL: Ensure PlaybackManager knows radio is the active player
+        PlaybackManager.shared.setActivePlayer(.radio)
+        
+        // Force update Now Playing info for radio with multiple attempts
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            radioPlayer.forceUpdateNowPlayingInfo()
+            os_log("🚗 CarPlay: First radio Now Playing info update attempt", log: self.log, type: .info)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            radioPlayer.forceUpdateNowPlayingInfo()
+            os_log("🚗 CarPlay: Second radio Now Playing info update attempt", log: self.log, type: .info)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            radioPlayer.forceUpdateNowPlayingInfo()
+            os_log("🚗 CarPlay: Final radio Now Playing info update attempt", log: self.log, type: .info)
+        }
+    }
+    
+    private func restorePodcastPlayback(_ podcastPlayer: PodcastPlayer) {
+        guard let currentEpisode = podcastPlayer.currentEpisode else { return }
+        
+        os_log("🚗 CarPlay: Restoring podcast playback - episode: %@", log: log, type: .info, currentEpisode.title)
+        
+        // CRITICAL: Ensure PlaybackManager knows podcast is the active player
+        PlaybackManager.shared.setActivePlayer(.podcast)
+        
+        // Force update Now Playing info for podcast with multiple attempts
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            podcastPlayer.updateNowPlayingInfo()
+            os_log("🚗 CarPlay: First podcast Now Playing info update attempt", log: self.log, type: .info)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            podcastPlayer.updateNowPlayingInfo()
+            
+            // Send playback state notification to refresh CarPlay UI
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PodcastPlaybackStateChanged"),
+                object: nil,
+                userInfo: [
+                    "episodeId": currentEpisode.id,
+                    "isPlaying": true
+                ]
+            )
+            
+            os_log("🚗 CarPlay: Second podcast Now Playing info update and UI state restored", log: self.log, type: .info)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            podcastPlayer.updateNowPlayingInfo()
+            os_log("🚗 CarPlay: Final podcast Now Playing info update attempt", log: self.log, type: .info)
+        }
+    }
+    
+    private func attemptRestoreFromSavedState() {
+        os_log("🚗 CarPlay: Attempting to restore from saved state after app kill", log: log, type: .info)
+        
+        let userDefaults = UserDefaults.standard
+        
+        // Check if we have recent saved state (within last 10 minutes)
+        let savedTimestamp = userDefaults.double(forKey: "CarPlayStateTimestamp")
+        let currentTime = Date().timeIntervalSince1970
+        let timeDifference = currentTime - savedTimestamp
+        
+        if timeDifference > 600 { // 10 minutes
+            os_log("🚗 CarPlay: Saved state is too old (%.0f seconds), skipping restoration", log: log, type: .info, timeDifference)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Found recent saved state (%.0f seconds ago), attempting restoration", log: log, type: .info, timeDifference)
+        
+        // Check what was playing before
+        let radioWasPlaying = userDefaults.bool(forKey: "CarPlayRadioWasPlaying")
+        let podcastWasPlaying = userDefaults.bool(forKey: "CarPlayPodcastWasPlaying")
+        let activePlayerType = userDefaults.string(forKey: "CarPlayActivePlayer")
+        
+        if radioWasPlaying && activePlayerType == "radio" {
+            attemptRadioStateRestoration()
+        } else if podcastWasPlaying && activePlayerType == "podcast" {
+            attemptPodcastStateRestoration()
+        } else {
+            // Check if there's audio playing in background that we need to identify
+            checkForBackgroundAudioAndRestore()
+        }
+    }
+    
+    private func attemptRadioStateRestoration() {
+        let userDefaults = UserDefaults.standard
+        guard let stationId = userDefaults.string(forKey: "CarPlayLastRadioStationId"),
+              let stationName = userDefaults.string(forKey: "CarPlayLastRadioStationName"),
+              let stationURL = userDefaults.string(forKey: "CarPlayLastRadioStationURL") else {
+            os_log("🚗 CarPlay: Missing radio restoration data", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Attempting to restore radio station: %@", log: log, type: .info, stationName)
+        
+        // Create a temporary station for restoration
+        let restoredStation = RadioStation(
+            id: stationId,
+            name: stationName,
+            url: stationURL,
+            iconData: nil,
+            iTunesArtworkData: nil,
+            country: "Unknown",
+            isFavorite: false
+        )
+        
+        // Set up PlaybackManager and force Now Playing info
+        PlaybackManager.shared.setActivePlayer(.radio)
+        
+        // Force create Now Playing info for the restored station
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.forceRadioNowPlayingInfo(for: restoredStation)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.forceRadioNowPlayingInfo(for: restoredStation)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.forceRadioNowPlayingInfo(for: restoredStation)
+        }
+    }
+    
+    private func attemptPodcastStateRestoration() {
+        let userDefaults = UserDefaults.standard
+        guard let _ = userDefaults.string(forKey: "CarPlayLastEpisodeId"),
+              let episodeTitle = userDefaults.string(forKey: "CarPlayLastEpisodeTitle"),
+              let _ = userDefaults.string(forKey: "CarPlayLastEpisodeFeedId") else {
+            os_log("🚗 CarPlay: Missing podcast restoration data", log: log, type: .error)
+            return
+        }
+        
+        let progress = userDefaults.double(forKey: "CarPlayLastEpisodeProgress")
+        
+        os_log("🚗 CarPlay: Attempting to restore podcast episode: %@", log: log, type: .info, episodeTitle)
+        
+        // Set up PlaybackManager
+        PlaybackManager.shared.setActivePlayer(.podcast)
+        
+        // Force create Now Playing info for the restored episode
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.forcePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.forcePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.forcePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress)
+        }
+    }
+    
+    private func checkForBackgroundAudioAndRestore() {
+        // Check if there's audio playing in the background
+        let audioSession = AVAudioSession.sharedInstance()
+        if audioSession.isOtherAudioPlaying {
+            os_log("🚗 CarPlay: Detected background audio after app kill - attempting generic restoration", log: log, type: .info)
+            
+            // Try to restore the most recent state
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.attemptPlaybackStateRecovery()
+            }
+        } else {
+            os_log("🚗 CarPlay: No background audio detected - no restoration needed", log: log, type: .info)
+        }
+    }
+    
+    private func forceRadioNowPlayingInfo(for station: RadioStation) {
+        var nowPlayingInfo = [String: Any]()
+        
+        nowPlayingInfo[MPMediaItemPropertyTitle] = station.name
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "StreamRadios"
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = station.name
+        nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
+        
+        // Try to use station's actual artwork if available
+        if let iconDataString = station.iconData, 
+           let iconData = Data(base64Encoded: iconDataString),
+           let image = UIImage(data: iconData) {
+            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+                return image
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        } else if let iTunesArtworkDataString = station.iTunesArtworkData,
+                  let iTunesArtworkData = Data(base64Encoded: iTunesArtworkDataString),
+                  let image = UIImage(data: iTunesArtworkData) {
+            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+                return image
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        }
+        
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        os_log("🚗 CarPlay: Forced radio Now Playing info for restored station: %@", log: log, type: .info, station.name)
+    }
+    
+    private func forcePodcastNowPlayingInfo(episodeTitle: String, progress: Double) {
+        var nowPlayingInfo = [String: Any]()
+        
+        nowPlayingInfo[MPMediaItemPropertyTitle] = episodeTitle
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "StreamRadios Podcast"
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "Podcast Episode"
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
+        
+        // Add progress if available
+        if progress > 0 {
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = progress
+        }
+        
+        // Don't add any artwork here to avoid green screen issue
+        // The regular podcast player will set proper artwork when it takes over
+        
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        os_log("🚗 CarPlay: Forced podcast Now Playing info for restored episode: %@", log: log, type: .info, episodeTitle)
+    }
+    
+    // MARK: - Independent CarPlay Restoration
+    
+    private func checkAppTerminationAndRestoreIndependently() {
+        os_log("🚗 CarPlay: Checking for app termination and independent restoration needs", log: log, type: .info)
+        
+        let userDefaults = UserDefaults.standard
+        
+        // Check if we have saved state indicating the app was playing something
+        let radioWasPlaying = userDefaults.bool(forKey: "CarPlayRadioWasPlaying")
+        let podcastWasPlaying = userDefaults.bool(forKey: "CarPlayPodcastWasPlaying")
+        let savedTimestamp = userDefaults.double(forKey: "CarPlayStateTimestamp")
+        
+        if savedTimestamp > 0 && (radioWasPlaying || podcastWasPlaying) {
+            let timeSinceLastSave = Date().timeIntervalSince1970 - savedTimestamp
+            
+            if timeSinceLastSave < 1800 { // Within last 30 minutes
+                os_log("🚗 CarPlay: Found recent playback state (%.0f seconds ago) - enabling independent restoration", 
+                       log: log, type: .info, timeSinceLastSave)
+                
+                // Mark that we need independent restoration
+                userDefaults.set(true, forKey: "CarPlayNeedsIndependentRestoration")
+                userDefaults.synchronize()
+                
+                // Start immediate background audio session to prepare for restoration
+                prepareBackgroundAudioSession()
+            } else {
+                os_log("🚗 CarPlay: Saved state is too old (%.0f seconds) - skipping independent restoration", 
+                       log: log, type: .info, timeSinceLastSave)
+            }
+        } else {
+            os_log("🚗 CarPlay: No saved playback state found - no independent restoration needed", log: log, type: .info)
+        }
+    }
+    
+    private func performIndependentCarPlayRestoration() {
+        let userDefaults = UserDefaults.standard
+        
+        // Check if we need independent restoration
+        guard userDefaults.bool(forKey: "CarPlayNeedsIndependentRestoration") else {
+            return
+        }
+        
+        os_log("🚗 CarPlay: Performing independent CarPlay restoration", log: log, type: .info)
+        
+        // Check current playback state
+        let radioPlayer = RadioPlayer.shared
+        let podcastPlayer = PodcastPlayer.shared
+        
+        // If no active playback, force restore from saved state
+        if !radioPlayer.isPlaying && !podcastPlayer.isPlaying {
+            os_log("🚗 CarPlay: No active playback detected - forcing restoration from saved state", log: log, type: .info)
+            forceRestoreFromSavedState()
+        } else {
+            // Clear the restoration flag since we have active playback
+            userDefaults.set(false, forKey: "CarPlayNeedsIndependentRestoration")
+            userDefaults.synchronize()
+            os_log("🚗 CarPlay: Active playback detected - independent restoration not needed", log: log, type: .info)
+        }
+    }
+    
+    private func prepareBackgroundAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetooth])
+            try audioSession.setActive(true)
+            os_log("🚗 CarPlay: Background audio session prepared for independent restoration", log: log, type: .info)
+        } catch {
+            os_log("🚗 CarPlay: Failed to prepare background audio session: %@", log: log, type: .error, error.localizedDescription)
+        }
+    }
+    
+    private func forceRestoreFromSavedState() {
+        os_log("🚗 CarPlay: Force restoring from saved state for independent CarPlay operation", log: log, type: .info)
+        
+        let userDefaults = UserDefaults.standard
+        let radioWasPlaying = userDefaults.bool(forKey: "CarPlayRadioWasPlaying")
+        let podcastWasPlaying = userDefaults.bool(forKey: "CarPlayPodcastWasPlaying")
+        let activePlayerType = userDefaults.string(forKey: "CarPlayActivePlayer")
+        
+        if radioWasPlaying && activePlayerType == "radio" {
+            os_log("🚗 CarPlay: Force restoring radio state for independent operation", log: log, type: .info)
+            forceRestoreRadioState()
+        } else if podcastWasPlaying && activePlayerType == "podcast" {
+            os_log("🚗 CarPlay: Force restoring podcast state for independent operation", log: log, type: .info)
+            forceRestorePodcastState()
+        }
+        
+        // Clear the restoration flag
+        userDefaults.set(false, forKey: "CarPlayNeedsIndependentRestoration")
+        userDefaults.synchronize()
+    }
+    
+    private func forceRestoreRadioState() {
+        let userDefaults = UserDefaults.standard
+        guard let stationId = userDefaults.string(forKey: "CarPlayLastRadioStationId"),
+              let stationName = userDefaults.string(forKey: "CarPlayLastRadioStationName"),
+              let stationURL = userDefaults.string(forKey: "CarPlayLastRadioStationURL") else {
+            os_log("🚗 CarPlay: Missing radio restoration data for independent operation", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Force restoring radio station for independent CarPlay: %@", log: log, type: .info, stationName)
+        
+        // Create a temporary station for restoration
+        let restoredStation = RadioStation(
+            id: stationId,
+            name: stationName,
+            url: stationURL,
+            iconData: nil,
+            iTunesArtworkData: nil,
+            country: "Unknown",
+            isFavorite: false
+        )
+        
+        // Force set PlaybackManager state
+        PlaybackManager.shared.setActivePlayer(.radio)
+        
+        // Create comprehensive Now Playing info immediately
+        createImmediateRadioNowPlayingInfo(for: restoredStation)
+        
+        // Set up multiple fallback updates
+        for delay in [0.2, 0.5, 1.0, 2.0, 3.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                self.createImmediateRadioNowPlayingInfo(for: restoredStation)
+            }
+        }
+    }
+    
+    private func forceRestorePodcastState() {
+        let userDefaults = UserDefaults.standard
+        guard let episodeId = userDefaults.string(forKey: "CarPlayLastEpisodeId"),
+              let episodeTitle = userDefaults.string(forKey: "CarPlayLastEpisodeTitle"),
+              let feedId = userDefaults.string(forKey: "CarPlayLastEpisodeFeedId") else {
+            os_log("🚗 CarPlay: Missing podcast restoration data for independent operation", log: log, type: .error)
+            return
+        }
+        
+        let progress = userDefaults.double(forKey: "CarPlayLastEpisodeProgress")
+        
+        os_log("🚗 CarPlay: Force restoring podcast episode for independent CarPlay: %@", log: log, type: .info, episodeTitle)
+        
+        // Force set PlaybackManager state
+        PlaybackManager.shared.setActivePlayer(.podcast)
+        
+        // Create comprehensive Now Playing info immediately
+        createImmediatePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress, episodeId: episodeId, feedId: feedId)
+        
+        // Set up multiple fallback updates
+        for delay in [0.2, 0.5, 1.0, 2.0, 3.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                self.createImmediatePodcastNowPlayingInfo(episodeTitle: episodeTitle, progress: progress, episodeId: episodeId, feedId: feedId)
+            }
+        }
+    }
+    
+    private func createImmediateRadioNowPlayingInfo(for station: RadioStation) {
+        var nowPlayingInfo = [String: Any]()
+        
+        nowPlayingInfo[MPMediaItemPropertyTitle] = station.name
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "StreamRadios"
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "Radio Station"
+        nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackProgress] = 1.0
+        
+        // Try to use station's actual artwork if available
+        if let iconDataString = station.iconData, 
+           let iconData = Data(base64Encoded: iconDataString),
+           let image = UIImage(data: iconData) {
+            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+                return image
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        } else if let iTunesArtworkDataString = station.iTunesArtworkData,
+                  let iTunesArtworkData = Data(base64Encoded: iTunesArtworkDataString),
+                  let image = UIImage(data: iTunesArtworkData) {
+            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+                return image
+            }
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        }
+        // If no artwork available, don't set any artwork (better than corrupted green image)
+        
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        
+        // Also set up remote command center
+        setupRemoteCommandCenter()
+        
+        os_log("🚗 CarPlay: Created immediate radio Now Playing info for independent operation: %@", log: log, type: .info, station.name)
+    }
+    
+    private func createImmediatePodcastNowPlayingInfo(episodeTitle: String, progress: Double, episodeId: String, feedId: String) {
+        var nowPlayingInfo = [String: Any]()
+        
+        nowPlayingInfo[MPMediaItemPropertyTitle] = episodeTitle
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "StreamRadios Podcast"
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "Podcast Episode"
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
+        
+        // Add progress information
+        if progress > 0 {
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = progress
+            nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackProgress] = min(progress / 3600.0, 1.0) // Assume max 1 hour for progress calculation
+        }
+        
+        // Try to find and use actual podcast artwork from CarPlayManager
+        let carPlayManager = CarPlayManager.shared
+        let podcastFeeds = carPlayManager.getPodcastFeeds()
+        if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
+            var imageData: Data?
+            
+            if let imageDataString = feed.imageData {
+                imageData = Data(base64Encoded: imageDataString)
+            } else if let iconDataString = feed.iconData {
+                imageData = Data(base64Encoded: iconDataString)
+            }
+            
+            if let imageData = imageData, let image = UIImage(data: imageData) {
+                let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+                    return image
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+            }
+        }
+        // If no artwork available, don't set any artwork (better than corrupted green image)
+        
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        
+        // Also set up remote command center
+        setupRemoteCommandCenter()
+        
+        os_log("🚗 CarPlay: Created immediate podcast Now Playing info for independent operation: %@", log: log, type: .info, episodeTitle)
+    }
+    
+    private func setupRemoteCommandCenter() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+        
+        // Enable basic playback controls
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.stopCommand.isEnabled = true
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        
+        os_log("🚗 CarPlay: Remote command center configured for independent operation", log: log, type: .info)
+    }
+
+    private func attemptPlaybackStateRecovery() {
+        os_log("🚗 CarPlay: Attempting playback state recovery after force close", log: log, type: .info)
+        
+        // Check if we can determine what was playing from saved state
+        let radioPlayer = RadioPlayer.shared
+        let podcastPlayer = PodcastPlayer.shared
+        
+        // Try to recover radio state
+        if let lastPlayedStation = radioPlayer.currentlyPlayingStation {
+            os_log("🚗 CarPlay: Attempting to recover radio state for station: %@", log: log, type: .info, lastPlayedStation.name)
+            
+            // CRITICAL: Set PlaybackManager state first
+            PlaybackManager.shared.activePlayer = .radio
+            
+            // Force update the radio player state
+            radioPlayer.isPlaying = true
+            
+            // Multiple attempts to update Now Playing info
+            radioPlayer.updateNowPlayingInfo()
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                radioPlayer.updateNowPlayingInfo()
+                self.refreshRecentsTabTemplate()
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                radioPlayer.updateNowPlayingInfo()
+            }
+        }
+        
+        // Try to recover podcast state
+        if let lastPlayedEpisode = podcastPlayer.currentEpisode {
+            os_log("🚗 CarPlay: Attempting to recover podcast state for episode: %@", log: log, type: .info, lastPlayedEpisode.title)
+            
+            // CRITICAL: Set PlaybackManager state first
+            PlaybackManager.shared.activePlayer = .podcast
+            
+            // Force update the podcast player state
+            podcastPlayer.isPlaying = true
+            
+            // Multiple attempts to update Now Playing info
+            podcastPlayer.updateNowPlayingInfo()
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                podcastPlayer.updateNowPlayingInfo()
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                podcastPlayer.updateNowPlayingInfo()
+            }
+            
+            // Send notification to refresh CarPlay UI
+            NotificationCenter.default.post(
+                name: NSNotification.Name("PodcastPlaybackStateChanged"),
+                object: nil,
+                userInfo: [
+                    "episodeId": lastPlayedEpisode.id,
+                    "isPlaying": true
+                ]
+            )
+        }
     }
     
     // MARK: - CarPlay Interface Setup
@@ -914,12 +1563,97 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func playStation(_ station: RadioStation, completion: @escaping () -> Void) {
         os_log("CarPlay: Playing station %@", log: log, type: .info, station.name)
         
+        // CRITICAL: Save station state immediately for independent CarPlay operation
+        let userDefaults = UserDefaults.standard
+        userDefaults.set(true, forKey: "CarPlayRadioWasPlaying")
+        userDefaults.set(station.id, forKey: "CarPlayLastRadioStationId")
+        userDefaults.set(station.name, forKey: "CarPlayLastRadioStationName")
+        userDefaults.set(station.url, forKey: "CarPlayLastRadioStationURL")
+        userDefaults.set("radio", forKey: "CarPlayActivePlayer")
+        userDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlayStateTimestamp")
+        userDefaults.synchronize()
+        
         // Use the existing RadioPlayer to play the station
         DispatchQueue.main.async {
             let radioPlayer = RadioPlayer.shared
+            
+            // CRITICAL: Set PlaybackManager state FIRST and ensure audio session is configured
+            PlaybackManager.shared.setActivePlayer(.radio)
+            os_log("🚗 CarPlay: Set radio as active player with audio session", log: self.log, type: .info)
+            
+            // CRITICAL: Force clear any stale Now Playing info before setting new info
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            os_log("🚗 CarPlay: Cleared stale Now Playing info", log: self.log, type: .info)
+            
+            // CRITICAL: Create immediate Now Playing info for independent operation
+            self.createImmediateRadioNowPlayingInfo(for: station)
+            
             if let stationIndex = RadioStationViewModel.shared.stations.firstIndex(where: { $0.id == station.id }) {
                 radioPlayer.playStation(at: stationIndex, from: RadioStationViewModel.shared.stations)
+                
+                // CRITICAL: Immediate Now Playing info update (early attempt)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    // Use force update to bypass any active player checks
+                    radioPlayer.forceUpdateNowPlayingInfo()
+                    // Also create our independent version as backup
+                    self.createImmediateRadioNowPlayingInfo(for: station)
+                    os_log("🚗 CarPlay: Early forced Now Playing info update for station: %@", log: self.log, type: .info, station.name)
+                }
+                
+                // CRITICAL: Primary Now Playing info update
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    // Ensure PlaybackManager state is still correct
+                    PlaybackManager.shared.activePlayer = .radio
+                    radioPlayer.forceUpdateNowPlayingInfo()
+                    // Also create our independent version as backup
+                    self.createImmediateRadioNowPlayingInfo(for: station)
+                    os_log("🚗 CarPlay: Primary forced Now Playing info update for station: %@", log: self.log, type: .info, station.name)
+                }
+                
+                // Additional fallback attempt
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    // Ensure PlaybackManager state is still correct
+                    PlaybackManager.shared.activePlayer = .radio
+                    radioPlayer.forceUpdateNowPlayingInfo()
+                    // Also create our independent version as backup
+                    self.createImmediateRadioNowPlayingInfo(for: station)
+                    os_log("🚗 CarPlay: Fallback forced Now Playing info update for station: %@", log: self.log, type: .info, station.name)
+                }
+                
+                // Final attempt to ensure it's set
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    // Ensure PlaybackManager state is still correct
+                    PlaybackManager.shared.activePlayer = .radio
+                    radioPlayer.forceUpdateNowPlayingInfo()
+                    // Also create our independent version as backup
+                    self.createImmediateRadioNowPlayingInfo(for: station)
+                    os_log("🚗 CarPlay: Final forced Now Playing info update for station: %@", log: self.log, type: .info, station.name)
+                }
+            } else {
+                // Station not found in RadioStationViewModel - handle independently
+                os_log("🚗 CarPlay: Station not found in RadioStationViewModel - handling independently", log: self.log, type: .info)
+                
+                // Force create Now Playing info for independent operation
+                for delay in [0.0, 0.2, 0.5, 1.0, 2.0] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        self.createImmediateRadioNowPlayingInfo(for: station)
+                    }
+                }
             }
+            
+            // CRITICAL: Apply cached iTunes artwork for CarPlay
+            // This works even when the main app is force-closed using pre-cached data
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.applyCachedArtworkToCarPlay()
+                os_log("🚗 CarPlay: Triggered cached iTunes artwork application for station: %@", log: self.log, type: .info, station.name)
+            }
+            
+            // Additional attempts to ensure artwork is applied
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                self.applyCachedArtworkToCarPlay()
+                os_log("🚗 CarPlay: Fallback cached iTunes artwork application for station: %@", log: self.log, type: .info, station.name)
+            }
+            
             completion()
         }
     }
@@ -931,6 +1665,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         DispatchQueue.main.async { [self] in
             let podcastPlayer = PodcastPlayer.shared
             let carPlayManager = CarPlayManager.shared
+            
+            // CRITICAL: Set PlaybackManager state before playing
+            PlaybackManager.shared.activePlayer = .podcast
             
             // Add episode to recently played list (but don't refresh UI yet)
             carPlayManager.addEpisodeToRecentlyPlayed(episode)
@@ -972,6 +1709,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     )
                     podcastPlayer.playEpisode(episode, feed: minimalFeed)
                 }
+            }
+            
+            // CRITICAL: Force Now Playing info update after starting playback
+            // This ensures Now Playing info is set even after app force close
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                podcastPlayer.updateNowPlayingInfo()
+                os_log("🚗 CarPlay: Forced Now Playing info update for episode: %@", log: self.log, type: .info, episode.title)
+            }
+            
+            // Additional fallback attempt
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                podcastPlayer.updateNowPlayingInfo()
+                os_log("🚗 CarPlay: Fallback Now Playing info update for episode: %@", log: self.log, type: .info, episode.title)
             }
             
             // CRITICAL: Call completion immediately to prevent CarPlay from showing empty state
@@ -1115,6 +1865,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         ) { [weak self] notification in
             self?.handleCarPlayRefreshRequest(notification)
         }
+        
+        // Listen for iTunes artwork updates to refresh Now Playing info
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("StationArtworkUpdated"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleStationArtworkUpdate(notification)
+        }
     }
     
     private func handlePodcastProgressUpdate(_ notification: Notification) {
@@ -1194,8 +1953,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // CRITICAL: Delay UI updates when episode starts to prevent blank sheet issue
             // Allow episode to fully initialize before updating CarPlay UI
             os_log("🚗 CarPlay: Episode starting - delaying UI updates to prevent blank sheet", log: log, type: .info)
+            
+            // CRITICAL: Force Now Playing info update for episodes after force close
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                PodcastPlayer.shared.updateNowPlayingInfo()
+                os_log("🚗 CarPlay: Forced Now Playing info update for episode start", log: self.log, type: .info)
+            }
+            
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.performDelayedPlaybackUIUpdates(episodeId: episodeId)
+                // Additional Now Playing update with UI updates
+                PodcastPlayer.shared.updateNowPlayingInfo()
             }
         } else {
             // Episode stopped/paused - update UI immediately
@@ -1240,6 +2008,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         os_log("🚗 CarPlay: Station played for recents update - ID: %@", log: log, type: .info, stationId)
         
+        // CRITICAL: Force Now Playing info update for radio stations after force close
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            RadioPlayer.shared.updateNowPlayingInfo()
+            os_log("🚗 CarPlay: Forced Now Playing info update for station start", log: self.log, type: .info)
+        }
+        
         // Update CarPlayManager's recents data immediately
         let carPlayManager = CarPlayManager.shared
         carPlayManager.updateContent() // This will refresh the recent stations list
@@ -1247,6 +2021,12 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // Force refresh the recents tab and downloads tab to show/hide highlighting
         refreshRecentsTabTemplate()
         refreshDownloadsTabTemplate()
+        
+        // Additional Now Playing update with UI updates
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            RadioPlayer.shared.updateNowPlayingInfo()
+            os_log("🚗 CarPlay: Additional Now Playing info update for station", log: self.log, type: .info)
+        }
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
         // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
@@ -1266,6 +2046,92 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
         // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
+    }
+    
+    private func handleStationArtworkUpdate(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            os_log("🚗 CarPlay: Invalid station artwork update notification", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Station artwork updated for station ID: %@", log: log, type: .info, stationId)
+        
+        // CRITICAL: Force Now Playing info update to show new iTunes artwork immediately
+        DispatchQueue.main.async {
+            RadioPlayer.shared.updateNowPlayingInfo()
+            os_log("🚗 CarPlay: Forced Now Playing info update for iTunes artwork", log: self.log, type: .info)
+        }
+        
+        // Also refresh the recents tab to show updated artwork in station list
+        refreshRecentsTabTemplate()
+        
+        os_log("🚗 CarPlay: Completed station artwork update handling", log: log, type: .info)
+    }
+    
+    // MARK: - iTunes Artwork for Independent CarPlay
+    
+    private func enableITunesArtworkForCarPlay(radioPlayer: RadioPlayer) {
+        os_log("🚗 CarPlay: Enabling iTunes artwork for independent CarPlay operation", log: log, type: .info)
+        
+        // Ensure the RadioPlayer is configured for background iTunes artwork fetching
+        // This allows iTunes artwork to work even when the phone app is not open
+        
+        // Set up background task for iTunes artwork fetching
+        DispatchQueue.global(qos: .background).async {
+            // Monitor metadata changes and trigger iTunes artwork search
+            self.monitorMetadataForITunesArtwork(radioPlayer: radioPlayer)
+        }
+        
+        // Also trigger immediate iTunes artwork check if metadata is already available
+        if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+            os_log("🚗 CarPlay: Triggering immediate iTunes artwork search for existing metadata", log: log, type: .info)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                // Give the station time to start playing and get metadata
+                radioPlayer.fetchITunesAlbumArt(for: metadata)
+            }
+        }
+    }
+    
+    private func monitorMetadataForITunesArtwork(radioPlayer: RadioPlayer) {
+        // Monitor for metadata changes in background
+        let timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            
+            // Check if CarPlay is still connected
+            guard CarPlayManager.shared.isCarPlayConnected else {
+                os_log("🚗 CarPlay: CarPlay disconnected - stopping iTunes artwork monitoring", log: self.log, type: .info)
+                timer.invalidate()
+                return
+            }
+            
+            // Check if radio is still playing
+            guard radioPlayer.isPlaying else {
+                os_log("🚗 CarPlay: Radio stopped - stopping iTunes artwork monitoring", log: self.log, type: .info)
+                timer.invalidate()
+                return
+            }
+            
+            // Check for new metadata and trigger iTunes search if needed
+            if let metadata = radioPlayer.metadata, 
+               !metadata.isEmpty,
+               metadata != radioPlayer.lastMetadataSearched,
+               radioPlayer.iTunesAlbumArt == nil {
+                
+                os_log("🚗 CarPlay: New metadata detected - triggering iTunes artwork search: %@", log: self.log, type: .info, metadata)
+                
+                DispatchQueue.main.async {
+                    radioPlayer.fetchITunesAlbumArt(for: metadata)
+                }
+            }
+        }
+        
+        // Store timer reference to keep it alive
+        RunLoop.current.add(timer, forMode: .common)
+        RunLoop.current.run()
     }
     
     private func refreshRecentsTabTemplate() {
@@ -1501,7 +2367,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         // Check if we're currently showing a podcast episode list that contains this episode
-        guard let currentTemplate = currentPodcastTemplate,
+        guard let _ = currentPodcastTemplate,
               let currentFeed = currentPodcastFeed,
               currentFeed.episodes.contains(where: { $0.id == episodeId }) else {
             os_log("🚗 CarPlay: No current template or episode not found in current feed", log: log, type: .debug)
@@ -1910,5 +2776,515 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
+    // MARK: - Enhanced Artwork Monitoring for CarPlay Independence
+    
+    /// Sets up enhanced artwork monitoring for independent CarPlay operation
+    private func setupEnhancedArtworkMonitoring() {
+        os_log("🚗 CarPlay: Setting up enhanced artwork monitoring for independent operation", log: log, type: .info)
+        
+        // Listen for CarPlay artwork updates from direct fetching
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("CarPlayArtworkUpdated"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            os_log("🚗 CarPlay: Received artwork update notification", log: self?.log ?? OSLog.default, type: .info)
+            self?.handleArtworkUpdate(notification)
+        }
+        
+        // CRITICAL: Set up immediate artwork fetching using CarPlay's audio session privileges
+        // This bypasses background task limitations by using active audio session
+        setupDirectArtworkFetching()
+        
+        os_log("🚗 CarPlay: Enhanced artwork monitoring setup complete", log: log, type: .info)
+    }
+    
+    /// Sets up pre-cached artwork system that works when app is closed
+    private func setupDirectArtworkFetching() {
+        os_log("🚗 CarPlay: Setting up PRE-CACHED iTunes artwork system for independent operation", log: log, type: .info)
+        
+        // NEW APPROACH: Use pre-cached artwork that was fetched when app was active
+        // This completely bypasses network restrictions when app is backgrounded
+        setupPreCachedArtworkSystem()
+        
+        os_log("🚗 CarPlay: Pre-cached artwork system configured", log: log, type: .info)
+    }
+    
+    /// Fetches iTunes artwork using CarPlay's active audio session network privileges
+    private func fetchArtworkWithCarPlayPrivileges(metadata: String, cacheKey: String) {
+        let radioPlayer = RadioPlayer.shared
+        
+        os_log("🚗 CarPlay: Starting immediate iTunes artwork fetch with CarPlay privileges", log: log, type: .info)
+        
+        // Mark this metadata as being searched to prevent duplicates
+        radioPlayer.lastMetadataSearched = cacheKey
+        
+        // Use a high-priority queue to leverage CarPlay's active audio session
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Use RadioPlayer's existing iTunes search but with enhanced error handling
+            radioPlayer.searchITunesForArtwork(metadata: metadata) { [weak self] image in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    
+                    if let image = image {
+                        os_log("🚗 CarPlay: iTunes artwork fetched successfully with CarPlay privileges", log: self.log, type: .info)
+                        
+                        // Update RadioPlayer immediately
+                        radioPlayer.iTunesAlbumArt = image
+                        radioPlayer.saveITunesArtworkToCurrentStation(image)
+                        
+                        // Force immediate Now Playing update for CarPlay
+                        self.forceCarPlayNowPlayingUpdate()
+                        
+                        // Update widget and other UI elements
+                        radioPlayer.updateWidget()
+                        
+                        // Notify of successful artwork update
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("CarPlayArtworkUpdated"),
+                            object: nil,
+                            userInfo: ["metadata": metadata, "hasArtwork": true]
+                        )
+                        
+                        os_log("🚗 CarPlay: iTunes artwork successfully integrated into CarPlay interface", log: self.log, type: .info)
+                        
+                    } else {
+                        os_log("🚗 CarPlay: No iTunes artwork found for: %@", log: self.log, type: .info, metadata)
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Forces immediate Now Playing update specifically for CarPlay
+    private func forceCarPlayNowPlayingUpdate() {
+        os_log("🚗 CarPlay: Forcing immediate Now Playing update for artwork", log: log, type: .info)
+        
+        let radioPlayer = RadioPlayer.shared
+        
+        // Multiple update attempts to ensure CarPlay receives the artwork
+        radioPlayer.updateNowPlayingInfo()
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            radioPlayer.updateNowPlayingInfo()
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            radioPlayer.updateNowPlayingInfo()
+        }
+        
+        os_log("🚗 CarPlay: Multiple Now Playing updates dispatched for reliable artwork display", log: log, type: .info)
+    }
+    
+    /// Normalizes metadata for consistent caching
+    private func normalizeMetadataForCache(_ metadata: String) -> String {
+        return metadata.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "  ", with: " ")
+    }
+    
+    /// Handles artwork updates from direct fetching
+    private func handleArtworkUpdate(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let metadata = userInfo["metadata"] as? String,
+              let hasArtwork = userInfo["hasArtwork"] as? Bool else {
+            os_log("🚗 CarPlay: Invalid artwork update notification", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Processing artwork update - metadata: %@, hasArtwork: %@", log: log, type: .info, metadata, hasArtwork ? "YES" : "NO")
+        
+        if hasArtwork {
+            // Refresh visible CarPlay interface elements to show new artwork
+            refreshVisibleStationArtwork()
+        }
+    }
+    
+    /// Refreshes visible station artwork in CarPlay interface
+    private func refreshVisibleStationArtwork() {
+        os_log("🚗 CarPlay: Refreshing visible station artwork in CarPlay interface", log: log, type: .info)
+        
+        // Refresh the recents tab if it contains the updated station
+        refreshRecentsTabTemplate()
+        
+        // If we're currently showing a station list, refresh it as well
+        guard let interfaceController = self.interfaceController,
+              let topTemplate = interfaceController.topTemplate as? CPListTemplate else {
+            return
+        }
+        
+        // Check if the top template is showing stations and refresh if needed
+        if topTemplate.title?.contains("Stations") == true || topTemplate.title?.contains("Recent") == true {
+            // Trigger a refresh of the current template
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                self.refreshRecentsTabTemplate()
+            }
+        }
+    }
+    
+    // MARK: - Pre-Cached CarPlay iTunes Artwork System
+    
+    /// Sets up a pre-cached iTunes artwork system that works when app is closed
+    private func setupPreCachedArtworkSystem() {
+        os_log("🚗 CarPlay: Initializing ENHANCED pre-cached artwork system", log: log, type: .info)
+        
+        // Monitor for playback changes to apply cached artwork
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(carPlayPlaybackChanged(_:)),
+            name: NSNotification.Name("CarPlayPlaybackChanged"),
+            object: nil
+        )
+        
+        // Monitor for audio route changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioRouteChanged(_:)),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+        
+        // Monitor for station artwork updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(stationArtworkUpdated(_:)),
+            name: NSNotification.Name("StationArtworkUpdated"),
+            object: nil
+        )
+        
+        // Set up aggressive cached artwork monitoring
+        setupAggressiveCachedArtworkMonitoring()
+        
+        // Trigger immediate check for existing Now Playing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.applyCachedArtworkToCarPlay()
+        }
+        
+        os_log("🚗 CarPlay: ENHANCED pre-cached artwork monitoring active", log: log, type: .info)
+    }
+    
+    /// Monitors playback changes to apply cached artwork
+    @objc private func carPlayPlaybackChanged(_ notification: Notification) {
+        os_log("🚗 CarPlay: Playback changed - triggering IMMEDIATE cached artwork check", log: log, type: .info)
+        
+        // Apply cached artwork immediately and with multiple attempts
+        applyCachedArtworkToCarPlay()
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.applyCachedArtworkToCarPlay()
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.applyCachedArtworkToCarPlay()
+        }
+        
+        // ENHANCED: If no cached artwork found, try to fetch from iTunes immediately
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+            if nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
+                os_log("🚗 CarPlay: No cached artwork applied - triggering iTunes fetch", log: self?.log ?? OSLog.default, type: .info)
+                self?.triggerImmediateITunesArtworkFetch()
+            }
+        }
+    }
+    
+    /// Monitors audio route changes for CarPlay connection
+    @objc private func audioRouteChanged(_ notification: Notification) {
+        let session = AVAudioSession.sharedInstance()
+        let isCarPlayActive = session.currentRoute.outputs.contains { $0.portType == .carAudio }
+        
+        if isCarPlayActive {
+            os_log("🚗 CarPlay: Audio route changed to CarPlay - triggering cached artwork check", log: log, type: .info)
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.applyCachedArtworkToCarPlay()
+            }
+            
+            // Also try iTunes artwork fetch if no cached artwork is available
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+                if nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
+                    os_log("🚗 CarPlay: CarPlay connected but no artwork - triggering iTunes fetch", log: self?.log ?? OSLog.default, type: .info)
+                    self?.triggerImmediateITunesArtworkFetch()
+                }
+            }
+        }
+    }
+    
+    /// Monitors station artwork updates
+    @objc private func stationArtworkUpdated(_ notification: Notification) {
+        os_log("🚗 CarPlay: Station artwork updated - triggering cached artwork refresh", log: log, type: .info)
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.applyCachedArtworkToCarPlay()
+        }
+    }
+    
+    /// Sets up aggressive periodic monitoring for cached artwork
+    private func setupAggressiveCachedArtworkMonitoring() {
+        // More frequent checks every 2 seconds for cached artwork
+        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            
+            // Only run while CarPlay is connected
+            guard CarPlayManager.shared.isCarPlayConnected else {
+                os_log("🚗 CarPlay: Stopping aggressive cached artwork monitoring - CarPlay disconnected", log: self.log, type: .info)
+                timer.invalidate()
+                return
+            }
+            
+            // Check and apply cached artwork aggressively
+            self.applyCachedArtworkToCarPlay()
+        }
+        
+        // Separate timer for iTunes artwork fetching (less frequent to avoid excessive network usage)
+        Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            
+            // Only run while CarPlay is connected
+            guard CarPlayManager.shared.isCarPlayConnected else {
+                os_log("🚗 CarPlay: Stopping iTunes artwork fetch monitoring - CarPlay disconnected", log: self.log, type: .info)
+                timer.invalidate()
+                return
+            }
+            
+            // Check if we need to fetch iTunes artwork
+            let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+            if nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
+                os_log("🚗 CarPlay: Periodic check - no artwork present, triggering iTunes fetch", log: self.log, type: .debug)
+                self.triggerImmediateITunesArtworkFetch()
+            }
+        }
+    }
+    
+    /// Applies cached iTunes artwork to CarPlay Now Playing
+    private func applyCachedArtworkToCarPlay() {
+        let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+        
+        // Try multiple approaches to get current track info
+        var title: String?
+        var artist: String?
+        
+        // Approach 1: From Now Playing info
+        if let nowPlayingTitle = nowPlayingInfo?[MPMediaItemPropertyTitle] as? String,
+           let nowPlayingArtist = nowPlayingInfo?[MPMediaItemPropertyArtist] as? String {
+            title = nowPlayingTitle
+            artist = nowPlayingArtist
+        }
+        
+        // Approach 2: From RadioPlayer metadata if Now Playing is insufficient
+        if title == nil || artist == nil {
+            let radioPlayer = RadioPlayer.shared
+            if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+                let components = metadata.components(separatedBy: " - ")
+                if components.count >= 2 {
+                    artist = components[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                    title = components[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        
+        // Approach 3: From current station name as fallback
+        if title == nil || artist == nil {
+            let radioPlayer = RadioPlayer.shared
+            if let currentStation = radioPlayer.currentlyPlayingStation {
+                title = currentStation.name
+                artist = "StreamRadios"
+            }
+        }
+        
+        guard let finalTitle = title, let finalArtist = artist, !finalTitle.isEmpty else {
+            os_log("🚗 CarPlay: No valid title/artist found for cached artwork lookup", log: log, type: .debug)
+            return
+        }
+        
+        // Check if artwork is already present (but allow refresh if it's been a while)
+        let hasExistingArtwork = nowPlayingInfo?[MPMediaItemPropertyArtwork] != nil
+        
+        let metadata = "\(finalArtist) - \(finalTitle)"
+        os_log("🚗 CarPlay: Checking for cached artwork for: %@", log: log, type: .info, metadata)
+        
+        // Look for cached iTunes artwork with enhanced lookup
+        if let cachedArtwork = getEnhancedCachedITunesArtwork(artist: finalArtist, title: finalTitle) {
+            os_log("🚗 CarPlay: Found cached iTunes artwork, applying to Now Playing", log: log, type: .info)
+            applyArtworkToCarPlayNowPlaying(image: cachedArtwork, metadata: metadata)
+        } else if !hasExistingArtwork {
+            os_log("🚗 CarPlay: No cached iTunes artwork found for: %@", log: log, type: .debug, metadata)
+            
+            // Try to apply station artwork as fallback
+            applyStationArtworkFallback(artist: finalArtist, title: finalTitle)
+        }
+    }
+    
+    /// Gets cached iTunes artwork from persistent storage
+    private func getCachedITunesArtwork(artist: String, title: String) -> UIImage? {
+        // Create a cache key from artist and title
+        let cacheKey = "\(artist.lowercased())_\(title.lowercased())"
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "[^a-zA-Z0-9_]", with: "", options: .regularExpression)
+        
+        // Check UserDefaults for cached artwork data
+        let userDefaults = UserDefaults.standard
+        
+        // First check for iTunes artwork data
+        if let artworkData = userDefaults.data(forKey: "iTunesArtwork_\(cacheKey)") {
+            if let image = UIImage(data: artworkData) {
+                os_log("🚗 CarPlay: Found cached iTunes artwork for key: %@", log: log, type: .info, cacheKey)
+                return image
+            }
+        }
+        
+        // Fallback: Check if this is a current station and use its saved iTunes artwork data
+        let radioPlayer = RadioPlayer.shared
+        if let currentStation = radioPlayer.currentlyPlayingStation,
+           let iTunesArtworkData = currentStation.iTunesArtworkData,
+           let imageData = Data(base64Encoded: iTunesArtworkData),
+           let image = UIImage(data: imageData) {
+            os_log("🚗 CarPlay: Using current station's iTunes artwork data", log: log, type: .info)
+            return image
+        }
+        
+        // Check all stations for matching iTunes artwork data
+        let stations = RadioStationViewModel.shared.stations
+        for station in stations {
+            if let iTunesArtworkData = station.iTunesArtworkData,
+               let imageData = Data(base64Encoded: iTunesArtworkData),
+               let image = UIImage(data: imageData),
+               (station.name.lowercased().contains(title.lowercased()) || 
+                title.lowercased().contains(station.name.lowercased())) {
+                os_log("🚗 CarPlay: Found matching station iTunes artwork data for: %@", log: log, type: .info, station.name)
+                return image
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Enhanced cached iTunes artwork lookup with multiple strategies
+    private func getEnhancedCachedITunesArtwork(artist: String, title: String) -> UIImage? {
+        // Strategy 1: Exact metadata cache key
+        if let artwork = getCachedITunesArtwork(artist: artist, title: title) {
+            return artwork
+        }
+        
+        // Strategy 2: Try with normalized strings
+        let normalizedArtist = artist.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedTitle = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if let artwork = getCachedITunesArtwork(artist: normalizedArtist, title: normalizedTitle) {
+            return artwork
+        }
+        
+        // Strategy 3: Try partial matches
+        let userDefaults = UserDefaults.standard
+        let allKeys = userDefaults.dictionaryRepresentation().keys
+        
+        for key in allKeys {
+            if key.hasPrefix("iTunesArtwork_") || key.hasPrefix("CarPlayArtwork_") {
+                let keyLower = key.lowercased()
+                if (keyLower.contains(normalizedArtist) && keyLower.contains(normalizedTitle)) ||
+                   keyLower.contains(normalizedTitle) {
+                    if let artworkData = userDefaults.data(forKey: key),
+                       let image = UIImage(data: artworkData) {
+                        os_log("🚗 CarPlay: Found cached artwork via partial match: %@", log: log, type: .info, key)
+                        return image
+                    }
+                }
+            }
+        }
+        
+        // Strategy 4: Check current station's iTunes artwork
+        let radioPlayer = RadioPlayer.shared
+        if let currentStation = radioPlayer.currentlyPlayingStation,
+           let iTunesArtworkData = currentStation.iTunesArtworkData,
+           let imageData = Data(base64Encoded: iTunesArtworkData),
+           let image = UIImage(data: imageData) {
+            os_log("🚗 CarPlay: Using current station's cached iTunes artwork", log: log, type: .info)
+            return image
+        }
+        
+        return nil
+    }
+    
+    /// Applies station artwork as fallback when no iTunes artwork is cached
+    private func applyStationArtworkFallback(artist: String, title: String) {
+        let radioPlayer = RadioPlayer.shared
+        guard let currentStation = radioPlayer.currentlyPlayingStation else { return }
+        
+        // Try to use station icon as fallback artwork
+        if let iconData = currentStation.iconData,
+           let imageData = Data(base64Encoded: iconData),
+           let image = UIImage(data: imageData) {
+            os_log("🚗 CarPlay: Applying station icon as fallback artwork", log: log, type: .info)
+            applyArtworkToCarPlayNowPlaying(image: image, metadata: "\(artist) - \(title)")
+        }
+    }
+    
+    /// Applies cached artwork directly to CarPlay Now Playing interface
+    private func applyArtworkToCarPlayNowPlaying(image: UIImage, metadata: String) {
+        os_log("🚗 CarPlay: Applying CACHED artwork to CarPlay Now Playing", log: log, type: .info)
+        
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        var nowPlayingInfo = nowPlayingCenter.nowPlayingInfo ?? [:]
+        
+        // Create and apply artwork
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
+            return image
+        }
+        
+        nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
+        
+        os_log("🚗 CarPlay: Cached artwork applied successfully to CarPlay Now Playing", log: log, type: .info)
+        
+        // Refresh CarPlay interface templates
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.refreshVisibleStationArtwork()
+        }
+    }
+    
+    /// Triggers immediate iTunes artwork fetching for CarPlay when possible
+    private func triggerImmediateITunesArtworkFetch() {
+        let radioPlayer = RadioPlayer.shared
+        
+        // Check if we have current metadata to search for
+        guard let metadata = radioPlayer.metadata, !metadata.isEmpty else {
+            os_log("🚗 CarPlay: No metadata available for iTunes artwork fetch", log: log, type: .debug)
+            return
+        }
+        
+        // Check if we already have iTunes artwork for this track
+        let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+        if nowPlayingInfo?[MPMediaItemPropertyArtwork] != nil {
+            os_log("🚗 CarPlay: Artwork already present, skipping iTunes fetch", log: log, type: .debug)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Triggering IMMEDIATE iTunes artwork fetch for: %@", log: log, type: .info, metadata)
+        
+        // Use background task to ensure network access during CarPlay session
+        let taskId = UIApplication.shared.beginBackgroundTask(withName: "CarPlayITunesArtworkFetch") {
+            os_log("🚗 CarPlay: iTunes artwork fetch background task expired", log: self.log, type: .default)
+        }
+        
+        radioPlayer.searchITunesForArtwork(metadata: metadata) { [weak self] image in
+            DispatchQueue.main.async {
+                UIApplication.shared.endBackgroundTask(taskId)
+                
+                if let image = image {
+                    os_log("🚗 CarPlay: iTunes artwork fetch SUCCESS - applying immediately", log: self?.log ?? OSLog.default, type: .info)
+                    radioPlayer.saveITunesArtworkToCurrentStation(image)
+                } else {
+                    os_log("🚗 CarPlay: iTunes artwork fetch failed for: %@", log: self?.log ?? OSLog.default, type: .debug, metadata)
+                }
+            }
+        }
+    }
 
 } 

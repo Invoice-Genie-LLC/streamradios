@@ -896,7 +896,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
-    private func updateNowPlayingInfo() {
+    func updateNowPlayingInfo() {
         // Only update Now Playing info if podcast is the active player
         guard PlaybackManager.shared.activePlayer == .podcast else {
             os_log("Podcast is not the active player, skipping Now Playing update", log: log, type: .info)

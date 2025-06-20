@@ -163,9 +163,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func registerBackgroundTasks() {
+        // Register all background tasks during app launch
+        // This is required by iOS - all registrations must happen before app finishes launching
+        
+        // Alarm task
         BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.streamradios.playalarm", using: nil) { task in
             self.handleAlarmTask(task: task as! BGProcessingTask)
         }
+        
+        // Register BackgroundTaskManager tasks
+        BackgroundTaskManager.shared.registerBackgroundTasks()
+        
+        print("✅ All background tasks registered during app launch")
     }
     
     func handleAlarmTask(task: BGProcessingTask) {

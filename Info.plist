@@ -10,6 +10,7 @@
         <array>
             <string>com.radio.streamradios.backgroundfetch</string>
             <string>com.streamradios.playalarm</string>
+            <string>com.radio.streamradios.carplay.artwork</string>
         </array>
         <key>CFBundleGetInfoString</key>
         <string></string>

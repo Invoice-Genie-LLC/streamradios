@@ -73,6 +73,9 @@ class RadioPlayer: NSObject, ObservableObject {
         setupRemoteCommandCenter()
         addInterruptionObserver()
         
+        // CRITICAL: Enhanced CarPlay artwork fetching using audio session events
+        setupCarPlayArtworkObservation()
+        
         print("✅ RadioPlayer initialized with CarPlay and Now Playing support")
         
         DispatchQueue.main.async {
@@ -244,38 +247,46 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    private func setStationURL(_ url: URL) {
-        print("🔗 Setting station URL: \(url)")
-        
-        let playerItem = AVPlayerItem(url: url)
-        player = AVPlayer(playerItem: playerItem)
-        player?.automaticallyWaitsToMinimizeStalling = true
-        userDefaults?.set(url, forKey: "lastStationURL")
-        
-        // Cancel previous observer if it exists
+    func setStationURL(_ url: URL) {
+        // Stop any existing player and clear status observer
+        player?.pause()
         statusCancellable?.cancel()
         
-        // Set up observers with enhanced debugging
+        // Create new player item and player
+        playerItem = AVPlayerItem(url: url)
+        player = AVPlayer(playerItem: playerItem)
+        
+        // CRITICAL: Enhanced metadata observation for CarPlay artwork fetching
+        setupEnhancedMetadataObservation()
+        
+        // Observe player status
         statusCancellable = player?.publisher(for: \.timeControlStatus)
             .sink { [weak self] status in
-                guard let self = self else { return }
-                self.isPlaying = (status == .playing)
-                self.isBuffering = (status == .waitingToPlayAtSpecifiedRate)
-                print("📊 Player Status Change: isPlaying = \(self.isPlaying), isBuffering = \(self.isBuffering), status = \(status)")
-                
-                // Update Now Playing whenever player status changes
                 DispatchQueue.main.async {
-                    self.updateNowPlayingInfo()
+                    switch status {
+                    case .playing:
+                        self?.isPlaying = true
+                        self?.isBuffering = false
+                        self?.updateNowPlayingInfo()
+                        
+                        // CRITICAL: Trigger artwork fetch when playback actually starts
+                        self?.triggerCarPlayArtworkFetchOnPlayback()
+                        
+                    case .waitingToPlayAtSpecifiedRate:
+                        self?.isBuffering = true
+                    case .paused:
+                        self?.isPlaying = false
+                        self?.isBuffering = false
+                    @unknown default:
+                        break
+                    }
                 }
             }
         
-        // Set the bitrate and add metadata output
-        updateBitrateBasedOnNetwork(path: monitor.currentPath)
+        // Set up periodic time observer for metadata updates
+        setupPeriodicTimeObserver()
         
-        // Ensure metadata output is added immediately
-        addMetadataOutput()
-        
-        print("✅ Station URL set and player configured")
+        adjustForNetworkConditions()
     }
     
     private func updateBitrateBasedOnNetwork(path: NWPath) {
@@ -607,12 +618,18 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    private func updateNowPlayingInfo() {
+    func updateNowPlayingInfo() {
         // Audio session is managed centrally by PlaybackManager
-        // Just ensure we're the active player
-        guard PlaybackManager.shared.activePlayer == .radio else {
-            print("❌ Now Playing: Radio is not the active player")
-            return
+        // Check if we're the active player, but allow override if we're actually playing
+        if PlaybackManager.shared.activePlayer != .radio {
+            // If radio is actually playing but not set as active player, force set it
+            if isPlaying && player?.timeControlStatus == .playing {
+                print("⚠️ Now Playing: Radio is playing but not active player - forcing active state")
+                PlaybackManager.shared.activePlayer = .radio
+            } else {
+                print("❌ Now Playing: Radio is not the active player and not playing")
+                return
+            }
         }
         
         guard let viewModel = viewModel else { 
@@ -716,9 +733,30 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("✅ Now Playing: Successfully updated info center with \(nowPlayingInfo.count) items")
         print("🎵 Now Playing State - isPlaying: \(isPlaying), playback rate: \(nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0.0)")
+        
+        // CRITICAL: Ensure remote command center is set up after updating Now Playing info
+        // This is especially important after app force close scenarios
+        setupRemoteCommandCenter()
     }
     
-    private func updateWidget() {
+    // Force update Now Playing info regardless of active player state (for CarPlay restoration)
+    func forceUpdateNowPlayingInfo() {
+        print("🚗 Force updating Now Playing info for CarPlay restoration")
+        
+        // Temporarily override the active player check
+        let originalActivePlayer = PlaybackManager.shared.activePlayer
+        PlaybackManager.shared.activePlayer = .radio
+        
+        // Update Now Playing info
+        updateNowPlayingInfo()
+        
+        // Restore original active player if it was different (shouldn't be, but safety)
+        if originalActivePlayer != .radio {
+            PlaybackManager.shared.activePlayer = originalActivePlayer
+        }
+    }
+    
+    func updateWidget() {
         guard let currentStationIndex = currentStationIndex, let viewModel = viewModel else { return }
         
         guard currentStationIndex < viewModel.stations.count else {
@@ -833,7 +871,7 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    private var lastMetadataSearched: String = ""
+    var lastMetadataSearched: String = ""
     private var lastArtworkFetched: UIImage?
     private var artworkSearchTimer: Timer?
     private var artworkCache: [String: UIImage?] = [:]
@@ -876,7 +914,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private var cacheOrder: [String] = []
     private let maxCacheSize = 50
     
-    private func fetchITunesAlbumArt(for metadata: String) {
+    func fetchITunesAlbumArt(for metadata: String) {
         guard !metadata.isEmpty && metadata != "No song or album title available" else {
             DispatchQueue.main.async { [weak self] in
                 self?.iTunesAlbumArt = nil
@@ -960,13 +998,18 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    private func searchITunesForArtwork(metadata: String, completion: @escaping (UIImage?) -> Void) {
+    func searchITunesForArtwork(metadata: String, completion: @escaping (UIImage?) -> Void) {
         let parsedData = parseComplexMetadata(metadata)
         
         // Try multiple search strategies
         let searchQueries = buildSearchQueries(parsedData: parsedData, originalMetadata: metadata)
         
-        searchWithQueries(searchQueries, completion: completion)
+        // Use enhanced network session for CarPlay if connected
+        if CarPlayManager.shared.isCarPlayConnected {
+            searchWithQueriesUsingCarPlaySession(searchQueries, completion: completion)
+        } else {
+            searchWithQueries(searchQueries, completion: completion)
+        }
     }
     
     private func parseComplexMetadata(_ metadata: String) -> (artist: String?, track: String?, album: String?) {
@@ -1188,7 +1231,7 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    private func saveITunesArtworkToCurrentStation(_ image: UIImage) {
+    func saveITunesArtworkToCurrentStation(_ image: UIImage) {
         guard let currentIndex = currentStationIndex,
               let viewModel = viewModel,
               currentIndex < viewModel.stations.count else {
@@ -1214,6 +1257,9 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("iTunes artwork saved to station: \(updatedStation.name)")
         
+        // CRITICAL: Cache artwork for CarPlay independent operation
+        cacheITunesArtworkForCarPlay(image: image, station: updatedStation)
+        
         // CRITICAL: Immediately update Now Playing with new artwork
         updateNowPlayingInfo()
         
@@ -1224,12 +1270,56 @@ class RadioPlayer: NSObject, ObservableObject {
                 object: nil, 
                 userInfo: ["stationId": updatedStation.id, "hasArtwork": true]
             )
+            
+            // ENHANCED: Also trigger CarPlay playback change to force artwork refresh
+            NotificationCenter.default.post(
+                name: NSNotification.Name("CarPlayPlaybackChanged"),
+                object: nil,
+                userInfo: ["artworkUpdated": true, "stationId": updatedStation.id]
+            )
         }
         
         // Also update widget with new artwork
         updateWidget()
         
-        print("✅ iTunes artwork updated in real-time - Now Playing, CarPlay, and Widget refreshed")
+        print("✅ iTunes artwork updated in real-time - Now Playing, CarPlay cache, and Widget refreshed")
+    }
+    
+    /// Caches iTunes artwork for CarPlay independent operation
+    private func cacheITunesArtworkForCarPlay(image: UIImage, station: RadioStation) {
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("Failed to compress iTunes artwork for CarPlay cache")
+            return
+        }
+        
+        let userDefaults = UserDefaults.standard
+        
+        // Cache by station name for easy lookup
+        let stationKey = station.name.lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "[^a-zA-Z0-9_]", with: "", options: .regularExpression)
+        
+        userDefaults.set(imageData, forKey: "CarPlayArtwork_\(stationKey)")
+        
+        // Also cache by current metadata if available
+        if let currentMetadata = self.metadata, !currentMetadata.isEmpty {
+            let metadataComponents = currentMetadata.components(separatedBy: " - ")
+            if metadataComponents.count >= 2 {
+                let artist = metadataComponents[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let title = metadataComponents[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                let metadataKey = "\(artist.lowercased())_\(title.lowercased())"
+                    .replacingOccurrences(of: " ", with: "_")
+                    .replacingOccurrences(of: "[^a-zA-Z0-9_]", with: "", options: .regularExpression)
+                
+                userDefaults.set(imageData, forKey: "iTunesArtwork_\(metadataKey)")
+                
+                print("🚗 Cached iTunes artwork for CarPlay - Station: \(stationKey), Metadata: \(metadataKey)")
+            }
+        }
+        
+        userDefaults.synchronize()
+        print("🚗 iTunes artwork cached for CarPlay independent operation")
     }
     
     private func buildSearchQueries(parsedData: (artist: String?, track: String?, album: String?), originalMetadata: String) -> [String] {
@@ -1595,6 +1685,43 @@ class RadioPlayer: NSObject, ObservableObject {
         searchWithQuery(queries[0], remainingQueries: Array(queries.dropFirst()), completion: completion)
     }
     
+    /// Enhanced iTunes search using CarPlay's active audio session network privileges
+    private func searchWithQueriesUsingCarPlaySession(_ queries: [String], completion: @escaping (UIImage?) -> Void) {
+        guard !queries.isEmpty else {
+            print("🚗 CarPlay iTunes: No queries available - using graceful fallback")
+            completion(nil)
+            return
+        }
+        
+        print("🚗 CarPlay iTunes: Using enhanced network session for independent operation")
+        
+        // Check smart cache for successful matches first
+        for query in queries.prefix(3) {
+            let cacheKey = "success_\(query.lowercased())"
+            if let cachedImage = artworkCache[cacheKey] {
+                print("🚗 CarPlay iTunes: Smart cache hit for: \(query)")
+                DispatchQueue.main.async {
+                    completion(cachedImage)
+                }
+                return
+            }
+        }
+        
+        // Create enhanced network session for CarPlay
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15.0  // Extended timeout for CarPlay
+        config.timeoutIntervalForResource = 30.0 // Extended resource timeout
+        config.waitsForConnectivity = false      // Don't wait - try immediately
+        config.networkServiceType = .responsiveData // High priority networking
+        
+        let carPlaySession = URLSession(configuration: config)
+        
+        searchWithQueryUsingCarPlaySession(queries[0], 
+                                         remainingQueries: Array(queries.dropFirst()), 
+                                         session: carPlaySession, 
+                                         completion: completion)
+    }
+    
     private func searchWithQuery(_ query: String, remainingQueries: [String], completion: @escaping (UIImage?) -> Void) {
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://itunes.apple.com/search?term=\(encodedQuery)&media=music&entity=song&limit=10") else {
@@ -1662,6 +1789,98 @@ class RadioPlayer: NSObject, ObservableObject {
                 // No good match found, try next query
                 if !remainingQueries.isEmpty {
                     self?.searchWithQuery(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), completion: completion)
+                } else {
+                    completion(nil)
+                }
+            }
+        }.resume()
+    }
+    
+    /// Enhanced CarPlay search method using privileged network session
+    private func searchWithQueryUsingCarPlaySession(_ query: String, remainingQueries: [String], session: URLSession, completion: @escaping (UIImage?) -> Void) {
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://itunes.apple.com/search?term=\(encodedQuery)&media=music&entity=song&limit=10") else {
+            
+            // Try next query if available
+            if !remainingQueries.isEmpty {
+                searchWithQueryUsingCarPlaySession(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), session: session, completion: completion)
+            } else {
+                completion(nil)
+            }
+            return
+        }
+        
+        print("🚗 CarPlay iTunes search query: \(query)")
+        
+        session.dataTask(with: url) { [weak self] data, response, error in
+            if let error = error {
+                print("🚗 CarPlay iTunes: Network error - \(error.localizedDescription)")
+            }
+            
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = json["results"] as? [[String: Any]] else {
+                
+                print("🚗 CarPlay iTunes: No results for query - \(query)")
+                
+                // Try next query if available
+                if !remainingQueries.isEmpty {
+                    self?.searchWithQueryUsingCarPlaySession(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), session: session, completion: completion)
+                } else {
+                    completion(nil)
+                }
+                return
+            }
+            
+            print("🚗 CarPlay iTunes: Found \(results.count) results for query")
+            
+            // Enhanced result evaluation - find best match based on word similarity
+            let bestMatch = self?.findBestMatch(query: query, results: results)
+            
+            if let bestResult = bestMatch,
+               let artworkUrl = bestResult["artworkUrl100"] as? String {
+                
+                print("🚗 CarPlay iTunes: Best match found - \(bestResult["trackName"] ?? "Unknown") by \(bestResult["artistName"] ?? "Unknown")")
+                
+                // Get higher resolution artwork
+                let highResArtworkUrl = artworkUrl.replacingOccurrences(of: "100x100bb", with: "600x600bb")
+                
+                guard let imageUrl = URL(string: highResArtworkUrl) else {
+                    completion(nil)
+                    return
+                }
+                
+                // Use the same enhanced session for artwork download
+                session.dataTask(with: imageUrl) { imageData, _, imageError in
+                    if let imageError = imageError {
+                        print("🚗 CarPlay iTunes: Image download error - \(imageError.localizedDescription)")
+                    }
+                    
+                    guard let imageData = imageData,
+                          let image = UIImage(data: imageData) else {
+                        // Try next query if available
+                        if !remainingQueries.isEmpty {
+                            self?.searchWithQueryUsingCarPlaySession(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), session: session, completion: completion)
+                        } else {
+                            completion(nil)
+                        }
+                        return
+                    }
+                    
+                    print("🚗 CarPlay iTunes: Artwork downloaded successfully - \(imageData.count) bytes")
+                    
+                    // Cache successful match for future use
+                    let successCacheKey = "success_\(query.lowercased())"
+                    self?.artworkCache[successCacheKey] = image
+                    
+                    completion(image)
+                }.resume()
+            } else {
+                print("🚗 CarPlay iTunes: No suitable match found for query")
+                
+                // No good match found, try next query
+                if !remainingQueries.isEmpty {
+                    self?.searchWithQueryUsingCarPlaySession(remainingQueries[0], remainingQueries: Array(remainingQueries.dropFirst()), session: session, completion: completion)
                 } else {
                     completion(nil)
                 }
@@ -2363,6 +2582,237 @@ extension RadioPlayer {
         } else {
             print("Error: No valid favorite station found for alarm")
             alarmStation = nil
+        }
+    }
+    
+    // MARK: - Enhanced CarPlay Artwork Observation
+    
+    /// Sets up CarPlay artwork observation using audio session events and metadata notifications
+    private func setupCarPlayArtworkObservation() {
+        print("🚗 RadioPlayer: Setting up enhanced CarPlay artwork observation")
+        
+        // Listen for audio session route changes (CarPlay connect/disconnect)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioSessionRouteChanged(_:)),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+        
+        // Listen for audio session interruptions that might indicate CarPlay state changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioSessionInterrupted(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: nil
+        )
+        
+        print("🚗 RadioPlayer: CarPlay artwork observation setup complete")
+    }
+    
+    /// Enhanced metadata observation for CarPlay artwork fetching
+    private func setupEnhancedMetadataObservation() {
+        guard let playerItem = self.playerItem else { return }
+        
+        print("🚗 RadioPlayer: Setting up enhanced metadata observation for CarPlay")
+        
+        // Remove existing metadata output if any
+        for output in playerItem.outputs {
+            if output is AVPlayerItemMetadataOutput {
+                playerItem.remove(output)
+            }
+        }
+        
+        // Create enhanced metadata output for CarPlay
+        let metadataOutput = AVPlayerItemMetadataOutput(identifiers: nil)
+        metadataOutput.setDelegate(self, queue: DispatchQueue.main)
+        metadataOutput.advanceIntervalForDelegateInvocation = 0.1 // More frequent updates for CarPlay
+        
+        playerItem.add(metadataOutput)
+        
+        // Also observe timed metadata groups for immediate response
+        playerItem.addObserver(self, forKeyPath: "timedMetadata", options: [.new], context: nil)
+        
+        print("🚗 RadioPlayer: Enhanced metadata observation configured")
+    }
+    
+    /// Sets up periodic time observer for the player
+    private func setupPeriodicTimeObserver() {
+        guard let player = self.player else { return }
+        
+        let timeScale = CMTimeScale(NSEC_PER_SEC)
+        let time = CMTime(seconds: 1.0, preferredTimescale: timeScale)
+        
+        player.addPeriodicTimeObserver(forInterval: time, queue: .main) { [weak self] time in
+            // This can be used for any periodic updates during playback
+            // Currently just ensuring player state is maintained
+            guard let self = self else { return }
+            
+            // Trigger artwork fetch if we have metadata but no artwork during CarPlay
+            if CarPlayManager.shared.isCarPlayConnected,
+               self.isPlaying,
+               self.iTunesAlbumArt == nil,
+               let metadata = self.metadata,
+               !metadata.isEmpty,
+               metadata != self.lastMetadataSearched {
+                
+                print("🚗 RadioPlayer: Periodic check found new metadata during CarPlay playback")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.fetchCarPlayArtworkDuringPlayback(metadata: metadata)
+                }
+            }
+        }
+    }
+    
+    /// Triggers CarPlay artwork fetch when playback starts - this leverages audio session privileges
+    private func triggerCarPlayArtworkFetchOnPlayback() {
+        guard CarPlayManager.shared.isCarPlayConnected else { return }
+        
+        print("🚗 RadioPlayer: Triggering CarPlay artwork fetch on playback start")
+        
+        // Use the fact that we just started playback to attempt immediate artwork fetch
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self,
+                  self.isPlaying,
+                  let metadata = self.metadata,
+                  !metadata.isEmpty,
+                  self.iTunesAlbumArt == nil else { return }
+            
+            print("🚗 RadioPlayer: Attempting iTunes artwork fetch during active playback")
+            self.fetchCarPlayArtworkDuringPlayback(metadata: metadata)
+        }
+    }
+    
+    /// Fetches iTunes artwork during active CarPlay playback when network privileges are highest
+    private func fetchCarPlayArtworkDuringPlayback(metadata: String) {
+        print("🚗 RadioPlayer: Fetching iTunes artwork during CarPlay playback")
+        
+        // Create a background task to keep network access alive during the request
+        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "CarPlayArtworkFetch") {
+            // Clean up if the task expires
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                backgroundTaskID = .invalid
+            }
+        }
+        
+        // Perform the search with high priority
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.searchITunesForArtwork(metadata: metadata) { [weak self] image in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    
+                    if let image = image {
+                        print("🚗 RadioPlayer: iTunes artwork fetched successfully during CarPlay playback")
+                        
+                        self.iTunesAlbumArt = image
+                        self.saveITunesArtworkToCurrentStation(image)
+                        self.updateNowPlayingInfo()
+                        self.updateWidget()
+                        
+                        // Notify CarPlay of artwork update
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("CarPlayArtworkUpdated"),
+                            object: nil,
+                            userInfo: ["metadata": metadata, "hasArtwork": true]
+                        )
+                    } else {
+                        print("🚗 RadioPlayer: No iTunes artwork found during CarPlay playback")
+                    }
+                    
+                    // End the background task
+                    if backgroundTaskID != .invalid {
+                        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                        backgroundTaskID = .invalid
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Handles audio session route changes to detect CarPlay connection
+    @objc private func audioSessionRouteChanged(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        
+        let session = AVAudioSession.sharedInstance()
+        let currentRoute = session.currentRoute
+        
+        // Check if CarPlay is in the current route
+        let isCarPlayConnected = currentRoute.outputs.contains { output in
+            output.portType == .carAudio
+        }
+        
+        if isCarPlayConnected && isPlaying && iTunesAlbumArt == nil {
+            print("🚗 RadioPlayer: CarPlay connected during playback - triggering artwork fetch")
+            
+            if let metadata = self.metadata, !metadata.isEmpty {
+                // Use a delay to ensure CarPlay is fully initialized
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.fetchCarPlayArtworkDuringPlayback(metadata: metadata)
+                }
+            }
+        }
+    }
+    
+    /// Handles audio session interruptions to trigger artwork fetching when session resumes
+    @objc private func audioSessionInterrupted(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        
+        if type == .ended,
+           CarPlayManager.shared.isCarPlayConnected,
+           isPlaying,
+           iTunesAlbumArt == nil,
+           let metadata = self.metadata,
+           !metadata.isEmpty {
+            
+            print("🚗 RadioPlayer: Audio session resumed - checking for artwork fetch opportunity")
+            
+            // This fires when audio session resumes - good time to attempt artwork fetch
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.fetchCarPlayArtworkDuringPlayback(metadata: metadata)
+            }
+        }
+    }
+    
+    /// KVO observer for timed metadata changes
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "timedMetadata" {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self,
+                      let playerItem = self.playerItem,
+                      CarPlayManager.shared.isCarPlayConnected,
+                      self.isPlaying else { return }
+                
+                // Check if we have new metadata and no artwork
+                if let timedMetadata = playerItem.timedMetadata,
+                   !timedMetadata.isEmpty,
+                   self.iTunesAlbumArt == nil {
+                    
+                    // Extract metadata and trigger artwork fetch
+                    for metadataItem in timedMetadata {
+                        if let commonKey = metadataItem.commonKey,
+                           commonKey.rawValue == "title",
+                           let stringValue = metadataItem.stringValue,
+                           !stringValue.isEmpty {
+                            
+                            print("🚗 RadioPlayer: New timed metadata detected during CarPlay playback: \(stringValue)")
+                            
+                            // Trigger artwork fetch for new metadata
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                self.fetchCarPlayArtworkDuringPlayback(metadata: stringValue)
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+        } else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
         }
     }
 }
