@@ -272,8 +272,8 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    // Compact mini-player matching screenshot design
-                    if let currentStation = viewModel.currentlyPlayingStation {
+                    // Compact mini-player matching screenshot design - hide during sorting mode
+                    if let currentStation = viewModel.currentlyPlayingStation, !isEditingMode {
                         VStack(spacing: 0) {
                             // Top divider for visual separation
                             Rectangle()
@@ -293,7 +293,7 @@ struct ContentView: View {
                         }
                     }
                     
-                    if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
+                    if podcastPlayer.isPlaying && !radioPlayer.isPlaying && podcastPlayer.currentEpisode != nil && !isEditingMode {
                         MiniPlayerView(
                             podcastPlayer: podcastPlayer,
                             viewModel: podcastViewModel,

@@ -256,6 +256,17 @@ struct RadioStationListView: View {
                 .onEnded { _ in
                     // Long press activates sorting mode for All and Favorites tabs
                     if !isEditing && selectedTab == .radio && (selectedSubTab == .all || selectedSubTab == .favorites) {
+                        // Stop any currently playing audio to prevent interference with sorting
+                        if radioPlayer.isPlaying {
+                            radioPlayer.pause()
+                        }
+                        
+                        // Also stop podcast playback if it's currently playing
+                        let podcastPlayer = PodcastPlayer.shared
+                        if podcastPlayer.isPlaying {
+                            podcastPlayer.pause()
+                        }
+                        
                         isEditing = true
                         // Haptic feedback for long press
                         let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
@@ -264,19 +275,23 @@ struct RadioStationListView: View {
                 }
         )
         .swipeActions(edge: .leading) {
-            Button {
-                editStation(station)
-            } label: {
-                Label("Edit", systemImage: "pencil")
+            if !isEditing {
+                Button {
+                    editStation(station)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .tint(.blue)
             }
-            .tint(.blue)
         }
         .swipeActions(edge: .trailing) {
-            Button(role: .destructive) {
-                stationToDelete = station
-                showDeleteAlert = true
-            } label: {
-                Label("Delete", systemImage: "trash")
+            if !isEditing {
+                Button(role: .destructive) {
+                    stationToDelete = station
+                    showDeleteAlert = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
             }
         }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
@@ -377,6 +392,8 @@ struct RadioStationListView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
+            .disabled(isEditing)
+            .opacity(isEditing ? 0.6 : 1.0)
             
             // Favorite button (separate from tappable area)
             if !isEditing {
