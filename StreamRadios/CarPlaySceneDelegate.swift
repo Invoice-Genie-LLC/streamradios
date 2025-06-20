@@ -455,10 +455,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             // Find the podcast feed for artwork
             let podcastFeeds = carPlayManager.getPodcastFeeds()
             let podcastFeed = podcastFeeds.first { feed in
-                feed.episodes.contains { $0.id == episode.id }
+                feed.id == episode.feedId
             }
             
-            // Use standard podcast artwork for all episodes
+            // Use podcast artwork for recently played episodes
             let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
             
             let item = CPListItem(text: episode.title,
@@ -606,8 +606,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let carPlayManager = CarPlayManager.shared
         var sections: [CPListSection] = []
         
-        // Add "Downloaded Episodes" filter if there are any downloaded episodes
+        // Add filter section for Downloaded and Bookmarked episodes
         let downloadedEpisodes = podcast.episodes.filter { $0.state.isDownloaded }
+        let bookmarkedEpisodes = podcast.episodes.filter { $0.state.isFavorite }
+        
+        var filterItems: [CPListItem] = []
+        
+        // Add "Downloaded Episodes" filter if there are any downloaded episodes
         if !downloadedEpisodes.isEmpty {
             let downloadedItem = CPListItem(text: "Downloaded Episodes",
                                            detailText: "\(downloadedEpisodes.count) downloaded",
@@ -615,8 +620,23 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             downloadedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
                 self?.showDownloadedEpisodesFromList(downloadedEpisodes, podcastTitle: podcast.title, completion: completion)
             }
-            
-            let filterSection = CPListSection(items: [downloadedItem], header: "Filter", sectionIndexTitle: nil)
+            filterItems.append(downloadedItem)
+        }
+        
+        // Add "Bookmarked Episodes" filter if there are any bookmarked episodes
+        if !bookmarkedEpisodes.isEmpty {
+            let bookmarkedItem = CPListItem(text: "Bookmarked Episodes",
+                                           detailText: "\(bookmarkedEpisodes.count) bookmarked",
+                                           image: UIImage(systemName: "bookmark.fill"))
+            bookmarkedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.showBookmarkedEpisodesFromList(bookmarkedEpisodes, podcastTitle: podcast.title, completion: completion)
+            }
+            filterItems.append(bookmarkedItem)
+        }
+        
+        // Add filter section if we have any filters
+        if !filterItems.isEmpty {
+            let filterSection = CPListSection(items: filterItems, header: "Filter", sectionIndexTitle: nil)
             sections.append(filterSection)
         }
         
@@ -715,6 +735,38 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
+    private func loadAndShowBookmarkedEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        let context = CoreDataStack.shared.context
+        
+        context.perform {
+            do {
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@ AND isFavorite == YES", podcast.id)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                
+                let managedEpisodes = try context.fetch(episodeRequest)
+                let bookmarkedEpisodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    episode.state.isFavorite = managedEpisode.isFavorite
+                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    return episode
+                }
+                
+                DispatchQueue.main.async { [weak self] in
+                    self?.showBookmarkedEpisodesFromList(bookmarkedEpisodes, podcastTitle: podcast.title, completion: completion)
+                }
+                
+            } catch {
+                os_log("🚗 CarPlay: Error loading bookmarked episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                DispatchQueue.main.async {
+                    completion()
+                }
+            }
+        }
+    }
+    
     private func showDownloadedEpisodesFromList(_ downloadedEpisodes: [PodcastEpisode], podcastTitle: String, completion: @escaping () -> Void) {
         let carPlayManager = CarPlayManager.shared
         var episodeItems: [CPListItem] = []
@@ -733,8 +785,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 statusText = " • In Progress"
             }
             
-            // Use download icon for all downloaded episodes
-            let itemImage = UIImage(systemName: "arrow.down.circle.fill")
+            // Find the podcast feed for artwork
+            let podcastFeeds = carPlayManager.getPodcastFeeds()
+            let podcastFeed = podcastFeeds.first { feed in
+                feed.id == episode.feedId
+            }
+            
+            // Use podcast artwork for downloaded episodes
+            let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "arrow.down.circle.fill")
             
             let item = CPListItem(text: episode.title,
                                  detailText: "\(duration)\(statusText)",
@@ -758,6 +816,66 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         let section = CPListSection(items: episodeItems, header: "Downloaded Episodes", sectionIndexTitle: nil)
         let listTemplate = CPListTemplate(title: "\(podcastTitle) - Downloaded", sections: [section])
+        
+        interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+            completion()
+        })
+    }
+    
+    private func showBookmarkedEpisodesFromList(_ bookmarkedEpisodes: [PodcastEpisode], podcastTitle: String, completion: @escaping () -> Void) {
+        let carPlayManager = CarPlayManager.shared
+        var episodeItems: [CPListItem] = []
+        
+        for episode in bookmarkedEpisodes {
+            let duration = formatDuration(episode.duration)
+            var statusText = ""
+            let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episode.id && PodcastPlayer.shared.isPlaying
+            
+            // Determine episode status based on state and current playback
+            if isCurrentlyPlaying {
+                statusText = " • Playing"
+            } else if episode.state.isPlayed {
+                statusText = " • Complete"
+            } else if episode.state.progress > 0 {
+                statusText = " • In Progress"
+            }
+            
+            // Add download indicator if episode is also downloaded
+            if episode.state.isDownloaded {
+                statusText += " • Downloaded"
+            }
+            
+            // Find the podcast feed for artwork
+            let podcastFeeds = carPlayManager.getPodcastFeeds()
+            let podcastFeed = podcastFeeds.first { feed in
+                feed.id == episode.feedId
+            }
+            
+            // Use podcast artwork for bookmarked episodes
+            let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "bookmark.fill")
+            
+            let item = CPListItem(text: episode.title,
+                                 detailText: "\(duration)\(statusText)",
+                                 image: itemImage)
+            
+            // Set Apple standard highlighting for currently playing episode
+            if #available(iOS 14.0, *) {
+                item.isPlaying = isCurrentlyPlaying
+            }
+            
+            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.playEpisode(episode, completion: completion)
+            }
+            episodeItems.append(item)
+        }
+        
+        if episodeItems.isEmpty {
+            let emptyItem = CPListItem(text: "No Bookmarked Episodes", detailText: "Bookmark episodes to see them here")
+            episodeItems.append(emptyItem)
+        }
+        
+        let section = CPListSection(items: episodeItems, header: "Bookmarked Episodes", sectionIndexTitle: nil)
+        let listTemplate = CPListTemplate(title: "\(podcastTitle) - Bookmarked", sections: [section])
         
         interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
             completion()
@@ -1198,10 +1316,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 // Find the podcast feed for artwork
                 let podcastFeeds = carPlayManager.getPodcastFeeds()
                 let podcastFeed = podcastFeeds.first { feed in
-                    feed.episodes.contains { $0.id == episode.id }
+                    feed.id == episode.feedId
                 }
                 
-                // Use standard podcast artwork for all episodes
+                // Use podcast artwork for recently played episodes
                 let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
                 
                 let item = CPListItem(text: episode.title,
@@ -1311,10 +1429,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 // Find the podcast feed for artwork
                 let podcastFeeds = carPlayManager.getPodcastFeeds()
                 let podcastFeed = podcastFeeds.first { feed in
-                    feed.episodes.contains { $0.id == episode.id }
+                    feed.id == episode.feedId
                 }
                 
-                // Use standard podcast artwork for all episodes
+                // Use podcast artwork for favorite episodes
                 let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
                 
                 let item = CPListItem(text: episode.title,
