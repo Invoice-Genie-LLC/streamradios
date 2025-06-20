@@ -139,6 +139,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // Ensure progress is saved when app is force closed or goes to background
             handleAppWillTerminate()
+            
+            // Additional safety: Force save to UserDefaults
+            UserDefaults.standard.synchronize()
         }
     }
     
@@ -494,13 +497,29 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // If there's a currently playing episode, mark it as "In Progress" before switching
         if let currentEpisode = currentEpisode, currentEpisode.id != episode.id {
-            let currentProgress = currentTime / duration
+            // Get the most accurate current time from the player
+            let actualCurrentTime = player?.currentItem?.currentTime().seconds ?? currentTime
+            let actualDuration = player?.currentItem?.duration.seconds ?? duration
+            
+            // Calculate progress with the most up-to-date values
+            let currentProgress = actualDuration > 0 ? actualCurrentTime / actualDuration : 0
+            
+            // Update our internal state to match the actual player state
+            if actualCurrentTime.isFinite && actualCurrentTime >= 0 {
+                currentTime = actualCurrentTime
+            }
+            if actualDuration.isFinite && actualDuration > 0 {
+                duration = actualDuration
+            }
+            
+            // Save progress immediately when switching episodes
+            saveProgressForEpisodeSwitch(currentEpisode, progress: currentProgress, actualTime: actualCurrentTime)
+            
             stateManager.switchToEpisode(
                 newEpisodeId: episode.id,
                 previousEpisodeId: currentEpisode.id,
                 previousProgress: currentProgress
             )
-            saveProgressIfNeeded()
         }
         
         // Set podcast as the active player - this will handle audio session activation
@@ -690,17 +709,53 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         var savedProgress: Double = 0.0
         var progressSource = "none"
         
-        // 1. Check ViewModel's in-memory cache first (fastest)
-        if let viewModelProgress = viewModel?.episodeProgress[currentEpisode.id], viewModelProgress > 0 {
+        // 1. Check EpisodeStateManager first (most up-to-date from episode switches)
+        let stateManagerProgress = stateManager.getProgress(for: currentEpisode.id)
+        let stateManagerCurrentTime = stateManager.getCurrentTime(for: currentEpisode.id)
+        
+        os_log("🔍 DEBUG: StateManager Progress: %.4f, CurrentTime: %.1fs for episode: %@", 
+               log: log, type: .info, stateManagerProgress, stateManagerCurrentTime, currentEpisode.id)
+        
+        // PRIORITIZE CURRENT TIME OVER PROGRESS for accuracy
+        if stateManagerCurrentTime > 0 && duration > 0 {
+            let targetTime = stateManagerCurrentTime
+            let targetProgress = targetTime / duration
+            
+            os_log("🎯 Using saved current time for perfect accuracy: %.1fs (%.2f%%) vs progress: %.4f", 
+                   log: log, type: .info, targetTime, targetProgress * 100, stateManagerProgress)
+            
+            currentTime = targetTime
+            currentProgress = targetProgress
+            
+            // Seek to the exact saved time
+            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
+                if completed {
+                    DispatchQueue.main.async {
+                        self?.currentTime = targetTime
+                        self?.currentProgress = targetProgress
+                        self?.updatePlaybackInfo()
+                        self?.updateNowPlayingInfo()
+                        os_log("✅ Perfectly restored playback position to %.1f seconds", log: self?.log ?? OSLog.default, type: .info, targetTime)
+                    }
+                }
+            }
+            return
+        }
+        else if stateManagerProgress > 0 {
+            savedProgress = stateManagerProgress
+            progressSource = "stateManager"
+        }
+        // 2. Check ViewModel's in-memory cache (fast and updated during playback)
+        else if let viewModelProgress = viewModel?.episodeProgress[currentEpisode.id], viewModelProgress > 0 {
             savedProgress = viewModelProgress
             progressSource = "viewModel"
         }
-        // 2. If not found, check the episode's state directly
+        // 3. Check the episode's state directly
         else if currentEpisode.state.progress > 0 {
             savedProgress = currentEpisode.state.progress
             progressSource = "episodeState"
         }
-        // 3. As fallback, query Core Data directly (for CarPlay independence)
+        // 4. As fallback, query Core Data directly (for CarPlay independence)
         else if let viewModel = viewModel {
             let coreDataProgress = viewModel.getProgress(for: currentEpisode)
             if coreDataProgress > 0 {
@@ -738,7 +793,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 }
             }
         } else {
-            os_log("No valid saved progress found, starting from the beginning (progress: %.2f)", log: log, type: .info, savedProgress)
+            os_log("❌ No valid saved progress found, starting from the beginning (stateManager progress: %.4f, currentTime: %.1fs)", 
+                   log: log, type: .info, stateManagerProgress, stateManagerCurrentTime)
             player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             currentTime = 0
             currentProgress = 0
@@ -770,6 +826,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         player.play()
                isPlaying = true
+        
+        // Update StateManager when starting playback
+        stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true)
         stateManager.startPlaying(episodeId: currentEpisode.id)
 
                
@@ -799,6 +858,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.pause()
         isPlaying = false
         saveProgressIfNeeded()  // Progress is saved here
+        
+        // Update StateManager with current progress when pausing
+        let actualCurrentTime = player.currentTime().seconds
+        stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
         stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
 
         ensureProgressTracking(for: currentEpisode)
@@ -854,10 +917,51 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         viewModel?.updateProgress(for: currentEpisode, progress: progress)
     }
     
+    private func saveProgressForEpisodeSwitch(_ episode: PodcastEpisode, progress: Double, actualTime: Double? = nil) {
+        // Ensure progress is saved immediately when switching episodes
+        guard duration > 0 else { return }
+        
+        let timeToSave = actualTime ?? currentTime
+        os_log("🔄 Saving progress immediately for episode switch: %@ (%.2f%% | %.1fs)", log: log, type: .info, episode.title, progress * 100, timeToSave)
+        
+        // 1. Update progress in state manager FIRST (highest priority for seeking)
+        stateManager.updateProgress(for: episode.id, progress: progress, isPlaying: false, currentTime: timeToSave)
+        
+        // 2. Update progress in view model (in-memory cache)
+        viewModel?.updateProgress(for: episode, progress: progress)
+        
+        // 3. Also update the episode progress cache immediately
+        viewModel?.episodeProgress[episode.id] = progress
+        
+        // 4. Update the episode object in memory to ensure consistency
+        var updatedEpisode = episode
+        updatedEpisode.state.progress = progress
+        if progress >= 0.99 {
+            updatedEpisode.state.isPlayed = true
+        } else if !episode.state.isPlayed {
+            updatedEpisode.state.isPlayed = false
+        }
+        viewModel?.updateEpisode(updatedEpisode)
+        
+        // 5. Force save the state manager data immediately
+        stateManager.forceSave()
+        
+        // 6. Force save the context to ensure persistence
+        viewModel?.saveContextIfNeeded()
+        
+        // 7. Force synchronize UserDefaults for additional safety
+        UserDefaults.standard.synchronize()
+        
+        os_log("✅ Progress saved successfully for episode: %@ at %.2f%% to all storage locations", log: log, type: .info, episode.title, progress * 100)
+    }
+    
     func skipForward() {
         seek(by: 15)
         if let currentEpisode = currentEpisode {
             saveProgressIfNeeded()
+            // Update StateManager when user manually seeks
+            let actualCurrentTime = player?.currentTime().seconds ?? currentTime
+            stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: isPlaying, currentTime: actualCurrentTime)
         }
     }
     
@@ -865,6 +969,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         seek(by: -15)
         if let currentEpisode = currentEpisode {
             saveProgressIfNeeded()
+            // Update StateManager when user manually seeks
+            let actualCurrentTime = player?.currentTime().seconds ?? currentTime
+            stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: isPlaying, currentTime: actualCurrentTime)
         }
     }
     
@@ -976,15 +1083,21 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let progress = currentTime / duration
             
             self.currentProgress = progress
-            stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying)
             
             // Calculate remaining time
             let remainingTime = max(duration - currentTime, 0)
             
-            // Always save progress if it has changed significantly (less frequent for Core Data performance)
+            // Only save progress if it has changed significantly (less frequent for Core Data performance)
             if abs(progress - lastSavedProgress) >= saveThreshold {
+                // Update StateManager only when we're actually saving progress
+                stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying)
+                
                 viewModel?.updateProgress(for: currentEpisode, progress: progress)
                 lastSavedProgress = progress
+                
+                // Update in-memory cache immediately for instant access
+                viewModel?.episodeProgress[currentEpisode.id] = progress
+                
                 os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
             }
             
@@ -1062,12 +1175,21 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func handleAppWillTerminate() {
-        if let currentEpisode = currentEpisode, isPlaying {
-            // Immediately save current progress
-            let progress = currentTime / duration
+        if let currentEpisode = currentEpisode {
+            // Get the most accurate current time from the player
+            let actualCurrentTime = player?.currentTime().seconds ?? currentTime
+            let progress = duration > 0 ? actualCurrentTime / duration : 0
+            
+            os_log("🛑 App terminating - saving progress for episode: %@ at %.2f%%", log: log, type: .info, currentEpisode.title, progress * 100)
+            
+            // Update StateManager with exact current time for perfect restoration
+            stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: false, currentTime: actualCurrentTime)
             
             // Save progress in view model
             viewModel?.updateProgress(for: currentEpisode, progress: progress)
+            
+            // Update in-memory cache immediately
+            viewModel?.episodeProgress[currentEpisode.id] = progress
             
             // Update episode state to "In Progress" if it was playing
             var updatedEpisode = currentEpisode
@@ -1087,10 +1209,19 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Update state manager to mark as in progress
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
             
-            // Force save to UserDefaults and Core Data immediately
+            // Force save state manager data immediately
+            stateManager.forceSave()
+            
+            // Force save to UserDefaults and Core Data immediately with synchronous operations
             viewModel?.saveContextIfNeeded()
             
-            os_log("Force saved progress and marked episode as in progress on app termination: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
+            // Force synchronize UserDefaults to ensure state manager data is persisted
+            if let userDefaults = UserDefaults(suiteName: "group.streamradios") {
+                userDefaults.synchronize()
+            }
+            UserDefaults.standard.synchronize()
+            
+            os_log("✅ Force saved progress and marked episode as in progress on app termination: %@, Progress: %.2f%%", log: log, type: .info, currentEpisode.title, progress * 100)
         }
     }
     

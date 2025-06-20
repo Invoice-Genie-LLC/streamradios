@@ -65,6 +65,16 @@ enum EpisodePlaybackState: String, Codable, Equatable {
 struct EpisodeProgress: Codable {
     var state: EpisodePlaybackState
     var progress: Double
+    var currentTime: Double?
+    var duration: Double?
+    
+    // Initialize with legacy support
+    init(state: EpisodePlaybackState, progress: Double, currentTime: Double? = nil, duration: Double? = nil) {
+        self.state = state
+        self.progress = progress
+        self.currentTime = currentTime
+        self.duration = duration
+    }
 }
 
 class EpisodeStateManager: ObservableObject {
@@ -73,11 +83,13 @@ class EpisodeStateManager: ObservableObject {
     @Published private(set) var episodeStates: [String: EpisodePlaybackState] = [:]
     @Published private(set) var currentlyPlayingEpisodeId: String?
     private var episodeProgress: [String: Double] = [:]
+    private var episodeCurrentTime: [String: Double] = [:]
     
     // Use shared app group UserDefaults instead of standard UserDefaults
     private let userDefaults = UserDefaults(suiteName: "group.streamradios") ?? UserDefaults.standard
     private let statesKey = "EpisodeStates"
     private let progressKey = "EpisodeProgress"
+    private let currentTimeKey = "EpisodeCurrentTime"
     
     private init() {
         loadSavedStates()
@@ -104,6 +116,12 @@ class EpisodeStateManager: ObservableObject {
                 var states = try JSONDecoder().decode([String: EpisodePlaybackState].self, from: savedData)
                 let progress = try JSONDecoder().decode([String: Double].self, from: savedProgress)
                 
+                // Load current times if available
+                var currentTimes: [String: Double] = [:]
+                if let savedCurrentTimes = userDefaults.data(forKey: currentTimeKey) {
+                    currentTimes = try JSONDecoder().decode([String: Double].self, from: savedCurrentTimes)
+                }
+                
                 // Convert any playing state to in progress on app launch
                 for (episodeId, state) in states {
                     if state == .playing {
@@ -124,6 +142,7 @@ class EpisodeStateManager: ObservableObject {
                 DispatchQueue.main.async {
                     self.episodeStates = states
                     self.episodeProgress = progress
+                    self.episodeCurrentTime = currentTimes
                     self.currentlyPlayingEpisodeId = nil // Clear any playing episode
                     self.objectWillChange.send()
                 }
@@ -137,9 +156,11 @@ class EpisodeStateManager: ObservableObject {
         do {
             let statesData = try JSONEncoder().encode(episodeStates)
             let progressData = try JSONEncoder().encode(episodeProgress)
+            let currentTimeData = try JSONEncoder().encode(episodeCurrentTime)
             
             userDefaults.set(statesData, forKey: statesKey)
             userDefaults.set(progressData, forKey: progressKey)
+            userDefaults.set(currentTimeData, forKey: currentTimeKey)
         } catch {
             print("Error saving states: \(error)")
         }
@@ -150,7 +171,15 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func getProgress(for episodeId: String) -> Double {
-        return episodeProgress[episodeId] ?? 0.0
+        let progress = episodeProgress[episodeId] ?? 0.0
+        print("🔍 EpisodeStateManager: Getting progress \(progress) for episode \(episodeId)")
+        return progress
+    }
+    
+    func getCurrentTime(for episodeId: String) -> Double {
+        let currentTime = episodeCurrentTime[episodeId] ?? 0.0
+        print("🔍 EpisodeStateManager: Getting currentTime \(currentTime)s for episode \(episodeId)")
+        return currentTime
     }
     
     func startPlaying(episodeId: String) {
@@ -254,25 +283,73 @@ class EpisodeStateManager: ObservableObject {
         objectWillChange.send()
     }
     
-    func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool) {
+    func updateProgress(for episodeId: String, progress: Double, isPlaying: Bool, currentTime: Double? = nil) {
         let newState: EpisodePlaybackState
-        episodeProgress[episodeId] = progress
+        
+        // Prevent overwriting existing progress with 0.0 unless it's a genuine reset
+        let existingProgress = episodeProgress[episodeId] ?? 0.0
+        let existingState = episodeStates[episodeId] ?? .new
+        let shouldUpdateProgress: Bool
+        
+        if progress > 0 {
+            // Always update when we have positive progress
+            shouldUpdateProgress = true
+            episodeProgress[episodeId] = progress
+        } else if existingProgress == 0.0 {
+            // Update to 0.0 only if there's no existing progress
+            shouldUpdateProgress = true
+            episodeProgress[episodeId] = progress
+        } else if currentTime != nil {
+            // Update if we have explicit currentTime (from episode switch)
+            shouldUpdateProgress = true
+            episodeProgress[episodeId] = progress
+        } else if !isPlaying && existingState == .inProgress && progress == 0.0 {
+            // CRITICAL: Don't overwrite in-progress episodes with 0.0 during loading
+            shouldUpdateProgress = false
+            print("🔍 EpisodeStateManager: Protecting in-progress episode \(episodeId) from 0.0 reset (existing: \(existingProgress))")
+        } else {
+            // Don't overwrite existing progress with 0.0
+            shouldUpdateProgress = false
+            print("🔍 EpisodeStateManager: Skipping 0.0 progress update for episode \(episodeId) (existing: \(existingProgress))")
+        }
+        
+        // Store current time if provided
+        if let currentTime = currentTime {
+            episodeCurrentTime[episodeId] = currentTime
+            print("🔍 EpisodeStateManager: Storing currentTime \(currentTime)s for episode \(episodeId)")
+        }
+        
+        if shouldUpdateProgress && progress > 0 {
+            print("🔍 EpisodeStateManager: Updating progress \(String(format: "%.3f", progress)) for episode \(episodeId)")
+        }
+        
+        // Use the actual progress value for state determination
+        let effectiveProgress = shouldUpdateProgress ? progress : existingProgress
         
         if isPlaying {
             newState = .playing
             currentlyPlayingEpisodeId = episodeId
-        } else if progress >= 0.99 {
+        } else if effectiveProgress >= 0.99 {
             newState = .played
             currentlyPlayingEpisodeId = nil
-        } else if progress > 0 {
+        } else if effectiveProgress > 0 {
             newState = .inProgress
             currentlyPlayingEpisodeId = nil
+        } else if existingState == .inProgress && !shouldUpdateProgress {
+            // CRITICAL: Preserve in-progress state when protecting from 0.0 updates
+            newState = .inProgress
         } else {
             newState = .new
         }
         
-        if episodeStates[episodeId] != newState {
+        if episodeStates[episodeId] != newState || shouldUpdateProgress || currentTime != nil {
+            let oldState = episodeStates[episodeId] ?? .new
             episodeStates[episodeId] = newState
+            
+            if oldState != newState {
+                print("🔄 EpisodeStateManager: State changed for \(episodeId): \(oldState) -> \(newState) (progress: \(String(format: "%.4f", effectiveProgress)))")
+            }
+            
             saveCurrentStates()
             objectWillChange.send()
         }
@@ -287,5 +364,15 @@ class EpisodeStateManager: ObservableObject {
         userDefaults.removeObject(forKey: progressKey)
         
         objectWillChange.send()
+    }
+    
+    func forceSave() {
+        // Force immediate save of current states
+        saveCurrentStates()
+        
+        // Force synchronize UserDefaults to ensure data is written to disk
+        userDefaults.synchronize()
+        
+        print("✅ EpisodeStateManager: Force saved all states and progress data")
     }
 }
