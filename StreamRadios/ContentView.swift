@@ -32,7 +32,7 @@ struct ContentView: View {
     @State private var selectedPodcast: PodcastFeed?
     @State private var showPodcastListView: Bool
     @State private var seekPosition: Double
-    @State private var showPodcastPlayerSheet = false
+
     @State private var showAllEpisodes = false
     @State private var scrollToEpisodeID: String?
 
@@ -170,7 +170,7 @@ struct ContentView: View {
             .tag(Tab.radio)
             
             // Podcast Tab
-            PodcastListView()
+            PodcastListView(selectedPodcast: $selectedPodcast)
                 .environmentObject(podcastViewModel)
             .tabItem {
                 Image(systemName: Tab.podcast.icon)
@@ -289,10 +289,10 @@ struct ContentView: View {
                                     viewModel: podcastViewModel,
                                     selectedPodcast: $selectedPodcast,
                                     onListButtonTap: {
+                                        // Switch to podcast tab and set the current feed
                                         selectedPodcast = currentFeed
                                         podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                        scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                        showPodcastPlayerSheet = true
+                                        selectedTab = .podcast
                                     },
                                     onCloseButtonTap: {
                                         podcastPlayer.pause()
@@ -302,10 +302,10 @@ struct ContentView: View {
                                 )
                                 .onTapGesture {
                                     if let currentFeed = podcastPlayer.currentFeed {
+                                        // Switch to podcast tab and set the current feed
                                         selectedPodcast = currentFeed
                                         podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                        scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                        showPodcastPlayerSheet = true
+                                        selectedTab = .podcast
                                     }
                                 }
                                 .padding(.horizontal, 16)
@@ -410,21 +410,7 @@ struct ContentView: View {
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
-            .sheet(isPresented: $showPodcastPlayerSheet) {
-                if let podcast = selectedPodcast {
-                    PodcastPlayerView(
-                        viewModel: podcastViewModel,
-                        feed: podcast,
-                        initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
-                        podcastPlayer: podcastPlayer,
-                        selectedPodcast: $selectedPodcast,
-                        episodeToScrollTo: Binding(
-                            get: { podcastPlayer.currentEpisode },
-                            set: { _ in }
-                        )
-                    )
-                }
-            }
+
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                 bitrateMessage = newBitrateMessage
             }
@@ -737,7 +723,7 @@ struct UnifiedPodcastPlayerView: View {
     }
     
     var body: some View {
-        VStack(spacing: sizeClass == .compact ? 8 : 12) {
+        VStack(spacing: sizeClass == .compact ? 10 : 14) {
             // Top row: Artwork and Controls
             HStack(spacing: sizeClass == .compact ? 12 : 16) {
                 // Album artwork - responsive size
@@ -833,7 +819,7 @@ struct UnifiedPodcastPlayerView: View {
             .padding(.top, sizeClass == .compact ? 8 : 12)
             
             // Titles section - full width
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(currentEpisode.title)
                     .font(.system(size: sizeClass == .compact ? 14 : 16, weight: .semibold))
                     .foregroundColor(.white)
@@ -849,6 +835,7 @@ struct UnifiedPodcastPlayerView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, horizontalPadding)
+            .padding(.bottom, 4) // Add bottom padding to titles section
             
             // Progress slider - compact and responsive
             VStack(spacing: sizeClass == .compact ? 4 : 6) {
@@ -909,7 +896,7 @@ struct UnifiedPodcastPlayerView: View {
             .padding(.top, sizeClass == .compact ? 6 : 8)
         }
         .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Match radio player background
-        .padding(.bottom, sizeClass == .compact ? 8 : 12)
+        .padding(.bottom, sizeClass == .compact ? 16 : 20) // Increased bottom padding to prevent text cutoff
         .onAppear {
             sliderProgress = podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0
         }

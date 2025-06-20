@@ -12,7 +12,7 @@ import OSLog
 import CoreData
 import AVKit
 
-struct PodcastFeed: Identifiable, Codable {
+struct PodcastFeed: Identifiable, Codable, Equatable {
     let id: String
     var title: String
     var url: String
@@ -31,6 +31,11 @@ struct PodcastFeed: Identifiable, Codable {
         self.iconData = iconData
         self.imageData = imageData
         self.episodes = episodes
+    }
+    
+    // Equatable implementation
+    static func == (lhs: PodcastFeed, rhs: PodcastFeed) -> Bool {
+        return lhs.id == rhs.id
     }
 }
 

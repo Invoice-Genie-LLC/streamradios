@@ -19,7 +19,7 @@ struct PodcastListView: View {
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
-    @State private var selectedPodcast: PodcastFeed?
+    @Binding var selectedPodcast: PodcastFeed?
     @State private var searchText = ""
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
@@ -38,68 +38,24 @@ struct PodcastListView: View {
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
     private let miniPlayerHeight: CGFloat = 60 // Adjust this value based on your MiniPlayerView height
     
+    // Default initializer for backward compatibility
+    init() {
+        self._selectedPodcast = .constant(nil)
+    }
+    
+    // Initializer with binding
+    init(selectedPodcast: Binding<PodcastFeed?>) {
+        self._selectedPodcast = selectedPodcast
+    }
+    
     var body: some View {
            NavigationView {
                ZStack(alignment: .bottom) {
-                   VStack(spacing: 0) {
-                       instructionText
-                       searchBar
-                       podcastList
-                           .padding(.bottom, podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
-                   }
-                   .navigationTitle("Podcasts")
-                   .toolbar {
-                                       ToolbarItem(placement: .navigationBarLeading) {
-                                           Button(action: {
-                                               isEditing.toggle()
-                                               if !isEditing {
-                                                   viewModel.saveFeedOrder()
-                                                   refreshID = UUID() // Force view refresh
-                                               }
-                                           }) {
-                                               Text(isEditing ? "Done" : "Edit")
-                                           }
-                                       
-                       }
-                       ToolbarItemGroup(placement: .navigationBarTrailing) {
-                           if !isEditing {
-                               Button(action: viewModel.sortFeedsAlphabetically) {
-                                   Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                               }
-                               Button(action: { showingAddPodcast = true }) {
-                                   Image(systemName: "plus")
-                               }
-                           }
-                       }
-                   }
-                   .onAppear(perform: onAppear)
-                   .id(refreshID)
-                   .sheet(isPresented: $showingAddPodcast) {
-                       AddPodcastView(
-                           isPresented: $showingAddPodcast, 
-                           title: $newPodcastTitle, 
-                           url: $newPodcastURL, 
-                           podcastToEdit: nil,
-                           onAdd: addPodcast,
-                           onUpdate: nil
-                       )
-                   }
-                   .sheet(isPresented: $showingEditPodcast) {
-                       AddPodcastView(
-                           isPresented: $showingEditPodcast,
-                           title: $editPodcastTitle,
-                           url: $editPodcastURL,
-                           podcastToEdit: podcastToEdit,
-                           onAdd: { },
-                           onUpdate: { updatedPodcast in
-                               updatePodcast(updatedPodcast)
-                           }
-                       )
-                   }
-                   .sheet(item: $selectedPodcast) { podcast in
+                   // Show episode list inline when a podcast is selected
+                   if let selectedPodcast = selectedPodcast {
                        PodcastPlayerView(
                            viewModel: viewModel,
-                           feed: podcast,
+                           feed: selectedPodcast,
                            initialScrollToEpisodeID: podcastPlayer.currentEpisode?.id,
                            podcastPlayer: podcastPlayer,
                            selectedPodcast: $selectedPodcast,
@@ -108,7 +64,71 @@ struct PodcastListView: View {
                                set: { _ in }
                            )
                        )
+                       .transition(.slide)
+                   } else {
+                       // Show the podcast list when no podcast is selected
+                       VStack(spacing: 0) {
+                           instructionText
+                           searchBar
+                           podcastList
+                               .padding(.bottom, podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
+                       }
                    }
+               }
+               .navigationTitle("Podcasts")
+               .toolbar {
+                   ToolbarItem(placement: .navigationBarLeading) {
+                       Button(action: {
+                           isEditing.toggle()
+                           if !isEditing {
+                               viewModel.saveFeedOrder()
+                               refreshID = UUID() // Force view refresh
+                           }
+                       }) {
+                           Text(isEditing ? "Done" : "Edit")
+                       }
+                   }
+                   ToolbarItemGroup(placement: .navigationBarTrailing) {
+                       if !isEditing {
+                           Button(action: viewModel.sortFeedsAlphabetically) {
+                               Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                           }
+                           Button(action: { showingAddPodcast = true }) {
+                               Image(systemName: "plus")
+                           }
+                       }
+                   }
+               }
+               .onAppear(perform: onAppear)
+               .onChange(of: selectedPodcast) { _, newValue in
+                   // When selectedPodcast is set from outside (like from ContentView),
+                   // automatically show the episode list
+                   if let podcast = newValue {
+                       viewModel.fetchAllEpisodes(for: podcast)
+                   }
+               }
+               .id(refreshID)
+               .sheet(isPresented: $showingAddPodcast) {
+                   AddPodcastView(
+                       isPresented: $showingAddPodcast, 
+                       title: $newPodcastTitle, 
+                       url: $newPodcastURL, 
+                       podcastToEdit: nil,
+                       onAdd: addPodcast,
+                       onUpdate: nil
+                   )
+               }
+               .sheet(isPresented: $showingEditPodcast) {
+                   AddPodcastView(
+                       isPresented: $showingEditPodcast,
+                       title: $editPodcastTitle,
+                       url: $editPodcastURL,
+                       podcastToEdit: podcastToEdit,
+                       onAdd: { },
+                       onUpdate: { updatedPodcast in
+                           updatePodcast(updatedPodcast)
+                       }
+                   )
                    .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
                    
                    // Fixed Mini Player
@@ -1609,7 +1629,8 @@ struct PodcastPlayerView: View {
             viewModel.objectWillChange.send()
         }
         
-        presentationMode.wrappedValue.dismiss()
+        // Go back to podcast list by setting selectedPodcast to nil
+        selectedPodcast = nil
     }
 }
 
