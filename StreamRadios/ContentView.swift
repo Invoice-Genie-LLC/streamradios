@@ -304,25 +304,11 @@ struct ContentView: View {
                             }
                             .padding(.horizontal, 16)
                         } else if let currentStation = viewModel.currentlyPlayingStation, radioPlayer.isPlaying {
-                            // Radio is playing - show compact radio player
-                            VStack(spacing: 0) {
-                                // Minimal top separator
-                                Rectangle()
-                                    .fill(Color.blue.opacity(0.5))
-                                    .frame(height: 1)
-                                
-                                CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata)
-                                    .environmentObject(radioPlayer)
-                                    .environmentObject(viewModel)
-                                    .onTapGesture {
-                                        isPlayerSheetPresented.toggle()
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                            }
-                            .background(Color(red: 0.05, green: 0.05, blue: 0.05))
-                            .frame(height: 60) // Match podcast player height
-                            .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
+                            // Radio is playing - show compact radio player matching podcast style
+                            CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
+                                .environmentObject(radioPlayer)
+                                .environmentObject(viewModel)
+                                .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
                         }
                     }
                 }
@@ -492,142 +478,102 @@ struct CompactPlayerView: View {
     let metadata: String?
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
+    @Binding var isPlayerSheetPresented: Bool
     
     var body: some View {
-        VStack(spacing: 6) {
-            // Top row: Album artwork and controls
-            HStack(spacing: 16) {
-                // Album artwork - compact size
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(width: 56, height: 56)
-                    
-                    albumArtworkView
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+        VStack(spacing: 0) {
+            // Safe space at top instead of blue line (matching podcast player)
+            Rectangle()
+                .fill(Color.clear)
+                .frame(height: 8)
+            
+            // Compact single-row layout (matching podcast player)
+            HStack(spacing: 12) {
+                // Tappable artwork area for opening player sheet
+                Button(action: {
+                    print("🖼️ Artwork tapped - OPENING player sheet")
+                    isPlayerSheetPresented.toggle()
+                }) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 44, height: 44)
+                        
+                        albumArtworkView
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
                 }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Tappable text area for opening player sheet
+                Button(action: {
+                    print("📝 Text area tapped - OPENING player sheet")
+                    isPlayerSheetPresented.toggle()
+                }) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(currentStation.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(nil) // Allow unlimited lines
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
+                        
+                        if let metadata = metadata, !metadata.isEmpty {
+                            Text(metadata)
+                                .font(.system(size: 12, weight: .regular))
+                                .foregroundColor(.gray)
+                                .lineLimit(nil) // Allow unlimited lines
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
+                        } else {
+                            Text("Live Radio")
+                                .font(.system(size: 12, weight: .regular))
+                                .foregroundColor(.gray)
+                                .lineLimit(nil)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
                 
                 Spacer()
                 
-                // Control buttons - horizontal layout
-                HStack(spacing: 16) {
-                    // Previous button
+                // Essential controls only - just play/pause button
+                HStack(spacing: 8) {
+                    // Main play/pause button
                     Button(action: {
-                        radioPlayer.previousStation(from: viewModel.stations)
-                    }) {
-                        Image(systemName: "backward.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.white)
-                    }
-                    .frame(width: 34, height: 34)
-                    .background(Color.gray.opacity(0.3))
-                    .clipShape(Circle())
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Play/pause button - primary control
-                    Button(action: {
+                        print("⏯️ Play/pause button action - NOT opening sheet")
                         radioPlayer.playPause()
                     }) {
                         ZStack {
+                            Circle()
+                                .fill(Color.blue)
+                                .frame(width: 36, height: 36)
+                            
                             if radioPlayer.isBuffering {
                                 ProgressView()
                                     .scaleEffect(0.8)
                                     .tint(.white)
                             } else {
                                 Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 20, weight: .medium))
+                                    .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
                             }
                         }
                     }
-                    .frame(width: 44, height: 44)
-                    .background(Color.blue)
-                    .clipShape(Circle())
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Next button
-                    Button(action: {
-                        radioPlayer.nextStation(from: viewModel.stations)
-                    }) {
-                        Image(systemName: "forward.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.white)
-                    }
-                    .frame(width: 34, height: 34)
-                    .background(Color.gray.opacity(0.3))
-                    .clipShape(Circle())
                     .buttonStyle(PlainButtonStyle())
                 }
             }
-            
-            // Bottom section: Dynamic full-width text information
-            VStack(alignment: .leading, spacing: 4) {
-                // Station name - full width, unlimited lines, dynamic height
-                Text(currentStation.name)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(nil) // Unlimited lines
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
-                
-                // Song metadata - full width, unlimited lines, dynamic height
-                if let metadata = metadata, !metadata.isEmpty {
-                    Text(metadata)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.gray)
-                        .lineLimit(nil) // Unlimited lines
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
-                } else {
-                    Text("Live Radio")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, dynamicBottomPadding)
-        .background(Color(red: 0.05, green: 0.05, blue: 0.05)) // Darker gray
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically
-    }
-    
-    // Dynamic bottom padding based on text content
-    private var dynamicBottomPadding: CGFloat {
-        let stationNameHeight = textHeight(for: currentStation.name, font: .systemFont(ofSize: 16, weight: .semibold))
-        let metadataText = (metadata?.isEmpty == false) ? metadata! : "Live Radio"
-        let metadataHeight = textHeight(for: metadataText, font: .systemFont(ofSize: 14, weight: .regular))
-        
-        let totalTextHeight = stationNameHeight + metadataHeight + 4 // 4 is the spacing between texts
-        let baseLineHeight: CGFloat = 20 // Approximate single line height
-        
-        // More precise padding calculation based on actual content
-        if totalTextHeight <= baseLineHeight * 1.5 { // Single line content
-            return 4
-        } else if totalTextHeight <= baseLineHeight * 2.5 { // Two lines
-            return 6
-        } else { // Three or more lines
-            return 8
-        }
-    }
-    
-    // Helper function to calculate text height
-    private func textHeight(for text: String, font: UIFont) -> CGFloat {
-        // More accurate width calculation: screen width - horizontal padding (32) - artwork (56) - spacing (16) - controls (~150)
-        let maxWidth = UIScreen.main.bounds.width - 32 - 56 - 16 - 150
-        let attributes = [NSAttributedString.Key.font: font]
-        let attributedString = NSAttributedString(string: text, attributes: attributes)
-        let rect = attributedString.boundingRect(
-            with: CGSize(width: max(maxWidth, 100), height: .greatestFiniteMagnitude), // Ensure minimum width
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            context: nil
+        .background(
+            Color(red: 0.05, green: 0.05, blue: 0.05)
         )
-        return ceil(rect.height)
+        .frame(minHeight: 60) // Minimum height with ability to expand
     }
     
     @ViewBuilder
@@ -720,31 +666,43 @@ struct UnifiedPodcastPlayerView: View {
             
             // Compact single-row layout
             HStack(spacing: 12) {
-                // Small artwork
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(width: 44, height: 44)
-                    
-                    feedArtworkView
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                // Tappable artwork area
+                Button(action: {
+                    print("Podcast artwork tapped - opening sheet")
+                    // Add sheet presentation logic here if needed
+                }) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(width: 44, height: 44)
+                        
+                        feedArtworkView
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
                 }
+                .buttonStyle(PlainButtonStyle())
                 
-                // Episode info - compact
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(currentEpisode.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Text(currentFeed.title)
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundColor(.gray)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                // Tappable text area
+                Button(action: {
+                    print("Podcast text area tapped - opening sheet")
+                    // Add sheet presentation logic here if needed
+                }) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(currentEpisode.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        Text(currentFeed.title)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(.gray)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+                .buttonStyle(PlainButtonStyle())
                 
                 Spacer()
                 
@@ -757,6 +715,7 @@ struct UnifiedPodcastPlayerView: View {
                             .foregroundColor(.white)
                             .frame(width: 32, height: 32)
                     }
+                    .buttonStyle(PlainButtonStyle())
                     
                     // Main play/pause button - compact
                     Button(action: podcastPlayer.togglePlayPause) {
@@ -770,6 +729,7 @@ struct UnifiedPodcastPlayerView: View {
                                 .foregroundColor(.white)
                         }
                     }
+                    .buttonStyle(PlainButtonStyle())
                     
                     // Skip forward 30s - smaller
                     Button(action: podcastPlayer.skipForward) {
@@ -778,6 +738,7 @@ struct UnifiedPodcastPlayerView: View {
                             .foregroundColor(.white)
                             .frame(width: 32, height: 32)
                     }
+                    .buttonStyle(PlainButtonStyle())
                     
                     // List button (only show if provided) - smaller
                     if onListButtonTap != nil {
@@ -789,6 +750,7 @@ struct UnifiedPodcastPlayerView: View {
                                 .foregroundColor(.gray)
                                 .frame(width: 28, height: 28)
                         }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     
                     // Close button (only show if provided) - smaller
@@ -801,6 +763,7 @@ struct UnifiedPodcastPlayerView: View {
                                 .foregroundColor(.gray)
                                 .frame(width: 28, height: 28)
                         }
+                        .buttonStyle(PlainButtonStyle())
                     }
                 }
             }
