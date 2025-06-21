@@ -1,4 +1,0 @@
-module AppAuthCore {
-umbrella "/Users/kley/Library/Developer/Xcode/DerivedData/StreamRadios-fjfrqscdmdancvdgxglzfjjuclgs/SourcePackages/checkouts/AppAuth-iOS/Sources/AppAuthCore"
-export *
-}
