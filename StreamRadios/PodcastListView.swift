@@ -1535,6 +1535,11 @@ struct PodcastPlayerView: View {
     @State private var lastScrollOffset: CGPoint = .zero
     @State private var scrollDebounceTimer: Timer?
     
+    // Animation states for enhanced UI feedback
+    @State private var endIndicatorScale: CGFloat = 1.0
+    @State private var showSuccessToast = false
+    @State private var successMessage = ""
+    
     // MARK: - Bindings
     @Binding var selectedPodcast: PodcastFeed?
     @Binding var episodeToScrollTo: PodcastEpisode?
@@ -1798,15 +1803,27 @@ struct PodcastPlayerView: View {
                 
                 Spacer()
                 
-                Text("\(viewModel.currentEpisodes.count) episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.blue.opacity(0.1))
-                    )
+                HStack(spacing: 4) {
+                    Text("\(viewModel.currentEpisodes.count)")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.blue)
+                    
+                    Text("episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.blue)
+                    
+                    if viewModel.hasMoreEpisodes {
+                        Text("• More available")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.blue.opacity(0.1))
+                )
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 8)
@@ -1838,21 +1855,36 @@ struct PodcastPlayerView: View {
             alignment: .bottom
         )
         .onChange(of: selectedTab) { newValue in
-            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: newValue)
+            // Reset pagination and load first page for the new tab
+            viewModel.switchToTab(newValue, for: feed)
         }
     }
     
     private var episodeListContent: some View {
         Group {
-            if viewModel.isLoadingEpisodes {
-                ProgressView("Loading episodes...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if viewModel.isLoadingEpisodes && viewModel.currentEpisodes.isEmpty {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                        .scaleEffect(1.2)
+                    Text("Loading episodes...")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text("Please wait while we fetch the latest episodes")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
             } else {
                 modernEpisodeList
             }
         }
     }
     
+
+
     private var modernEpisodeList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
@@ -1868,41 +1900,205 @@ struct PodcastPlayerView: View {
                     .id(episode.compositeID)
                 }
                 
-                if viewModel.hasMoreEpisodes && !viewModel.isLoadingMoreEpisodes {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                            .scaleEffect(1.0)
-                        Text("Loading more episodes...")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .padding(.leading, 8)
-                        Spacer()
-                    }
-                    .padding(.vertical, 24)
-                    .onAppear {
-                        loadMoreIfNeeded()
+                // Loading indicator and invisible trigger area for pull-up gesture
+                if viewModel.hasMoreEpisodes && !viewModel.currentEpisodes.isEmpty {
+                    VStack(spacing: 0) {
+                        // Show loading indicator when loading more episodes
+                        if isLoadingMore {
+                            HStack(spacing: 12) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                                    .scaleEffect(1.2)
+                                
+                                Text("Loading more episodes...")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(.blue)
+                            }
+                            .padding(.vertical, 20)
+                            .transition(.opacity.combined(with: .scale))
+                        } else {
+                            // Instructional area with arrow and text
+                            VStack(spacing: 12) {
+                                // Animated up arrow
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 24, weight: .medium))
+                                    .foregroundColor(.blue)
+                                    .scaleEffect(endIndicatorScale)
+                                    .animation(
+                                        .easeInOut(duration: 1.5)
+                                        .repeatForever(autoreverses: true),
+                                        value: endIndicatorScale
+                                    )
+                                
+                                // Instructional text
+                                Text("Swipe up for more episodes")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.primary)
+                            }
+                            .padding(.vertical, 24)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 20)
+                            .transition(.opacity.combined(with: .scale))
+                        }
+                        
+                        // Invisible trigger area that fills remaining space
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(minHeight: 100) // Reduced since we have instructional area
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                // Also allow tap to load more for easier testing
+                                if !isLoadingMore {
+                                    Task {
+                                        await loadMoreEpisodesRefreshable()
+                                    }
+                                }
+                            }
+                            .gesture(
+                                DragGesture(minimumDistance: 10)
+                                    .onChanged { value in
+                                        // Visual feedback during drag
+                                        if value.translation.height < -20 {
+                                            print("Pull-up detected: \(value.translation.height)")
+                                        }
+                                    }
+                                    .onEnded { value in
+                                        // Detect upward pull gesture with lower threshold
+                                        print("Drag ended with translation: \(value.translation.height)")
+                                        if value.translation.height < -20 && !isLoadingMore {
+                                            print("Triggering load more episodes")
+                                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                                            impactFeedback.impactOccurred()
+                                            
+                                            Task {
+                                                await loadMoreEpisodesRefreshable()
+                                            }
+                                        }
+                                    }
+                            )
                     }
                 }
                 
-                // Bottom padding for compact mini player
+                // End of list indicator (when all episodes are loaded)
+                if !viewModel.hasMoreEpisodes && !viewModel.currentEpisodes.isEmpty {
+                    VStack(spacing: 12) {
+                        Divider()
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
+                        
+                        VStack(spacing: 12) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundColor(.green)
+                                .scaleEffect(endIndicatorScale)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8), value: endIndicatorScale)
+                            
+                            VStack(spacing: 6) {
+                                Text("🎉 All episodes loaded!")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.primary)
+                                Text("You've reached the end")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                Text("\(viewModel.currentEpisodes.count) episodes total")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 24)
+                        
+                        Divider()
+                            .padding(.horizontal, 20)
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.green.opacity(0.1), Color.green.opacity(0.05)]),
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .onAppear {
+                        withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
+                            endIndicatorScale = 1.1
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
+                                endIndicatorScale = 1.0
+                            }
+                        }
+                    }
+                }
+                
+                // Extended bottom padding that serves as main trigger area
                 Rectangle()
                     .fill(Color.clear)
-                    .frame(height: 70)
+                    .frame(height: 120) // Increased from 70 to 120 for larger trigger area
+                    .contentShape(Rectangle())
+                    .gesture(
+                        // Main pull-up gesture for bottom area
+                        DragGesture(minimumDistance: 10)
+                            .onEnded { value in
+                                if value.translation.height < -20 && !isLoadingMore && viewModel.hasMoreEpisodes {
+                                    print("Pull-up triggered from bottom area")
+                                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                                    impactFeedback.impactOccurred()
+                                    
+                                    Task {
+                                        await loadMoreEpisodesRefreshable()
+                                    }
+                                }
+                            }
+                    )
             }
         }
         .background(Color.black)
-        .simultaneousGesture(
-            DragGesture()
-                .onChanged { _ in
-                    UserDefaults.standard.set(true, forKey: "isUserScrolling")
-                }
-                .onEnded { _ in
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        UserDefaults.standard.set(false, forKey: "isUserScrolling")
+        .onAppear {
+            // Start end indicator animation
+            endIndicatorScale = 1.3
+        }
+        .overlay(
+            // Success toast notification
+            VStack {
+                if showSuccessToast {
+                    HStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.white)
+                            .font(.system(size: 20))
+                        
+                        Text(successMessage)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 25)
+                            .fill(Color.green)
+                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                showSuccessToast = false
+                            }
+                        }
                     }
                 }
+                Spacer()
+            }
+            .padding(.top, 50),
+            alignment: .top
         )
     }
 
@@ -1918,7 +2114,12 @@ struct PodcastPlayerView: View {
             
             loadInitialEpisodes()
         } else {
-            viewModel.updateFilteredEpisodes(for: feed.id, selectedTab: selectedTab)
+            // DON'T call updateFilteredEpisodes here as it would load all episodes from memory
+            // The current episodes are already properly paginated
+            // Only refresh the UI state
+            DispatchQueue.main.async {
+                viewModel.objectWillChange.send()
+            }
         }
     }
     
@@ -1927,13 +2128,98 @@ struct PodcastPlayerView: View {
     }
     
     private func loadMoreIfNeeded() {
-        guard !isLoadingMore && viewModel.hasMoreEpisodes else { return }
+        guard !isLoadingMore && viewModel.hasMoreEpisodes else { 
+            // Provide haptic feedback when no more episodes to load
+            if !viewModel.hasMoreEpisodes {
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+            }
+            return 
+        }
+        
+        // Provide haptic feedback when starting to load
+        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+        impactFeedback.impactOccurred()
         
         isLoadingMore = true
-        viewModel.loadMoreEpisodes(for: feed) { _ in
-            isLoadingMore = false
+        viewModel.loadMoreEpisodes(for: feed) { success in
+            DispatchQueue.main.async {
+                isLoadingMore = false
+                
+                // Provide success/failure haptic feedback
+                if success {
+                    let successFeedback = UINotificationFeedbackGenerator()
+                    successFeedback.notificationOccurred(.success)
+                } else {
+                    let errorFeedback = UINotificationFeedbackGenerator()
+                    errorFeedback.notificationOccurred(.error)
+                }
+            }
         }
     }
+    
+    private func loadMoreEpisodesRefreshable() async {
+        guard !isLoadingMore && viewModel.hasMoreEpisodes else { 
+            // Provide haptic feedback when no more episodes to load
+            if !viewModel.hasMoreEpisodes {
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+            }
+            return 
+        }
+        
+        // Provide haptic feedback when starting to load
+        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+        impactFeedback.impactOccurred()
+        
+        // Set loading state with animation
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isLoadingMore = true
+        }
+        
+        let episodeCountBefore = viewModel.currentEpisodes.count
+        
+        await withCheckedContinuation { continuation in
+            viewModel.loadMoreEpisodes(for: feed) { success in
+                DispatchQueue.main.async {
+                    let episodeCountAfter = self.viewModel.currentEpisodes.count
+                    let newEpisodesAdded = episodeCountAfter - episodeCountBefore
+                    
+                    // Show success state briefly before hiding loading
+                    if success && newEpisodesAdded > 0 {
+                        // Show success feedback
+                        let successFeedback = UINotificationFeedbackGenerator()
+                        successFeedback.notificationOccurred(.success)
+                        
+                        // Show success toast
+                        self.successMessage = "Added \(newEpisodesAdded) new episodes!"
+                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                            self.showSuccessToast = true
+                        }
+                        
+                        // Brief delay to show success state
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                self.isLoadingMore = false
+                            }
+                        }
+                    } else {
+                        // Handle failure or no new episodes
+                        let errorFeedback = UINotificationFeedbackGenerator()
+                        errorFeedback.notificationOccurred(.error)
+                        
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            self.isLoadingMore = false
+                        }
+                    }
+                    
+                    continuation.resume()
+                }
+            }
+        }
+    }
+    
+
     
     private func playEpisode(_ episode: PodcastEpisode) {
         if podcastPlayer.currentEpisode?.id == episode.id {
