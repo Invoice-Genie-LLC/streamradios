@@ -485,7 +485,7 @@ class RadioPlayer: NSObject, ObservableObject {
         let station = stations[index]
         print("Playing station: \(station.name) at index \(index)")
         
-        // Set the current station index and station
+        // Set the current station index and station immediately
         currentStationIndex = index
         currentlyPlayingStation = station
         
@@ -507,10 +507,8 @@ class RadioPlayer: NSObject, ObservableObject {
         
         setStationURL(url)
         
-        // Only play if we're not already playing this station
-        if !isPlaying || player?.currentItem?.asset as? AVURLAsset == nil || (player?.currentItem?.asset as? AVURLAsset)?.url != url {
-            play()
-        }
+        // Always start playing when a station is selected
+        play()
         
         isPlaying = true  // Set isPlaying to true when starting a new station
         updateNowPlayingInfo()

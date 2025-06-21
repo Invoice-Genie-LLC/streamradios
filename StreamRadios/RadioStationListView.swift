@@ -616,14 +616,25 @@ struct RadioStationListView: View {
             return 
         }
         
-        if isStationPlaying(station) && radioPlayer.isPlaying {
-            print("📱 Opening player sheet for playing station")
+        // Check if this is the exact same station that's currently playing
+        let isSameStationPlaying = radioPlayer.currentStationIndex != nil &&
+                                   radioPlayer.currentStationIndex! < viewModel.stations.count &&
+                                   viewModel.stations[radioPlayer.currentStationIndex!].id == station.id &&
+                                   radioPlayer.isPlaying
+        
+        if isSameStationPlaying {
+            // Same station is already playing - open Shazam view
+            print("🎵 Opening Shazam view for playing station: \(station.name)")
             isPlayerSheetPresented = true
         } else {
+            // Different station or no station playing - start playing this station
             print("▶️ Playing station: \(station.name)")
             if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                print("🔍 Found station at index: \(index)")
                 viewModel.updateLastPlayed(for: viewModel.stations[index])
                 radioPlayer.playStation(at: index, from: viewModel.stations)
+            } else {
+                print("❌ Station not found in viewModel.stations")
             }
         }
     }

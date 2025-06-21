@@ -303,12 +303,22 @@ struct ContentView: View {
                                 }
                             }
                             .padding(.horizontal, 16)
-                        } else if let currentStation = viewModel.currentlyPlayingStation, radioPlayer.isPlaying {
-                            // Radio is playing - show compact radio player matching podcast style
-                            CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
-                                .environmentObject(radioPlayer)
-                                .environmentObject(viewModel)
-                                .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
+                        } else if selectedTab == .radio {
+                            // Always show radio player when on radio tab
+                            if let currentStation = viewModel.currentlyPlayingStation {
+                                // Show current station (playing or paused)
+                                CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
+                                    .environmentObject(radioPlayer)
+                                    .environmentObject(viewModel)
+                                    .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
+                            } else if !viewModel.stations.isEmpty {
+                                // Show first available station as default when no station is set
+                                let defaultStation = viewModel.stations.first!
+                                CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
+                                    .environmentObject(radioPlayer)
+                                    .environmentObject(viewModel)
+                                    .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
+                            }
                         }
                     }
                 }

@@ -636,8 +636,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func updateLastPlayed(for station: RadioStation) {
         if let index = stations.firstIndex(where: { $0.id == station.id }) {
             stations[index].lastPlayed = Date()
-            saveStationsToCoreData()
-            objectWillChange.send()  // Notify observers of the change
+            
+            // Save to CoreData on main thread but asynchronously to avoid blocking current operation
+            DispatchQueue.main.async {
+                self.saveStationsToCoreData()
+            }
             
             // Post notification for real-time CarPlay recents update
             NotificationCenter.default.post(
