@@ -1678,6 +1678,12 @@ class PodcastViewModel: ObservableObject {
 
     
     func getProgress(for episode: PodcastEpisode) -> Double {
+        // Skip expensive Core Data queries during scrolling for better performance
+        if UserDefaults.standard.bool(forKey: "isUserScrolling") {
+            // Return cached value or episode state progress during scrolling
+            return episodeProgressCache[episode.id] ?? episode.state.progress
+        }
+        
         // First check the non-published cache for better performance
         if let cachedProgress = episodeProgressCache[episode.id] {
             return cachedProgress
@@ -1689,19 +1695,10 @@ class PodcastViewModel: ObservableObject {
             return cachedProgress
         }
         
-        // If not in cache, check Core Data on the main thread
-        var progress: Double = 0.0
+        // Use episode state progress as fallback to avoid expensive Core Data queries
+        let progress = episode.state.progress
         
-        // Ensure Core Data operations happen on the main thread
-        if Thread.isMainThread {
-            progress = getProgressFromCoreData(episode)
-        } else {
-            DispatchQueue.main.sync {
-                progress = getProgressFromCoreData(episode)
-            }
-        }
-        
-        // Cache the result in the non-published cache to avoid publishing cycles
+        // Cache the result
         episodeProgressCache[episode.id] = progress
         
         // Defer updating the published property to avoid publishing during view updates

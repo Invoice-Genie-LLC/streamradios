@@ -688,7 +688,7 @@ struct EpisodeRowView: View {
                     Image(systemName: episode.state.isPlayed || progress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
                         .resizable()
                         .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .blue : (isPlaying ? .blue : .green))
+                        .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .gray : (isPlaying ? .blue : .green))
                 }
                 .frame(width: buttonSize, height: buttonSize)
                 
@@ -820,7 +820,7 @@ struct EpisodeRowView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.gray))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.8))) // Dark gray for played
             } else if isPlaying {
                 Text("Playing")
                     .foregroundColor(.white)
@@ -838,7 +838,7 @@ struct EpisodeRowView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.green))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue)) // Changed from green to blue for consistency
             }
         }
         .font(.system(size: 10, weight: .bold))
@@ -858,7 +858,7 @@ struct EpisodeRowView: View {
                         .foregroundColor(.orange)
                 } else {
                     Text("New")
-                        .foregroundColor(.green)
+                        .foregroundColor(.blue) // Changed from green to blue for consistency
                 }
             }
             .font(.caption2)
@@ -997,6 +997,15 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var bannerAlertMessage = ""
     @State private var isDownloading: Bool = false
     
+    // Cache expensive computations to avoid recalculation during scrolling
+    private let cachedProgress: Double
+    private let cachedStatusText: String
+    private let cachedStatusColor: Color
+    private let cachedTimeInfo: String?
+    private let cachedDateString: String
+    private let cachedPlayButtonIcon: String
+    private let cachedIsCompleted: Bool
+    
     // Cache formatters to avoid recreation
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1005,11 +1014,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
         return formatter
     }()
     
-    private var episodeState: EpisodePlaybackState {
-        EpisodeStateManager.shared.getState(for: episode.id)
-    }
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute]
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
     
-    private let playbackProgress: Double
     private let buttonSize: CGFloat = 22
     
     init(episode: PodcastEpisode,
@@ -1024,15 +1035,73 @@ struct OptimizedEpisodeRowView: View, Equatable {
         self.onStop = onStop
         self.viewModel = viewModel
         self.podcastPlayer = podcastPlayer
-        self.playbackProgress = isPlaying ? podcastPlayer.currentProgress : episode.state.progress
+        
+        // Cache expensive computations once during initialization
+        // For playing episodes, we'll use real-time progress; for others, use cached state
+        self.cachedProgress = isPlaying ? podcastPlayer.currentProgress : episode.state.progress
+        self.cachedIsCompleted = episode.state.progress >= 0.99 || episode.state.isPlayed
+        
+        // Pre-compute status text and color to avoid expensive EpisodeStateManager calls
+        if cachedIsCompleted {
+            self.cachedStatusText = "PLAYED"
+            self.cachedStatusColor = Color.gray.opacity(0.8) // Dark gray for played episodes
+        } else if episode.state.progress > 0 {
+            self.cachedStatusText = "IN PROGRESS"
+            self.cachedStatusColor = .orange
+        } else {
+            self.cachedStatusText = "NEW"
+            self.cachedStatusColor = .blue
+        }
+        
+        // Pre-compute play button icon
+        if isPlaying {
+            self.cachedPlayButtonIcon = "pause.fill"
+        } else if cachedIsCompleted {
+            self.cachedPlayButtonIcon = "arrow.counterclockwise"
+        } else {
+            self.cachedPlayButtonIcon = "play.fill"
+        }
+        
+        // Pre-compute date string
+        self.cachedDateString = Self.dateFormatter.string(from: episode.publicationDate)
+        
+        // Pre-compute time info
+        if episode.duration > 0 {
+            let remainingTime = episode.duration * (1 - cachedProgress)
+            if remainingTime > 0 && episode.state.progress > 0 {
+                let hours = Int(remainingTime) / 3600
+                let minutes = (Int(remainingTime) % 3600) / 60
+                if hours > 0 {
+                    self.cachedTimeInfo = "\(hours)h \(minutes)m left"
+                } else {
+                    self.cachedTimeInfo = "\(minutes)m left"
+                }
+            } else {
+                let hours = Int(episode.duration) / 3600
+                let minutes = (Int(episode.duration) % 3600) / 60
+                if hours > 0 {
+                    self.cachedTimeInfo = "\(hours)h \(minutes)m"
+                } else {
+                    self.cachedTimeInfo = "\(minutes)m"
+                }
+            }
+        } else {
+            self.cachedTimeInfo = nil
+        }
     }
     
     static func == (lhs: OptimizedEpisodeRowView, rhs: OptimizedEpisodeRowView) -> Bool {
-        lhs.episode.id == rhs.episode.id &&
+        // Simplified equality check using cached values to reduce computation
+        // For playing episodes, allow progress updates to trigger view refresh
+        let progressEqual = lhs.isPlaying || rhs.isPlaying ? 
+            abs(lhs.podcastPlayer.currentProgress - rhs.podcastPlayer.currentProgress) < 0.01 :
+            abs(lhs.cachedProgress - rhs.cachedProgress) < 0.01
+            
+        return lhs.episode.id == rhs.episode.id &&
         lhs.isPlaying == rhs.isPlaying &&
-        lhs.playbackProgress == rhs.playbackProgress &&
-        lhs.episode.state == rhs.episode.state &&
-        abs((lhs.viewModel.downloadProgress[lhs.episode.id] ?? 0) - (rhs.viewModel.downloadProgress[rhs.episode.id] ?? 0)) < 0.01
+        progressEqual &&
+        lhs.episode.state.isFavorite == rhs.episode.state.isFavorite &&
+        lhs.episode.state.isDownloaded == rhs.episode.state.isDownloaded
     }
     
     var body: some View {
@@ -1067,10 +1136,10 @@ struct OptimizedEpisodeRowView: View, Equatable {
             .padding(.bottom, 4)
     }
     
-    // MARK: - Enhanced Episode Card Design
+    // MARK: - Optimized Episode Card Design
     private var modernEpisodeCard: some View {
         VStack(spacing: 0) {
-            // Main episode content with enhanced visual separation
+            // Simplified episode content without expensive gradients
             Group {
                 if viewModel.currentTab == 2 && episode.state.isDownloaded {
                     episodeContentWithSwipe
@@ -1078,104 +1147,122 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     episodeContent
                 }
             }
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        isPlaying ? Color.blue.opacity(0.05) : Color.clear,
-                        Color.clear
-                    ]),
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
+            .background(isPlaying ? Color.blue.opacity(0.03) : Color.clear) // Simple background instead of gradient
             
-            // Compact separator
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(height: 0.5)
-                    .padding(.horizontal, 16)
-                
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(height: 4) // Reduced spacing between episodes
-            }
+            // Simple separator
+            Rectangle()
+                .fill(Color.gray.opacity(0.15))
+                .frame(height: 0.5)
+                .padding(.horizontal, 16)
         }
     }
     
     private var episodeContent: some View {
-        VStack(spacing: 0) {
-            // 3-column layout for perfect alignment
-            HStack(alignment: .top, spacing: 0) {
-                // Column 1: Play button (fixed width)
-                modernPlayButton
-                    .frame(width: 50, height: 40, alignment: .leading)
+        HStack(alignment: .top, spacing: 12) {
+            // Play button - simplified
+            Button(action: isPlaying ? onStop : onPlay) {
+                Image(systemName: cachedPlayButtonIcon)
+                    .font(.system(size: 28))
+                    .foregroundColor(isPlaying ? .orange : .blue)
+            }
+            .frame(width: 40, height: 40)
+            
+            // Episode content
+            VStack(alignment: .leading, spacing: 4) {
+                // Episode title - limit lines for better performance
+                Text(episode.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2) // Limit lines for better scrolling performance
+                    .multilineTextAlignment(.leading)
                 
-                // Column 2: Episode content (flexible width)
-                VStack(alignment: .leading, spacing: 4) {
-                    // Episode title - allow full display
-                    Text(episode.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(isPlaying ? .white : .primary)
-                        .lineLimit(nil) // Allow unlimited lines for full display
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                // Progress bar for currently playing episode
+                if isPlaying {
+                    ProgressView(value: podcastPlayer.currentProgress)
+                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                        .frame(height: 3)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(1.5)
+                        .padding(.vertical, 2)
+                        .animation(.easeInOut(duration: 0.3), value: podcastPlayer.currentProgress)
+                }
+                
+                // Metadata row - using cached values
+                HStack(spacing: 6) {
+                    // Status indicator - using cached values
+                    Text(cachedStatusText)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(cachedStatusColor)
+                        )
                     
-                    // Metadata row - flexible layout to show all content
-                    HStack(spacing: 6) {
-                        // Status indicator - more compact
-                        episodeStatusChip
-                        
-                        // Date - more compact
-                        Text(Self.dateFormatter.string(from: episode.publicationDate))
+                    // Date - using cached string
+                    Text(cachedDateString)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.blue.opacity(0.1))
+                        )
+                    
+                    // Duration - using cached time info
+                    if let timeInfo = cachedTimeInfo {
+                        Text(timeInfo)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.blue)
+                            .foregroundColor(.gray)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(
                                 RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.blue.opacity(0.1))
+                                    .fill(Color.gray.opacity(0.1))
                             )
-                            .fixedSize() // Prevent truncation
-                        
-                        // Duration/remaining time - more compact
-                        if let timeInfo = formatTimeInfo() {
-                            Text(timeInfo)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.gray)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color.gray.opacity(0.1))
-                                )
-                                .fixedSize() // Prevent truncation
-                        }
-                        
-                        Spacer(minLength: 0) // Allow space to expand/contract as needed
                     }
+                    
+                    Spacer()
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8)
-                
-                // Column 3: Action buttons (fixed width)
-                VStack(alignment: .center, spacing: 4) {
-                    modernBookmarkButton
-                    modernDownloadButton
-                }
-                .frame(width: 50, alignment: .center)
             }
             
-            // Progress bar - only show when actually playing (not just in progress)
-            if isPlaying {
-                interactiveProgressBar
-                    .padding(.top, 8)
-                    .padding(.horizontal, 4)
+            // Action buttons - simplified
+            VStack(alignment: .center, spacing: 4) {
+                // Bookmark button - simplified
+                Button(action: {
+                    if isPlaying {
+                        showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
+                    } else {
+                        viewModel.toggleFavorite(for: episode)
+                    }
+                }) {
+                    Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
+                        .foregroundColor(episode.state.isFavorite ? .blue : .gray)
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                
+                // Download button - simplified
+                Group {
+                    if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                        Button(action: {
+                            showingDeleteConfirmation = true
+                        }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                                .frame(width: buttonSize, height: buttonSize)
+                        }
+                    } else {
+                        simplifiedDownloadButton
+                    }
+                }
+                .frame(width: buttonSize, height: buttonSize)
             }
+            .frame(width: 50)
         }
-        .padding(.horizontal, 16) // Consistent horizontal padding for all episodes
-        .padding(.vertical, 12) // Consistent vertical padding for all episodes
-        .background(Color.clear) // Remove all background styling
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture {
             onPlay()
@@ -1194,256 +1281,35 @@ struct OptimizedEpisodeRowView: View, Equatable {
             }
     }
     
-    // MARK: - Modern Components
+    // MARK: - Simplified Components
     
-    private var modernPlayButton: some View {
+    private var simplifiedDownloadButton: some View {
         Button(action: {
-            let progress = podcastPlayer.getCurrentProgress(for: episode)
-            if episode.state.isPlayed || progress >= 0.99 {
-                podcastPlayer.rewindAndPlay(episode: episode)
-            } else if isPlaying {
-                onStop()
+            if episode.state.isDownloaded {
+                // Already downloaded, no action
+            } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
+                // Currently downloading, show progress without complex animations
+                ProgressView(value: downloadProgress)
+                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                    .scaleEffect(0.8)
             } else {
-                onPlay()
-            }
-        }) {
-            ZStack {
-                // Background circle with gradient - more compact
-                Circle()
-                    .fill(playButtonGradient)
-                    .frame(width: 40, height: 40)
-                    .shadow(color: playButtonShadowColor, radius: 2, x: 0, y: 1)
-                
-                // Icon - smaller
-                Image(systemName: playButtonIcon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .offset(x: playButtonIcon == "play.fill" ? 1 : 0) // Slight offset for play icon
-            }
-        }
-        .buttonStyle(PlainButtonStyle())
-        .scaleEffect(isPlaying ? 1.05 : 1.0)
-        .animation(.easeInOut(duration: 0.2), value: isPlaying)
-        .frame(width: 40, height: 40, alignment: .leading) // Ensure consistent alignment
-    }
-    
-    private var playButtonGradient: LinearGradient {
-        let progress = podcastPlayer.getCurrentProgress(for: episode)
-        if episode.state.isPlayed || progress >= 0.99 {
-            return LinearGradient(
-                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else if isPlaying {
-            return LinearGradient(
-                gradient: Gradient(colors: [Color.orange, Color.red]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        } else {
-            return LinearGradient(
-                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-    }
-    
-    private var playButtonIcon: String {
-        // Prioritize current playing state over finished state
-        if isPlaying {
-            return "pause.fill"
-        } else {
-            let progress = podcastPlayer.getCurrentProgress(for: episode)
-            // If episode was rewound (progress is very low), show play icon even if previously marked as played
-            if progress < 0.05 {
-                return "play.fill"
-            } else if episode.state.isPlayed || progress >= 0.99 {
-                return "arrow.counterclockwise"
-            } else {
-                return "play.fill"
-            }
-        }
-    }
-    
-    private var playButtonShadowColor: Color {
-        if isPlaying {
-            return Color.orange.opacity(0.3)
-        } else {
-            return Color.black.opacity(0.2)
-        }
-    }
-    
-    private var episodeStatusChip: some View {
-        Text(episodeState.statusText)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundColor(.white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(episodeState.statusColor)
-            )
-            .fixedSize() // Ensure full text is displayed without truncation
-    }
-    
-    private var modernProgressIndicator: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                // Background track
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(height: 4)
-                
-                // Progress fill with gradient
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.blue, Color.cyan]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: geometry.size.width * CGFloat(currentProgress), height: 4)
-                    .animation(.easeInOut(duration: 0.3), value: currentProgress)
-            }
-        }
-        .frame(height: 4)
-    }
-    
-    private var interactiveProgressBar: some View {
-        GeometryReader { geometry in
-            let currentProgress = isPlaying ? podcastPlayer.currentProgress : episode.state.progress
-            
-            ZStack(alignment: .leading) {
-                // Background track
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(height: 3)
-                
-                // Progress fill with gradient
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.blue, Color.cyan]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: geometry.size.width * CGFloat(currentProgress), height: 3)
-                    .animation(.easeInOut(duration: 0.3), value: currentProgress)
-                
-                // Interactive thumb (only visible when playing)
-                if isPlaying {
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 12, height: 12)
-                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                        .offset(x: max(0, min(geometry.size.width - 12, (geometry.size.width - 12) * currentProgress)))
-                }
-            }
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        guard isPlaying else { return }
-                        let progress = max(0, min(1, value.location.x / geometry.size.width))
-                        let newTime = progress * podcastPlayer.duration
-                        podcastPlayer.seek(to: newTime)
-                    }
-            )
-            .onTapGesture { value in
-                guard isPlaying else { return }
-                let progress = max(0, min(1, value.x / geometry.size.width))
-                let newTime = progress * podcastPlayer.duration
-                podcastPlayer.seek(to: newTime)
-            }
-        }
-        .frame(height: isPlaying ? 12 : 3)
-    }
-    
-    private var shouldShowProgress: Bool {
-        isPlaying || episode.state.progress > 0.01
-    }
-    
-    private var currentProgress: Double {
-        if isPlaying {
-            return podcastPlayer.currentProgress
-        } else {
-            return episode.state.progress
-        }
-    }
-    
-    private var modernBookmarkButton: some View {
-        Button(action: {
-            if isPlaying {
-                showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
-            } else {
-                viewModel.toggleFavorite(for: episode)
-            }
-        }) {
-            ZStack {
-                Circle()
-                    .fill(episode.state.isFavorite ? Color.red.opacity(0.2) : Color.clear)
-                    .frame(width: 34, height: 34) // Made bigger
-                
-                Image(systemName: episode.state.isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: 16, weight: .medium)) // Made bigger
-                    .foregroundColor(episode.state.isFavorite ? .red : .gray)
-            }
-        }
-        .buttonStyle(PlainButtonStyle())
-        .scaleEffect(episode.state.isFavorite ? 1.05 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: episode.state.isFavorite)
-    }
-    
-    private var modernDownloadButton: some View {
-        Button(action: {
-            if viewModel.currentTab == 2 && episode.state.isDownloaded {
-                showingDeleteConfirmation = true
-            } else {
+                // Not downloaded, start download
                 handleDownloadAction()
             }
         }) {
-            ZStack {
-                Circle()
-                    .fill(downloadButtonBackgroundColor)
-                    .frame(width: 34, height: 34) // Made bigger
-                
-                if viewModel.currentTab == 2 && episode.state.isDownloaded {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 14, weight: .medium)) // Made bigger
-                        .foregroundColor(.red)
-                } else if episode.state.isDownloaded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16, weight: .semibold)) // Made bigger
-                        .foregroundColor(.green)
-                } else if isDownloading {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                        .scaleEffect(0.8) // Made bigger
-                } else {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 16, weight: .medium)) // Made bigger
-                        .foregroundColor(.gray)
-                }
+            if episode.state.isDownloaded {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+            } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
+                ProgressView(value: downloadProgress)
+                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                    .scaleEffect(0.8)
+            } else {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundColor(.blue)
             }
         }
-        .buttonStyle(PlainButtonStyle())
-        .scaleEffect(isDownloading ? 1.05 : 1.0)
-        .animation(.easeInOut(duration: 0.2), value: isDownloading)
-    }
-    
-    private var downloadButtonBackgroundColor: Color {
-        if viewModel.currentTab == 2 && episode.state.isDownloaded {
-            return Color.red.opacity(0.2)
-        } else if episode.state.isDownloaded {
-            return Color.green.opacity(0.2)
-        } else if isDownloading {
-            return Color.blue.opacity(0.2)
-        } else {
-            return Color.clear
-        }
+        .frame(width: buttonSize, height: buttonSize)
     }
     
     // MARK: - Helper Methods
@@ -1469,42 +1335,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
     
-    private func formatTimeInfo() -> String? {
-        let remainingDuration: Double
-        if isPlaying {
-            remainingDuration = podcastPlayer.remainingTime
-        } else if episode.state.progress > 0 {
-            remainingDuration = episode.duration * (1 - episode.state.progress)
-        } else {
-            remainingDuration = episode.duration
-        }
-        
-        guard remainingDuration > 0 else { return nil }
-        
-        let hours = Int(remainingDuration) / 3600
-        let minutes = (Int(remainingDuration) % 3600) / 60
-        
-        if episode.state.progress > 0 {
-            if hours > 0 {
-                return String(format: "%dh %dm left", hours, minutes)
-            } else {
-                return String(format: "%dm left", minutes)
-            }
-        } else {
-            if hours > 0 {
-                return String(format: "%dh %dm", hours, minutes)
-            } else {
-                return String(format: "%dm", minutes)
-            }
-        }
-    }
-    
-    private func formatFileSize(_ size: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: size)
-    }
+
 }
 
 struct PodcastPlayerView: View {
@@ -2062,6 +1893,27 @@ struct PodcastPlayerView: View {
             }
         }
         .background(Color.black)
+        .gesture(
+            // Track scroll gestures to optimize performance during scrolling
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !userIsScrolling {
+                        userIsScrolling = true
+                        UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                        
+                        // Cancel any existing timer
+                        scrollDebounceTimer?.invalidate()
+                    }
+                }
+                .onEnded { _ in
+                    // Debounce the end of scrolling to avoid rapid state changes
+                    scrollDebounceTimer?.invalidate()
+                    scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { _ in
+                        userIsScrolling = false
+                        UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                    }
+                }
+        )
         .onAppear {
             // Start end indicator animation
             endIndicatorScale = 1.3
