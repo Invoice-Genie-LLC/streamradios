@@ -60,6 +60,11 @@
 		77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */; };
 		77AAED6A2CE2873C009B2A00 /* EpisodeStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
+		77B4E0F12E086FEF0034F886 /* PodcastCoreDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EC2E086FEF0034F886 /* PodcastCoreDataManager.swift */; };
+		77B4E0F22E086FEF0034F886 /* PodcastFeedManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EE2E086FEF0034F886 /* PodcastFeedManager.swift */; };
+		77B4E0F32E086FEF0034F886 /* PodcastEpisodeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */; };
+		77B4E0F42E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EF2E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld */; };
+		77B4E0F52E086FEF0034F886 /* PodcastCloudKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EB2E086FEF0034F886 /* PodcastCloudKitManager.swift */; };
 		77BC0EBA2C337CF6002FDD8E /* PermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */; };
 		77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */; };
 		77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */ = {isa = PBXBuildFile; productRef = 77CC1EB42C2DBD8600F8FD5B /* Reachability */; };
@@ -169,6 +174,11 @@
 		77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTriggeredView.swift; sourceTree = "<group>"; };
 		77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeStateManager.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
+		77B4E0EB2E086FEF0034F886 /* PodcastCloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCloudKitManager.swift; sourceTree = "<group>"; };
+		77B4E0EC2E086FEF0034F886 /* PodcastCoreDataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCoreDataManager.swift; sourceTree = "<group>"; };
+		77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastEpisodeManager.swift; sourceTree = "<group>"; };
+		77B4E0EE2E086FEF0034F886 /* PodcastFeedManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastFeedManager.swift; sourceTree = "<group>"; };
+		77B4E0F02E086FEF0034F886 /* StreamRadiosModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamRadiosModel.xcdatamodel; sourceTree = "<group>"; };
 		77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
 		77CC1EB12C2D1EB900F8FD5B /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		77CCE95A2C161E910098EE74 /* SideMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SideMenuView.swift; sourceTree = "<group>"; };
@@ -348,6 +358,11 @@
 		77313D6B2C2C9CEE005F4AC8 /* Data */ = {
 			isa = PBXGroup;
 			children = (
+				77B4E0EB2E086FEF0034F886 /* PodcastCloudKitManager.swift */,
+				77B4E0EC2E086FEF0034F886 /* PodcastCoreDataManager.swift */,
+				77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */,
+				77B4E0EE2E086FEF0034F886 /* PodcastFeedManager.swift */,
+				77B4E0EF2E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld */,
 				77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */,
 				7780E96B2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld */,
 			);
@@ -538,6 +553,11 @@
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7715BD9A2C4CA97300FA7CB1 /* ExportSheet.swift in Sources */,
 				77AAED6A2CE2873C009B2A00 /* EpisodeStateManager.swift in Sources */,
+				77B4E0F12E086FEF0034F886 /* PodcastCoreDataManager.swift in Sources */,
+				77B4E0F22E086FEF0034F886 /* PodcastFeedManager.swift in Sources */,
+				77B4E0F32E086FEF0034F886 /* PodcastEpisodeManager.swift in Sources */,
+				77B4E0F42E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld in Sources */,
+				77B4E0F52E086FEF0034F886 /* PodcastCloudKitManager.swift in Sources */,
 				77F50BB72C63B81800187488 /* YouTubeMusicManager.swift in Sources */,
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
 				77F50BB92C63B84600187488 /* YouTubeMusicPlaylistPickerView.swift in Sources */,
@@ -973,6 +993,16 @@
 			currentVersion = 7780E96C2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodel */;
 			name = StreamRadiosModel.xcdatamodeld;
 			path = /Users/kley/Documents/StreamRadios/StreamRadios/Data/StreamRadiosModel.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+		77B4E0EF2E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				77B4E0F02E086FEF0034F886 /* StreamRadiosModel.xcdatamodel */,
+			);
+			currentVersion = 77B4E0F02E086FEF0034F886 /* StreamRadiosModel.xcdatamodel */;
+			path = StreamRadiosModel.xcdatamodeld;
 			sourceTree = "<group>";
 			versionGroupType = wrapper.xcdatamodel;
 		};

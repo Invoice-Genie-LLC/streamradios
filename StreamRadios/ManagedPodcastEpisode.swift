@@ -50,18 +50,26 @@ extension PodcastModel {
        }
     
     func toPodcastEpisode() -> PodcastEpisode {
+            let episodeId = self.id ?? UUID().uuidString
+            
+            // Use EpisodeStateManager as source of truth for episode states
+            let progress = EpisodeStateManager.shared.getProgress(for: episodeId)
+            let isFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+            let isDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
+            let isPlayed = progress >= 0.99
+            
             return PodcastEpisode(
-                id: self.id ?? UUID().uuidString,
+                id: episodeId,
                 title: self.title ?? "",
                 descriptionText: self.descriptionText ?? "",
                 audioUrl: self.audioUrl ?? "",
                 publicationDate: self.publicationDate ?? Date(),
                 duration: self.duration,
                 state: EpisodeState(
-                    isPlayed: self.isPlayed,
-                    isFavorite: self.isFavorite,
-                    progress: self.progress,
-                    isDownloaded: self.isDownloaded
+                    isPlayed: isPlayed,
+                    isFavorite: isFavorite,
+                    progress: progress,
+                    isDownloaded: isDownloaded
                 ),
                 feedId: self.feedId ?? "",
                 localFilePath: self.localFilePath,

@@ -62,7 +62,7 @@ class PodcastCoreDataManager {
         let batchInsert = NSBatchInsertRequest(entity: FeedModel.entity()) { (managedObject: NSManagedObject) -> Bool in
             guard let feedModel = managedObject as? FeedModel else { return true }
             
-            static var index = 0
+            var index = 0
             defer { index += 1 }
             
             if index < feeds.count {
@@ -79,7 +79,7 @@ class PodcastCoreDataManager {
             return true
         }
         
-        batchInsert.resultType = .objectIDs
+        batchInsert.resultType = NSBatchInsertRequestResultType.objectIDs
         try context.execute(batchInsert)
         
         os_log("📦 Batch inserted %d feeds", log: log, type: .debug, feeds.count)
@@ -96,7 +96,7 @@ class PodcastCoreDataManager {
         let batchInsert = NSBatchInsertRequest(entity: PodcastModel.entity()) { (managedObject: NSManagedObject) -> Bool in
             guard let episodeModel = managedObject as? PodcastModel else { return true }
             
-            static var index = 0
+            var index = 0
             defer { index += 1 }
             
             if index < allEpisodes.count {
@@ -107,7 +107,7 @@ class PodcastCoreDataManager {
                 episodeModel.descriptionText = episode.descriptionText
                 episodeModel.publicationDate = episode.publicationDate
                 episodeModel.duration = episode.duration
-                episodeModel.fileSize = episode.fileSize
+                episodeModel.fileSize = episode.fileSize ?? 0
                 episodeModel.feedId = feedId
                 episodeModel.progress = 0.0
                 episodeModel.isPlayed = false
@@ -118,7 +118,7 @@ class PodcastCoreDataManager {
             return true
         }
         
-        batchInsert.resultType = .objectIDs
+        batchInsert.resultType = NSBatchInsertRequestResultType.objectIDs
         try context.execute(batchInsert)
         
         os_log("📦 Batch inserted %d episodes", log: log, type: .debug, allEpisodes.count)

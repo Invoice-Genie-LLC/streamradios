@@ -88,13 +88,17 @@ class PodcastEpisodeManager {
                     
                     try backgroundContext.save()
                     
-                    // Clear relevant caches
+                    // Clear relevant caches - don't await inside synchronous context
                     let feedIds = Set(episodes.compactMap { $0.feedId })
-                    for feedId in feedIds {
-                        await self.cacheManager.clearCacheForFeed(feedId)
-                    }
                     
                     continuation.resume()
+                    
+                    // Clear caches after completion - asynchronously
+                    Task {
+                        for feedId in feedIds {
+                            await self.cacheManager.clearCacheForFeed(feedId)
+                        }
+                    }
                     
                 } catch {
                     os_log("❌ Failed to update episode states: %@", log: self.log, type: .error, error.localizedDescription)
@@ -255,11 +259,18 @@ class PodcastEpisodeManager {
         return managedEpisodes.compactMap { managedEpisode in
             var episode = managedEpisode.toPodcastEpisode()
             
-            // Sync with EpisodeStateManager for latest progress
-            episode.state.progress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            episode.state.isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
-            episode.state.isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
-            episode.state.isPlayed = managedEpisode.isPlayed
+            // Sync with EpisodeStateManager for latest state (source of truth)
+            let stateManagerProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            let stateManagerFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+            let stateManagerDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+            
+            // Use EpisodeStateManager as the source of truth for all states
+            episode.state.progress = stateManagerProgress
+            episode.state.isFavorite = stateManagerFavorite
+            episode.state.isDownloaded = stateManagerDownloaded
+            
+            // Determine isPlayed based on progress
+            episode.state.isPlayed = stateManagerProgress >= 0.99
             
             return episode
         }
@@ -381,7 +392,9 @@ actor PodcastCacheManager {
         
         // Implement LRU cache eviction
         if episodeCache.count >= maxCacheSize {
-            await evictOldestCacheEntry()
+            Task {
+                await evictOldestCacheEntry()
+            }
         }
         
         episodeCache[key] = result

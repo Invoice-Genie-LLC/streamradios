@@ -263,9 +263,9 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
         let feed = PodcastFeed(
             id: UUID().uuidString,
             title: title,
-            descriptionText: feedDescription ?? "",
+            url: feedUrl,
             artworkUrl: feedArtworkUrl,
-            url: feedUrl
+            description: feedDescription ?? ""
         )
         
         return (feed, episodes)
@@ -316,6 +316,8 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
                 if feedDescription == nil {
                     feedDescription = trimmedContent
                 }
+            default:
+                break
             }
         } else {
             // Episode-level elements
@@ -336,6 +338,8 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
                 }
                 isParsingItem = false
                 currentEpisode = nil
+            default:
+                break
             }
         }
     }

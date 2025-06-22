@@ -1282,7 +1282,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
     private var simplifiedDownloadButton: some View {
         Button(action: {
             if episode.state.isDownloaded {
-                // Already downloaded, no action
+                // Toggle download off (remove download)
+                viewModel.toggleDownload(for: episode)
             } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
                 // Currently downloading, show progress without complex animations
                 ProgressView(value: downloadProgress)
@@ -1315,9 +1316,18 @@ struct OptimizedEpisodeRowView: View, Equatable {
             showBannerAlert(message: "You can't download episodes while playing.")
         } else if !episode.state.isDownloaded && !isDownloading {
             isDownloading = true
+            
+            // Simulate download and mark as downloaded when complete
             viewModel.downloadEpisode(episode) { result in
                 DispatchQueue.main.async {
                     isDownloading = false
+                    switch result {
+                    case .success(_):
+                        // Mark episode as downloaded
+                        viewModel.toggleDownload(for: episode)
+                    case .failure(_):
+                        showBannerAlert(message: "Download failed. Please try again.")
+                    }
                 }
             }
         }

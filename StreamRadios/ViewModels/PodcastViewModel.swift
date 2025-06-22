@@ -159,7 +159,7 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Add a new podcast feed with background processing
+    /// Add a new podcast feed with background processing and CloudKit sync
     func addPodcastFeed(url: String) async -> Bool {
         isLoading = true
         
@@ -170,22 +170,21 @@ class PodcastViewModel: ObservableObject {
         }
         
         do {
-            // Step 1: Parse RSS feed using the same system as test URL
-            let (data, _) = try await URLSession.shared.data(from: feedURL)
-            let parser = SimplePodcastParser(data: data, feedUrl: url)
-            let (feed, episodes) = try parser.parse()
+            // Step 1: Use feed manager to add the feed (this handles Core Data saving)
+            let feed = try await feedManager.addFeed(from: feedURL)
             
-            print("📊 Parsed feed '\(feed.title)' with \(episodes.count) episodes")
+            print("📊 Added feed: \(feed.title)")
             
-            // Step 2: Save to CloudKit first
-            try await PodcastCloudKitManager.shared.savePodcastFeedToCloudKit(feed)
-            print("✅ Saved feed to CloudKit: \(feed.title)")
+            // Step 2: Save to CloudKit for future fresh installs
+            do {
+                try await PodcastCloudKitManager.shared.savePodcastFeedToCloudKit(feed)
+                print("✅ Saved feed to CloudKit: \(feed.title)")
+            } catch {
+                print("⚠️ Failed to save feed to CloudKit (local save succeeded): \(error)")
+                // Continue even if CloudKit save fails
+            }
             
-            // Step 3: Save to Core Data
-            try await saveFeedAndEpisodesToCoreData(feed, episodes: episodes)
-            print("✅ Saved feed to Core Data: \(feed.title)")
-            
-            // Step 4: Update UI
+            // Step 3: Update UI
             self.loadFeedsFromCoreData()
             isLoading = false
             return true
@@ -327,7 +326,7 @@ class PodcastViewModel: ObservableObject {
         Task {
             // Get current state to preserve values not being updated
             let currentProgress = progress ?? EpisodeStateManager.shared.getProgress(for: episodeId)
-            let currentFavorite = isFavorite ?? (currentEpisodes.first(where: { $0.id == episodeId })?.state.isFavorite ?? false)
+            let currentFavorite = isFavorite ?? EpisodeStateManager.shared.isFavorite(episodeId)
             let currentDownloaded = isDownloaded ?? EpisodeStateManager.shared.isDownloaded(episodeId)
             
             // Determine the correct EpisodePlaybackState based on progress and isPlayed
@@ -374,37 +373,15 @@ class PodcastViewModel: ObservableObject {
                 self.episodeProgress[episodeId] = finalProgress
             }
             
-            // Sync to CloudKit immediately (non-blocking)
+            // Sync to CloudKit (single call, non-blocking)
             Task.detached(priority: .userInitiated) {
-                do {
-                    try await PodcastCloudKitManager.shared.saveEpisodeStateToCloudKit(
-                        episodeId,
-                        state: episodeState,
-                        progress: finalProgress,
-                        isFavorite: currentFavorite,
-                        isDownloaded: currentDownloaded
-                    )
-                    print("✅ Episode state synced to CloudKit: \(episodeId)")
-                } catch {
-                    print("❌ Failed to sync episode state to CloudKit: \(error)")
-                }
-            }
-            
-            // Sync to CloudKit and Core Data (non-blocking)
-            Task.detached(priority: .background) {
-                do {
-                    // Sync to CloudKit
-                    await PodcastCloudKitManager.shared.saveEpisodeState(
-                        episodeId: episodeId,
-                        progress: finalProgress,
-                        isFavorite: currentFavorite,
-                        isDownloaded: currentDownloaded,
-                        isPlayed: finalIsPlayed
-                    )
-                    print("✅ Episode state synced to CloudKit: \(episodeId)")
-                } catch {
-                    print("❌ Failed to sync episode state to CloudKit: \(error)")
-                }
+                await PodcastCloudKitManager.shared.saveEpisodeState(
+                    episodeId: episodeId,
+                    progress: finalProgress,
+                    isFavorite: currentFavorite,
+                    isDownloaded: currentDownloaded,
+                    isPlayed: finalIsPlayed
+                )
             }
             
             // Update counts if necessary
@@ -415,19 +392,38 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// Delete a podcast feed
-    func deleteFeed(_ feedId: String) {
+    @MainActor
+    func deletePodcastFeed(_ feed: PodcastFeed) {
+        isLoading = true
+        
         Task {
-            // Remove from UI immediately
-            await MainActor.run {
-                self.podcastFeeds.removeAll { $0.id == feedId }
-                if self.selectedFeedId == feedId {
-                    self.currentEpisodes = []
-                    self.selectedFeedId = nil
+            do {
+                print("🗑️ Deleting feed: \(feed.title)")
+                
+                // Step 1: Delete from CloudKit
+                do {
+                    try await PodcastCloudKitManager.shared.deletePodcastFeedFromCloudKit(feed.id)
+                    print("✅ Deleted feed from CloudKit: \(feed.title)")
+                } catch {
+                    print("⚠️ Failed to delete from CloudKit (will continue with local deletion): \(error)")
+                    // Continue even if CloudKit deletion fails
                 }
+                
+                // Step 2: Delete from Core Data
+                try await deleteFeedFromCoreData(feed)
+                print("✅ Deleted feed from Core Data: \(feed.title)")
+                
+                // Step 3: Update UI
+                self.loadFeedsFromCoreData()
+                self.isLoading = false
+                
+                print("🎉 Successfully deleted podcast feed: \(feed.title)")
+                
+            } catch {
+                print("❌ Failed to delete podcast feed: \(error)")
+                self.error = "Failed to delete podcast feed: \(error.localizedDescription)"
+                self.isLoading = false
             }
-            
-            // TODO: Implement Core Data deletion
-            os_log("🗑️ Feed deleted: %@", log: log, type: .info, feedId)
         }
     }
     
@@ -515,10 +511,6 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-
-    
-
-    
     // MARK: - Fresh Install & CloudKit Integration
     
     /// Check for CloudKit sync and setup new feeds if needed
@@ -526,25 +518,213 @@ class PodcastViewModel: ObservableObject {
         print("🔄 Checking for CloudKit sync...")
         
         do {
-            // Always try to sync with CloudKit, not just on fresh installs
+            // Check if this is a fresh install (no feeds in Core Data)
+            let existingFeedCount = await countExistingFeeds()
+            let isFreshInstall = existingFeedCount == 0
+            
+            if isFreshInstall {
+                print("🆕 Fresh install detected - fetching feeds from CloudKit")
+            } else {
+                print("📱 Existing installation with \(existingFeedCount) feeds - syncing updates")
+            }
+            
+            // Fetch feeds from CloudKit
             let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
             
             if !cloudKitFeeds.isEmpty {
                 print("🌟 Synced \(cloudKitFeeds.count) feeds from CloudKit")
+                
+                if isFreshInstall {
+                    // Fresh install: Process all feeds and parse their RSS
+                    await processFreshInstallFeeds(cloudKitFeeds)
+                } else {
+                    // Existing install: Merge new feeds only
+                    await mergeCloudKitFeeds(cloudKitFeeds)
+                }
                 
                 // Update UI on main thread
                 await MainActor.run {
                     self.loadFeedsFromCoreData()
                 }
             } else {
-                print("📡 No new feeds to sync from CloudKit")
+                print("📡 No feeds found in CloudKit")
+                
+                if isFreshInstall {
+                    // Add a test feed for debugging on fresh installs with no CloudKit data
+                    await addTestFeedForDebugging()
+                }
             }
         } catch {
             print("❌ CloudKit sync failed: \(error)")
+            
+            // On fresh install with CloudKit failure, add test feed
+            let existingFeedCount = await countExistingFeeds()
+            if existingFeedCount == 0 {
+                await addTestFeedForDebugging()
+            }
         }
     }
     
-
+    /// Count existing feeds in Core Data
+    private func countExistingFeeds() async -> Int {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    let count = try context.count(for: request)
+                    continuation.resume(returning: count)
+                } catch {
+                    print("❌ Failed to count existing feeds: \(error)")
+                    continuation.resume(returning: 0)
+                }
+            }
+        }
+    }
+    
+    /// Process fresh install feeds by parsing RSS and saving to Core Data
+    private func processFreshInstallFeeds(_ cloudKitFeeds: [PodcastFeed]) async {
+        print("🚀 Processing \(cloudKitFeeds.count) feeds for fresh install")
+        
+        await MainActor.run {
+            self.isLoading = true
+        }
+        
+        for feed in cloudKitFeeds {
+            do {
+                print("📡 Processing feed: \(feed.title)")
+                
+                // Use FeedManager to properly add feed with RSS parsing
+                guard let url = URL(string: feed.url) else {
+                    print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
+                    continue
+                }
+                
+                let addedFeed = try await feedManager.addFeed(from: url)
+                print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+                
+            } catch {
+                print("❌ Failed to process feed \(feed.title): \(error)")
+                
+                // Save feed without episodes if RSS parsing fails
+                try? await saveFeedToCoreData(feed)
+            }
+        }
+        
+        await MainActor.run {
+            self.isLoading = false
+        }
+        
+        print("🎉 Fresh install processing complete")
+    }
+    
+    /// Merge CloudKit feeds with existing local feeds
+    private func mergeCloudKitFeeds(_ cloudKitFeeds: [PodcastFeed]) async {
+        let context = CoreDataStack.shared.context
+        
+        await withCheckedContinuation { continuation in
+            context.perform {
+                do {
+                    // Get existing feed IDs
+                    let existingRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    let existingFeeds = try context.fetch(existingRequest)
+                    let existingFeedIds = Set(existingFeeds.compactMap { $0.id })
+                    
+                    // Add new feeds that don't exist locally
+                    var newFeedsAdded = 0
+                    for cloudFeed in cloudKitFeeds {
+                        if !existingFeedIds.contains(cloudFeed.id) {
+                            let feedModel = FeedModel(context: context)
+                            feedModel.update(from: cloudFeed)
+                            newFeedsAdded += 1
+                        }
+                    }
+                    
+                    if newFeedsAdded > 0 {
+                        try context.save()
+                        print("✅ Merged \(newFeedsAdded) new feeds from CloudKit")
+                    } else {
+                        print("📊 No new feeds to merge from CloudKit")
+                    }
+                    
+                    continuation.resume()
+                } catch {
+                    print("❌ Failed to merge CloudKit feeds: \(error)")
+                    continuation.resume()
+                }
+            }
+        }
+    }
+    
+    /// Add test feed for debugging purposes
+    private func addTestFeedForDebugging() async {
+        print("🧪 Adding test Planet Money feed for debugging")
+        
+        let testFeedUrl = "https://feeds.npr.org/510289/podcast.xml"
+        
+        do {
+            // Use FeedManager to properly add feed with RSS parsing
+            guard let url = URL(string: testFeedUrl) else {
+                print("❌ Invalid test feed URL")
+                return
+            }
+            
+            let addedFeed = try await feedManager.addFeed(from: url)
+            print("✅ Added test feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+            
+            // Also save to CloudKit for future installs
+            try await PodcastCloudKitManager.shared.savePodcastFeedToCloudKit(addedFeed)
+            
+        } catch {
+            print("❌ Failed to add test feed: \(error)")
+        }
+    }
+    
+    /// Save feed to Core Data with episodes
+    private func saveFeedToCoreData(_ feed: PodcastFeed) async throws {
+        return try await withCheckedThrowingContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            
+            context.perform {
+                do {
+                    // Create or update feed
+                    let feedRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    feedRequest.predicate = NSPredicate(format: "id == %@", feed.id)
+                    
+                    let feedModel: FeedModel
+                    if let existingFeed = try context.fetch(feedRequest).first {
+                        feedModel = existingFeed
+                    } else {
+                        feedModel = FeedModel(context: context)
+                        feedModel.id = feed.id
+                    }
+                    
+                    feedModel.update(from: feed)
+                    
+                    // Save episodes
+                    for episode in feed.episodes {
+                        let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        episodeRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+                        
+                        let episodeModel: PodcastModel
+                        if let existingEpisode = try context.fetch(episodeRequest).first {
+                            episodeModel = existingEpisode
+                        } else {
+                            episodeModel = PodcastModel(context: context)
+                            episodeModel.id = episode.id
+                        }
+                        
+                        episodeModel.update(from: episode)
+                    }
+                    
+                    try context.save()
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
     
     /// Updated initialization to include CloudKit sync check
     @MainActor
@@ -558,77 +738,75 @@ class PodcastViewModel: ObservableObject {
         // Always check for CloudKit sync in background
         Task {
             await checkForFreshInstallAndSetup()
+            
+            // After CloudKit sync, check if any feeds need episode refreshing
+            await refreshFeedsWithoutEpisodes()
         }
     }
     
-    private func saveFeedAndEpisodesToCoreData(_ feed: PodcastFeed, episodes: [PodcastEpisode]) async throws {
-        return try await withCheckedThrowingContinuation { continuation in
-            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+    /// Refresh any feeds that don't have episodes by re-parsing their RSS
+    private func refreshFeedsWithoutEpisodes() async {
+        print("🔍 Checking for feeds without episodes...")
+        
+        // Check each feed for episode count
+        var feedsToRefresh: [PodcastFeed] = []
+        
+        for feed in podcastFeeds {
+            let episodeCount = await getEpisodeCountForFeed(feed.id)
+            if episodeCount == 0 {
+                print("📡 Feed '\(feed.title)' has 0 episodes, needs refresh")
+                feedsToRefresh.append(feed)
+            }
+        }
+        
+        if !feedsToRefresh.isEmpty {
+            print("🔄 Refreshing \(feedsToRefresh.count) feeds without episodes...")
             
-            backgroundContext.perform {
+            for feed in feedsToRefresh {
                 do {
-                    // Check if feed already exists
-                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    fetchRequest.predicate = NSPredicate(format: "url == %@", feed.url)
-                    
-                    if let existingFeed = try backgroundContext.fetch(fetchRequest).first {
-                        print("📡 Feed already exists in Core Data: \(feed.title)")
-                        continuation.resume()
-                        return
+                    guard let url = URL(string: feed.url) else {
+                        print("❌ Invalid URL for feed: \(feed.title)")
+                        continue
                     }
                     
-                    // Create new feed
-                    let managedFeed = FeedModel(context: backgroundContext)
-                    managedFeed.update(from: feed)
-                    
-                    // Save all episodes
-                    for episode in episodes {
-                        let managedEpisode = PodcastModel(context: backgroundContext)
-                        var episodeWithFeedId = episode
-                        episodeWithFeedId.feedId = feed.id
-                        managedEpisode.update(from: episodeWithFeedId)
-                        managedEpisode.feed = managedFeed
-                    }
-                    
-                    try backgroundContext.save()
-                    print("✅ Saved feed with \(episodes.count) episodes to Core Data")
-                    continuation.resume()
+                    print("📡 Refreshing feed: \(feed.title)")
+                    let (_, newEpisodes) = try await feedManager.refreshFeed(feed.id)
+                    print("✅ Refreshed feed '\(feed.title)' with \(newEpisodes.count) episodes")
                     
                 } catch {
-                    print("❌ Failed to save feed to Core Data: \(error)")
-                    continuation.resume(throwing: error)
+                    print("❌ Failed to refresh feed '\(feed.title)': \(error)")
+                }
+            }
+            
+            // Reload feeds after refreshing
+            await MainActor.run {
+                self.loadFeedsFromCoreData()
+                print("🎉 Completed refreshing feeds without episodes")
+            }
+        } else {
+            print("✅ All feeds have episodes")
+        }
+    }
+    
+    /// Get episode count for a specific feed
+    private func getEpisodeCountForFeed(_ feedId: String) async -> Int {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    request.predicate = NSPredicate(format: "feedId == %@", feedId)
+                    let count = try context.count(for: request)
+                    continuation.resume(returning: count)
+                } catch {
+                    print("❌ Failed to count episodes for feed \(feedId): \(error)")
+                    continuation.resume(returning: 0)
                 }
             }
         }
     }
     
     // MARK: - Delete Feed with CloudKit Integration
-    
-    @MainActor
-    func deletePodcastFeed(_ feed: PodcastFeed) {
-        isLoading = true
-        
-        Task {
-            do {
-                // Step 1: Delete from CloudKit
-                try await PodcastCloudKitManager.shared.deletePodcastFeedFromCloudKit(feed.id)
-                print("✅ Deleted feed from CloudKit: \(feed.title)")
-                
-                // Step 2: Delete from Core Data
-                try await deleteFeedFromCoreData(feed)
-                print("✅ Deleted feed from Core Data: \(feed.title)")
-                
-                // Step 3: Update UI
-                self.loadFeedsFromCoreData()
-                isLoading = false
-                
-            } catch {
-                print("❌ Failed to delete podcast feed: \(error)")
-                self.error = "Failed to delete podcast feed: \(error.localizedDescription)"
-                isLoading = false
-            }
-        }
-    }
     
     private func deleteFeedFromCoreData(_ feed: PodcastFeed) async throws {
         return try await withCheckedThrowingContinuation { continuation in
@@ -772,8 +950,6 @@ extension PodcastViewModel {
         }
     }
     
-
-    
     /// For AddStationView compatibility
     @available(*, deprecated, message: "Use loadEpisodesForFeed instead")
     func fetchAllEpisodes(for feed: PodcastFeed) {
@@ -812,17 +988,77 @@ extension PodcastViewModel {
         return allEpisodes.filter { $0.state.isDownloaded }
     }
     
-    /// For AppDelegate compatibility
-    @available(*, deprecated, message: "Use updateEpisodeState instead")
+    /// Toggle favorite state for an episode with proper filtering update
     func toggleFavorite(for episode: PodcastEpisode) {
         let currentState = episode.state.isFavorite
-        updateEpisodeState(episode.id, isFavorite: !currentState)
+        let newState = !currentState
+        
+        // Update EpisodeStateManager immediately
+        EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: newState)
+        
+        // Update episode state with proper sync
+        updateEpisodeState(episode.id, isFavorite: newState)
+        
+        // Update local episode immediately for UI responsiveness and refresh filtering
+        Task { @MainActor in
+            if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                var updatedEpisode = self.currentEpisodes[index]
+                updatedEpisode.state.isFavorite = newState
+                self.currentEpisodes[index] = updatedEpisode
+            }
+            
+            // Force refresh the current tab to update filtering
+            if let feedId = self.selectedFeedId {
+                await self.loadEpisodesForFeed(feedId, isInitialLoad: false)
+            }
+        }
     }
     
-    /// For AppDelegate compatibility
-    @available(*, deprecated, message: "Use updateEpisodeState instead")
+    /// Toggle download state for an episode with proper filtering update
+    func toggleDownload(for episode: PodcastEpisode) {
+        let currentState = episode.state.isDownloaded
+        let newState = !currentState
+        
+        // Update EpisodeStateManager immediately
+        EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: newState)
+        
+        // Update episode state with proper sync
+        updateEpisodeState(episode.id, isDownloaded: newState)
+        
+        // Update local episode immediately for UI responsiveness and refresh filtering
+        Task { @MainActor in
+            if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                var updatedEpisode = self.currentEpisodes[index]
+                updatedEpisode.state.isDownloaded = newState
+                self.currentEpisodes[index] = updatedEpisode
+            }
+            
+            // Force refresh the current tab to update filtering
+            if let feedId = self.selectedFeedId {
+                await self.loadEpisodesForFeed(feedId, isInitialLoad: false)
+            }
+        }
+    }
+    
+    /// Delete downloaded episode with confirmation
     func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
+        // Set download state to false
+        EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
         updateEpisodeState(episode.id, isDownloaded: false)
+        
+        // Update local episode immediately for UI responsiveness and refresh filtering
+        Task { @MainActor in
+            if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                var updatedEpisode = self.currentEpisodes[index]
+                updatedEpisode.state.isDownloaded = false
+                self.currentEpisodes[index] = updatedEpisode
+            }
+            
+            // Force refresh the current tab to update filtering
+            if let feedId = self.selectedFeedId {
+                await self.loadEpisodesForFeed(feedId, isInitialLoad: false)
+            }
+        }
     }
     
     /// For SettingsView compatibility
@@ -902,8 +1138,6 @@ extension PodcastViewModel {
         print("📡 Updated podcast feed: \(feed.title)")
     }
     
-
-    
     /// For PodcastListView compatibility
     @available(*, deprecated, message: "Use new feed management")
     func sortFeedsAlphabetically() {
@@ -948,8 +1182,10 @@ extension PodcastViewModel {
     @available(*, deprecated, message: "Use updateFilter instead")
     func switchToTab(_ tab: Int, for feed: PodcastFeed) {
         currentTab = tab
+        selectedFeedId = feed.id
+        print("🔄 Switching to tab \(tab) for feed: \(feed.title)")
         Task {
-            await loadEpisodesForFeed(feed.id)
+            await loadEpisodesForFeed(feed.id, isInitialLoad: true)
         }
     }
     
@@ -1099,8 +1335,6 @@ extension PodcastViewModel {
         }
     }
     
-
-    
     /// Delete a podcast feed from Core Data (following radio station pattern)
     func deletePodcastFeedFromCoreData(_ feed: PodcastFeed) {
         let context = CoreDataStack.shared.persistentContainer.viewContext
@@ -1174,825 +1408,5 @@ extension PodcastViewModel {
         
         // Save the new order to Core Data
         saveFeedsToCoreData()
-    }
-}
-
-// MARK: - Supporting Types
-
-enum EpisodeFilter: Int, CaseIterable {
-    case all = 0
-    case favorites = 1
-    case downloads = 2
-}
-
-struct EpisodeLoadResult {
-    let episodes: [PodcastEpisode]
-    let hasMore: Bool
-    let totalCount: Int
-}
-
-// MARK: - Temporary Manager Classes (until project configuration is fixed)
-
-class PodcastFeedManager {
-    private let log = OSLog(subsystem: "StreamRadios", category: "FeedManager")
-    private let context = CoreDataStack.shared.context
-    
-    func loadSavedFeeds() async throws -> [PodcastFeed] {
-        return try await withCheckedThrowingContinuation { continuation in
-            context.perform {
-                do {
-                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    fetchRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-                    
-                    let managedFeeds = try self.context.fetch(fetchRequest)
-                    let feeds = managedFeeds.map { $0.toPodcastFeed() }
-                    
-                    continuation.resume(returning: feeds)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-    
-    func addFeed(from url: URL) async throws -> PodcastFeed {
-        print("🔄 PodcastFeedManager: Starting to add feed from \(url.absoluteString)")
-        
-        // Fetch and parse the RSS feed
-        let (data, _) = try await URLSession.shared.data(from: url)
-        print("📥 PodcastFeedManager: Downloaded \(data.count) bytes of RSS data")
-        
-        let parser = SimplePodcastParser(data: data, feedUrl: url.absoluteString)
-        let (feed, episodes) = try parser.parse()
-        
-        print("✅ PodcastFeedManager: Parsed feed '\(feed.title)' with \(episodes.count) episodes")
-        
-        // Save feed and episodes to Core Data
-        return try await saveFeedWithEpisodes(feed: feed, episodes: episodes)
-    }
-    
-    private func saveFeedWithEpisodes(feed: PodcastFeed, episodes: [PodcastEpisode]) async throws -> PodcastFeed {
-        return try await withCheckedThrowingContinuation { continuation in
-            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
-            
-            backgroundContext.perform {
-                do {
-                    // Check if feed already exists
-                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    fetchRequest.predicate = NSPredicate(format: "url == %@", feed.url)
-                    
-                    if let existingFeed = try backgroundContext.fetch(fetchRequest).first {
-                        print("📡 PodcastFeedManager: Feed already exists, updating...")
-                        let podcastFeed = existingFeed.toPodcastFeed()
-                        continuation.resume(returning: podcastFeed)
-                        return
-                    }
-                    
-                    // Create new feed
-                    let managedFeed = FeedModel(context: backgroundContext)
-                    managedFeed.update(from: feed)
-                    
-                    print("💾 PodcastFeedManager: Saving \(episodes.count) episodes...")
-                    
-                    // Save episodes
-                    for episode in episodes {
-                        let managedEpisode = PodcastModel(context: backgroundContext)
-                        var episodeWithFeedId = episode
-                        episodeWithFeedId.feedId = feed.id
-                        managedEpisode.update(from: episodeWithFeedId)
-                        managedEpisode.feed = managedFeed
-                    }
-                    
-                    try backgroundContext.save()
-                    print("✅ PodcastFeedManager: Successfully saved feed with \(episodes.count) episodes")
-                    
-                    continuation.resume(returning: feed)
-                } catch {
-                    print("❌ PodcastFeedManager: Failed to save feed: \(error)")
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-}
-
-class PodcastEpisodeManager {
-    private let log = OSLog(subsystem: "StreamRadios", category: "EpisodeManager")
-    
-    func loadEpisodes(
-        feedId: String,
-        page: Int,
-        pageSize: Int,
-        filter: EpisodeFilter,
-        searchQuery: String?
-    ) async throws -> EpisodeLoadResult {
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
-            
-            backgroundContext.perform {
-                do {
-                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                    fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
-                    fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
-                    fetchRequest.fetchLimit = pageSize
-                    fetchRequest.fetchOffset = (page - 1) * pageSize
-                    
-                    let managedEpisodes = try backgroundContext.fetch(fetchRequest)
-                    let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
-                    
-                    let result = EpisodeLoadResult(
-                        episodes: episodes,
-                        hasMore: managedEpisodes.count == pageSize,
-                        totalCount: episodes.count
-                    )
-                    
-                    continuation.resume(returning: result)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Simple RSS Parser
-
-class SimplePodcastParser: NSObject, XMLParserDelegate {
-    private let data: Data
-    private let feedUrl: String
-    private var parser: XMLParser
-    
-    // Feed-level properties
-    private var feedTitle: String?
-    private var feedDescription: String?
-    private var feedArtworkUrl: String?
-    
-    // Episode parsing
-    private var episodes: [PodcastEpisode] = []
-    private var currentElement = ""
-    private var currentEpisode: EpisodeBuilder?
-    private var isParsingItem = false
-    private var characterBuffer = ""
-    
-    init(data: Data, feedUrl: String) {
-        self.data = data
-        self.feedUrl = feedUrl
-        self.parser = XMLParser(data: data)
-        super.init()
-        self.parser.delegate = self
-    }
-    
-    func parse() throws -> (PodcastFeed, [PodcastEpisode]) {
-        guard parser.parse() else {
-            throw PodcastError.parsingFailed
-        }
-        
-        guard let title = feedTitle else {
-            throw PodcastError.parsingFailed
-        }
-        
-        let feed = PodcastFeed(
-            title: title,
-            url: feedUrl,
-            artworkUrl: feedArtworkUrl,
-            description: feedDescription
-        )
-        
-        print("📊 SimplePodcastParser: Parsed '\(title)' with \(episodes.count) episodes")
-        return (feed, episodes)
-    }
-    
-    // MARK: - XMLParserDelegate
-    
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        currentElement = elementName
-        characterBuffer = ""
-        
-        switch elementName {
-        case "item":
-            isParsingItem = true
-            currentEpisode = EpisodeBuilder()
-        case "enclosure":
-            if isParsingItem, let url = attributeDict["url"] {
-                currentEpisode?.audioUrl = url
-            }
-        default:
-            break
-        }
-    }
-    
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        characterBuffer += string.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        defer { characterBuffer = "" }
-        
-        if isParsingItem {
-            // Parse episode elements
-            switch elementName {
-            case "item":
-                if let episode = currentEpisode?.build() {
-                    episodes.append(episode)
-                }
-                currentEpisode = nil
-                isParsingItem = false
-            case "title":
-                currentEpisode?.title = characterBuffer
-            case "description":
-                currentEpisode?.description = characterBuffer
-            case "pubDate":
-                currentEpisode?.pubDate = characterBuffer
-            case "guid":
-                currentEpisode?.guid = characterBuffer
-            case "itunes:duration":
-                currentEpisode?.duration = characterBuffer
-            default:
-                break
-            }
-        } else {
-            // Parse feed-level elements
-            switch elementName {
-            case "title":
-                if feedTitle == nil { // Only set the first title (channel title)
-                    feedTitle = characterBuffer
-                }
-            case "description":
-                if feedDescription == nil {
-                    feedDescription = characterBuffer
-                }
-            case "itunes:image":
-                if feedArtworkUrl == nil {
-                    feedArtworkUrl = characterBuffer
-                }
-            default:
-                break
-            }
-        }
-    }
-}
-
-// MARK: - Episode Builder
-
-private class EpisodeBuilder {
-    var title: String?
-    var description: String?
-    var audioUrl: String?
-    var pubDate: String?
-    var guid: String?
-    var duration: String?
-    
-    func build() -> PodcastEpisode? {
-        guard let title = title,
-              let description = description,
-              let audioUrl = audioUrl else {
-            return nil
-        }
-        
-        let publicationDate = parseDate(pubDate) ?? Date()
-        let episodeDuration = parseDuration(duration ?? "0")
-        let episodeId = guid ?? UUID().uuidString
-        
-        return PodcastEpisode(
-            id: episodeId,
-            title: title,
-            descriptionText: description,
-            audioUrl: audioUrl,
-            publicationDate: publicationDate,
-            duration: episodeDuration,
-            state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
-            feedId: "" // Will be set when saving
-        )
-    }
-    
-    private func parseDate(_ dateString: String?) -> Date? {
-        guard let dateString = dateString else { return nil }
-        
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.date(from: dateString)
-    }
-}
-
-// MARK: - Error Types
-
-enum PodcastError: Error, LocalizedError {
-    case parsingFailed
-    case networkError
-    case invalidURL
-    
-    var errorDescription: String? {
-        switch self {
-        case .parsingFailed:
-            return "Failed to parse podcast feed"
-        case .networkError:
-            return "Network error occurred"
-        case .invalidURL:
-            return "Invalid podcast URL"
-        }
-    }
-}
-
-// MARK: - Helper Extensions
-
-// Helper function to parse duration
-func parseDuration(_ durationString: String) -> TimeInterval {
-    let components = durationString.components(separatedBy: ":")
-    
-    if components.count == 3 {
-        // HH:MM:SS format
-        let hours = Double(components[0]) ?? 0
-        let minutes = Double(components[1]) ?? 0
-        let seconds = Double(components[2]) ?? 0
-        return hours * 3600 + minutes * 60 + seconds
-    } else if components.count == 2 {
-        // MM:SS format
-        let minutes = Double(components[0]) ?? 0
-        let seconds = Double(components[1]) ?? 0
-        return minutes * 60 + seconds
-    } else {
-        // Just seconds
-        return Double(durationString) ?? 0
-    }
-}
-
-// MARK: - CloudKit Integration
-
-/// Enhanced CloudKit manager for podcast feeds with fresh install support
-class PodcastCloudKitManager {
-    static let shared = PodcastCloudKitManager()
-    
-    private let container = CKContainer.default()
-    private let privateDatabase: CKDatabase
-    private let log = OSLog(subsystem: "com.radio.streamradios", category: "PodcastCloudKit")
-    
-    // CloudKit Record Types
-    private enum RecordType {
-        static let podcastFeed = "PodcastFeed"
-        static let podcastEpisode = "PodcastEpisode"
-        static let episodeState = "EpisodeState" // New record type for episode states
-    }
-    
-    // Batch limits for CloudKit operations
-    private enum BatchLimits {
-        static let maxRecordsPerOperation = 400
-        static let maxEpisodesPerFeed = 1000 // Allow more episodes per feed
-    }
-    
-    private init() {
-        self.privateDatabase = container.privateCloudDatabase
-    }
-    
-    // MARK: - Episode State CloudKit Sync
-    
-    /// Save episode state to CloudKit immediately (convenience method)
-    func saveEpisodeState(episodeId: String, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool) async {
-        do {
-            // Determine the episode state based on progress and isPlayed
-            let state: EpisodePlaybackState
-            if isPlayed || progress >= 0.99 {
-                state = .played
-            } else if progress > 0 {
-                state = .inProgress
-            } else {
-                state = .new
-            }
-            
-            try await saveEpisodeStateToCloudKit(episodeId, state: state, progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded)
-        } catch {
-            os_log("❌ Failed to save episode state to CloudKit: %@", log: log, type: .error, error.localizedDescription)
-        }
-    }
-    
-    /// Save episode state to CloudKit immediately
-    func saveEpisodeStateToCloudKit(_ episodeId: String, state: EpisodePlaybackState, progress: Double, isFavorite: Bool = false, isDownloaded: Bool = false) async throws {
-        let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
-        let record = CKRecord(recordType: RecordType.episodeState, recordID: recordID)
-        
-        // Episode state information
-        record["episodeId"] = episodeId as CKRecordValue
-        record["state"] = state.rawValue as CKRecordValue
-        record["progress"] = progress as CKRecordValue
-        record["isFavorite"] = isFavorite as CKRecordValue
-        record["isDownloaded"] = isDownloaded as CKRecordValue
-        record["lastUpdated"] = Date() as CKRecordValue
-        
-        // Determine isPlayed based on state and progress
-        let isPlayed = (state == .played) || (progress >= 0.99)
-        record["isPlayed"] = isPlayed as CKRecordValue
-        
-        try await privateDatabase.save(record)
-        os_log("✅ Saved episode state to CloudKit: %@ (%@, %.2f%%)", log: log, type: .info, episodeId, state.statusText, progress * 100)
-    }
-    
-    /// Fetch episode state from CloudKit
-    func fetchEpisodeStateFromCloudKit(_ episodeId: String) async throws -> (state: EpisodePlaybackState, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool)? {
-        let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
-        
-        do {
-            let record = try await privateDatabase.record(for: recordID)
-            
-            guard let stateString = record["state"] as? String,
-                  let state = EpisodePlaybackState(rawValue: stateString),
-                  let progress = record["progress"] as? Double else {
-                return nil
-            }
-            
-            let isFavorite = record["isFavorite"] as? Bool ?? false
-            let isDownloaded = record["isDownloaded"] as? Bool ?? false
-            let isPlayed = record["isPlayed"] as? Bool ?? false
-            
-            return (state: state, progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
-        } catch CKError.unknownItem {
-            // Episode state doesn't exist in CloudKit yet
-            return nil
-        }
-    }
-    
-    /// Batch sync episode states to CloudKit
-    func syncEpisodeStatesToCloudKit(_ episodeStates: [String: (state: EpisodePlaybackState, progress: Double, isFavorite: Bool, isDownloaded: Bool)]) async throws {
-        guard !episodeStates.isEmpty else { return }
-        
-        let records = episodeStates.map { episodeId, stateInfo in
-            let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
-            let record = CKRecord(recordType: RecordType.episodeState, recordID: recordID)
-            
-            record["episodeId"] = episodeId as CKRecordValue
-            record["state"] = stateInfo.state.rawValue as CKRecordValue
-            record["progress"] = stateInfo.progress as CKRecordValue
-            record["isFavorite"] = stateInfo.isFavorite as CKRecordValue
-            record["isDownloaded"] = stateInfo.isDownloaded as CKRecordValue
-            record["lastUpdated"] = Date() as CKRecordValue
-            
-            // Determine isPlayed based on state and progress
-            let isPlayed = (stateInfo.state == .played) || (stateInfo.progress >= 0.99)
-            record["isPlayed"] = isPlayed as CKRecordValue
-            
-            return record
-        }
-        
-        // Process in batches to avoid CloudKit limits
-        let batches = records.chunked(into: BatchLimits.maxRecordsPerOperation)
-        
-        for batch in batches {
-            let operation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
-            operation.savePolicy = .changedKeys
-            operation.qualityOfService = .userInitiated
-            
-            try await privateDatabase.add(operation)
-        }
-        
-        os_log("✅ Synced %d episode states to CloudKit", log: log, type: .info, episodeStates.count)
-    }
-
-    // MARK: - Fresh Install Setup
-
-    /// Complete fresh install setup - fetches all podcast feeds from CloudKit and saves to Core Data
-    func performFreshInstallSetup() async throws -> [PodcastFeed] {
-        os_log("🌟 Starting fresh install CloudKit setup", log: log, type: .info)
-        
-        // Step 1: Check if this is actually a fresh install
-        let coreDataFeedCount = await getCoreDataFeedCount()
-        if coreDataFeedCount > 0 {
-            os_log("📡 Found %d existing feeds in Core Data - skipping fresh install", log: log, type: .info, coreDataFeedCount)
-            return []
-        }
-        
-        // Step 2: Fetch all podcast feeds from CloudKit
-        let cloudKitFeeds = try await fetchAllPodcastFeedsFromCloudKit()
-        os_log("🌟 Fetched %d podcast feeds from CloudKit", log: log, type: .info, cloudKitFeeds.count)
-        
-        guard !cloudKitFeeds.isEmpty else {
-            os_log("📡 No feeds found in CloudKit - fresh install complete", log: log, type: .info)
-            return []
-        }
-        
-        // Step 3: For each feed, parse RSS and save to Core Data using the same system as test URL
-        var processedFeeds: [PodcastFeed] = []
-        
-        for cloudFeed in cloudKitFeeds {
-            do {
-                let processedFeed = try await parseRSSAndSaveToCoreData(cloudFeed)
-                processedFeeds.append(processedFeed)
-                os_log("✅ Processed feed: %@", log: log, type: .info, processedFeed.title)
-            } catch {
-                os_log("❌ Failed to process feed %@: %@", log: log, type: .error, cloudFeed.title, error.localizedDescription)
-            }
-        }
-        
-        os_log("🌟 Fresh install complete - processed %d feeds", log: log, type: .info, processedFeeds.count)
-        return processedFeeds
-    }
-    
-    /// Sync from CloudKit - fetches all feeds and only adds new ones
-    func syncFromCloudKit() async throws -> [PodcastFeed] {
-        os_log("🔄 Starting CloudKit sync", log: log, type: .info)
-        
-        // Step 1: Fetch all podcast feeds from CloudKit
-        let cloudKitFeeds = try await fetchAllPodcastFeedsFromCloudKit()
-        os_log("📡 Fetched %d podcast feeds from CloudKit", log: log, type: .info, cloudKitFeeds.count)
-        
-        guard !cloudKitFeeds.isEmpty else {
-            os_log("📡 No feeds found in CloudKit", log: log, type: .info)
-            return []
-        }
-        
-        // Step 2: Get existing feed URLs from Core Data
-        let existingFeedUrls = await getExistingFeedUrls()
-        
-        // Step 3: Filter out feeds that already exist
-        let newFeeds = cloudKitFeeds.filter { !existingFeedUrls.contains($0.url) }
-        os_log("📊 Found %d new feeds to sync (out of %d total)", log: log, type: .info, newFeeds.count, cloudKitFeeds.count)
-        
-        // Step 4: Process only new feeds
-        var processedFeeds: [PodcastFeed] = []
-        
-        for cloudFeed in newFeeds {
-            do {
-                let processedFeed = try await parseRSSAndSaveToCoreData(cloudFeed)
-                processedFeeds.append(processedFeed)
-                os_log("✅ Synced new feed: %@", log: log, type: .info, processedFeed.title)
-            } catch {
-                os_log("❌ Failed to sync feed %@: %@", log: log, type: .error, cloudFeed.title, error.localizedDescription)
-            }
-        }
-        
-        os_log("🔄 CloudKit sync complete - processed %d new feeds", log: log, type: .info, processedFeeds.count)
-        return processedFeeds
-    }
-    
-    /// Get existing feed URLs from Core Data
-    private func getExistingFeedUrls() async -> Set<String> {
-        return await withCheckedContinuation { continuation in
-            let context = CoreDataStack.shared.context
-            context.perform {
-                let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                fetchRequest.propertiesToFetch = ["url"]
-                
-                do {
-                    let feedModels = try context.fetch(fetchRequest)
-                    let urls = Set(feedModels.compactMap { $0.url })
-                    os_log("📊 Found %d existing feed URLs in Core Data", log: self.log, type: .debug, urls.count)
-                    continuation.resume(returning: urls)
-                } catch {
-                    os_log("❌ Error fetching existing feed URLs: %@", log: self.log, type: .error, error.localizedDescription)
-                    continuation.resume(returning: Set())
-                }
-            }
-        }
-    }
-    
-    // MARK: - Core Data Integration
-    
-    private func getCoreDataFeedCount() async -> Int {
-        return await withCheckedContinuation { continuation in
-            let context = CoreDataStack.shared.context
-            context.perform {
-                let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                fetchRequest.includesPropertyValues = false
-                fetchRequest.includesSubentities = false
-                
-                do {
-                    let count = try context.count(for: fetchRequest)
-                    continuation.resume(returning: count)
-                } catch {
-                    os_log("❌ Error counting Core Data feeds: %@", log: self.log, type: .error, error.localizedDescription)
-                    continuation.resume(returning: 0)
-                }
-            }
-        }
-    }
-    
-    private func parseRSSAndSaveToCoreData(_ cloudFeed: PodcastFeed) async throws -> PodcastFeed {
-        // Use the same RSS parsing system as the test URL
-        guard let url = URL(string: cloudFeed.url) else {
-            throw PodcastCloudKitError.invalidURL
-        }
-        
-        // Fetch RSS data
-        let (data, _) = try await URLSession.shared.data(from: url)
-        os_log("📥 Downloaded RSS data for %@: %d bytes", log: log, type: .debug, cloudFeed.title, data.count)
-        
-        // Parse using the same parser as test URL
-        let parser = SimplePodcastParser(data: data, feedUrl: cloudFeed.url)
-        let (parsedFeed, episodes) = try parser.parse()
-        
-        // Merge CloudKit metadata with parsed data - create new feed with CloudKit ID
-        let finalFeed = PodcastFeed(
-            id: cloudFeed.id, // Keep CloudKit ID
-            title: parsedFeed.title,
-            url: parsedFeed.url,
-            artworkUrl: parsedFeed.artworkUrl,
-            description: parsedFeed.descriptionText,
-            iconData: cloudFeed.iconData,
-            imageData: cloudFeed.imageData, // Keep CloudKit artwork
-            episodes: parsedFeed.episodes
-        )
-        
-        os_log("📊 Parsed %@ with %d episodes", log: log, type: .info, finalFeed.title, episodes.count)
-        
-        // Save to Core Data
-        try await saveFeedAndEpisodesToCoreData(finalFeed, episodes: episodes)
-        
-        return finalFeed
-    }
-    
-    private func saveFeedAndEpisodesToCoreData(_ feed: PodcastFeed, episodes: [PodcastEpisode]) async throws {
-        return try await withCheckedThrowingContinuation { continuation in
-            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
-            
-            backgroundContext.perform {
-                do {
-                    // Check if feed already exists
-                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    fetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
-                    
-                    if let existingFeed = try backgroundContext.fetch(fetchRequest).first {
-                        os_log("📡 Feed %@ already exists in Core Data", log: self.log, type: .info, feed.title)
-                        continuation.resume()
-                        return
-                    }
-                    
-                    // Create new feed
-                    let managedFeed = FeedModel(context: backgroundContext)
-                    managedFeed.update(from: feed)
-                    
-                    // Save all episodes
-                    for episode in episodes {
-                        let managedEpisode = PodcastModel(context: backgroundContext)
-                        var episodeWithFeedId = episode
-                        episodeWithFeedId.feedId = feed.id
-                        managedEpisode.update(from: episodeWithFeedId)
-                        managedEpisode.feed = managedFeed
-                    }
-                    
-                    try backgroundContext.save()
-                    os_log("✅ Saved feed %@ with %d episodes to Core Data", log: self.log, type: .info, feed.title, episodes.count)
-                    continuation.resume()
-                    
-                } catch {
-                    os_log("❌ Failed to save feed to Core Data: %@", log: self.log, type: .error, error.localizedDescription)
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-    
-    // MARK: - CloudKit Operations
-    
-    /// Save new podcast feed to CloudKit
-    func savePodcastFeedToCloudKit(_ feed: PodcastFeed) async throws {
-        let record = CKRecord(recordType: RecordType.podcastFeed, recordID: CKRecord.ID(recordName: feed.id))
-        
-        // Basic feed information
-        record["title"] = feed.title as CKRecordValue
-        record["url"] = feed.url as CKRecordValue
-        record["artworkUrl"] = feed.artworkUrl as CKRecordValue?
-        record["descriptionText"] = feed.descriptionText as CKRecordValue?
-        record["lastUpdated"] = Date() as CKRecordValue
-        
-        // Handle artwork efficiently
-        if let imageData = feed.imageData {
-            let asset = try await createAssetFromImageData(imageData, identifier: "artwork_\(feed.id)")
-            record["artwork"] = asset
-        }
-        
-        try await privateDatabase.save(record)
-        os_log("✅ Saved podcast feed to CloudKit: %@", log: log, type: .info, feed.title)
-    }
-    
-    /// Fetch all podcast feeds from CloudKit
-    func fetchAllPodcastFeedsFromCloudKit() async throws -> [PodcastFeed] {
-        let query = CKQuery(recordType: RecordType.podcastFeed, predicate: NSPredicate(value: true))
-        query.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            var allFeeds: [PodcastFeed] = []
-            var cursor: CKQueryOperation.Cursor?
-            
-            func fetchBatch() {
-                let operation: CKQueryOperation
-                
-                if let cursor = cursor {
-                    operation = CKQueryOperation(cursor: cursor)
-                } else {
-                    operation = CKQueryOperation(query: query)
-                }
-                
-                operation.resultsLimit = BatchLimits.maxRecordsPerOperation
-                operation.qualityOfService = .userInitiated
-                
-                operation.recordFetchedBlock = { record in
-                    if let feed = self.podcastFeedFromRecord(record) {
-                        allFeeds.append(feed)
-                    }
-                }
-                
-                operation.queryCompletionBlock = { nextCursor, error in
-                    if let error = error {
-                        os_log("❌ Error fetching podcast feeds: %@", log: self.log, type: .error, error.localizedDescription)
-                        continuation.resume(throwing: error)
-                        return
-                    }
-                    
-                    if let nextCursor = nextCursor {
-                        cursor = nextCursor
-                        fetchBatch() // Fetch next batch
-                    } else {
-                        // All batches fetched
-                        continuation.resume(returning: allFeeds)
-                    }
-                }
-                
-                privateDatabase.add(operation)
-            }
-            
-            fetchBatch()
-        }
-    }
-    
-    /// Delete podcast feed from CloudKit
-    func deletePodcastFeedFromCloudKit(_ feedId: String) async throws {
-        let recordID = CKRecord.ID(recordName: feedId)
-        try await privateDatabase.deleteRecord(withID: recordID)
-        os_log("✅ Deleted podcast feed from CloudKit: %@", log: log, type: .info, feedId)
-    }
-    
-    // MARK: - Utility Methods
-    
-    /// Create CloudKit asset from image data
-    private func createAssetFromImageData(_ imageData: Data, identifier: String) async throws -> CKAsset {
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(identifier)
-            .appendingPathExtension("jpg")
-        
-        try imageData.write(to: tempURL)
-        return CKAsset(fileURL: tempURL)
-    }
-    
-    /// Convert CloudKit record to PodcastFeed
-    private func podcastFeedFromRecord(_ record: CKRecord) -> PodcastFeed? {
-        guard let id = record.recordID.recordName as String?,
-              let title = record["title"] as? String,
-              let url = record["url"] as? String else {
-            return nil
-        }
-        
-        let artworkUrl = record["artworkUrl"] as? String
-        let descriptionText = record["descriptionText"] as? String
-        
-        // Get cached artwork if available
-        var imageData: Data?
-        if let asset = record["artwork"] as? CKAsset,
-           let artworkURL = asset.fileURL {
-            imageData = try? Data(contentsOf: artworkURL)
-        }
-        
-        return PodcastFeed(
-            id: id,
-            title: title,
-            url: url,
-            artworkUrl: artworkUrl,
-            description: descriptionText,
-            iconData: nil,
-            imageData: imageData,
-            episodes: []
-        )
-    }
-}
-
-// MARK: - CloudKit Error Types
-
-enum PodcastCloudKitError: Error, LocalizedError {
-    case invalidURL
-    case noData
-    case parsingFailed
-    case cloudKitError(Error)
-    case coreDataError(Error)
-    
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL:
-            return "Invalid podcast feed URL"
-        case .noData:
-            return "No data received from podcast feed"
-        case .parsingFailed:
-            return "Failed to parse podcast feed"
-        case .cloudKitError(let error):
-            return "CloudKit error: \(error.localizedDescription)"
-        case .coreDataError(let error):
-            return "Core Data error: \(error.localizedDescription)"
-        }
-    }
-}
-
-// MARK: - Array Extension for Chunking
-extension Array {
-    func chunked(into size: Int) -> [[Element]] {
-        return stride(from: 0, to: count, by: size).map {
-            Array(self[$0..<Swift.min($0 + size, count)])
-        }
     }
 }

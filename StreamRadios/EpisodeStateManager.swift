@@ -80,112 +80,112 @@ struct EpisodeProgress: Codable {
 class EpisodeStateManager: ObservableObject {
     static let shared = EpisodeStateManager()
     
-    @Published private(set) var episodeStates: [String: EpisodePlaybackState] = [:]
-    @Published private(set) var currentlyPlayingEpisodeId: String?
-    private var episodeProgress: [String: Double] = [:]
-    private var episodeCurrentTime: [String: Double] = [:]
+    // MARK: - Published Properties
+    @Published var episodeStates: [String: EpisodePlaybackState] = [:]
+    @Published var episodeProgress: [String: Double] = [:]
+    @Published var episodeFavorites: [String: Bool] = [:] // New: Track favorite states
+    @Published var episodeDownloads: [String: Bool] = [:] // New: Track download states
     
-    // Use shared app group UserDefaults instead of standard UserDefaults
-    private let userDefaults = UserDefaults(suiteName: "group.streamradios") ?? UserDefaults.standard
+    // MARK: - Private Properties
+    private let userDefaults: UserDefaults
     private let statesKey = "EpisodeStates"
     private let progressKey = "EpisodeProgress"
-    private let currentTimeKey = "EpisodeCurrentTime"
+    private let favoritesKey = "EpisodeFavorites" // New: Favorites storage key
+    private let downloadsKey = "EpisodeDownloads" // New: Downloads storage key
+    private let currentlyPlayingKey = "CurrentlyPlayingEpisode"
     
-    // Throttling for UI updates to prevent CPU spikes
-    private var lastUpdateTime = Date()
-    private let updateThrottleInterval: TimeInterval = 3.0 // 3 seconds between updates
+    private var currentlyPlayingEpisodeId: String?
+    private var episodeCurrentTime: [String: Double] = [:]
+    
+    // Throttled update properties
+    private var updateTimer: Timer?
+    private let updateDelay: TimeInterval = 0.1
     
     private init() {
+        // Try to use app group UserDefaults, fallback to standard if not available
+        if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
+            self.userDefaults = appGroupDefaults
+            print("✅ EpisodeStateManager: Using app group UserDefaults")
+        } else {
+            self.userDefaults = UserDefaults.standard
+            print("⚠️ EpisodeStateManager: App group not available, using standard UserDefaults")
+        }
+        
         loadSavedStates()
-        setupAppTerminationObserver()
+        setupDebugLogging()
     }
     
-    private func setupAppTerminationObserver() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(saveStateOnTermination),
-            name: UIApplication.willTerminateNotification,
-            object: nil
-        )
-    }
-    
-    @objc private func saveStateOnTermination() {
-        saveCurrentStates()
-    }
+    // MARK: - Public Methods
     
     private func loadSavedStates() {
-        if let savedData = userDefaults.data(forKey: statesKey),
-           let savedProgress = userDefaults.data(forKey: progressKey) {
-            do {
-                var states = try JSONDecoder().decode([String: EpisodePlaybackState].self, from: savedData)
-                let progress = try JSONDecoder().decode([String: Double].self, from: savedProgress)
-                
-                // Load current times if available
-                var currentTimes: [String: Double] = [:]
-                if let savedCurrentTimes = userDefaults.data(forKey: currentTimeKey) {
-                    currentTimes = try JSONDecoder().decode([String: Double].self, from: savedCurrentTimes)
-                }
-                
-                // Convert any playing state to in progress on app launch
-                for (episodeId, state) in states {
-                    if state == .playing {
-                        if let episodeProgress = progress[episodeId] {
-                            if episodeProgress >= 0.99 {
-                                states[episodeId] = .played
-                            } else if episodeProgress > 0 {
-                                states[episodeId] = .inProgress
-                            } else {
-                                states[episodeId] = .new
-                            }
-                        } else {
-                            states[episodeId] = .new
-                        }
-                    }
-                }
-                
-                DispatchQueue.main.async {
-                    self.episodeStates = states
-                    self.episodeProgress = progress
-                    self.episodeCurrentTime = currentTimes
-                    self.currentlyPlayingEpisodeId = nil // Clear any playing episode
-                    self.sendThrottledUpdate()
-                }
-            } catch {
-                print("Error loading saved states: \(error)")
-            }
+        // Load episode states
+        if let statesData = userDefaults.data(forKey: statesKey),
+           let decodedStates = try? JSONDecoder().decode([String: String].self, from: statesData) {
+            self.episodeStates = decodedStates.compactMapValues { EpisodePlaybackState(rawValue: $0) }
+            print("✅ EpisodeStateManager: Loaded \(episodeStates.count) episode states")
+        }
+        
+        // Load episode progress
+        if let progressData = userDefaults.data(forKey: progressKey),
+           let decodedProgress = try? JSONDecoder().decode([String: Double].self, from: progressData) {
+            self.episodeProgress = decodedProgress
+            print("✅ EpisodeStateManager: Loaded \(episodeProgress.count) episode progress entries")
+        }
+        
+        // Load episode favorites
+        if let favoritesData = userDefaults.data(forKey: favoritesKey),
+           let decodedFavorites = try? JSONDecoder().decode([String: Bool].self, from: favoritesData) {
+            self.episodeFavorites = decodedFavorites
+            print("✅ EpisodeStateManager: Loaded \(episodeFavorites.count) episode favorites")
+        }
+        
+        // Load episode downloads
+        if let downloadsData = userDefaults.data(forKey: downloadsKey),
+           let decodedDownloads = try? JSONDecoder().decode([String: Bool].self, from: downloadsData) {
+            self.episodeDownloads = decodedDownloads
+            print("✅ EpisodeStateManager: Loaded \(episodeDownloads.count) episode downloads")
+        }
+        
+        // Load currently playing episode
+        currentlyPlayingEpisodeId = userDefaults.string(forKey: currentlyPlayingKey)
+        if let playingId = currentlyPlayingEpisodeId {
+            print("✅ EpisodeStateManager: Currently playing episode: \(playingId)")
         }
     }
     
     private func saveCurrentStates() {
-        do {
-            let statesData = try JSONEncoder().encode(episodeStates)
-            let progressData = try JSONEncoder().encode(episodeProgress)
-            let currentTimeData = try JSONEncoder().encode(episodeCurrentTime)
-            
+        // Save episode states
+        let statesForSaving = episodeStates.mapValues { $0.rawValue }
+        if let statesData = try? JSONEncoder().encode(statesForSaving) {
             userDefaults.set(statesData, forKey: statesKey)
+        }
+        
+        // Save episode progress
+        if let progressData = try? JSONEncoder().encode(episodeProgress) {
             userDefaults.set(progressData, forKey: progressKey)
-            userDefaults.set(currentTimeData, forKey: currentTimeKey)
-        } catch {
-            print("Error saving states: \(error)")
+        }
+        
+        // Save episode favorites
+        if let favoritesData = try? JSONEncoder().encode(episodeFavorites) {
+            userDefaults.set(favoritesData, forKey: favoritesKey)
+        }
+        
+        // Save episode downloads
+        if let downloadsData = try? JSONEncoder().encode(episodeDownloads) {
+            userDefaults.set(downloadsData, forKey: downloadsKey)
+        }
+        
+        // Save currently playing episode
+        if let playingId = currentlyPlayingEpisodeId {
+            userDefaults.set(playingId, forKey: currentlyPlayingKey)
+        } else {
+            userDefaults.removeObject(forKey: currentlyPlayingKey)
         }
     }
     
     // Throttled update method to prevent excessive UI updates
-    private func sendThrottledUpdate() {
-        let now = Date()
-        
-        // Skip update if user is scrolling or if we updated too recently
-        if UserDefaults.standard.bool(forKey: "isUserScrolling") {
-            return
-        }
-        
-        if now.timeIntervalSince(lastUpdateTime) < updateThrottleInterval {
-            return
-        }
-        
-        lastUpdateTime = now
-        objectWillChange.send()
-    }
+    private var lastUpdateTime = Date()
+    private let updateThrottleInterval: TimeInterval = 3.0 // 3 seconds between updates
     
     func getState(for episodeId: String) -> EpisodePlaybackState {
         return episodeStates[episodeId] ?? .new
@@ -193,7 +193,6 @@ class EpisodeStateManager: ObservableObject {
     
     func getProgress(for episodeId: String) -> Double {
         let progress = episodeProgress[episodeId] ?? 0.0
-        print("🔍 EpisodeStateManager: Getting progress \(progress) for episode \(episodeId)")
         return progress
     }
     
@@ -400,33 +399,73 @@ class EpisodeStateManager: ObservableObject {
         userDefaults.synchronize()
     }
     
-    func isDownloaded(_ episodeId: String) -> Bool {
-        // For now, return false as download functionality isn't implemented
-        // This can be extended later when download feature is added
-        return false
+    /// Get favorite state for an episode
+    func isFavorite(_ episodeId: String) -> Bool {
+        return episodeFavorites[episodeId] ?? false
     }
     
+    /// Set favorite state for an episode
     func setFavorite(_ episodeId: String, isFavorite: Bool) {
-        // For now, just log the action as favorite functionality isn't fully implemented
-        // This can be extended later when favorite feature is added
-        print("🔍 EpisodeStateManager: Setting favorite for \(episodeId): \(isFavorite)")
+        episodeFavorites[episodeId] = isFavorite
+        saveCurrentStates()
+        userDefaults.synchronize() // Force immediate sync
+        sendThrottledUpdate()
+        print("🔍 EpisodeStateManager: Set favorite for \(episodeId): \(isFavorite)")
     }
     
+    /// Get download state for an episode
+    func isDownloaded(_ episodeId: String) -> Bool {
+        return episodeDownloads[episodeId] ?? false
+    }
+    
+    /// Set download state for an episode
     func setDownloaded(_ episodeId: String, isDownloaded: Bool) {
-        // For now, just log the action as download functionality isn't implemented
-        // This can be extended later when download feature is added
-        print("🔍 EpisodeStateManager: Setting downloaded for \(episodeId): \(isDownloaded)")
+        episodeDownloads[episodeId] = isDownloaded
+        saveCurrentStates()
+        userDefaults.synchronize() // Force immediate sync
+        sendThrottledUpdate()
+        print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded)")
     }
     
     func clearAllStates() {
         episodeStates.removeAll()
         episodeProgress.removeAll()
+        episodeFavorites.removeAll()
+        episodeDownloads.removeAll()
         currentlyPlayingEpisodeId = nil
         
         userDefaults.removeObject(forKey: statesKey)
         userDefaults.removeObject(forKey: progressKey)
+        userDefaults.removeObject(forKey: favoritesKey)
+        userDefaults.removeObject(forKey: downloadsKey)
+        userDefaults.removeObject(forKey: currentlyPlayingKey)
         
         sendThrottledUpdate()
     }
     
+    // MARK: - Private Methods
+    
+    private func setupDebugLogging() {
+        // Set up app termination observer to save state
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            self.saveCurrentStates()
+            self.userDefaults.synchronize()
+        }
+    }
+    
+    private func sendThrottledUpdate() {
+        // Cancel any existing timer
+        updateTimer?.invalidate()
+        
+        // Create a new timer that will fire after the delay
+        updateTimer = Timer.scheduledTimer(withTimeInterval: updateDelay, repeats: false) { _ in
+            DispatchQueue.main.async {
+                self.objectWillChange.send()
+            }
+        }
+    }
 }
