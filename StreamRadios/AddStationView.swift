@@ -263,7 +263,9 @@ struct AddStationView: View {
                 selectedPodcast: $selectedPodcast,
                 onListButtonTap: {
                     selectedPodcast = currentFeed
-                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                    Task {
+                        await podcastViewModel.loadEpisodesForFeed(currentFeed.id, isInitialLoad: true)
+                    }
                     scrollToEpisodeID = podcastPlayer.currentEpisode?.id
                     activeSheet = .podcastPlayer(podcast: currentFeed)
                 },

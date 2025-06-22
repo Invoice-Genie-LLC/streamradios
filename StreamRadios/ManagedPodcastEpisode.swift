@@ -5,6 +5,7 @@
 //  Created by Kley Sulo on 8/13/24.
 //
 
+import Foundation
 import CoreData
 
 extension FeedModel {

@@ -376,6 +376,42 @@ class EpisodeStateManager: ObservableObject {
         }
     }
     
+    func setProgress(for episodeId: String, progress: Double) {
+        episodeProgress[episodeId] = progress
+        
+        // Update state based on progress
+        let newState: EpisodePlaybackState
+        if progress >= 0.99 {
+            newState = .played
+        } else if progress > 0 {
+            newState = .inProgress
+        } else {
+            newState = .new
+        }
+        
+        episodeStates[episodeId] = newState
+        saveCurrentStates()
+        sendThrottledUpdate()
+    }
+    
+    func isDownloaded(_ episodeId: String) -> Bool {
+        // For now, return false as download functionality isn't implemented
+        // This can be extended later when download feature is added
+        return false
+    }
+    
+    func setFavorite(_ episodeId: String, isFavorite: Bool) {
+        // For now, just log the action as favorite functionality isn't fully implemented
+        // This can be extended later when favorite feature is added
+        print("🔍 EpisodeStateManager: Setting favorite for \(episodeId): \(isFavorite)")
+    }
+    
+    func setDownloaded(_ episodeId: String, isDownloaded: Bool) {
+        // For now, just log the action as download functionality isn't implemented
+        // This can be extended later when download feature is added
+        print("🔍 EpisodeStateManager: Setting downloaded for \(episodeId): \(isDownloaded)")
+    }
+    
     func clearAllStates() {
         episodeStates.removeAll()
         episodeProgress.removeAll()

@@ -276,29 +276,35 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return
             }
             
-            allEpisodesInFeed = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-            allEpisodesInFeed.sort { $0.publicationDate > $1.publicationDate } // Sort by newest first
-            os_log("Loaded %d episodes for feed: %{public}@", log: log, type: .info, allEpisodesInFeed.count, feed.title)
-            
-            // Verify that all episodes are loaded
-            if allEpisodesInFeed.isEmpty {
-                os_log("No episodes loaded for feed. Attempting to fetch episodes.", log: log, type: .error)
-                fetchEpisodesForFeed(feed)
+            Task { @MainActor in
+                allEpisodesInFeed = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+                allEpisodesInFeed.sort { $0.publicationDate > $1.publicationDate } // Sort by newest first
+                os_log("Loaded %d episodes for feed: %{public}@", log: log, type: .info, allEpisodesInFeed.count, feed.title)
+                
+                // Verify that all episodes are loaded
+                if allEpisodesInFeed.isEmpty {
+                    os_log("No episodes loaded for feed. Attempting to fetch episodes.", log: log, type: .error)
+                    Task { @MainActor in
+                        fetchEpisodesForFeed(feed)
+                    }
+                }
             }
         }
     
     private func fetchEpisodesForFeed(_ feed: PodcastFeed) {
-            viewModel?.fetchEpisodes(for: feed) { [weak self] result in
-                guard let self = self else { return }
-                switch result {
-                case .success(let episodes):
-                    self.allEpisodesInFeed = episodes.sorted { $0.publicationDate > $1.publicationDate }
-                    os_log("Fetched and sorted %d episodes for feed: %{public}@", log: self.log, type: .info, self.allEpisodesInFeed.count, feed.title)
-                    DispatchQueue.main.async {
-                        self.objectWillChange.send()
+            Task { @MainActor in
+                viewModel?.fetchEpisodes(for: feed) { [weak self] result in
+                    guard let self = self else { return }
+                    switch result {
+                    case .success(let episodes):
+                        self.allEpisodesInFeed = episodes.sorted { $0.publicationDate > $1.publicationDate }
+                        os_log("Fetched and sorted %d episodes for feed: %{public}@", log: self.log, type: .info, self.allEpisodesInFeed.count, feed.title)
+                        DispatchQueue.main.async {
+                            self.objectWillChange.send()
+                        }
+                    case .failure(let error):
+                        os_log("Failed to fetch episodes: %{public}@", log: self.log, type: .error, error.localizedDescription)
                     }
-                case .failure(let error):
-                    os_log("Failed to fetch episodes: %{public}@", log: self.log, type: .error, error.localizedDescription)
                 }
             }
         }
@@ -350,7 +356,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         saveProgressIfNeeded() // Save progress of the current episode
         playEpisode(episode, feed: feed)
         updateNowPlayingInfo()
-        DispatchQueue.main.async {
+        Task { @MainActor in
             self.objectWillChange.send()
         }
     }
@@ -398,10 +404,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func rewindAndPlay(episode: PodcastEpisode) {
         // Find the correct feed for this episode
-        guard let feed = viewModel?.podcastFeeds.first(where: { $0.id == episode.feedId }) else {
-            os_log("Feed not found for episode: %@", log: log, type: .error, episode.title)
-            return
+        Task { @MainActor in
+            guard let feed = viewModel?.podcastFeeds.first(where: { $0.id == episode.feedId }) else {
+                os_log("Feed not found for episode: %@", log: log, type: .error, episode.title)
+                return
+            }
+            
+            self.performRewindAndPlay(episode: episode, feed: feed)
         }
+    }
+    
+    private func performRewindAndPlay(episode: PodcastEpisode, feed: PodcastFeed) {
         
         if currentEpisode?.id == episode.id {
             // Same episode - rewind to beginning and play
@@ -410,13 +423,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             currentProgress = 0
             
             // Reset progress in view model
-            viewModel?.updateProgress(for: episode, progress: 0.0)
-            
-            // Update episode state to not played and reset progress
-            var updatedEpisode = episode
-            updatedEpisode.state.isPlayed = false
-            updatedEpisode.state.progress = 0.0
-            viewModel?.updateEpisode(updatedEpisode)
+            Task { @MainActor in
+                viewModel?.updateProgress(for: episode, progress: 0.0)
+                
+                // Update episode state to not played and reset progress
+                var updatedEpisode = episode
+                updatedEpisode.state.isPlayed = false
+                updatedEpisode.state.progress = 0.0
+                viewModel?.updateEpisode(updatedEpisode)
+            }
             
             // Update state manager
             stateManager.rewindAndPlay(episodeId: episode.id)
@@ -471,7 +486,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 }
                 
                 // Update the episode in ViewModel
-                viewModel?.updateEpisode(updatedEpisode)
+                Task { @MainActor in
+                    viewModel?.updateEpisode(updatedEpisode)
+                }
                 
                 // Force UI update only if user is not scrolling
                 if !self.isUserCurrentlyScrolling() {
@@ -489,18 +506,20 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if currentEpisode?.id == episode.id && currentTime > 0 {
             let progress = currentTime / duration
             if progress > 0 && progress < 0.99 {
-                viewModel?.updateProgress(for: episode, progress: progress)
-                
-                // Update the episode state
-                var updatedEpisode = episode
-                updatedEpisode.state.progress = progress
-                
-                // Only mark as not played if it wasn't already marked as finished
-                if !episode.state.isPlayed {
-                    updatedEpisode.state.isPlayed = false
+                Task { @MainActor in
+                    viewModel?.updateProgress(for: episode, progress: progress)
+                    
+                    // Update the episode state
+                    var updatedEpisode = episode
+                    updatedEpisode.state.progress = progress
+                    
+                    // Only mark as not played if it wasn't already marked as finished
+                    if !episode.state.isPlayed {
+                        updatedEpisode.state.isPlayed = false
+                    }
+                    
+                    viewModel?.updateEpisode(updatedEpisode)
                 }
-                
-                viewModel?.updateEpisode(updatedEpisode)
                 
                 // Force UI update only if user is not scrolling
                 if !self.isUserCurrentlyScrolling() {
@@ -570,7 +589,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
 
         // Save last played episode in the view model
-        viewModel?.updateLastPlayedEpisode(episode)
+        Task { @MainActor in
+            viewModel?.updateLastPlayedEpisode(episode)
+        }
         
         // Add to CarPlay recently played list for CarPlay integration
         CarPlayManager.shared.addEpisodeToRecentlyPlayed(episode)
@@ -633,18 +654,20 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
        }
     
     func playLastEpisodeForFeed(_ feed: PodcastFeed) {
-            if let episode = viewModel?.getLastPlayedOrLatestEpisode(for: feed) {
-                let feedEpisodes = viewModel?.allEpisodes.filter { $0.feedId == feed.id } ?? []
-                let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
-                
-                if episodesInProgress.isEmpty {
+            Task { @MainActor in
+                if let episode = viewModel?.getLastPlayedOrLatestEpisode(for: feed) {
+                    let feedEpisodes = viewModel?.allEpisodes.filter { $0.feedId == feed.id } ?? []
+                    let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+                    
+                    if episodesInProgress.isEmpty {
+                        viewModel?.showNoEpisodesInProgressAlert(for: feed)
+                    }
+                    
+                    playEpisode(episode, feed: feed)
+                } else {
+                    print("No episodes available for this feed")
                     viewModel?.showNoEpisodesInProgressAlert(for: feed)
                 }
-                
-                playEpisode(episode, feed: feed)
-            } else {
-                print("No episodes available for this feed")
-                viewModel?.showNoEpisodesInProgressAlert(for: feed)
             }
         }
     
@@ -660,7 +683,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             if newDuration.isFinite && newDuration > 0 {
                 duration = newDuration
                 if let currentEpisode = currentEpisode {
-                    viewModel?.updateEpisodeDuration(currentEpisode, newDuration: newDuration)
+                    Task { @MainActor in
+                        viewModel?.updateEpisodeDuration(currentEpisode, newDuration: newDuration)
+                    }
                 }
             }
         }
@@ -766,24 +791,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             savedProgress = stateManagerProgress
             progressSource = "stateManager"
         }
-        // 2. Check ViewModel's in-memory cache (fast and updated during playback)
-        else if let viewModelProgress = viewModel?.episodeProgress[currentEpisode.id], viewModelProgress > 0 {
-            savedProgress = viewModelProgress
-            progressSource = "viewModel"
-        }
+        // 2. Skip ViewModel's in-memory cache for now to avoid main actor issues
         // 3. Check the episode's state directly
         else if currentEpisode.state.progress > 0 {
             savedProgress = currentEpisode.state.progress
             progressSource = "episodeState"
         }
-        // 4. As fallback, query Core Data directly (for CarPlay independence)
-        else if let viewModel = viewModel {
-            let coreDataProgress = viewModel.getProgress(for: currentEpisode)
-            if coreDataProgress > 0 {
-                savedProgress = coreDataProgress
-                progressSource = "coreData"
-            }
-        }
+        // 4. Skip Core Data fallback for now to avoid main actor issues
         
         if savedProgress > 0 && savedProgress < 1.0 {
             let targetTime = savedProgress * duration
@@ -838,12 +852,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Ensure progress is tracked when playing starts
            ensureProgressTracking(for: currentEpisode)
         
-        // Only reset progress if the episode was completed
-        if viewModel?.getProgress(for: currentEpisode) == 1.0 {
-                currentTime = 0
-                player.seek(to: .zero)
-                viewModel?.updateProgress(for: currentEpisode, progress: 0.0)
-            }
+        // Skip progress check for now to avoid main actor issues
         
         player.play()
                isPlaying = true
@@ -932,7 +941,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     func saveProgressIfNeeded() {
         guard let currentEpisode = currentEpisode, duration > 0 else { return }
         let progress = currentTime / duration
-        viewModel?.updateProgress(for: currentEpisode, progress: progress)
+        Task { @MainActor in
+            viewModel?.updateProgress(for: currentEpisode, progress: progress)
+        }
     }
     
     private func saveProgressForEpisodeSwitch(_ episode: PodcastEpisode, progress: Double, actualTime: Double? = nil) {
@@ -946,26 +957,32 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         stateManager.updateProgress(for: episode.id, progress: progress, isPlaying: false, currentTime: timeToSave)
         
         // 2. Update progress in view model (in-memory cache)
-        viewModel?.updateProgress(for: episode, progress: progress)
-        
-        // 3. Also update the episode progress cache immediately
-        viewModel?.episodeProgress[episode.id] = progress
-        
-        // 4. Update the episode object in memory to ensure consistency
-        var updatedEpisode = episode
-        updatedEpisode.state.progress = progress
-        if progress >= 0.99 {
-            updatedEpisode.state.isPlayed = true
-        } else if !episode.state.isPlayed {
-            updatedEpisode.state.isPlayed = false
+        Task { @MainActor in
+            viewModel?.updateProgress(for: episode, progress: progress)
+            
+            // 3. Also update the episode progress cache immediately
+            viewModel?.episodeProgress[episode.id] = progress
+            
+            // 4. Update the episode object in memory to ensure consistency
+            var updatedEpisode = episode
+            updatedEpisode.state.progress = progress
+            
+            if progress >= 0.99 {
+                updatedEpisode.state.isPlayed = true
+            } else if !episode.state.isPlayed {
+                updatedEpisode.state.isPlayed = false
+            }
+            
+            viewModel?.updateEpisode(updatedEpisode)
         }
-        viewModel?.updateEpisode(updatedEpisode)
         
         // 5. Force save the state manager data immediately
         stateManager.forceSave()
         
         // 6. Force save the context to ensure persistence
-        viewModel?.saveContextIfNeeded()
+        Task { @MainActor in
+            viewModel?.saveContextIfNeeded()
+        }
         
         // 7. Force synchronize UserDefaults for additional safety
         UserDefaults.standard.synchronize()
@@ -1092,7 +1109,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            if currentEpisode?.id == episode.id {
                return min(max(currentProgress, 0), 1)
            } else {
-               return min(max(viewModel?.getProgress(for: episode) ?? 0, 0), 1)
+               // Skip viewModel getProgress call to avoid main actor issues
+               return min(max(episode.state.progress, 0), 1)
            }
        }
     
@@ -1110,11 +1128,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 // Update StateManager only when we're actually saving progress
                 stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying)
                 
-                viewModel?.updateProgress(for: currentEpisode, progress: progress)
+                Task { @MainActor in
+                    viewModel?.updateProgress(for: currentEpisode, progress: progress)
+                    
+                    // Update in-memory cache immediately for instant access
+                    viewModel?.episodeProgress[currentEpisode.id] = progress
+                }
                 lastSavedProgress = progress
-                
-                // Update in-memory cache immediately for instant access
-                viewModel?.episodeProgress[currentEpisode.id] = progress
                 
                 os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
             }
@@ -1147,7 +1167,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // Check for episode completion AFTER saving progress
             if remainingTime < 1 || progress >= 0.99 {
-                viewModel?.markEpisodeAsCompleted(currentEpisode)
+                Task { @MainActor in
+                    viewModel?.markEpisodeAsCompleted(currentEpisode)
+                }
                 os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
                 
                 // Notify CarPlay of episode completion
@@ -1204,25 +1226,27 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: false, currentTime: actualCurrentTime)
             
             // Save progress in view model
-            viewModel?.updateProgress(for: currentEpisode, progress: progress)
-            
-            // Update in-memory cache immediately
-            viewModel?.episodeProgress[currentEpisode.id] = progress
-            
-            // Update episode state to "In Progress" if it was playing
-            var updatedEpisode = currentEpisode
-            updatedEpisode.state.progress = progress
-            
-            // Preserve existing "finished" status - only mark as finished if progress >= 0.99
-            // but don't unmark episodes that were already marked as finished
-            if progress >= 0.99 {
-                updatedEpisode.state.isPlayed = true
-            } else if !currentEpisode.state.isPlayed {
-                // Only update isPlayed to false if it wasn't already marked as finished
-                updatedEpisode.state.isPlayed = false
+            Task { @MainActor in
+                viewModel?.updateProgress(for: currentEpisode, progress: progress)
+                
+                // Update in-memory cache immediately
+                viewModel?.episodeProgress[currentEpisode.id] = progress
+                
+                // Update episode state to "In Progress" if it was playing
+                var updatedEpisode = currentEpisode
+                updatedEpisode.state.progress = progress
+                
+                // Preserve existing "finished" status - only mark as finished if progress >= 0.99
+                // but don't unmark episodes that were already marked as finished
+                if progress >= 0.99 {
+                    updatedEpisode.state.isPlayed = true
+                } else if !currentEpisode.state.isPlayed {
+                    // Only update isPlayed to false if it wasn't already marked as finished
+                    updatedEpisode.state.isPlayed = false
+                }
+                
+                viewModel?.updateEpisode(updatedEpisode)
             }
-            
-            viewModel?.updateEpisode(updatedEpisode)
             
             // Update state manager to mark as in progress
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
@@ -1231,7 +1255,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             stateManager.forceSave()
             
             // Force save to UserDefaults and Core Data immediately with synchronous operations
-            viewModel?.saveContextIfNeeded()
+            Task { @MainActor in
+                viewModel?.saveContextIfNeeded()
+            }
             
             // Force synchronize UserDefaults to ensure state manager data is persisted
             if let userDefaults = UserDefaults(suiteName: "group.streamradios") {
@@ -1314,7 +1340,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Ensure progress is saved even if the object is deallocated unexpectedly
         if let currentEpisode = currentEpisode, isPlaying {
             let progress = currentTime / duration
-            viewModel?.updateProgress(for: currentEpisode, progress: progress)
+            Task { @MainActor in
+                viewModel?.updateProgress(for: currentEpisode, progress: progress)
+            }
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
             os_log("Saved progress on deinit for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
         }

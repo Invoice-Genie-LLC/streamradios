@@ -92,7 +92,7 @@ struct PodcastListView: View {
                    }
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
                        if !isEditing {
-                           Button(action: viewModel.sortFeedsAlphabetically) {
+                           Button(action: { viewModel.sortFeedsAlphabetically() }) {
                                Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
                            }
                            Button(action: { showingAddPodcast = true }) {
@@ -1719,7 +1719,7 @@ struct PodcastPlayerView: View {
     private var modernEpisodeList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(viewModel.currentEpisodes, id: \.compositeID) { episode in
+                ForEach(viewModel.currentEpisodes, id: \.id) { episode in
                     OptimizedEpisodeRowView(
                         episode: episode,
                         isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
@@ -1728,7 +1728,7 @@ struct PodcastPlayerView: View {
                         viewModel: viewModel,
                         podcastPlayer: podcastPlayer
                     )
-                    .id(episode.compositeID)
+                    .id(episode.id)
                 }
                 
                 // Loading indicator and invisible trigger area for pull-up gesture
