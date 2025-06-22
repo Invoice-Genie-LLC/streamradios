@@ -66,11 +66,8 @@ struct RadioStreamApp: App {
             }
         }
         
-        // Load podcast episode progress
-          podcastViewModel.loadAllEpisodesProgress()
-          
-          // Clean up any duplicate episodes
-          podcastViewModel.cleanupDuplicateEpisodes()
+        // Podcast loading is now handled in PodcastViewModel init
+        // No need to manually load progress or clean duplicates here
     }
 
     private func fetchStationsFromCloudKit() {
