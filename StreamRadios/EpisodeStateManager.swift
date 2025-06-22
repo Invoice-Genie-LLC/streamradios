@@ -28,9 +28,9 @@ enum EpisodePlaybackState: String, Codable, Equatable {
     
     var statusColor: Color {
         switch self {
-        case .new: return Color(red: 0.0, green: 0.5, blue: 0.0) // Darker green
+        case .new: return .blue // New episodes in blue
         case .playing: return .blue
-        case .inProgress: return .orange
+        case .inProgress: return .orange // In Progress episodes in orange
         case .played: return .gray
         }
     }
@@ -44,20 +44,20 @@ enum EpisodePlaybackState: String, Codable, Equatable {
         case .inProgress:
             return "play.circle.fill"
         case .played:
-            return "arrow.counterclockwise.circle.fill"
+            return "arrow.counterclockwise.circle.fill" // Rewind icon for played episodes
         }
     }
     
     var buttonColor: Color {
         switch self {
         case .new:
-            return .green
+            return .blue
         case .playing:
             return .blue
         case .inProgress:
-            return .green
+            return .orange // Orange color for in progress
         case .played:
-            return .blue
+            return .gray // Gray color for played episodes
         }
     }
 }
@@ -394,6 +394,12 @@ class EpisodeStateManager: ObservableObject {
         sendThrottledUpdate()
     }
     
+    /// Force save current states immediately (for critical saves)
+    func forceSave() {
+        saveCurrentStates()
+        userDefaults.synchronize()
+    }
+    
     func isDownloaded(_ episodeId: String) -> Bool {
         // For now, return false as download functionality isn't implemented
         // This can be extended later when download feature is added
@@ -423,13 +429,4 @@ class EpisodeStateManager: ObservableObject {
         sendThrottledUpdate()
     }
     
-    func forceSave() {
-        // Force immediate save of current states
-        saveCurrentStates()
-        
-        // Force synchronize UserDefaults to ensure data is written to disk
-        userDefaults.synchronize()
-        
-        print("✅ EpisodeStateManager: Force saved all states and progress data")
-    }
 }

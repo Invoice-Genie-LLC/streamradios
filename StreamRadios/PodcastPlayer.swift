@@ -707,15 +707,23 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 os_log("🎵 Episode finished playing (AVPlayerItemDidPlayToEndTime): %@", log: self.log, type: .info, currentEpisode.title)
                 
-                // Mark episode as completed
+                // Update current time and progress to reflect completion
+                self.currentTime = self.duration
+                self.currentProgress = 1.0
+                
+                // Mark episode as completed in EpisodeStateManager
+                self.stateManager.completeEpisode(episodeId: currentEpisode.id)
+                
+                // Sync episode completion to CloudKit and Core Data
+                Task.detached(priority: .userInitiated) {
+                    await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: 1.0, isPlayed: true)
+                }
+                
+                // Mark episode as completed (deprecated method for compatibility)
                 self.viewModel?.markEpisodeAsCompleted(currentEpisode)
                 
                 // Pause playback
                 self.pause()
-                
-                // Update current time and progress to reflect completion
-                self.currentTime = self.duration
-                self.currentProgress = 1.0
                 
                 // Update playback info and Now Playing
                 self.updatePlaybackInfo()
@@ -860,6 +868,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Update StateManager when starting playback
         stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true)
         stateManager.startPlaying(episodeId: currentEpisode.id)
+        
+        // Sync episode state to CloudKit and Core Data when starting playback
+        Task.detached(priority: .userInitiated) { [self] in
+            await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: self.currentProgress)
+        }
 
                
                updateNowPlayingInfo()
@@ -1134,6 +1147,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     // Update in-memory cache immediately for instant access
                     viewModel?.episodeProgress[currentEpisode.id] = progress
                 }
+                
+                // Sync progress to CloudKit and Core Data (non-blocking)
+                Task.detached(priority: .background) { [self] in
+                    await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
+                }
+                
                 lastSavedProgress = progress
                 
                 os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
@@ -1253,6 +1272,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // Force save state manager data immediately
             stateManager.forceSave()
+            
+            // Sync episode state to CloudKit and Core Data when pausing
+            Task.detached(priority: .userInitiated) {
+                await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
+            }
             
             // Force save to UserDefaults and Core Data immediately with synchronous operations
             Task { @MainActor in

@@ -1037,29 +1037,25 @@ struct OptimizedEpisodeRowView: View, Equatable {
         self.podcastPlayer = podcastPlayer
         
         // Cache expensive computations once during initialization
-        // For playing episodes, we'll use real-time progress; for others, use cached state
-        self.cachedProgress = isPlaying ? podcastPlayer.currentProgress : episode.state.progress
-        self.cachedIsCompleted = episode.state.progress >= 0.99 || episode.state.isPlayed
+        // For playing episodes, we'll use real-time progress; for others, use EpisodeStateManager
+        self.cachedProgress = isPlaying ? podcastPlayer.currentProgress : EpisodeStateManager.shared.getProgress(for: episode.id)
+        let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+        self.cachedIsCompleted = episodeState == .played || self.cachedProgress >= 0.99
         
-        // Pre-compute status text and color to avoid expensive EpisodeStateManager calls
-        if cachedIsCompleted {
-            self.cachedStatusText = "PLAYED"
-            self.cachedStatusColor = Color.gray.opacity(0.8) // Dark gray for played episodes
-        } else if episode.state.progress > 0 {
-            self.cachedStatusText = "IN PROGRESS"
-            self.cachedStatusColor = .orange
-        } else {
-            self.cachedStatusText = "NEW"
+        // Pre-compute status text and color using EpisodeStateManager
+        if isPlaying {
+            self.cachedStatusText = "PLAYING"
             self.cachedStatusColor = .blue
+        } else {
+            self.cachedStatusText = episodeState.statusText.uppercased()
+            self.cachedStatusColor = episodeState.statusColor
         }
         
-        // Pre-compute play button icon
+        // Pre-compute play button icon using EpisodeStateManager
         if isPlaying {
             self.cachedPlayButtonIcon = "pause.fill"
-        } else if cachedIsCompleted {
-            self.cachedPlayButtonIcon = "arrow.counterclockwise"
         } else {
-            self.cachedPlayButtonIcon = "play.fill"
+            self.cachedPlayButtonIcon = episodeState.buttonImage
         }
         
         // Pre-compute date string
@@ -1163,7 +1159,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             Button(action: isPlaying ? onStop : onPlay) {
                 Image(systemName: cachedPlayButtonIcon)
                     .font(.system(size: 28))
-                    .foregroundColor(isPlaying ? .orange : .blue)
+                    .foregroundColor(isPlaying ? .blue : EpisodeStateManager.shared.getState(for: episode.id).buttonColor)
             }
             .frame(width: 40, height: 40)
             

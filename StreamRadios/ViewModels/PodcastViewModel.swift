@@ -322,44 +322,95 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Update episode state efficiently
+    /// Update episode state efficiently with immediate CloudKit and Core Data sync
     func updateEpisodeState(_ episodeId: String, progress: Double? = nil, isFavorite: Bool? = nil, isDownloaded: Bool? = nil, isPlayed: Bool? = nil) {
         Task {
-            // Update episode states directly for now
-            EpisodeStateManager.shared.setProgress(for: episodeId, progress: progress ?? 0.0)
+            // Get current state to preserve values not being updated
+            let currentProgress = progress ?? EpisodeStateManager.shared.getProgress(for: episodeId)
+            let currentFavorite = isFavorite ?? (currentEpisodes.first(where: { $0.id == episodeId })?.state.isFavorite ?? false)
+            let currentDownloaded = isDownloaded ?? EpisodeStateManager.shared.isDownloaded(episodeId)
+            
+            // Determine the correct EpisodePlaybackState based on progress and isPlayed
+            let finalProgress = progress ?? currentProgress
+            let finalIsPlayed = isPlayed ?? (finalProgress >= 0.99)
+            
+            let episodeState: EpisodePlaybackState
+            if finalIsPlayed || finalProgress >= 0.99 {
+                episodeState = .played
+            } else if finalProgress > 0 {
+                episodeState = .inProgress
+            } else {
+                episodeState = .new
+            }
+            
+            // Update EpisodeStateManager first (source of truth)
+            if let progress = progress {
+                EpisodeStateManager.shared.setProgress(for: episodeId, progress: progress)
+            }
             if let isFavorite = isFavorite {
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
             }
             if let isDownloaded = isDownloaded {
                 EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded)
             }
-                
-                // Update local state immediately for responsiveness
-                await MainActor.run {
-                    if let index = self.currentEpisodes.firstIndex(where: { $0.id == episodeId }) {
-                        var updatedEpisode = self.currentEpisodes[index]
-                        
-                        if let progress = progress {
-                            updatedEpisode.state.progress = progress
-                        }
-                        if let isFavorite = isFavorite {
-                            updatedEpisode.state.isFavorite = isFavorite
-                        }
-                        if let isDownloaded = isDownloaded {
-                            updatedEpisode.state.isDownloaded = isDownloaded
-                        }
-                        if let isPlayed = isPlayed {
-                            updatedEpisode.state.isPlayed = isPlayed
-                        }
-                        
-                        self.currentEpisodes[index] = updatedEpisode
-                    }
+            
+            // Update the episode state in EpisodeStateManager
+            EpisodeStateManager.shared.updateProgress(for: episodeId, progress: finalProgress, isPlaying: false)
+            
+            // Update local state immediately for responsiveness
+            await MainActor.run {
+                if let index = self.currentEpisodes.firstIndex(where: { $0.id == episodeId }) {
+                    var updatedEpisode = self.currentEpisodes[index]
+                    
+                    updatedEpisode.state.progress = finalProgress
+                    updatedEpisode.state.isFavorite = currentFavorite
+                    updatedEpisode.state.isDownloaded = currentDownloaded
+                    updatedEpisode.state.isPlayed = finalIsPlayed
+                    
+                    self.currentEpisodes[index] = updatedEpisode
                 }
                 
-                // Update counts if necessary
-                if isFavorite != nil || isDownloaded != nil {
-                    await updateEpisodeCountsForCurrentFeed()
+                // Update progress cache
+                self.episodeProgress[episodeId] = finalProgress
+            }
+            
+            // Sync to CloudKit immediately (non-blocking)
+            Task.detached(priority: .userInitiated) {
+                do {
+                    try await PodcastCloudKitManager.shared.saveEpisodeStateToCloudKit(
+                        episodeId,
+                        state: episodeState,
+                        progress: finalProgress,
+                        isFavorite: currentFavorite,
+                        isDownloaded: currentDownloaded
+                    )
+                    print("✅ Episode state synced to CloudKit: \(episodeId)")
+                } catch {
+                    print("❌ Failed to sync episode state to CloudKit: \(error)")
                 }
+            }
+            
+            // Sync to CloudKit and Core Data (non-blocking)
+            Task.detached(priority: .background) {
+                do {
+                    // Sync to CloudKit
+                    await PodcastCloudKitManager.shared.saveEpisodeState(
+                        episodeId: episodeId,
+                        progress: finalProgress,
+                        isFavorite: currentFavorite,
+                        isDownloaded: currentDownloaded,
+                        isPlayed: finalIsPlayed
+                    )
+                    print("✅ Episode state synced to CloudKit: \(episodeId)")
+                } catch {
+                    print("❌ Failed to sync episode state to CloudKit: \(error)")
+                }
+            }
+            
+            // Update counts if necessary
+            if isFavorite != nil || isDownloaded != nil {
+                await updateEpisodeCountsForCurrentFeed()
+            }
         }
     }
     
@@ -1481,6 +1532,7 @@ class PodcastCloudKitManager {
     private enum RecordType {
         static let podcastFeed = "PodcastFeed"
         static let podcastEpisode = "PodcastEpisode"
+        static let episodeState = "EpisodeState" // New record type for episode states
     }
     
     // Batch limits for CloudKit operations
@@ -1493,8 +1545,110 @@ class PodcastCloudKitManager {
         self.privateDatabase = container.privateCloudDatabase
     }
     
-    // MARK: - Fresh Install Setup
+    // MARK: - Episode State CloudKit Sync
     
+    /// Save episode state to CloudKit immediately (convenience method)
+    func saveEpisodeState(episodeId: String, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool) async {
+        do {
+            // Determine the episode state based on progress and isPlayed
+            let state: EpisodePlaybackState
+            if isPlayed || progress >= 0.99 {
+                state = .played
+            } else if progress > 0 {
+                state = .inProgress
+            } else {
+                state = .new
+            }
+            
+            try await saveEpisodeStateToCloudKit(episodeId, state: state, progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded)
+        } catch {
+            os_log("❌ Failed to save episode state to CloudKit: %@", log: log, type: .error, error.localizedDescription)
+        }
+    }
+    
+    /// Save episode state to CloudKit immediately
+    func saveEpisodeStateToCloudKit(_ episodeId: String, state: EpisodePlaybackState, progress: Double, isFavorite: Bool = false, isDownloaded: Bool = false) async throws {
+        let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
+        let record = CKRecord(recordType: RecordType.episodeState, recordID: recordID)
+        
+        // Episode state information
+        record["episodeId"] = episodeId as CKRecordValue
+        record["state"] = state.rawValue as CKRecordValue
+        record["progress"] = progress as CKRecordValue
+        record["isFavorite"] = isFavorite as CKRecordValue
+        record["isDownloaded"] = isDownloaded as CKRecordValue
+        record["lastUpdated"] = Date() as CKRecordValue
+        
+        // Determine isPlayed based on state and progress
+        let isPlayed = (state == .played) || (progress >= 0.99)
+        record["isPlayed"] = isPlayed as CKRecordValue
+        
+        try await privateDatabase.save(record)
+        os_log("✅ Saved episode state to CloudKit: %@ (%@, %.2f%%)", log: log, type: .info, episodeId, state.statusText, progress * 100)
+    }
+    
+    /// Fetch episode state from CloudKit
+    func fetchEpisodeStateFromCloudKit(_ episodeId: String) async throws -> (state: EpisodePlaybackState, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool)? {
+        let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
+        
+        do {
+            let record = try await privateDatabase.record(for: recordID)
+            
+            guard let stateString = record["state"] as? String,
+                  let state = EpisodePlaybackState(rawValue: stateString),
+                  let progress = record["progress"] as? Double else {
+                return nil
+            }
+            
+            let isFavorite = record["isFavorite"] as? Bool ?? false
+            let isDownloaded = record["isDownloaded"] as? Bool ?? false
+            let isPlayed = record["isPlayed"] as? Bool ?? false
+            
+            return (state: state, progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
+        } catch CKError.unknownItem {
+            // Episode state doesn't exist in CloudKit yet
+            return nil
+        }
+    }
+    
+    /// Batch sync episode states to CloudKit
+    func syncEpisodeStatesToCloudKit(_ episodeStates: [String: (state: EpisodePlaybackState, progress: Double, isFavorite: Bool, isDownloaded: Bool)]) async throws {
+        guard !episodeStates.isEmpty else { return }
+        
+        let records = episodeStates.map { episodeId, stateInfo in
+            let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
+            let record = CKRecord(recordType: RecordType.episodeState, recordID: recordID)
+            
+            record["episodeId"] = episodeId as CKRecordValue
+            record["state"] = stateInfo.state.rawValue as CKRecordValue
+            record["progress"] = stateInfo.progress as CKRecordValue
+            record["isFavorite"] = stateInfo.isFavorite as CKRecordValue
+            record["isDownloaded"] = stateInfo.isDownloaded as CKRecordValue
+            record["lastUpdated"] = Date() as CKRecordValue
+            
+            // Determine isPlayed based on state and progress
+            let isPlayed = (stateInfo.state == .played) || (stateInfo.progress >= 0.99)
+            record["isPlayed"] = isPlayed as CKRecordValue
+            
+            return record
+        }
+        
+        // Process in batches to avoid CloudKit limits
+        let batches = records.chunked(into: BatchLimits.maxRecordsPerOperation)
+        
+        for batch in batches {
+            let operation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
+            operation.savePolicy = .changedKeys
+            operation.qualityOfService = .userInitiated
+            
+            try await privateDatabase.add(operation)
+        }
+        
+        os_log("✅ Synced %d episode states to CloudKit", log: log, type: .info, episodeStates.count)
+    }
+
+    // MARK: - Fresh Install Setup
+
     /// Complete fresh install setup - fetches all podcast feeds from CloudKit and saves to Core Data
     func performFreshInstallSetup() async throws -> [PodcastFeed] {
         os_log("🌟 Starting fresh install CloudKit setup", log: log, type: .info)
@@ -1830,6 +1984,15 @@ enum PodcastCloudKitError: Error, LocalizedError {
             return "CloudKit error: \(error.localizedDescription)"
         case .coreDataError(let error):
             return "Core Data error: \(error.localizedDescription)"
+        }
+    }
+}
+
+// MARK: - Array Extension for Chunking
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
 }
