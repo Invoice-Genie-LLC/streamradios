@@ -66,8 +66,8 @@ struct RadioStreamApp: App {
             }
         }
         
-        // Podcast loading is now handled in PodcastViewModel init
-        // No need to manually load progress or clean duplicates here
+        // Initialize podcast system with CloudKit support
+        podcastViewModel.initializeWithCloudKitSupport()
     }
 
     private func fetchStationsFromCloudKit() {
