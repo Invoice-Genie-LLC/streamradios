@@ -21,8 +21,11 @@ class PodcastEpisodeManager {
         
         let startTime = CFAbsoluteTimeGetCurrent()
         
-        // Try cache first
-        if let cachedResult = await cacheManager.getCachedEpisodes(
+        // For filtering operations (Favorites/Downloads), always bypass cache to ensure fresh results
+        let shouldUseCache = (filter == .all && searchQuery == nil)
+        
+        // Try cache first only for All tab without search
+        if shouldUseCache, let cachedResult = await cacheManager.getCachedEpisodes(
             feedId: feedId,
             page: page,
             pageSize: pageSize,
@@ -42,13 +45,25 @@ class PodcastEpisodeManager {
             searchQuery: searchQuery
         )
         
-        // Cache the result
-        await cacheManager.cacheEpisodes(result, for: feedId, page: page, filter: filter, searchQuery: searchQuery)
+        // Cache the result only for All tab
+        if shouldUseCache {
+            await cacheManager.cacheEpisodes(result, for: feedId, page: page, filter: filter, searchQuery: searchQuery)
+        }
         
         let endTime = CFAbsoluteTimeGetCurrent()
-        os_log("⚡ Loaded %d episodes in %.3f seconds", log: log, type: .info, result.episodes.count, endTime - startTime)
+        os_log("⚡ Loaded %d episodes in %.3f seconds (filter: %@, cached: %@)", log: log, type: .info, result.episodes.count, filter.displayName, shouldUseCache ? "yes" : "no")
         
         return result
+    }
+    
+    /// Clear cache for a feed when episode states change
+    func clearCacheForFeed(_ feedId: String) async {
+        await cacheManager.clearCacheForFeed(feedId)
+    }
+    
+    /// Clear all cache - useful for debugging
+    func clearAllCache() async {
+        await cacheManager.clearAllCache()
     }
     
     /// Bulk update episode states efficiently
@@ -171,35 +186,33 @@ class PodcastEpisodeManager {
             
             backgroundContext.perform {
                 do {
-                    // Build optimized fetch request
-                    let fetchRequest = self.buildFetchRequest(
+                    // Fetch ALL episodes for the feed first (without filter-based pagination)
+                    let baseFetchRequest = self.buildBaseFetchRequest(
                         feedId: feedId,
-                        page: page,
-                        pageSize: pageSize,
-                        filter: filter,
                         searchQuery: searchQuery
                     )
                     
-                    // Fetch episodes
-                    let managedEpisodes = try backgroundContext.fetch(fetchRequest)
+                    // Fetch all matching episodes
+                    let managedEpisodes = try backgroundContext.fetch(baseFetchRequest)
                     
-                    // Convert to domain models efficiently in batch
-                    let episodes = self.convertToEpisodes(managedEpisodes)
+                    // Convert to domain models with EpisodeStateManager sync
+                    let allEpisodes = self.convertToEpisodes(managedEpisodes)
                     
-                    // Get total count efficiently
-                    let totalCount = try self.getTotalCount(
-                        feedId: feedId,
-                        filter: filter,
-                        searchQuery: searchQuery,
-                        in: backgroundContext
-                    )
+                    // Apply filtering based on EpisodeStateManager (source of truth)
+                    let filteredEpisodes = self.applyStateBasedFiltering(allEpisodes, filter: filter)
                     
-                    let hasMore = totalCount > (page * pageSize)
+                    // Apply pagination to filtered results
+                    let startIndex = (page - 1) * pageSize
+                    let endIndex = min(startIndex + pageSize, filteredEpisodes.count)
+                    let paginatedEpisodes = startIndex < filteredEpisodes.count ? 
+                        Array(filteredEpisodes[startIndex..<endIndex]) : []
+                    
+                    let hasMore = filteredEpisodes.count > (page * pageSize)
                     
                     let result = EpisodeLoadResult(
-                        episodes: episodes,
+                        episodes: paginatedEpisodes,
                         hasMore: hasMore,
-                        totalCount: totalCount
+                        totalCount: filteredEpisodes.count
                     )
                     
                     continuation.resume(returning: result)
@@ -255,6 +268,35 @@ class PodcastEpisodeManager {
         return fetchRequest
     }
     
+    private func buildBaseFetchRequest(
+        feedId: String,
+        searchQuery: String?
+    ) -> NSFetchRequest<PodcastModel> {
+        
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        
+        // Build predicate (only feedId and search, no favorite/download filtering)
+        var predicates = [NSPredicate(format: "feedId == %@", feedId)]
+        
+        if let query = searchQuery, !query.isEmpty {
+            predicates.append(NSPredicate(
+                format: "title CONTAINS[cd] %@ OR descriptionText CONTAINS[cd] %@",
+                query, query
+            ))
+        }
+        
+        fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+        
+        // Performance optimizations
+        fetchRequest.fetchBatchSize = batchSize
+        fetchRequest.includesPropertyValues = true
+        fetchRequest.returnsObjectsAsFaults = false
+        fetchRequest.relationshipKeyPathsForPrefetching = ["feed"]
+        
+        return fetchRequest
+    }
+    
     private func convertToEpisodes(_ managedEpisodes: [PodcastModel]) -> [PodcastEpisode] {
         return managedEpisodes.compactMap { managedEpisode in
             var episode = managedEpisode.toPodcastEpisode()
@@ -272,7 +314,21 @@ class PodcastEpisodeManager {
             // Determine isPlayed based on progress
             episode.state.isPlayed = stateManagerProgress >= 0.99
             
+
+            
             return episode
+        }
+    }
+    
+    /// Apply filtering based on EpisodeStateManager (source of truth) after Core Data fetch
+    private func applyStateBasedFiltering(_ episodes: [PodcastEpisode], filter: EpisodeFilter) -> [PodcastEpisode] {
+        switch filter {
+        case .all:
+            return episodes
+        case .favorites:
+            return episodes.filter { $0.state.isFavorite }
+        case .downloads:
+            return episodes.filter { $0.state.isDownloaded }
         }
     }
     

@@ -753,9 +753,10 @@ struct EpisodeRowView: View {
                             .frame(width: buttonSize, height: buttonSize)
                     }
                     
-                    // Download button or trash can
+                    // Download button - simplified
                     Group {
                         if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                            // Downloads tab: Show trash can for downloaded episodes
                             Button(action: {
                                 showingDeleteConfirmation = true
                             }) {
@@ -763,8 +764,14 @@ struct EpisodeRowView: View {
                                     .foregroundColor(.red)
                                     .frame(width: buttonSize, height: buttonSize)
                             }
+                        } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && episode.state.isDownloaded {
+                            // All tab and Favorites tab: Show filled green download icon for downloaded episodes (not clickable)
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .frame(width: buttonSize, height: buttonSize)
                         } else {
-                            downloadButton
+                            // All other cases: Show regular download button
+                            simplifiedDownloadButton
                         }
                     }
                     .frame(width: buttonSize, height: buttonSize)
@@ -865,7 +872,7 @@ struct EpisodeRowView: View {
             .fontWeight(.semibold)
         }
     
-    private var downloadButton: some View {
+    private var simplifiedDownloadButton: some View {
         Button(action: {
             if isPlaying {
                 showBannerAlert(message: "You can't download episodes while playing.")
@@ -1242,6 +1249,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 // Download button - simplified
                 Group {
                     if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                        // Downloads tab: Show trash can for downloaded episodes
                         Button(action: {
                             showingDeleteConfirmation = true
                         }) {
@@ -1249,7 +1257,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .foregroundColor(.red)
                                 .frame(width: buttonSize, height: buttonSize)
                         }
+                    } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && episode.state.isDownloaded {
+                        // All tab and Favorites tab: Show filled green download icon for downloaded episodes (not clickable)
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .frame(width: buttonSize, height: buttonSize)
                     } else {
+                        // All other cases: Show regular download button
                         simplifiedDownloadButton
                     }
                 }
@@ -1265,7 +1279,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
     
-    private var episodeContentWithSwipe: some View {
+        private var episodeContentWithSwipe: some View {
         episodeContent
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(action: {
@@ -1277,21 +1291,19 @@ struct OptimizedEpisodeRowView: View, Equatable {
             }
     }
     
-    // MARK: - Simplified Components
+    // MARK: - Helper Methods
     
     private var simplifiedDownloadButton: some View {
         Button(action: {
-            if episode.state.isDownloaded {
-                // Toggle download off (remove download)
-                viewModel.toggleDownload(for: episode)
-            } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
-                // Currently downloading, show progress without complex animations
-                ProgressView(value: downloadProgress)
-                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                    .scaleEffect(0.8)
-            } else {
-                // Not downloaded, start download
-                handleDownloadAction()
+            if isPlaying {
+                showBannerAlert(message: "You can't download episodes while playing.")
+            } else if !episode.state.isDownloaded && !isDownloading {
+                isDownloading = true
+                viewModel.downloadEpisode(episode) { result in
+                    DispatchQueue.main.async {
+                        isDownloading = false
+                    }
+                }
             }
         }) {
             if episode.state.isDownloaded {
@@ -1309,30 +1321,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .frame(width: buttonSize, height: buttonSize)
     }
     
-    // MARK: - Helper Methods
-    
-    private func handleDownloadAction() {
-        if isPlaying {
-            showBannerAlert(message: "You can't download episodes while playing.")
-        } else if !episode.state.isDownloaded && !isDownloading {
-            isDownloading = true
-            
-            // Simulate download and mark as downloaded when complete
-            viewModel.downloadEpisode(episode) { result in
-                DispatchQueue.main.async {
-                    isDownloading = false
-                    switch result {
-                    case .success(_):
-                        // Mark episode as downloaded
-                        viewModel.toggleDownload(for: episode)
-                    case .failure(_):
-                        showBannerAlert(message: "Download failed. Please try again.")
-                    }
-                }
-            }
-        }
-    }
-    
     private func showBannerAlert(message: String) {
         bannerAlertMessage = message
         showingBannerAlert = true
@@ -1340,7 +1328,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
             showingBannerAlert = false
         }
     }
-    
 
 }
 
@@ -1691,9 +1678,12 @@ struct PodcastPlayerView: View {
                 .frame(height: 1),
             alignment: .bottom
         )
-        .onChange(of: selectedTab) { newValue in
-            // Reset pagination and load first page for the new tab
-            viewModel.switchToTab(newValue, for: feed)
+        .onChange(of: selectedTab) { _, newValue in
+            // Update the current tab and reload episodes with proper filtering
+            viewModel.currentTab = newValue
+            Task {
+                await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
+            }
         }
     }
     
@@ -1963,6 +1953,9 @@ struct PodcastPlayerView: View {
     private func handleOnAppear() {
         let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
         
+        // Synchronize viewModel.currentTab with selectedTab to ensure proper filtering
+        viewModel.currentTab = selectedTab
+        
         if viewModel.currentEpisodes.isEmpty || !currentEpisodesForThisFeed {
             hasPerformedInitialScroll = false
             hasManuallyScrolled = false
@@ -1972,17 +1965,17 @@ struct PodcastPlayerView: View {
             
             loadInitialEpisodes()
         } else {
-            // DON'T call updateFilteredEpisodes here as it would load all episodes from memory
-            // The current episodes are already properly paginated
-            // Only refresh the UI state
-            DispatchQueue.main.async {
-                viewModel.objectWillChange.send()
+            // Reload episodes with the current tab filter to ensure proper filtering
+            Task {
+                await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
             }
         }
     }
     
     private func loadInitialEpisodes() {
-        viewModel.loadAllEpisodesForFeed(feed)
+        Task {
+            await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
+        }
     }
     
     private func loadMoreIfNeeded() {

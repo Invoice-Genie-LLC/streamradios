@@ -216,11 +216,27 @@ class PodcastViewModel: ObservableObject {
         if let feed = podcastFeeds.first(where: { $0.id == feedId }),
            !feed.episodes.isEmpty {
             print("🔍 DEBUG: Found \(feed.episodes.count) episodes already loaded in feed: \(feed.title)")
+            
+            // Apply filtering based on current tab
+            let filter = EpisodeFilter(rawValue: currentTab) ?? .all
+            let filteredEpisodes: [PodcastEpisode]
+            
+            switch filter {
+            case .all:
+                filteredEpisodes = feed.episodes
+            case .favorites:
+                filteredEpisodes = feed.episodes.filter { $0.state.isFavorite }
+            case .downloads:
+                filteredEpisodes = feed.episodes.filter { $0.state.isDownloaded }
+            }
+            
+            print("🔍 DEBUG: Applied filter \(filter) - showing \(filteredEpisodes.count) of \(feed.episodes.count) episodes")
+            
             await MainActor.run {
-                self.currentEpisodes = feed.episodes
+                self.currentEpisodes = filteredEpisodes
                 self.isLoadingEpisodes = false
                 self.hasMoreEpisodes = false
-                print("📊 Using pre-loaded episodes: \(self.currentEpisodes.count) episodes displayed")
+                print("📊 Using pre-loaded episodes with filter: \(self.currentEpisodes.count) episodes displayed")
             }
             return
         }
@@ -387,6 +403,16 @@ class PodcastViewModel: ObservableObject {
             // Update counts if necessary
             if isFavorite != nil || isDownloaded != nil {
                 await updateEpisodeCountsForCurrentFeed()
+                
+                // Clear cache for this feed since episode states changed
+                if let feedId = self.selectedFeedId {
+                    await self.episodeManager.clearCacheForFeed(feedId)
+                }
+                
+                // Immediately refresh the filtered list if we're on favorites or downloads tab
+                if self.currentTab == EpisodeFilter.favorites.rawValue || self.currentTab == EpisodeFilter.downloads.rawValue {
+                    await self.refreshCurrentFilteredList()
+                }
             }
         }
     }
@@ -841,6 +867,16 @@ class PodcastViewModel: ObservableObject {
             }
         }
     }
+    
+    /// Refresh the current filtered episode list immediately
+    private func refreshCurrentFilteredList() async {
+        guard let feedId = selectedFeedId else { return }
+        
+        print("🔄 Refreshing filtered list for tab: \(currentTab)")
+        
+        // Reload episodes with current filter
+        await performEpisodeLoad(feedId: feedId, page: 1, isInitialLoad: false, isAppending: false)
+    }
 }
 
 // MARK: - Backward Compatibility Methods
@@ -993,25 +1029,48 @@ extension PodcastViewModel {
         let currentState = episode.state.isFavorite
         let newState = !currentState
         
-        // Update EpisodeStateManager immediately
+        print("🔍 DEBUG: Toggling favorite for '\(episode.title)' from \(currentState) to \(newState) on tab \(currentTab)")
+        
+        // Update EpisodeStateManager immediately (source of truth)
         EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: newState)
         
-        // Update episode state with proper sync
-        updateEpisodeState(episode.id, isFavorite: newState)
-        
-        // Update local episode immediately for UI responsiveness and refresh filtering
+        // Update local state immediately for all tabs
         Task { @MainActor in
+            // Update the episode in place across all states immediately
             if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
                 var updatedEpisode = self.currentEpisodes[index]
                 updatedEpisode.state.isFavorite = newState
                 self.currentEpisodes[index] = updatedEpisode
+                print("🔍 DEBUG: Updated episode state immediately - isFavorite: \(newState)")
             }
             
-            // Force refresh the current tab to update filtering
-            if let feedId = self.selectedFeedId {
-                await self.loadEpisodesForFeed(feedId, isInitialLoad: false)
+            // Update the episode in the feed object as well
+            if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
+               let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
+                var updatedFeed = self.podcastFeeds[feedIndex]
+                updatedFeed.episodes[episodeIndex].state.isFavorite = newState
+                self.podcastFeeds[feedIndex] = updatedFeed
+            }
+            
+            // Apply filtering immediately based on current tab without reloading
+            let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+            switch filter {
+            case .favorites:
+                // If we're on favorites tab and unfavoriting, remove the episode
+                if !newState {
+                    self.currentEpisodes.removeAll { $0.id == episode.id }
+                }
+            case .downloads:
+                // No change needed for downloads tab when favoriting
+                break
+            case .all:
+                // All tab shows everything, no filtering needed
+                break
             }
         }
+        
+        // Update episode state with proper sync (background operation)
+        updateEpisodeState(episode.id, isFavorite: newState)
     }
     
     /// Toggle download state for an episode with proper filtering update
@@ -1019,46 +1078,83 @@ extension PodcastViewModel {
         let currentState = episode.state.isDownloaded
         let newState = !currentState
         
-        // Update EpisodeStateManager immediately
+        print("🔍 DEBUG: Toggling download for '\(episode.title)' from \(currentState) to \(newState) on tab \(currentTab)")
+        
+        // Update EpisodeStateManager immediately (source of truth)
         EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: newState)
         
-        // Update episode state with proper sync
-        updateEpisodeState(episode.id, isDownloaded: newState)
-        
-        // Update local episode immediately for UI responsiveness and refresh filtering
+        // Update local state immediately for all tabs
         Task { @MainActor in
+            // Update the episode in place across all states immediately
             if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
                 var updatedEpisode = self.currentEpisodes[index]
                 updatedEpisode.state.isDownloaded = newState
                 self.currentEpisodes[index] = updatedEpisode
+                print("🔍 DEBUG: Updated episode state immediately - isDownloaded: \(newState)")
             }
             
-            // Force refresh the current tab to update filtering
-            if let feedId = self.selectedFeedId {
-                await self.loadEpisodesForFeed(feedId, isInitialLoad: false)
+            // Update the episode in the feed object as well
+            if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
+               let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
+                var updatedFeed = self.podcastFeeds[feedIndex]
+                updatedFeed.episodes[episodeIndex].state.isDownloaded = newState
+                self.podcastFeeds[feedIndex] = updatedFeed
+            }
+            
+            // Apply filtering immediately based on current tab without reloading
+            let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+            switch filter {
+            case .downloads:
+                // If we're on downloads tab and removing download, remove the episode
+                if !newState {
+                    self.currentEpisodes.removeAll { $0.id == episode.id }
+                }
+            case .favorites:
+                // No change needed for favorites tab when downloading
+                break
+            case .all:
+                // All tab shows everything, no filtering needed
+                break
             }
         }
+        
+        // Update episode state with proper sync (background operation)
+        updateEpisodeState(episode.id, isDownloaded: newState)
     }
     
     /// Delete downloaded episode with confirmation
     func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
-        // Set download state to false
-        EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
-        updateEpisodeState(episode.id, isDownloaded: false)
+        print("🔍 DEBUG: Deleting download for '\(episode.title)' on tab \(currentTab)")
         
-        // Update local episode immediately for UI responsiveness and refresh filtering
+        // Update EpisodeStateManager immediately (source of truth)
+        EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
+        
+        // Update local state immediately for all tabs
         Task { @MainActor in
+            // Update the episode in place across all states immediately
             if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
                 var updatedEpisode = self.currentEpisodes[index]
                 updatedEpisode.state.isDownloaded = false
                 self.currentEpisodes[index] = updatedEpisode
+                print("🔍 DEBUG: Updated episode state immediately - isDownloaded: false")
             }
             
-            // Force refresh the current tab to update filtering
-            if let feedId = self.selectedFeedId {
-                await self.loadEpisodesForFeed(feedId, isInitialLoad: false)
+            // Update the episode in the feed object as well
+            if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
+               let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
+                var updatedFeed = self.podcastFeeds[feedIndex]
+                updatedFeed.episodes[episodeIndex].state.isDownloaded = false
+                self.podcastFeeds[feedIndex] = updatedFeed
+            }
+            
+            // If we're on downloads tab, remove the episode immediately
+            if self.currentTab == EpisodeFilter.downloads.rawValue {
+                self.currentEpisodes.removeAll { $0.id == episode.id }
             }
         }
+        
+        // Update episode state with proper sync (background operation)
+        updateEpisodeState(episode.id, isDownloaded: false)
     }
     
     /// For SettingsView compatibility
@@ -1170,11 +1266,34 @@ extension PodcastViewModel {
                 try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
             }
             
-            // Complete download
+            // Complete download and mark episode as downloaded
             await MainActor.run {
                 self.downloadProgress[episode.id] = 1.0
+                
+                // Mark episode as downloaded
+                EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: true)
+                
+                // Update local state immediately
+                if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    var updatedEpisode = self.currentEpisodes[index]
+                    updatedEpisode.state.isDownloaded = true
+                    self.currentEpisodes[index] = updatedEpisode
+                    print("🔍 DEBUG: Episode download completed - marked as downloaded")
+                }
+                
+                // Update the episode in the feed object as well
+                if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
+                   let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
+                    var updatedFeed = self.podcastFeeds[feedIndex]
+                    updatedFeed.episodes[episodeIndex].state.isDownloaded = true
+                    self.podcastFeeds[feedIndex] = updatedFeed
+                }
+                
                 completion(.success(true))
             }
+            
+            // Update episode state with proper sync (background operation)
+            updateEpisodeState(episode.id, isDownloaded: true)
         }
     }
     
