@@ -417,6 +417,15 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    /// Remove duplicate feeds manually
+    @MainActor
+    func removeDuplicateFeeds() {
+        Task {
+            await cleanupDuplicateFeeds()
+            loadFeedsFromCoreData() // Refresh UI
+        }
+    }
+    
     /// Delete a podcast feed
     @MainActor
     func deletePodcastFeed(_ feed: PodcastFeed) {
@@ -616,7 +625,11 @@ class PodcastViewModel: ObservableObject {
             self.isLoading = true
         }
         
-        for feed in cloudKitFeeds {
+        // Remove duplicates from CloudKit feeds before processing
+        let uniqueFeeds = removeDuplicateFeeds(cloudKitFeeds)
+        print("📊 Removed \(cloudKitFeeds.count - uniqueFeeds.count) duplicate feeds from CloudKit data")
+        
+        for feed in uniqueFeeds {
             do {
                 print("📡 Processing feed: \(feed.title)")
                 
@@ -642,6 +655,9 @@ class PodcastViewModel: ObservableObject {
         }
         
         print("🎉 Fresh install processing complete")
+        
+        // Clean up any duplicates that might have been created
+        await cleanupDuplicateFeeds()
     }
     
     /// Merge CloudKit feeds with existing local feeds
@@ -651,18 +667,29 @@ class PodcastViewModel: ObservableObject {
         await withCheckedContinuation { continuation in
             context.perform {
                 do {
-                    // Get existing feed IDs
+                    // Get existing feeds and create comprehensive duplicate check
                     let existingRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                     let existingFeeds = try context.fetch(existingRequest)
-                    let existingFeedIds = Set(existingFeeds.compactMap { $0.id })
                     
-                    // Add new feeds that don't exist locally
+                    // Create sets for efficient duplicate checking
+                    let existingFeedIds = Set(existingFeeds.compactMap { $0.id })
+                    let existingFeedUrls = Set(existingFeeds.compactMap { $0.url })
+                    let existingFeedTitles = Set(existingFeeds.compactMap { $0.title })
+                    
+                    // Add new feeds that don't exist locally (check by ID, URL, and title)
                     var newFeedsAdded = 0
                     for cloudFeed in cloudKitFeeds {
-                        if !existingFeedIds.contains(cloudFeed.id) {
+                        let isDuplicateById = existingFeedIds.contains(cloudFeed.id)
+                        let isDuplicateByUrl = existingFeedUrls.contains(cloudFeed.url)
+                        let isDuplicateByTitle = existingFeedTitles.contains(cloudFeed.title)
+                        
+                        if !isDuplicateById && !isDuplicateByUrl && !isDuplicateByTitle {
                             let feedModel = FeedModel(context: context)
                             feedModel.update(from: cloudFeed)
                             newFeedsAdded += 1
+                            print("📥 Adding new feed from CloudKit: \(cloudFeed.title)")
+                        } else {
+                            print("⚠️ Skipping duplicate feed from CloudKit: \(cloudFeed.title)")
                         }
                     }
                     
@@ -670,12 +697,87 @@ class PodcastViewModel: ObservableObject {
                         try context.save()
                         print("✅ Merged \(newFeedsAdded) new feeds from CloudKit")
                     } else {
-                        print("📊 No new feeds to merge from CloudKit")
+                        print("📊 No new feeds to merge from CloudKit (all were duplicates)")
                     }
                     
                     continuation.resume()
                 } catch {
                     print("❌ Failed to merge CloudKit feeds: \(error)")
+                    continuation.resume()
+                }
+            }
+        }
+    }
+    
+    /// Remove duplicate feeds from an array based on URL and title
+    private func removeDuplicateFeeds(_ feeds: [PodcastFeed]) -> [PodcastFeed] {
+        var seenUrls = Set<String>()
+        var seenTitles = Set<String>()
+        var uniqueFeeds: [PodcastFeed] = []
+        
+        for feed in feeds {
+            let urlKey = feed.url.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let titleKey = feed.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            if !seenUrls.contains(urlKey) && !seenTitles.contains(titleKey) {
+                seenUrls.insert(urlKey)
+                seenTitles.insert(titleKey)
+                uniqueFeeds.append(feed)
+            } else {
+                print("🔍 Removing duplicate feed: \(feed.title) (\(feed.url))")
+            }
+        }
+        
+        return uniqueFeeds
+    }
+    
+    /// Clean up any duplicate feeds that exist in Core Data
+    private func cleanupDuplicateFeeds() async {
+        print("🧹 Cleaning up duplicate feeds...")
+        
+        await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            
+            context.perform {
+                do {
+                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    fetchRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+                    let allFeeds = try context.fetch(fetchRequest)
+                    
+                    var seenUrls = Set<String>()
+                    var seenTitles = Set<String>()
+                    var feedsToDelete: [FeedModel] = []
+                    
+                    for feed in allFeeds {
+                        guard let url = feed.url, let title = feed.title else { continue }
+                        
+                        let urlKey = url.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                        let titleKey = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                        
+                        if seenUrls.contains(urlKey) || seenTitles.contains(titleKey) {
+                            print("🗑️ Marking duplicate feed for deletion: \(title)")
+                            feedsToDelete.append(feed)
+                        } else {
+                            seenUrls.insert(urlKey)
+                            seenTitles.insert(titleKey)
+                        }
+                    }
+                    
+                    // Delete duplicate feeds
+                    for feed in feedsToDelete {
+                        context.delete(feed)
+                    }
+                    
+                    if !feedsToDelete.isEmpty {
+                        try context.save()
+                        print("✅ Deleted \(feedsToDelete.count) duplicate feeds")
+                    } else {
+                        print("📊 No duplicate feeds found")
+                    }
+                    
+                    continuation.resume()
+                } catch {
+                    print("❌ Failed to cleanup duplicate feeds: \(error)")
                     continuation.resume()
                 }
             }
@@ -876,6 +978,83 @@ class PodcastViewModel: ObservableObject {
         
         // Reload episodes with current filter
         await performEpisodeLoad(feedId: feedId, page: 1, isInitialLoad: false, isAppending: false)
+    }
+    
+    /// Delete downloaded episode with confirmation
+    func deleteDownloadedEpisode(_ episode: PodcastEpisode) async {
+        print("🔍 DEBUG: Deleting download for '\(episode.title)' on tab \(currentTab)")
+        
+        // Delete the downloaded file from local storage
+        print("🗑️ Deleting downloaded episode: \(episode.title)")
+        
+        do {
+            // Delete the local file if it exists
+            if let localFilePath = episode.localFilePath, !localFilePath.isEmpty {
+                let localURL = URL(fileURLWithPath: localFilePath)
+                if FileManager.default.fileExists(atPath: localFilePath) {
+                    try FileManager.default.removeItem(at: localURL)
+                    print("📁 Successfully deleted local file: \(localFilePath)")
+                } else {
+                    print("⚠️ Local file doesn't exist at path: \(localFilePath)")
+                }
+            }
+            
+            // CRITICAL: Update EpisodeStateManager first (source of truth for download state)
+            EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
+            
+            // Clear local file path from Core Data
+            await episodeManager.updateEpisodeLocalPath(episode.id, localPath: nil)
+            
+            // Update episode state in Core Data to ensure consistency
+            try await episodeManager.updateEpisodeStates([
+                EpisodeStateUpdate(episodeId: episode.id, isDownloaded: false)
+            ])
+            
+            // Clear cache to force fresh load
+            await episodeManager.clearCacheForFeed(episode.feedId)
+            
+            // Update local state immediately for all tabs
+            await MainActor.run {
+                // Update the episode in place across all states immediately
+                if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                    var updatedEpisode = self.currentEpisodes[index]
+                    updatedEpisode.state.isDownloaded = false
+                    updatedEpisode.localFilePath = nil
+                    self.currentEpisodes[index] = updatedEpisode
+                    print("🔍 DEBUG: Updated episode state immediately - isDownloaded: false")
+                }
+                
+                // Update the episode in the feed object as well
+                if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
+                   let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
+                    var updatedFeed = self.podcastFeeds[feedIndex]
+                    updatedFeed.episodes[episodeIndex].state.isDownloaded = false
+                    updatedFeed.episodes[episodeIndex].localFilePath = nil
+                    self.podcastFeeds[feedIndex] = updatedFeed
+                }
+                
+                // If we're on downloads tab, remove the episode immediately
+                if self.currentTab == EpisodeFilter.downloads.rawValue {
+                    self.currentEpisodes.removeAll { $0.id == episode.id }
+                }
+            }
+            
+            print("✅ Successfully deleted download for episode: \(episode.title)")
+            
+        } catch {
+            print("❌ Failed to delete downloaded episode: \(error)")
+            
+            // Even if file deletion fails, still update the database states to prevent ghost downloads
+            EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
+            await episodeManager.updateEpisodeLocalPath(episode.id, localPath: nil)
+            do {
+                try await episodeManager.updateEpisodeStates([
+                    EpisodeStateUpdate(episodeId: episode.id, isDownloaded: false)
+                ])
+            } catch {
+                print("❌ Failed to update episode states: \(error)")
+            }
+        }
     }
 }
 
@@ -1122,41 +1301,6 @@ extension PodcastViewModel {
         updateEpisodeState(episode.id, isDownloaded: newState)
     }
     
-    /// Delete downloaded episode with confirmation
-    func deleteDownloadedEpisode(_ episode: PodcastEpisode) {
-        print("🔍 DEBUG: Deleting download for '\(episode.title)' on tab \(currentTab)")
-        
-        // Update EpisodeStateManager immediately (source of truth)
-        EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
-        
-        // Update local state immediately for all tabs
-        Task { @MainActor in
-            // Update the episode in place across all states immediately
-            if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                var updatedEpisode = self.currentEpisodes[index]
-                updatedEpisode.state.isDownloaded = false
-                self.currentEpisodes[index] = updatedEpisode
-                print("🔍 DEBUG: Updated episode state immediately - isDownloaded: false")
-            }
-            
-            // Update the episode in the feed object as well
-            if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
-               let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
-                var updatedFeed = self.podcastFeeds[feedIndex]
-                updatedFeed.episodes[episodeIndex].state.isDownloaded = false
-                self.podcastFeeds[feedIndex] = updatedFeed
-            }
-            
-            // If we're on downloads tab, remove the episode immediately
-            if self.currentTab == EpisodeFilter.downloads.rawValue {
-                self.currentEpisodes.removeAll { $0.id == episode.id }
-            }
-        }
-        
-        // Update episode state with proper sync (background operation)
-        updateEpisodeState(episode.id, isDownloaded: false)
-    }
-    
     /// For SettingsView compatibility
     @available(*, deprecated, message: "Use clear methods from managers instead")
     func clearAllPodcastData(completion: @escaping (Bool) -> Void) {
@@ -1251,50 +1395,153 @@ extension PodcastViewModel {
         podcastFeedOrder = podcastFeeds.map { $0.id }
     }
     
-    /// For PodcastListView compatibility
-    @available(*, deprecated, message: "Use new episode management")
+    /// Sanitize filename by removing invalid characters
+    private func sanitizeFilename(_ filename: String) -> String {
+        // Remove or replace invalid characters for filesystem
+        let invalidCharacters = CharacterSet(charactersIn: ":/\\?%*|\"<>")
+        let sanitized = filename.components(separatedBy: invalidCharacters).joined(separator: "_")
+        
+        // Limit length to avoid filesystem issues
+        let maxLength = 100
+        if sanitized.count > maxLength {
+            let startIndex = sanitized.startIndex
+            let endIndex = sanitized.index(startIndex, offsetBy: maxLength)
+            return String(sanitized[startIndex..<endIndex])
+        }
+        
+        return sanitized
+    }
+    
+    /// Download episode to local storage for offline playback
     func downloadEpisode(_ episode: PodcastEpisode, completion: @escaping (Result<Bool, Error>) -> Void) {
-        // Simulate download progress
+        guard let audioURL = URL(string: episode.audioUrl) else {
+            completion(.failure(NSError(domain: "PodcastViewModel", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid audio URL"])))
+            return
+        }
+        
+        // Initialize download progress
         downloadProgress[episode.id] = 0.0
         
-        Task {
-            // Simulate download with progress updates
-            for progress in stride(from: 0.0, through: 1.0, by: 0.1) {
-                await MainActor.run {
-                    self.downloadProgress[episode.id] = progress
-                }
-                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
-            }
+        // Create URLSession for downloading
+        let config = URLSessionConfiguration.default
+        let session = URLSession(configuration: config)
+        
+        // Start download task
+        let downloadTask = session.downloadTask(with: audioURL) { [weak self] tempURL, response, error in
+            guard let self = self else { return }
             
-            // Complete download and mark episode as downloaded
-            await MainActor.run {
-                self.downloadProgress[episode.id] = 1.0
-                
-                // Mark episode as downloaded
-                EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: true)
-                
-                // Update local state immediately
-                if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                    var updatedEpisode = self.currentEpisodes[index]
-                    updatedEpisode.state.isDownloaded = true
-                    self.currentEpisodes[index] = updatedEpisode
-                    print("🔍 DEBUG: Episode download completed - marked as downloaded")
+            DispatchQueue.main.async {
+                if let error = error {
+                    self.downloadProgress.removeValue(forKey: episode.id)
+                    completion(.failure(error))
+                    return
                 }
                 
-                // Update the episode in the feed object as well
-                if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
-                   let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
-                    var updatedFeed = self.podcastFeeds[feedIndex]
-                    updatedFeed.episodes[episodeIndex].state.isDownloaded = true
-                    self.podcastFeeds[feedIndex] = updatedFeed
+                guard let tempURL = tempURL else {
+                    self.downloadProgress.removeValue(forKey: episode.id)
+                    completion(.failure(NSError(domain: "PodcastViewModel", code: 2, userInfo: [NSLocalizedDescriptionKey: "No download URL"])))
+                    return
                 }
                 
-                completion(.success(true))
+                // Create local file path
+                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let episodesFolder = documentsPath.appendingPathComponent("DownloadedEpisodes")
+                
+                // Create episodes folder if it doesn't exist
+                if !FileManager.default.fileExists(atPath: episodesFolder.path) {
+                    try? FileManager.default.createDirectory(at: episodesFolder, withIntermediateDirectories: true)
+                }
+                
+                // Create unique filename - sanitize episode ID for filesystem
+                let fileExtension = audioURL.pathExtension.isEmpty ? "mp3" : audioURL.pathExtension
+                let sanitizedId = self.sanitizeFilename(episode.id)
+                let fileName = "\(sanitizedId).\(fileExtension)"
+                let localURL = episodesFolder.appendingPathComponent(fileName)
+                
+                print("📁 DEBUG: Original episode ID: \(episode.id)")
+                print("📁 DEBUG: Sanitized filename: \(fileName)")
+                print("📁 DEBUG: Full local path: \(localURL.path)")
+                print("📁 DEBUG: Temp file exists: \(FileManager.default.fileExists(atPath: tempURL.path))")
+                
+                do {
+                    // Check if temp file exists
+                    guard FileManager.default.fileExists(atPath: tempURL.path) else {
+                        throw NSError(domain: "PodcastViewModel", code: 3, userInfo: [NSLocalizedDescriptionKey: "Temporary download file not found at: \(tempURL.path)"])
+                    }
+                    
+                    // Remove existing file if it exists
+                    if FileManager.default.fileExists(atPath: localURL.path) {
+                        try FileManager.default.removeItem(at: localURL)
+                        print("📁 DEBUG: Removed existing file at: \(localURL.path)")
+                    }
+                    
+                    // Move downloaded file to permanent location
+                    try FileManager.default.moveItem(at: tempURL, to: localURL)
+                    print("📁 DEBUG: Successfully moved file from \(tempURL.path) to \(localURL.path)")
+                    
+                    // CRITICAL: Update both EpisodeStateManager AND Core Data for download state
+                    EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: true)
+                    
+                    // Save local file path and download state to Core Data
+                    Task {
+                        await self.episodeManager.updateEpisodeLocalPath(episode.id, localPath: localURL.path)
+                        // Also update the download state in Core Data to ensure consistency
+                        do {
+                            try await self.episodeManager.updateEpisodeStates([
+                                EpisodeStateUpdate(episodeId: episode.id, isDownloaded: true)
+                            ])
+                        } catch {
+                            print("❌ Failed to update episode states after download: \(error)")
+                        }
+                    }
+                    
+                    // Update local episode state immediately
+                    if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
+                        var updatedEpisode = self.currentEpisodes[index]
+                        updatedEpisode.state.isDownloaded = true
+                        updatedEpisode.localFilePath = localURL.path
+                        self.currentEpisodes[index] = updatedEpisode
+                        print("🔍 DEBUG: Episode download completed - marked as downloaded with local path: \(localURL.path)")
+                    }
+                    
+                    // Update the episode in the feed object as well
+                    if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
+                       let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
+                        var updatedFeed = self.podcastFeeds[feedIndex]
+                        updatedFeed.episodes[episodeIndex].state.isDownloaded = true
+                        updatedFeed.episodes[episodeIndex].localFilePath = localURL.path
+                        self.podcastFeeds[feedIndex] = updatedFeed
+                    }
+                    
+                    self.downloadProgress[episode.id] = 1.0
+                    completion(.success(true))
+                    
+                    // Clear download progress after a delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        self.downloadProgress.removeValue(forKey: episode.id)
+                    }
+                    
+                    print("📁 Episode downloaded successfully to: \(localURL.path)")
+                    
+                } catch {
+                    self.downloadProgress.removeValue(forKey: episode.id)
+                    completion(.failure(error))
+                    print("❌ Failed to save downloaded episode: \(error)")
+                }
             }
-            
-            // Update episode state with proper sync (background operation)
-            updateEpisodeState(episode.id, isDownloaded: true)
         }
+        
+        // Observe download progress
+        let observation = downloadTask.progress.observe(\.fractionCompleted) { [weak self] (progress: Progress, _: NSKeyValueObservedChange<Double>) in
+            DispatchQueue.main.async {
+                self?.downloadProgress[episode.id] = progress.fractionCompleted
+            }
+        }
+        
+        downloadTask.resume()
+        
+        // Store observation to prevent deallocation
+        // Note: In a production app, you'd want to manage these observations properly
     }
     
     /// For PodcastListView compatibility

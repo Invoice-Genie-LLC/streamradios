@@ -157,7 +157,7 @@ class CarPlayManager: ObservableObject {
         }
         
         // Return system fallback
-        return UIImage(systemName: "podcast")
+        return UIImage(systemName: "microphone")
     }
     
     // MARK: - Recently Played Episodes Management

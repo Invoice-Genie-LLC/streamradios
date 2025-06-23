@@ -171,6 +171,33 @@ class PodcastEpisodeManager {
         }
     }
     
+    /// Update the local file path for a downloaded episode
+    func updateEpisodeLocalPath(_ episodeId: String, localPath: String?) async {
+        await withCheckedContinuation { continuation in
+            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+            
+            backgroundContext.perform {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.fetchLimit = 1
+                
+                do {
+                    if let episode = try backgroundContext.fetch(fetchRequest).first {
+                        episode.localFilePath = localPath
+                        try backgroundContext.save()
+                        os_log("📁 Updated episode local path: %@", log: self.log, type: .info, localPath ?? "nil")
+                    } else {
+                        os_log("❌ Episode not found for local path update: %@", log: self.log, type: .error, episodeId)
+                    }
+                } catch {
+                    os_log("❌ Failed to update episode local path: %@", log: self.log, type: .error, error.localizedDescription)
+                }
+                
+                continuation.resume()
+            }
+        }
+    }
+    
     // MARK: - Private Methods
     
     private func loadFromCoreData(

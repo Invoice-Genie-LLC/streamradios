@@ -628,12 +628,16 @@ struct EpisodeRowView: View {
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
     @State private var progress: Double
-    @State private var isDownloading: Bool = false
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
+    
+    // Computed property for checking download state
+    private var isDownloading: Bool {
+        viewModel.downloadProgress[episode.id] != nil && viewModel.downloadProgress[episode.id]! > 0 && viewModel.downloadProgress[episode.id]! < 1
+    }
     
     // Static formatter to avoid recreation
     private static let dateFormatter: DateFormatter = {
@@ -804,7 +808,9 @@ struct EpisodeRowView: View {
                 title: Text("Delete Downloaded Episode"),
                 message: Text("Are you sure you want to delete this downloaded episode?"),
                 primaryButton: .destructive(Text("Delete")) {
-                    viewModel.deleteDownloadedEpisode(episode)
+                    Task {
+                        await viewModel.deleteDownloadedEpisode(episode)
+                    }
                 },
                 secondaryButton: .cancel()
             )
@@ -877,11 +883,9 @@ struct EpisodeRowView: View {
             if isPlaying {
                 showBannerAlert(message: "You can't download episodes while playing.")
             } else if !episode.state.isDownloaded && !isDownloading {
-                isDownloading = true
                 viewModel.downloadEpisode(episode) { result in
-                    DispatchQueue.main.async {
-                        isDownloading = false
-                    }
+                    // Download state is managed by the progress tracking
+                    print("Download completed for episode: \(episode.title)")
                 }
             }
         }) {
@@ -897,7 +901,7 @@ struct EpisodeRowView: View {
                         .foregroundColor(.green)
                 } else if isDownloading {
                     Circle()
-                        .trim(from: 0, to: CGFloat(viewModel.downloadProgress[episode.id] ?? 0))
+                                                        .trim(from: 0, to: CGFloat(viewModel.downloadProgress[episode.id] ?? 0))
                         .stroke(Color.blue, lineWidth: 2)
                         .rotationEffect(.degrees(-90))
                         .frame(width: buttonSize, height: buttonSize)
@@ -1002,7 +1006,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
-    @State private var isDownloading: Bool = false
     
     // Cache expensive computations to avoid recalculation during scrolling
     private let cachedProgress: Double
@@ -1029,6 +1032,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }()
     
     private let buttonSize: CGFloat = 22
+    
+    // Computed property for checking download state
+    private var isDownloading: Bool {
+        viewModel.downloadProgress[episode.id] != nil && viewModel.downloadProgress[episode.id]! > 0 && viewModel.downloadProgress[episode.id]! < 1
+    }
     
     init(episode: PodcastEpisode,
          isPlaying: Bool,
@@ -1120,7 +1128,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 title: Text("Delete Download"),
                 message: Text("Are you sure you want to delete the downloaded file? The episode will remain in the list but will need to be downloaded again to listen offline."),
                 primaryButton: .destructive(Text("Delete Download")) {
-                    viewModel.deleteDownloadedEpisode(episode)
+                    Task {
+                        await viewModel.deleteDownloadedEpisode(episode)
+                    }
                 },
                 secondaryButton: .cancel()
             )
@@ -1298,18 +1308,16 @@ struct OptimizedEpisodeRowView: View, Equatable {
             if isPlaying {
                 showBannerAlert(message: "You can't download episodes while playing.")
             } else if !episode.state.isDownloaded && !isDownloading {
-                isDownloading = true
                 viewModel.downloadEpisode(episode) { result in
-                    DispatchQueue.main.async {
-                        isDownloading = false
-                    }
+                    // Download state is managed by the progress tracking
+                    print("Download completed for episode: \(episode.title)")
                 }
             }
         }) {
             if episode.state.isDownloaded {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.green)
-            } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
+                                    } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
                 ProgressView(value: downloadProgress)
                     .progressViewStyle(CircularProgressViewStyle(tint: .blue))
                     .scaleEffect(0.8)
@@ -1807,64 +1815,7 @@ struct PodcastPlayerView: View {
                     }
                 }
                 
-                // End of list indicator (when all episodes are loaded)
-                if !viewModel.hasMoreEpisodes && !viewModel.currentEpisodes.isEmpty {
-                    VStack(spacing: 12) {
-                        Divider()
-                            .padding(.horizontal, 20)
-                            .padding(.top, 12)
-                        
-                        VStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 28))
-                                .foregroundColor(.green)
-                                .scaleEffect(endIndicatorScale)
-                                .animation(.spring(response: 0.6, dampingFraction: 0.8), value: endIndicatorScale)
-                            
-                            VStack(spacing: 6) {
-                                Text("🎉 All episodes loaded!")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.primary)
-                                Text("You've reached the end")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text("\(viewModel.currentEpisodes.count) episodes total")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 24)
-                        
-                        Divider()
-                            .padding(.horizontal, 20)
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.green.opacity(0.1), Color.green.opacity(0.05)]),
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.green.opacity(0.3), lineWidth: 1)
-                            )
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .onAppear {
-                        withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
-                            endIndicatorScale = 1.1
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
-                                endIndicatorScale = 1.0
-                            }
-                        }
-                    }
-                }
+
                 
                 // Extended bottom padding that serves as main trigger area
                 Rectangle()

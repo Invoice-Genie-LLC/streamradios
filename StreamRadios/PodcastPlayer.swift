@@ -570,13 +570,40 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         var playUrl: URL?
         
-        if let localFilePath = episode.localFilePath, FileManager.default.fileExists(atPath: localFilePath) {
-            playUrl = URL(fileURLWithPath: localFilePath)
-        } else if let url = URL(string: episode.audioUrl) {
-            playUrl = url
+        // Debug logging for offline playback
+        print("🔍 DEBUG: Attempting to play episode: \(episode.title)")
+        print("🔍 DEBUG: Episode localFilePath: \(episode.localFilePath ?? "nil")")
+        print("🔍 DEBUG: Episode audioUrl: \(episode.audioUrl)")
+        print("🔍 DEBUG: Episode isDownloaded: \(episode.state.isDownloaded)")
+        print("🔍 DEBUG: Episode fileSize: \(episode.fileSize ?? 0)")
+        
+        os_log("🔍 DEBUG: Attempting to play episode: %@", log: log, type: .info, episode.title)
+        os_log("🔍 DEBUG: Episode localFilePath: %@", log: log, type: .info, episode.localFilePath ?? "nil")
+        os_log("🔍 DEBUG: Episode audioUrl: %@", log: log, type: .info, episode.audioUrl)
+        os_log("🔍 DEBUG: Episode isDownloaded: %@", log: log, type: .info, episode.state.isDownloaded ? "true" : "false")
+        
+        if let localFilePath = episode.localFilePath, !localFilePath.isEmpty {
+            let fileExists = FileManager.default.fileExists(atPath: localFilePath)
+            os_log("🔍 DEBUG: Local file exists at path '%@': %@", log: log, type: .info, localFilePath, fileExists ? "YES" : "NO")
+            
+            if fileExists {
+                playUrl = URL(fileURLWithPath: localFilePath)
+                os_log("✅ DEBUG: Using local file for offline playback: %@", log: log, type: .info, localFilePath)
+            } else {
+                os_log("❌ DEBUG: Local file not found, falling back to streaming", log: log, type: .error)
+            }
         } else {
-            os_log("Failed to get playable URL for episode: %@", log: log, type: .error, episode.title)
-            return
+            os_log("🔍 DEBUG: No local file path available, using streaming URL", log: log, type: .info)
+        }
+        
+        if playUrl == nil {
+            if let url = URL(string: episode.audioUrl) {
+                playUrl = url
+                os_log("🔍 DEBUG: Using streaming URL: %@", log: log, type: .info, episode.audioUrl)
+            } else {
+                os_log("❌ Failed to get playable URL for episode: %@", log: log, type: .error, episode.title)
+                return
+            }
         }
         
         guard let url = playUrl else { return }

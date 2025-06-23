@@ -94,12 +94,26 @@ class PodcastFeedManager {
             
             backgroundContext.perform {
                 do {
-                    // Check if feed already exists
+                    // Check if feed already exists by URL (primary check) or ID (secondary check)
                     let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    fetchRequest.predicate = NSPredicate(format: "url == %@", feed.url)
+                    fetchRequest.predicate = NSPredicate(format: "url == %@ OR id == %@", feed.url, feed.id)
+                    fetchRequest.fetchLimit = 1
                     
                     if let existingFeed = try backgroundContext.fetch(fetchRequest).first {
+                        os_log("⚠️ Feed already exists, skipping duplicate: %@", log: self.log, type: .info, feed.title)
                         let podcastFeed = existingFeed.toPodcastFeed()
+                        continuation.resume(returning: podcastFeed)
+                        return
+                    }
+                    
+                    // Double-check with a more comprehensive search to prevent any duplicates
+                    let titleCheckRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    titleCheckRequest.predicate = NSPredicate(format: "title == %@ AND url == %@", feed.title, feed.url)
+                    titleCheckRequest.fetchLimit = 1
+                    
+                    if let duplicateFeed = try backgroundContext.fetch(titleCheckRequest).first {
+                        os_log("⚠️ Duplicate feed detected by title+URL, skipping: %@", log: self.log, type: .info, feed.title)
+                        let podcastFeed = duplicateFeed.toPodcastFeed()
                         continuation.resume(returning: podcastFeed)
                         return
                     }
@@ -113,7 +127,7 @@ class PodcastFeedManager {
                     
                     try backgroundContext.save()
                     
-                    os_log("✅ Saved feed with %d episodes", log: self.log, type: .info, episodes.count)
+                    os_log("✅ Saved new feed with %d episodes: %@", log: self.log, type: .info, episodes.count, feed.title)
                     continuation.resume(returning: feed)
                     
                 } catch {
@@ -193,11 +207,37 @@ class PodcastFeedManager {
             
             autoreleasepool {
                 for episode in batch {
-                    let managedEpisode = PodcastModel(context: context)
-                    var episodeWithFeedId = episode
-                    episodeWithFeedId.feedId = feed.id ?? ""
-                    managedEpisode.update(from: episodeWithFeedId)
-                    managedEpisode.feed = feed
+                    // Check if episode already exists to preserve download data
+                    let existingRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    existingRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+                    existingRequest.fetchLimit = 1
+                    
+                    let managedEpisode: PodcastModel
+                    if let existingEpisode = try? context.fetch(existingRequest).first {
+                        // Update existing episode but preserve download data
+                        managedEpisode = existingEpisode
+                        let preservedLocalFilePath = existingEpisode.localFilePath
+                        let preservedFileSize = existingEpisode.fileSize
+                        
+                        var episodeWithFeedId = episode
+                        episodeWithFeedId.feedId = feed.id ?? ""
+                        managedEpisode.update(from: episodeWithFeedId)
+                        
+                        // Restore preserved download data
+                        managedEpisode.localFilePath = preservedLocalFilePath
+                        managedEpisode.fileSize = preservedFileSize
+                        
+                        if let localPath = preservedLocalFilePath, !localPath.isEmpty {
+                            print("📁 DEBUG: Preserved localFilePath for existing episode: \(episode.title) -> \(localPath)")
+                        }
+                    } else {
+                        // Create new episode
+                        managedEpisode = PodcastModel(context: context)
+                        var episodeWithFeedId = episode
+                        episodeWithFeedId.feedId = feed.id ?? ""
+                        managedEpisode.update(from: episodeWithFeedId)
+                        managedEpisode.feed = feed
+                    }
                 }
             }
         }

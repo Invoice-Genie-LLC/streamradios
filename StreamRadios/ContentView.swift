@@ -818,7 +818,7 @@ struct UnifiedPodcastPlayerView: View {
         ZStack {
             Color.gray.opacity(0.3)
             
-            Image(systemName: "podcast")
+                                Image(systemName: "microphone")
                 .font(.system(size: 20, weight: .medium))
                 .foregroundColor(.white)
         }

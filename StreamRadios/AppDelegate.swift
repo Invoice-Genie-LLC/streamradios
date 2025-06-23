@@ -103,7 +103,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                         updatedEpisode.state.isDownloaded = true
                         podcastViewModel.updateEpisode(updatedEpisode)
                     } else {
-                        podcastViewModel.deleteDownloadedEpisode(currentEpisode)
+                        Task {
+                            await podcastViewModel.deleteDownloadedEpisode(currentEpisode)
+                        }
                     }
                 }
             }
