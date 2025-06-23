@@ -366,19 +366,12 @@ class PodcastEpisodeManager {
         in context: NSManagedObjectContext
     ) throws -> Int {
         
-        let countRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        // CRITICAL: For accurate counts, we need to fetch episodes and apply EpisodeStateManager filtering
+        // rather than relying on potentially stale Core Data states
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         
-        // Build same predicate as fetch request (without pagination)
+        // Build base predicate (without state-based filtering)
         var predicates = [NSPredicate(format: "feedId == %@", feedId)]
-        
-        switch filter {
-        case .favorites:
-            predicates.append(NSPredicate(format: "isFavorite == YES"))
-        case .downloads:
-            predicates.append(NSPredicate(format: "isDownloaded == YES"))
-        case .all:
-            break
-        }
         
         if let query = searchQuery, !query.isEmpty {
             predicates.append(NSPredicate(
@@ -387,10 +380,21 @@ class PodcastEpisodeManager {
             ))
         }
         
-        countRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        countRequest.includesSubentities = false
+        fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        fetchRequest.includesSubentities = false
         
-        return try context.count(for: countRequest)
+        // For state-based filters (favorites, downloads), we need to check EpisodeStateManager
+        switch filter {
+        case .all:
+            // For 'all', we can use Core Data count directly
+            return try context.count(for: fetchRequest)
+        case .favorites, .downloads:
+            // For state-based filters, fetch episodes and apply EpisodeStateManager filtering
+            let managedEpisodes = try context.fetch(fetchRequest)
+            let episodes = convertToEpisodes(managedEpisodes)
+            let filteredEpisodes = applyStateBasedFiltering(episodes, filter: filter)
+            return filteredEpisodes.count
+        }
     }
 }
 

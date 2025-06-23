@@ -110,8 +110,60 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 }
             }
             
+            // CRITICAL: Synchronize ALL download states during force close protection
+            synchronizeAllDownloadStates()
+            
             // Save context and force synchronize
             podcastViewModel.saveContextIfNeeded()
+        }
+        
+        /// Synchronize all download states between Core Data and EpisodeStateManager during force close
+        private func synchronizeAllDownloadStates() {
+            let context = CoreDataStack.shared.context
+            context.performAndWait {
+                do {
+                    // Get all downloaded episodes from Core Data
+                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "isDownloaded == YES")
+                    
+                    let downloadedEpisodes = try context.fetch(fetchRequest)
+                    
+                    print("🔄 Force close sync: Found \(downloadedEpisodes.count) downloaded episodes in Core Data")
+                    
+                    for managedEpisode in downloadedEpisodes {
+                        guard let episodeId = managedEpisode.id else { continue }
+                        
+                        // Verify file still exists
+                        var fileExists = false
+                        if let localPath = managedEpisode.localFilePath, !localPath.isEmpty {
+                            fileExists = FileManager.default.fileExists(atPath: localPath)
+                        }
+                        
+                        if fileExists {
+                            // File exists, ensure EpisodeStateManager knows about it
+                            EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: true)
+                            print("✅ Synced download state for episode: \(managedEpisode.title ?? "Unknown")")
+                        } else {
+                            // File doesn't exist, remove from Core Data
+                            managedEpisode.isDownloaded = false
+                            managedEpisode.localFilePath = nil
+                            EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                            print("🧹 Cleaned up missing download for episode: \(managedEpisode.title ?? "Unknown")")
+                        }
+                    }
+                    
+                    // Save Core Data changes
+                    try context.save()
+                    
+                    // Force save EpisodeStateManager to UserDefaults
+                    EpisodeStateManager.shared.forceSave()
+                    
+                    print("✅ Force close download sync completed successfully")
+                    
+                } catch {
+                    print("❌ Error during force close download sync: \(error)")
+                }
+            }
         }
 
      func applicationDidEnterBackground(_ application: UIApplication) {

@@ -10,6 +10,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import CoreData
 
 enum EpisodePlaybackState: String, Codable, Equatable {
     case new
@@ -112,6 +113,10 @@ class EpisodeStateManager: ObservableObject {
         }
         
         loadSavedStates()
+        
+        // CRITICAL: Sync download states from Core Data on startup to recover from force close scenarios
+        syncDownloadStatesFromCoreData()
+        
         setupDebugLogging()
     }
     
@@ -441,6 +446,61 @@ class EpisodeStateManager: ObservableObject {
         userDefaults.removeObject(forKey: currentlyPlayingKey)
         
         sendThrottledUpdate()
+    }
+    
+    /// Synchronize download states from Core Data on startup to recover from force close scenarios
+    private func syncDownloadStatesFromCoreData() {
+        DispatchQueue.global(qos: .utility).async {
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    // Get all downloaded episodes from Core Data
+                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "isDownloaded == YES")
+                    
+                    let downloadedEpisodes = try context.fetch(fetchRequest)
+                    
+                    var syncedCount = 0
+                    var cleanedCount = 0
+                    
+                    for managedEpisode in downloadedEpisodes {
+                        guard let episodeId = managedEpisode.id else { continue }
+                        
+                        // Verify file still exists
+                        var fileExists = false
+                        if let localPath = managedEpisode.localFilePath, !localPath.isEmpty {
+                            fileExists = FileManager.default.fileExists(atPath: localPath)
+                        }
+                        
+                        if fileExists {
+                            // File exists, ensure EpisodeStateManager knows about it
+                            DispatchQueue.main.async {
+                                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: true)
+                            }
+                            syncedCount += 1
+                        } else {
+                            // File doesn't exist, clean up Core Data
+                            managedEpisode.isDownloaded = false
+                            managedEpisode.localFilePath = nil
+                            DispatchQueue.main.async {
+                                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                            }
+                            cleanedCount += 1
+                        }
+                    }
+                    
+                    // Save Core Data changes if needed
+                    if cleanedCount > 0 {
+                        try context.save()
+                    }
+                    
+                    print("🔄 EpisodeStateManager startup sync: \(syncedCount) downloads synced, \(cleanedCount) cleaned up")
+                    
+                } catch {
+                    print("❌ EpisodeStateManager startup sync error: \(error)")
+                }
+            }
+        }
     }
     
     // MARK: - Private Methods
