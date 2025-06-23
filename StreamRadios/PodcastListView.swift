@@ -2025,7 +2025,9 @@ struct PodcastPlayerView: View {
     
     private func playEpisode(_ episode: PodcastEpisode) {
         if podcastPlayer.currentEpisode?.id == episode.id {
-            if episode.state.isPlayed || podcastPlayer.currentProgress >= 0.99 {
+            // Check the specific episode's progress, not the current player's progress
+            let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
+            if episode.state.isPlayed || episodeProgress >= 0.99 {
                 podcastPlayer.rewindAndPlay(episode: episode)
             } else {
                 podcastPlayer.togglePlayPause()

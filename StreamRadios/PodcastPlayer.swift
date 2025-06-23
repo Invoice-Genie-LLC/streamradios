@@ -638,9 +638,22 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("Failed to find index for current episode", log: log, type: .error)
         }
         
-        // Initialize time and duration - don't reset to zero yet, let seekToSavedProgress handle it
+        // Initialize time and duration - preserve existing progress for episodes that were partially played
         duration = episode.duration
-        currentProgress = 0
+        
+        // Initialize progress from saved state instead of always resetting to 0
+        if !shouldStartFromBeginning {
+            let savedProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            if savedProgress > 0 {
+                currentProgress = savedProgress
+                os_log("🎯 Preserving existing progress: %.2f%% for episode: %@", log: log, type: .info, savedProgress * 100, episode.title)
+            } else {
+                currentProgress = 0
+            }
+        } else {
+            // Only reset to 0 if explicitly starting from beginning
+            currentProgress = 0
+        }
         
         // Set up observers first so we can properly seek when ready
         setupPlayerItemObserver()
@@ -863,11 +876,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 }
             }
         } else {
-            os_log("❌ No valid saved progress found, starting from the beginning (stateManager progress: %.4f, currentTime: %.1fs)", 
-                   log: log, type: .info, stateManagerProgress, stateManagerCurrentTime)
-            player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-            currentTime = 0
-            currentProgress = 0
+            // Don't reset progress if it was already set from playEpisode - only reset if truly no progress exists
+            if currentProgress == 0 && currentTime == 0 {
+                os_log("❌ No valid saved progress found, starting from the beginning (stateManager progress: %.4f, currentTime: %.1fs)", 
+                       log: log, type: .info, stateManagerProgress, stateManagerCurrentTime)
+                player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                currentTime = 0
+                currentProgress = 0
+            } else {
+                os_log("🎯 Preserving progress already set in playEpisode: %.2f%% (%.1fs)", 
+                       log: log, type: .info, currentProgress * 100, currentTime)
+            }
             // Update Now Playing info immediately
             updateNowPlayingInfo()
         }
@@ -1163,8 +1182,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Calculate remaining time
             let remainingTime = max(duration - currentTime, 0)
             
-            // Only save progress if it has changed significantly (less frequent for Core Data performance)
-            if abs(progress - lastSavedProgress) >= saveThreshold {
+            // Save progress more frequently to handle force close scenarios (reduced threshold for better reliability)
+            let forceCloseThreshold = 0.01 // Save every 1% to protect against force close
+            if abs(progress - lastSavedProgress) >= forceCloseThreshold {
                 // Update StateManager only when we're actually saving progress
                 stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying)
                 
@@ -1181,6 +1201,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 }
                 
                 lastSavedProgress = progress
+                
+                // Force UserDefaults sync every 5% to handle force close scenarios better
+                let progressPercent = Int(progress * 100)
+                if progressPercent % 5 == 0 {
+                    UserDefaults.standard.synchronize()
+                    os_log("💾 Force-synced progress to disk: %.0f%% to protect against force close", log: log, type: .debug, progress * 100)
+                }
                 
                 os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
             }
@@ -1264,59 +1291,32 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if let currentEpisode = currentEpisode {
             // Get the most accurate current time from the player
             let actualCurrentTime = player?.currentTime().seconds ?? currentTime
-            let progress = duration > 0 ? actualCurrentTime / duration : 0
+            let calculatedProgress = duration > 0 ? actualCurrentTime / duration : 0
             
-            os_log("🛑 App terminating - saving progress for episode: %@ at %.2f%%", log: log, type: .info, currentEpisode.title, progress * 100)
+            // CRITICAL: Preserve maximum progress to prevent reset during force close
+            // Get existing progress from StateManager and use the maximum value
+            let existingProgress = stateManager.getProgress(for: currentEpisode.id)
+            let maxProgress = max(calculatedProgress, existingProgress, currentProgress)
             
-            // Update StateManager with exact current time for perfect restoration
-            stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: false, currentTime: actualCurrentTime)
+            // Use the most accurate current time, but preserve progress if it's higher
+            let finalCurrentTime = max(actualCurrentTime, currentTime)
             
-            // Save progress in view model
-            Task { @MainActor in
-                viewModel?.updateProgress(for: currentEpisode, progress: progress)
-                
-                // Update in-memory cache immediately
-                viewModel?.episodeProgress[currentEpisode.id] = progress
-                
-                // Update episode state to "In Progress" if it was playing
-                var updatedEpisode = currentEpisode
-                updatedEpisode.state.progress = progress
-                
-                // Preserve existing "finished" status - only mark as finished if progress >= 0.99
-                // but don't unmark episodes that were already marked as finished
-                if progress >= 0.99 {
-                    updatedEpisode.state.isPlayed = true
-                } else if !currentEpisode.state.isPlayed {
-                    // Only update isPlayed to false if it wasn't already marked as finished
-                    updatedEpisode.state.isPlayed = false
-                }
-                
-                viewModel?.updateEpisode(updatedEpisode)
-            }
+            os_log("🛑 App terminating - preserving maximum progress for episode: %@ (calculated: %.2f%%, existing: %.2f%%, current: %.2f%% -> final: %.2f%%)", 
+                   log: log, type: .info, currentEpisode.title, calculatedProgress * 100, existingProgress * 100, currentProgress * 100, maxProgress * 100)
             
-            // Update state manager to mark as in progress
-            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
+            // Save to StateManager with maximum progress (synchronous and reliable)
+            stateManager.updateProgress(for: currentEpisode.id, progress: maxProgress, isPlaying: false, currentTime: finalCurrentTime)
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
             
-            // Force save state manager data immediately
-            stateManager.forceSave()
-            
-            // Sync episode state to CloudKit and Core Data when pausing
-            Task.detached(priority: .userInitiated) {
-                await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
-            }
-            
-            // Force save to UserDefaults and Core Data immediately with synchronous operations
-            Task { @MainActor in
-                viewModel?.saveContextIfNeeded()
-            }
-            
-            // Force synchronize UserDefaults to ensure state manager data is persisted
-            if let userDefaults = UserDefaults(suiteName: "group.streamradios") {
-                userDefaults.synchronize()
-            }
+            // Force synchronize UserDefaults immediately
             UserDefaults.standard.synchronize()
             
-            os_log("✅ Force saved progress and marked episode as in progress on app termination: %@, Progress: %.2f%%", log: log, type: .info, currentEpisode.title, progress * 100)
+            // Simple progress update to view model (avoid complex Core Data operations during termination)
+            Task { @MainActor in
+                viewModel?.updateProgress(for: currentEpisode, progress: maxProgress)
+            }
+            
+            os_log("✅ Saved maximum progress for app termination: %@, Progress: %.2f%%", log: log, type: .info, currentEpisode.title, maxProgress * 100)
         }
     }
     
@@ -1390,12 +1390,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     deinit {
         // Ensure progress is saved even if the object is deallocated unexpectedly
         if let currentEpisode = currentEpisode, isPlaying {
-            let progress = currentTime / duration
+            let calculatedProgress = duration > 0 ? currentTime / duration : 0
+            
+            // CRITICAL: Preserve maximum progress during deallocation
+            let existingProgress = stateManager.getProgress(for: currentEpisode.id)
+            let maxProgress = max(calculatedProgress, existingProgress, currentProgress)
+            
             Task { @MainActor in
-                viewModel?.updateProgress(for: currentEpisode, progress: progress)
+                viewModel?.updateProgress(for: currentEpisode, progress: maxProgress)
             }
-            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
-            os_log("Saved progress on deinit for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
+            os_log("Saved maximum progress on deinit for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, maxProgress)
         }
         
         playerItemObserver?.invalidate()
