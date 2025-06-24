@@ -76,8 +76,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             if let currentEpisode = podcastPlayer.currentEpisode {
                 let currentProgress = PodcastPlayer.shared.currentProgress
                 
-                // Update progress
+                // Update progress locally
                 podcastViewModel.updateProgress(for: currentEpisode, progress: currentProgress)
+                
+                // Save to CloudKit when app goes to background
+                let progress = podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0
+                Task.detached(priority: .userInitiated) {
+                    await self.podcastViewModel.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
+                }
                 
                 // If episode was playing when app is closing, mark it as "In Progress"
                 if podcastPlayer.isPlaying && currentProgress > 0 && currentProgress < 0.99 {

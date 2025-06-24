@@ -84,6 +84,112 @@ class PodcastCloudKitManager {
         }
     }
     
+    /// Sync episode states from CloudKit with different behavior for fresh install vs upgrade
+    /// - For fresh install: sync isFavorite but NOT isDownloaded (files don't exist)
+    /// - For upgrade: sync both isFavorite and isDownloaded (files might still exist)
+    /// - Returns: Array of episode state updates that should be saved to Core Data
+    func syncEpisodeStatesFromCloudKit(for episodeIds: [String], isFreshInstall: Bool) async -> [EpisodeStateUpdate] {
+        os_log("🔄 Starting episode state sync from CloudKit for %d episodes (fresh install: %@)", 
+               log: log, type: .info, episodeIds.count, isFreshInstall ? "YES" : "NO")
+        
+        var syncedCount = 0
+        var skippedDownloadsCount = 0
+        var coreDataUpdates: [EpisodeStateUpdate] = []
+        
+        for episodeId in episodeIds {
+            do {
+                if let cloudState = try await fetchEpisodeStateFromCloudKit(episodeId) {
+                    // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager
+                    EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                    EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
+                    
+                    // Handle isDownloaded based on install type
+                    let finalIsDownloaded: Bool
+                    if isFreshInstall {
+                        // Fresh install: Don't sync isDownloaded because download files don't exist
+                        finalIsDownloaded = false
+                        EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                        if cloudState.isDownloaded {
+                            skippedDownloadsCount += 1
+                            os_log("📱 Fresh install: Skipped download state for episode %@ (file doesn't exist)", 
+                                   log: log, type: .debug, episodeId)
+                        }
+                    } else {
+                        // Upgrade: Sync isDownloaded because files might still exist locally
+                        finalIsDownloaded = cloudState.isDownloaded
+                        EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: cloudState.isDownloaded)
+                        os_log("📱 Upgrade: Synced download state for episode %@ (isDownloaded: %@)", 
+                               log: log, type: .debug, episodeId, cloudState.isDownloaded ? "YES" : "NO")
+                    }
+                    
+                    // Prepare Core Data update
+                    coreDataUpdates.append(EpisodeStateUpdate(
+                        episodeId: episodeId,
+                        progress: cloudState.progress,
+                        isFavorite: cloudState.isFavorite,
+                        isDownloaded: finalIsDownloaded,
+                        isPlayed: cloudState.isPlayed
+                    ))
+                    
+                    syncedCount += 1
+                }
+            } catch {
+                os_log("❌ Failed to sync episode state for %@: %@", log: log, type: .error, episodeId, error.localizedDescription)
+            }
+        }
+        
+        // Save all synced states to Core Data immediately for fast app restart
+        if !coreDataUpdates.isEmpty {
+            // Note: Core Data saving will be handled by the caller (PodcastViewModel)
+            // since PodcastEpisodeManager doesn't have a shared instance
+            os_log("📦 Prepared %d episode state updates for Core Data saving", 
+                   log: log, type: .info, coreDataUpdates.count)
+        }
+        
+        os_log("✅ Episode state sync completed: %d synced, %d downloads skipped (fresh install), %d prepared for Core Data", 
+               log: log, type: .info, syncedCount, skippedDownloadsCount, coreDataUpdates.count)
+        
+        // Return the updates so the caller can save them to Core Data
+        return coreDataUpdates
+    }
+    
+    /// Fetch all episode states from CloudKit (for bulk sync operations)
+    func fetchAllEpisodeStatesFromCloudKit() async throws -> [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool)] {
+        os_log("🔄 Fetching all episode states from CloudKit", log: log, type: .info)
+        
+        let query = CKQuery(recordType: RecordType.episodeState, predicate: NSPredicate(value: true))
+        query.sortDescriptors = [NSSortDescriptor(key: "lastUpdated", ascending: false)]
+        
+        var episodeStates: [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool)] = [:]
+        
+        do {
+            let (matchResults, _) = try await privateDatabase.records(matching: query)
+            
+            for (recordID, recordResult) in matchResults {
+                switch recordResult {
+                case .success(let record):
+                    if let episodeId = record["episodeId"] as? String {
+                        let progress = record["progress"] as? Double ?? 0.0
+                        let isFavorite = record["isFavorite"] as? Bool ?? false
+                        let isDownloaded = record["isDownloaded"] as? Bool ?? false
+                        let isPlayed = record["isPlayed"] as? Bool ?? false
+                        
+                        episodeStates[episodeId] = (progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
+                    }
+                case .failure(let error):
+                    os_log("❌ Failed to fetch episode state record %@: %@", log: log, type: .error, recordID.recordName, error.localizedDescription)
+                }
+            }
+            
+            os_log("✅ Fetched %d episode states from CloudKit", log: log, type: .info, episodeStates.count)
+            return episodeStates
+            
+        } catch {
+            os_log("❌ Failed to fetch episode states from CloudKit: %@", log: log, type: .error, error.localizedDescription)
+            throw error
+        }
+    }
+    
     // MARK: - Podcast Feed CloudKit Sync
     
     /// Sync from CloudKit to local storage - fetch all podcast feeds

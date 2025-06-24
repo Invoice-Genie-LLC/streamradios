@@ -422,9 +422,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             currentTime = 0
             currentProgress = 0
             
-            // Reset progress in view model
+            // Reset progress in view model by updating cache directly
             Task { @MainActor in
-                viewModel?.updateProgress(for: episode, progress: 0.0)
+                viewModel?.episodeProgress[episode.id] = 0.0
                 
                 // Update episode state to not played and reset progress
                 var updatedEpisode = episode
@@ -476,6 +476,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 let progress = currentTime / duration
                 updatedEpisode.state.progress = progress
                 
+                // Save to CloudKit when user navigates away
+                saveProgressToCloudKit(for: currentEpisode, progress: progress, reason: "user navigated away from episode")
+                
                 // Preserve existing "finished" status - only mark as finished if progress >= 0.99
                 // but don't unmark episodes that were already marked as finished
                 if progress >= 0.99 {
@@ -507,7 +510,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let progress = currentTime / duration
             if progress > 0 && progress < 0.99 {
                 Task { @MainActor in
-                    viewModel?.updateProgress(for: episode, progress: progress)
+                    // Update cache directly without triggering CloudKit saves
+                    viewModel?.episodeProgress[episode.id] = progress
                     
                     // Update the episode state
                     var updatedEpisode = episode
@@ -754,10 +758,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 // Mark episode as completed in EpisodeStateManager
                 self.stateManager.completeEpisode(episodeId: currentEpisode.id)
                 
-                // Sync episode completion to CloudKit and Core Data
-                Task.detached(priority: .userInitiated) {
-                    await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: 1.0, isPlayed: true)
-                }
+                // Save to CloudKit when episode completes
+                self.saveProgressToCloudKit(for: currentEpisode, progress: 1.0, reason: "episode completed")
                 
                 // Mark episode as completed (deprecated method for compatibility)
                 self.viewModel?.markEpisodeAsCompleted(currentEpisode)
@@ -915,28 +917,22 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true)
         stateManager.startPlaying(episodeId: currentEpisode.id)
         
-        // Sync episode state to CloudKit and Core Data when starting playback
-        Task.detached(priority: .userInitiated) { [self] in
-            await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: self.currentProgress)
-        }
-
-               
-               updateNowPlayingInfo()
-               setupTimeObserver()
-               
-               // Notify CarPlay of playback state change
-               NotificationCenter.default.post(
-                   name: NSNotification.Name("PodcastPlaybackStateChanged"),
-                   object: nil,
-                   userInfo: [
-                       "episodeId": currentEpisode.id,
-                       "isPlaying": true
-                   ]
-               )
-               
-                       // Disable all UI updates during playback to prevent CPU spikes
+        updateNowPlayingInfo()
+        setupTimeObserver()
+        
+        // Notify CarPlay of playback state change
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PodcastPlaybackStateChanged"),
+            object: nil,
+            userInfo: [
+                "episodeId": currentEpisode.id,
+                "isPlaying": true
+            ]
+        )
+        
+        // Disable all UI updates during playback to prevent CPU spikes
         // objectWillChange.send()
-            }
+    }
     
     
     func pause() {
@@ -944,7 +940,14 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         player.pause()
         isPlaying = false
-        saveProgressIfNeeded()  // Progress is saved here
+        
+        // Calculate current progress
+        let progress = duration > 0 ? currentTime / duration : 0
+        
+        saveProgressIfNeeded()  // Save progress locally
+        
+        // Save to CloudKit when user pauses
+        saveProgressToCloudKit(for: currentEpisode, progress: progress, reason: "user paused episode")
         
         // Update StateManager with current progress when pausing
         let actualCurrentTime = player.currentTime().seconds
@@ -1000,8 +1003,25 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     func saveProgressIfNeeded() {
         guard let currentEpisode = currentEpisode, duration > 0 else { return }
         let progress = currentTime / duration
+        
+        // Update local cache only, without triggering CloudKit saves
         Task { @MainActor in
-            viewModel?.updateProgress(for: currentEpisode, progress: progress)
+            viewModel?.episodeProgress[currentEpisode.id] = progress
+        }
+    }
+    
+    /// Save episode progress to CloudKit only when specific user actions occur
+    /// - When user navigates away by tapping another episode to play
+    /// - When user pauses the episode  
+    /// - When user switches to other tabs like Favorites or Downloads
+    /// - When user puts the app in the background
+    /// - When user force closes the app
+    private func saveProgressToCloudKit(for episode: PodcastEpisode, progress: Double, reason: String) {
+        os_log("💾 Saving episode progress to CloudKit due to: %@ - Episode: %@, Progress: %.2f", 
+               log: log, type: .info, reason, episode.title, progress)
+        
+        Task.detached(priority: .userInitiated) { [self] in
+            await self.viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: progress >= 0.99)
         }
     }
     
@@ -1012,17 +1032,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let timeToSave = actualTime ?? currentTime
         os_log("🔄 Saving progress immediately for episode switch: %@ (%.2f%% | %.1fs)", log: log, type: .info, episode.title, progress * 100, timeToSave)
         
+        // Save to CloudKit when switching episodes
+        saveProgressToCloudKit(for: episode, progress: progress, reason: "user switched to another episode")
+        
         // 1. Update progress in state manager FIRST (highest priority for seeking)
         stateManager.updateProgress(for: episode.id, progress: progress, isPlaying: false, currentTime: timeToSave)
         
         // 2. Update progress in view model (in-memory cache)
         Task { @MainActor in
-            viewModel?.updateProgress(for: episode, progress: progress)
-            
-            // 3. Also update the episode progress cache immediately
             viewModel?.episodeProgress[episode.id] = progress
             
-            // 4. Update the episode object in memory to ensure consistency
+            // 3. Update the episode object in memory to ensure consistency
             var updatedEpisode = episode
             updatedEpisode.state.progress = progress
             
@@ -1035,15 +1055,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             viewModel?.updateEpisode(updatedEpisode)
         }
         
-        // 5. Force save the state manager data immediately
+        // 4. Force save the state manager data immediately
         stateManager.forceSave()
         
-        // 6. Force save the context to ensure persistence
-        Task { @MainActor in
-            viewModel?.saveContextIfNeeded()
-        }
-        
-        // 7. Force synchronize UserDefaults for additional safety
+        // 5. Force synchronize UserDefaults for additional safety
         UserDefaults.standard.synchronize()
         
         os_log("✅ Progress saved successfully for episode: %@ at %.2f%% to all storage locations", log: log, type: .info, episode.title, progress * 100)
@@ -1182,22 +1197,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Calculate remaining time
             let remainingTime = max(duration - currentTime, 0)
             
-            // Save progress more frequently to handle force close scenarios (reduced threshold for better reliability)
+            // Save progress locally more frequently to handle force close scenarios (reduced threshold for better reliability)
             let forceCloseThreshold = 0.01 // Save every 1% to protect against force close
             if abs(progress - lastSavedProgress) >= forceCloseThreshold {
                 // Update StateManager only when we're actually saving progress
                 stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying)
                 
+                // Update in-memory cache directly without triggering CloudKit saves
                 Task { @MainActor in
-                    viewModel?.updateProgress(for: currentEpisode, progress: progress)
-                    
-                    // Update in-memory cache immediately for instant access
                     viewModel?.episodeProgress[currentEpisode.id] = progress
-                }
-                
-                // Sync progress to CloudKit and Core Data (non-blocking)
-                Task.detached(priority: .background) { [self] in
-                    await self.viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
                 }
                 
                 lastSavedProgress = progress
@@ -1209,7 +1217,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     os_log("💾 Force-synced progress to disk: %.0f%% to protect against force close", log: log, type: .debug, progress * 100)
                 }
                 
-                os_log("Progress saved for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
+                os_log("Progress saved locally for episode: %@, Progress: %.2f, Remaining Time: %@", log: log, type: .info, currentEpisode.title, progress, formatRemainingTime(remainingTime))
             }
             
             // Send CarPlay progress updates even less frequently to prevent CPU spikes (every 20% for maximum performance)
@@ -1304,6 +1312,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("🛑 App terminating - preserving maximum progress for episode: %@ (calculated: %.2f%%, existing: %.2f%%, current: %.2f%% -> final: %.2f%%)", 
                    log: log, type: .info, currentEpisode.title, calculatedProgress * 100, existingProgress * 100, currentProgress * 100, maxProgress * 100)
             
+            // Save to CloudKit when app is force closed
+            saveProgressToCloudKit(for: currentEpisode, progress: maxProgress, reason: "app force closed")
+            
             // Save to StateManager with maximum progress (synchronous and reliable)
             stateManager.updateProgress(for: currentEpisode.id, progress: maxProgress, isPlaying: false, currentTime: finalCurrentTime)
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
@@ -1311,9 +1322,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Force synchronize UserDefaults immediately
             UserDefaults.standard.synchronize()
             
-            // Simple progress update to view model (avoid complex Core Data operations during termination)
+            // Update in-memory cache directly without triggering CloudKit saves (avoid complex Core Data operations during termination)
             Task { @MainActor in
-                viewModel?.updateProgress(for: currentEpisode, progress: maxProgress)
+                viewModel?.episodeProgress[currentEpisode.id] = maxProgress
             }
             
             os_log("✅ Saved maximum progress for app termination: %@, Progress: %.2f%%", log: log, type: .info, currentEpisode.title, maxProgress * 100)
@@ -1396,8 +1407,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let existingProgress = stateManager.getProgress(for: currentEpisode.id)
             let maxProgress = max(calculatedProgress, existingProgress, currentProgress)
             
+            // Update in-memory cache directly without triggering CloudKit saves
             Task { @MainActor in
-                viewModel?.updateProgress(for: currentEpisode, progress: maxProgress)
+                viewModel?.episodeProgress[currentEpisode.id] = maxProgress
             }
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
             os_log("Saved maximum progress on deinit for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, maxProgress)

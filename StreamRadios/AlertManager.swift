@@ -33,7 +33,7 @@ class AlertManager: ObservableObject {
                 self?.dismissAlert()
             }
             customAlertSecondaryAction = nil
-        case .deleteAllData, .deleteStation, .clearAllPodcasts:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData:
             customAlertPrimaryAction = deleteAction
             customAlertSecondaryAction = { [weak self] in
                 self?.dismissAlert()
@@ -62,6 +62,7 @@ enum AlertType: Identifiable {
     case deleteStation
     case deleteStationError
     case clearAllPodcasts
+    case deleteAllAppData
     
     var id: Int {
         switch self {
@@ -72,6 +73,7 @@ enum AlertType: Identifiable {
         case .deleteStation: return 4
         case .deleteStationError: return 5
         case .clearAllPodcasts: return 6
+        case .deleteAllAppData: return 7
         }
     }
     
@@ -87,6 +89,8 @@ enum AlertType: Identifiable {
             return "Error"
         case .clearAllPodcasts:
             return "Clear All Podcast Episodes"
+        case .deleteAllAppData:
+            return "Delete All App Data"
         }
     }
     
@@ -106,6 +110,8 @@ enum AlertType: Identifiable {
             return "Failed to delete the station. Please try again later."
         case .clearAllPodcasts:
             return "Are you sure you want to clear all podcast episodes? This will erase all downloaded episodes and their progress. This action cannot be undone."
+        case .deleteAllAppData:
+            return "Important: You're about to delete ALL app data. This will remove all stations, podcasts, downloads, progress, favorites, and settings from both iCloud and your device's local storage. This action is permanent and cannot be reversed."
         }
     }
     
@@ -113,14 +119,14 @@ enum AlertType: Identifiable {
         switch self {
         case .exportWithoutCountry, .importWithoutCountry, .selectCountryBeforeAddingStation, .deleteStationError:
             return "OK"
-        case .deleteAllData, .deleteStation, .clearAllPodcasts:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData:
             return "Delete"
         }
     }
     
     var secondaryButtonText: String? {
         switch self {
-        case .deleteAllData, .deleteStation, .clearAllPodcasts:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData:
             return "Cancel"
         default:
             return nil

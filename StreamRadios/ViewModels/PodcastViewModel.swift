@@ -128,6 +128,26 @@ class PodcastViewModel: ObservableObject {
         
         // Load feeds from Core Data (radio station pattern)
         loadFeedsFromCoreData()
+        
+        // Always check for CloudKit sync in background
+        Task {
+            // Clean up any duplicate episodes first to prevent crashes
+            do {
+                try await episodeManager.cleanupDuplicateEpisodes()
+            } catch {
+                print("⚠️ Failed to cleanup duplicate episodes: \(error)")
+            }
+            
+            await checkForFreshInstallAndSetup()
+            
+            // After CloudKit sync, check if any feeds need episode refreshing
+            await refreshFeedsWithoutEpisodes()
+            
+            // Always attempt episode state sync after all initialization is complete
+            print("🔄 Final episode state sync after full initialization...")
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+        }
     }
     
     deinit {
@@ -309,6 +329,17 @@ class PodcastViewModel: ObservableObject {
     func updateFilter(tab: Int) {
         guard currentTab != tab else { return }
         
+        // Save current episode progress to CloudKit when switching tabs
+        if let currentEpisode = PodcastPlayer.shared.currentEpisode, PodcastPlayer.shared.isPlaying {
+            let progress = PodcastPlayer.shared.duration > 0 ? PodcastPlayer.shared.currentTime / PodcastPlayer.shared.duration : 0
+            os_log("💾 Saving episode progress to CloudKit due to tab switch - Episode: %@, Progress: %.2f", 
+                   log: log, type: .info, currentEpisode.title, progress)
+            
+            Task.detached(priority: .userInitiated) {
+                await self.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
+            }
+        }
+        
         currentTab = tab
         
         Task {
@@ -398,6 +429,22 @@ class PodcastViewModel: ObservableObject {
                     isDownloaded: currentDownloaded,
                     isPlayed: finalIsPlayed
                 )
+            }
+            
+            // CRITICAL: Save to Core Data immediately for persistence and fast app restart
+            let coreDataUpdate = EpisodeStateUpdate(
+                episodeId: episodeId,
+                progress: finalProgress,
+                isFavorite: currentFavorite,
+                isDownloaded: currentDownloaded,
+                isPlayed: finalIsPlayed
+            )
+            
+            do {
+                try await episodeManager.updateEpisodeStates([coreDataUpdate])
+                print("💾 Saved episode state to Core Data immediately: \(episodeId)")
+            } catch {
+                print("❌ Failed to save episode state to Core Data: \(error)")
             }
             
             // Update counts if necessary
@@ -520,9 +567,9 @@ class PodcastViewModel: ObservableObject {
         let updatedEpisodes = currentEpisodes.map { episode in
             var updated = episode
             updated.state.progress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            // Note: isFavorite method not yet implemented in EpisodeStateManager
-            updated.state.isFavorite = episode.state.isFavorite
+            updated.state.isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
             updated.state.isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+            updated.state.isPlayed = updated.state.progress >= 0.99
             return updated
         }
         
@@ -583,20 +630,60 @@ class PodcastViewModel: ObservableObject {
                 }
             } else {
                 print("📡 No feeds found in CloudKit")
-                
-                if isFreshInstall {
-                    // Add a test feed for debugging on fresh installs with no CloudKit data
-                    await addTestFeedForDebugging()
-                }
             }
+            
         } catch {
             print("❌ CloudKit sync failed: \(error)")
+        }
+    }
+    
+    /// Sync episode states from CloudKit with different behavior based on install type
+    private func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async {
+        print("🔄 Syncing episode states from CloudKit (fresh install: \(isFreshInstall))")
+        
+        do {
+            // Get episode IDs from ALL loaded feeds, not just currentEpisodes
+            var allEpisodeIds: [String] = []
             
-            // On fresh install with CloudKit failure, add test feed
-            let existingFeedCount = await countExistingFeeds()
-            if existingFeedCount == 0 {
-                await addTestFeedForDebugging()
+            // Load current feeds and get all episode IDs
+            await MainActor.run {
+                self.loadFeedsFromCoreData()
+                for feed in podcastFeeds {
+                    allEpisodeIds.append(contentsOf: feed.episodes.map { $0.id })
+                }
             }
+            
+            print("📊 Found \(allEpisodeIds.count) total episodes across \(podcastFeeds.count) feeds for state sync")
+            
+            if !allEpisodeIds.isEmpty {
+                // Sync episode states with appropriate behavior for install type
+                let coreDataUpdates = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+                    for: allEpisodeIds, 
+                    isFreshInstall: isFreshInstall
+                )
+                
+                // Save all synced states to Core Data immediately for fast app restart
+                if !coreDataUpdates.isEmpty {
+                    do {
+                        try await episodeManager.updateEpisodeStates(coreDataUpdates)
+                        print("💾 Saved \(coreDataUpdates.count) episode states to Core Data for immediate availability")
+                    } catch {
+                        print("❌ Failed to save synced episode states to Core Data: \(error)")
+                    }
+                }
+                
+                // Refresh episode states from the updated EpisodeStateManager
+                await MainActor.run {
+                    self.refreshEpisodeStatesFromManager()
+                }
+                
+                print("✅ Episode states synced from CloudKit for \(allEpisodeIds.count) episodes, \(coreDataUpdates.count) saved to Core Data")
+            } else {
+                print("📊 No episodes found to sync states for - feeds may not have episodes loaded yet")
+            }
+            
+        } catch {
+            print("❌ Failed to sync episode states from CloudKit: \(error)")
         }
     }
     
@@ -658,6 +745,10 @@ class PodcastViewModel: ObservableObject {
         
         // Clean up any duplicates that might have been created
         await cleanupDuplicateFeeds()
+        
+        // IMPORTANT: Now that episodes are loaded, sync their states from CloudKit
+        print("🔄 Starting episode state sync after fresh install processing...")
+        await syncEpisodeStatesFromCloudKit(isFreshInstall: true)
     }
     
     /// Merge CloudKit feeds with existing local feeds
@@ -706,6 +797,12 @@ class PodcastViewModel: ObservableObject {
                     continuation.resume()
                 }
             }
+        }
+        
+        // After merging feeds, sync episode states for existing installation (upgrade)
+        if !cloudKitFeeds.isEmpty {
+            print("🔄 Starting episode state sync after merging feeds for existing installation...")
+            await syncEpisodeStatesFromCloudKit(isFreshInstall: false)
         }
     }
     
@@ -784,30 +881,6 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Add test feed for debugging purposes
-    private func addTestFeedForDebugging() async {
-        print("🧪 Adding test Planet Money feed for debugging")
-        
-        let testFeedUrl = "https://feeds.npr.org/510289/podcast.xml"
-        
-        do {
-            // Use FeedManager to properly add feed with RSS parsing
-            guard let url = URL(string: testFeedUrl) else {
-                print("❌ Invalid test feed URL")
-                return
-            }
-            
-            let addedFeed = try await feedManager.addFeed(from: url)
-            print("✅ Added test feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
-            
-            // Also save to CloudKit for future installs
-            try await PodcastCloudKitManager.shared.savePodcastFeedToCloudKit(addedFeed)
-            
-        } catch {
-            print("❌ Failed to add test feed: \(error)")
-        }
-    }
-    
     /// Save feed to Core Data with episodes
     private func saveFeedToCoreData(_ feed: PodcastFeed) async throws {
         return try await withCheckedThrowingContinuation { continuation in
@@ -869,6 +942,65 @@ class PodcastViewModel: ObservableObject {
             
             // After CloudKit sync, check if any feeds need episode refreshing
             await refreshFeedsWithoutEpisodes()
+            
+            // Always attempt episode state sync after all initialization is complete
+            print("🔄 Final episode state sync after full initialization...")
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+        }
+    }
+    
+    /// Initialize episode state syncing for app startup
+    @MainActor
+    func initializeEpisodeStateSync() {
+        print("🔄 Initializing episode state sync...")
+        
+        Task {
+            // Determine if this is a fresh install
+            let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let isFreshInstall = !hasLaunchedBefore
+            
+            if isFreshInstall {
+                print("🆕 Fresh install detected - syncing episode states (excluding downloads)")
+            } else {
+                print("📱 Existing installation - syncing all episode states including downloads")
+            }
+            
+            // Get all episode IDs from current episodes and all feeds
+            var allEpisodeIds: [String] = []
+            
+            // Add current episodes
+            allEpisodeIds.append(contentsOf: currentEpisodes.map { $0.id })
+            
+            // Add episodes from all feeds
+            for feed in podcastFeeds {
+                allEpisodeIds.append(contentsOf: feed.episodes.map { $0.id })
+            }
+            
+            // Remove duplicates
+            allEpisodeIds = Array(Set(allEpisodeIds))
+            
+            if !allEpisodeIds.isEmpty {
+                // Sync episode states from CloudKit
+                await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+                    for: allEpisodeIds,
+                    isFreshInstall: isFreshInstall
+                )
+                
+                // Update UI with synced states
+                await MainActor.run {
+                    self.refreshEpisodeStatesFromManager()
+                    if let selectedFeedId = self.selectedFeedId {
+                        Task {
+                            await self.loadEpisodesForFeed(selectedFeedId)
+                        }
+                    }
+                }
+                
+                print("✅ Episode state sync completed for \(allEpisodeIds.count) episodes")
+            } else {
+                print("📊 No episodes found for state sync")
+            }
         }
     }
     

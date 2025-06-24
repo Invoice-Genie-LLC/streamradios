@@ -34,6 +34,11 @@ struct SettingsView: View {
     @State private var showPodcastPlayerSheet = false
     @State private var safeAreaBottom: CGFloat = 0
     @State private var miniPlayerHeight: CGFloat = 60
+    @State private var isDeletingAllAppData = false
+    @State private var appDataDeletionComplete = false
+    @State private var isDeletingRadioStationRecords = false
+    @State private var radioStationRecordsDeletionComplete = false
+    @State private var radioStationRecordsDeletionError: String? = nil
     
     // Modern color system for adaptive theming
     private var backgroundColor: Color {
@@ -62,7 +67,6 @@ struct SettingsView: View {
                          modernAlarmSettings
                          modernImportExportSettings
                          modernDataManagement
-                         modernPodcastDataManagement
                      }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -295,77 +299,52 @@ struct SettingsView: View {
         ) {
             VStack(spacing: 16) {
                 ModernDestructiveButton(
-                    title: "Delete All Data",
-                    subtitle: "Permanently remove all stations and settings",
+                    title: "Delete All App Data",
+                    subtitle: "Permanently remove all stations, podcasts, and settings",
                     icon: "internaldrive.fill",
-                    action: { showAlert(for: .deleteAllData) }
+                    action: { showAlert(for: .deleteAllAppData) }
                 )
                 
-                if viewModel.isDeletingData {
-                    ModernProgressView(title: "Deleting data...")
-                } else if viewModel.deletionComplete {
+                if isDeletingAllAppData {
+                    ModernProgressView(title: "Deleting all app data...")
+                } else if appDataDeletionComplete {
                     ModernStatusMessage(
-                        text: "All data has been deleted.",
+                        text: "All app data has been deleted.",
                         isSuccess: true
                     )
                 }
                 
-                ModernWarningText(text: deletionWarningString)
-            }
-        }
-    }
-    
-    @ViewBuilder
-    private var modernPodcastDataManagement: some View {
-        ModernSettingsCard(
-            title: "Podcast Data Management",
-            icon: "",
-            isDestructive: true
-        ) {
-            VStack(spacing: 16) {
                 ModernDestructiveButton(
-                    title: "Clear All Podcast Episodes",
-                    subtitle: "Remove all podcast downloads and progress",
-                    icon: "microphone",
-                    action: { showAlert(for: .clearAllPodcasts) }
+                    title: "Delete All Radio Station Records (CloudKit)",
+                    subtitle: "Remove all RadioStation records from iCloud in batches of 400",
+                    icon: "antenna.radiowaves.left.and.right",
+                    action: { deleteAllRadioStationRecords() }
                 )
                 
-                if isCleaningPodcasts {
-                    ModernProgressView(title: "Clearing podcast data...")
-                } else if podcastCleanupComplete {
+                if isDeletingRadioStationRecords {
+                    ModernProgressView(title: "Deleting all RadioStation records from CloudKit...")
+                } else if radioStationRecordsDeletionComplete {
                     ModernStatusMessage(
-                        text: "All podcast episodes have been cleared.",
+                        text: "All RadioStation records have been deleted from CloudKit.",
                         isSuccess: true
+                    )
+                } else if let error = radioStationRecordsDeletionError {
+                    ModernStatusMessage(
+                        text: "Error: \(error)",
+                        isSuccess: false
                     )
                 }
                 
-                ModernWarningText(text: podcastWarningString)
+                ModernWarningText(text: appDataDeletionWarningString)
             }
         }
     }
     
     // MARK: - Helper Properties
     
-    private var deletionWarningString: String {
+    private var appDataDeletionWarningString: String {
         """
-        Warning: Deleting your data will permanently erase all stored stations and their associated information from both iCloud and your device's local storage. While you can restore default stations by reinstalling the app from the App Store, any custom stations you've configured will be lost permanently.
-        
-        Please keep the app running in the background. You can use other apps, but do not force close this one. We'll notify you when the deletion is fully completed. The duration of this operation may vary, but it could take up to 5 minutes depending on the number of custom stations configured. This action cannot be undone.
-        """
-    }
-    
-    private var podcastWarningString: String {
-        """
-        Warning: Clearing all podcast episodes will permanently erase ALL podcast-related data from your device's local storage, including:
-        
-        • All downloaded episodes
-        • Playback progress for all episodes  
-        • All bookmarked episodes
-        • All favorited episodes
-        • Episode listening history
-        • Custom sort preferences
-        
-        This action cannot be undone.
+        Warning: Deleting all app data will permanently erase all stored stations, podcasts, downloads, progress, favorites, and settings from both iCloud and your device's local storage. This action cannot be undone.
         """
     }
     
@@ -381,56 +360,40 @@ struct SettingsView: View {
     private func showAlert(for alertType: AlertType) {
         alertManager.showCustomAlert(for: alertType, deleteAction: {
             switch alertType {
-            case .deleteAllData:
-                initiateDataDeletion()
-            case .clearAllPodcasts:
-                initiatePodcastCleanup()
+            case .deleteAllAppData:
+                initiateAppDataDeletion()
             default:
                 break
             }
         })
     }
     
-    private func initiatePodcastCleanup() {
-        isCleaningPodcasts = true
-        podcastCleanupComplete = false
-
-        podcastViewModel.clearAllPodcastData { success in
-            DispatchQueue.main.async {
-                self.isCleaningPodcasts = false
-                if success {
-                    self.podcastCleanupComplete = true
-                    self.notificationManager.notifyUser(title: "Podcast Cleanup Complete", message: "All podcast data has been successfully cleared, including downloads, playback progress, bookmarks, favorites, and listening history.")
-                } else {
-                    self.notificationManager.notifyUser(title: "Podcast Cleanup Failed", message: "An error occurred while clearing podcast data. Some data may not have been fully cleared. Please try again.")
-                }
-            }
+    private func initiateAppDataDeletion() {
+        isDeletingAllAppData = true
+        appDataDeletionComplete = false
+        notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all app data has started.")
+        let group = DispatchGroup()
+        var allSuccess = true
+        group.enter()
+        viewModel.deleteAllData { success, _ in
+            if !success { allSuccess = false }
+            group.leave()
         }
-    }
-    
-    private func initiateDataDeletion() {
-        if viewModel.isCloudKitOperationRunning {
-            notificationManager.notifyUser(title: "Operation in Progress", message: "iCloud operation in progress. Please wait before deleting data.")
-        } else {
-            notificationManager.notifyUser(title: "Deletion Started", message: "The process to delete all stations from iCloud and local storage has started.")
-            
-            DispatchQueue.main.async {
-                viewModel.isDeletingData = true
-                viewModel.deletionComplete = false
-            }
-            
-            viewModel.deleteAllData { success, error in
-                DispatchQueue.main.async {
-                    viewModel.isDeletingData = false
-                    if success {
-                        print("Deletion was successful.")
-                        viewModel.deletionComplete = true
-                        notificationManager.notifyUser(title: "Deletion Complete", message: "All data has been successfully deleted from iCloud and local storage.")
-                    } else if let error = error {
-                        print("Deletion failed: \(error.localizedDescription)")
-                        notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting data. Please try again.")
-                    }
-                }
+        group.enter()
+        podcastViewModel.clearAllPodcastData { success in
+            if !success { allSuccess = false }
+            group.leave()
+        }
+        group.notify(queue: .main) {
+            // Optionally clear UserDefaults
+            UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+            UserDefaults.standard.synchronize()
+            isDeletingAllAppData = false
+            appDataDeletionComplete = allSuccess
+            if allSuccess {
+                notificationManager.notifyUser(title: "Deletion Complete", message: "All app data has been successfully deleted.")
+            } else {
+                notificationManager.notifyUser(title: "Deletion Failed", message: "An error occurred while deleting app data. Please try again.")
             }
         }
     }
@@ -468,6 +431,37 @@ struct SettingsView: View {
                 isImporting = false
                 importURL = nil
                 onImportComplete?(viewModel.selectedCountry)
+            }
+        }
+    }
+    
+    private func deleteAllRadioStationRecords() {
+        isDeletingRadioStationRecords = true
+        radioStationRecordsDeletionComplete = false
+        radioStationRecordsDeletionError = nil
+        DataStore.shared.fetchAllRecordIDs(ofType: "RadioStation") { recordIDs, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.isDeletingRadioStationRecords = false
+                    self.radioStationRecordsDeletionError = error.localizedDescription
+                }
+                return
+            }
+            guard let recordIDs = recordIDs, !recordIDs.isEmpty else {
+                DispatchQueue.main.async {
+                    self.isDeletingRadioStationRecords = false
+                    self.radioStationRecordsDeletionComplete = true
+                }
+                return
+            }
+            DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
+                DispatchQueue.main.async {
+                    self.isDeletingRadioStationRecords = false
+                    self.radioStationRecordsDeletionComplete = success
+                    if let error = error {
+                        self.radioStationRecordsDeletionError = error.localizedDescription
+                    }
+                }
             }
         }
     }

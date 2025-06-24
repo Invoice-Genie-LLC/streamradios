@@ -2,6 +2,23 @@ import Foundation
 import CoreData
 import os.log
 
+/// Struct for bulk episode state updates
+struct EpisodeStateUpdate {
+    let episodeId: String
+    let progress: Double?
+    let isFavorite: Bool?
+    let isDownloaded: Bool?
+    let isPlayed: Bool?
+    
+    init(episodeId: String, progress: Double? = nil, isFavorite: Bool? = nil, isDownloaded: Bool? = nil, isPlayed: Bool? = nil) {
+        self.episodeId = episodeId
+        self.progress = progress
+        self.isFavorite = isFavorite
+        self.isDownloaded = isDownloaded
+        self.isPlayed = isPlayed
+    }
+}
+
 /// High-performance episode manager with efficient pagination and caching
 class PodcastEpisodeManager {
     private let log = OSLog(subsystem: "StreamRadios", category: "EpisodeManager")
@@ -66,6 +83,64 @@ class PodcastEpisodeManager {
         await cacheManager.clearAllCache()
     }
     
+    /// Clean up duplicate episodes in Core Data
+    func cleanupDuplicateEpisodes() async throws {
+        os_log("🧹 Starting cleanup of duplicate episodes in Core Data", log: log, type: .info)
+        
+        try await withCheckedThrowingContinuation { continuation in
+            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+            
+            backgroundContext.perform {
+                do {
+                    // Get all episodes grouped by ID
+                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    fetchRequest.sortDescriptors = [
+                        NSSortDescriptor(key: "id", ascending: true),
+                        NSSortDescriptor(key: "publicationDate", ascending: false) // Keep most recent first
+                    ]
+                    
+                    let allEpisodes = try backgroundContext.fetch(fetchRequest)
+                    var seenIds = Set<String>()
+                    var duplicatesToDelete: [PodcastModel] = []
+                    
+                    for episode in allEpisodes {
+                        guard let episodeId = episode.id else {
+                            // Delete episodes without IDs
+                            duplicatesToDelete.append(episode)
+                            continue
+                        }
+                        
+                        if seenIds.contains(episodeId) {
+                            // This is a duplicate, mark for deletion
+                            duplicatesToDelete.append(episode)
+                            os_log("🗑️ Marking duplicate episode for deletion: %@", log: self.log, type: .debug, episodeId)
+                        } else {
+                            seenIds.insert(episodeId)
+                        }
+                    }
+                    
+                    // Delete duplicates
+                    for duplicate in duplicatesToDelete {
+                        backgroundContext.delete(duplicate)
+                    }
+                    
+                    if !duplicatesToDelete.isEmpty {
+                        try backgroundContext.save()
+                        os_log("✅ Cleaned up %d duplicate episodes", log: self.log, type: .info, duplicatesToDelete.count)
+                    } else {
+                        os_log("✅ No duplicate episodes found", log: self.log, type: .info)
+                    }
+                    
+                    continuation.resume()
+                    
+                } catch {
+                    os_log("❌ Failed to cleanup duplicate episodes: %@", log: self.log, type: .error, error.localizedDescription)
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
     /// Bulk update episode states efficiently
     func updateEpisodeStates(_ updates: [EpisodeStateUpdate]) async throws {
         guard !updates.isEmpty else { return }
@@ -81,7 +156,27 @@ class PodcastEpisodeManager {
                     fetchRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
                     
                     let episodes = try backgroundContext.fetch(fetchRequest)
-                    let episodeDict = Dictionary(uniqueKeysWithValues: episodes.map { ($0.id!, $0) })
+                    
+                    // Handle duplicate episode IDs gracefully - use the most recent one
+                    var episodeDict: [String: PodcastModel] = [:]
+                    for episode in episodes {
+                        guard let episodeId = episode.id else { continue }
+                        
+                        if let existingEpisode = episodeDict[episodeId] {
+                            // Keep the episode with the most recent date or the one with more data
+                            let existingDate = existingEpisode.publicationDate ?? Date.distantPast
+                            let newDate = episode.publicationDate ?? Date.distantPast
+                            
+                            if newDate > existingDate {
+                                episodeDict[episodeId] = episode
+                                print("⚠️ Found duplicate episode ID \(episodeId), keeping newer one")
+                            } else {
+                                print("⚠️ Found duplicate episode ID \(episodeId), keeping existing one")
+                            }
+                        } else {
+                            episodeDict[episodeId] = episode
+                        }
+                    }
                     
                     // Apply updates efficiently
                     for update in updates {
@@ -424,22 +519,6 @@ struct EpisodeCounts {
     let all: Int
     let favorites: Int
     let downloads: Int
-}
-
-struct EpisodeStateUpdate {
-    let episodeId: String
-    let progress: Double?
-    let isFavorite: Bool?
-    let isDownloaded: Bool?
-    let isPlayed: Bool?
-    
-    init(episodeId: String, progress: Double? = nil, isFavorite: Bool? = nil, isDownloaded: Bool? = nil, isPlayed: Bool? = nil) {
-        self.episodeId = episodeId
-        self.progress = progress
-        self.isFavorite = isFavorite
-        self.isDownloaded = isDownloaded
-        self.isPlayed = isPlayed
-    }
 }
 
 // MARK: - Cache Manager

@@ -160,10 +160,7 @@ class DataSyncManager: ObservableObject {
                     
                     // Process feeds using existing logic
                     await processFreshInstallFeeds(cloudKitFeeds)
-                } else {
-                    currentOperation = "Adding default test feed..."
-                    await addTestFeedForDebugging()
-                }
+                } 
             }
             
             podcastFeedsStatus = .completed
@@ -359,21 +356,7 @@ class DataSyncManager: ObservableObject {
         
         print("📡 Processed \(cloudKitFeeds.count) podcast feeds from CloudKit")
     }
-    
-    private func addTestFeedForDebugging() async {
-        // Add Planet Money test feed as fallback
-        let testFeedURL = "https://feeds.npr.org/510289/podcast.xml"
-        
-        do {
-            if let url = URL(string: testFeedURL) {
-                let feedManager = PodcastFeedManager()
-                let _ = try await feedManager.addFeed(from: url)
-                print("✅ Added test feed for debugging")
-            }
-        } catch {
-            print("❌ Failed to add test feed: \(error)")
-        }
-    }
+
 }
 
 // MARK: - PodcastViewModel Extension for Fresh Install
