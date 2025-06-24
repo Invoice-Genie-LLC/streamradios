@@ -160,39 +160,45 @@ struct ContentView: View {
     // MARK: - Body
     
     var body: some View {
-        TabView(selection: $selectedTab) {
-            // Radio Tab - Contains the original full interface
-            radioTabContent
-            .tabItem {
-                Image(systemName: Tab.radio.icon)
-                Text(Tab.radio.title)
+        ZStack {
+            TabView(selection: $selectedTab) {
+                // Radio Tab - Contains the original full interface
+                radioTabContent
+                .tabItem {
+                    Image(systemName: Tab.radio.icon)
+                    Text(Tab.radio.title)
+                }
+                .tag(Tab.radio)
+                
+                // Podcast Tab
+                PodcastListView(selectedPodcast: $selectedPodcast)
+                    .environmentObject(podcastViewModel)
+                .tabItem {
+                    Image(systemName: Tab.podcast.icon)
+                    Text(Tab.podcast.title)
+                }
+                .tag(Tab.podcast)
+                
+                // Settings Tab
+                SettingsView()
+                    .environmentObject(viewModel)
+                .tabItem {
+                    Image(systemName: Tab.settings.icon)
+                    Text(Tab.settings.title)
+                }
+                .tag(Tab.settings)
             }
-            .tag(Tab.radio)
+            .accentColor(.blue)
+            .onAppear {
+                setupTabView()
+                checkAndStartDataSync()
+            }
+            .onChange(of: selectedTab) { oldTab, newTab in
+                UserDefaults.standard.set(newTab.rawValue, forKey: "selectedTab")
+            }
             
-            // Podcast Tab
-            PodcastListView(selectedPodcast: $selectedPodcast)
-                .environmentObject(podcastViewModel)
-            .tabItem {
-                Image(systemName: Tab.podcast.icon)
-                Text(Tab.podcast.title)
-            }
-            .tag(Tab.podcast)
-            
-            // Settings Tab
-            SettingsView()
-                .environmentObject(viewModel)
-            .tabItem {
-                Image(systemName: Tab.settings.icon)
-                Text(Tab.settings.title)
-            }
-            .tag(Tab.settings)
-        }
-        .accentColor(.blue)
-        .onAppear {
-            setupTabView()
-        }
-        .onChange(of: selectedTab) { oldTab, newTab in
-            UserDefaults.standard.set(newTab.rawValue, forKey: "selectedTab")
+            // Data Sync Progress Overlay
+            DataSyncProgressView()
         }
     }
     
@@ -478,6 +484,16 @@ struct ContentView: View {
         
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+    
+    private func checkAndStartDataSync() {
+        // Check if this is a fresh install or if sync is needed
+        if DataSyncManager.shared.checkIfSyncNeeded() {
+            print("🔄 Fresh install detected - starting data synchronization...")
+            DataSyncManager.shared.startFreshInstallSync()
+        } else {
+            print("✅ App has been launched before and sync is complete")
+        }
     }
 }
 
