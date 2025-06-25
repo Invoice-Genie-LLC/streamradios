@@ -275,6 +275,11 @@ struct AddPodcastView: View {
     @State private var searchText = ""
     @State private var searchTask: Task<Void, Never>?
     
+    // Progress indicator state
+    @State private var isAddingPodcast = false
+    @State private var addingProgress: Double = 0.0
+    @State private var addingStageText = ""
+    
     // Add editing support
     let podcastToEdit: PodcastFeed?
     let onAdd: () -> Void
@@ -380,6 +385,15 @@ struct AddPodcastView: View {
                     CustomAlertView(title: "Validation Error", message: alertMessage, buttonText: "OK") {
                         self.showAlert = false
                     }
+                    .transition(.opacity)
+                }
+                
+                if isAddingPodcast {
+                    Color.black.opacity(0.6).edgesIgnoringSafeArea(.all)
+                    PodcastAddingProgressView(
+                        progress: addingProgress,
+                        stageText: addingStageText
+                    )
                     .transition(.opacity)
                 }
             }
@@ -620,9 +634,12 @@ struct AddPodcastView: View {
     @ViewBuilder
     private var modernCancelButton: some View {
         Button("Cancel") {
-            isPresented = false
+            if !isAddingPodcast {
+                isPresented = false
+            }
         }
-        .foregroundColor(.blue)
+        .foregroundColor(isAddingPodcast ? .gray : .blue)
+        .disabled(isAddingPodcast)
     }
     
     @ViewBuilder
@@ -630,8 +647,9 @@ struct AddPodcastView: View {
         Button(actionButtonText) {
             validateAndSavePodcast()
         }
-        .foregroundColor(.blue)
+        .foregroundColor(isAddingPodcast ? .gray : .blue)
         .fontWeight(.semibold)
+        .disabled(isAddingPodcast)
     }
     
     // MARK: - Helper Methods (Preserved from original)
@@ -655,7 +673,7 @@ struct AddPodcastView: View {
 
         // Handle edit vs add
         if let podcastToEdit = podcastToEdit {
-            // Update existing podcast
+            // Update existing podcast - no progress needed for updates
             print("DEBUG: AddPodcastView - Original podcast - ID: \(podcastToEdit.id), Title: '\(podcastToEdit.title)', URL: '\(podcastToEdit.url)'")
             print("DEBUG: AddPodcastView - New values - Title: '\(title.trimmingCharacters(in: .whitespacesAndNewlines))', URL: '\(self.url.trimmingCharacters(in: .whitespacesAndNewlines))'")
             
@@ -665,12 +683,71 @@ struct AddPodcastView: View {
             
             print("DEBUG: AddPodcastView - Updated podcast - ID: \(updatedPodcast.id), Title: '\(updatedPodcast.title)', URL: '\(updatedPodcast.url)'")
             onUpdate?(updatedPodcast)
+            isPresented = false
         } else {
-            // Add new podcast
-            onAdd()
+            // Add new podcast with progress indication
+            addPodcastWithProgress()
         }
+    }
+    
+    private func addPodcastWithProgress() {
+        isAddingPodcast = true
+        addingProgress = 0.0
+        addingStageText = "Preparing to add podcast..."
         
-        isPresented = false
+        Task {
+            do {
+                // Stage 1: Validate URL
+                await updateProgress(0.1, "Connecting to podcast...")
+                try await Task.sleep(nanoseconds: 200_000_000) // Brief pause for UI
+                
+                // Stage 2: Download feed
+                await updateProgress(0.3, "Fetching podcast information...")
+                
+                // Add the podcast feed using the ViewModel
+                let success = await podcastViewModel.addPodcastFeed(url: url)
+                
+                if success {
+                    // Stage 3: Processing episodes
+                    await updateProgress(0.7, "Processing episodes and content...")
+                    try await Task.sleep(nanoseconds: 500_000_000) // Pause for parsing
+                    
+                    // Stage 4: Saving to device
+                    await updateProgress(0.9, "Adding to your podcast library...")
+                    try await Task.sleep(nanoseconds: 300_000_000) // Pause for saving
+                    
+                    // Stage 5: Complete
+                    await updateProgress(1.0, "Podcast added successfully!")
+                    try await Task.sleep(nanoseconds: 500_000_000) // Show completion briefly
+                    
+                    await MainActor.run {
+                        onAdd()
+                        isPresented = false
+                        isAddingPodcast = false
+                    }
+                } else {
+                    await MainActor.run {
+                        isAddingPodcast = false
+                        alertMessage = podcastViewModel.error ?? "Failed to add podcast. Please check the URL and try again."
+                        showAlert = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isAddingPodcast = false
+                    alertMessage = "Failed to add podcast: \(error.localizedDescription)"
+                    showAlert = true
+                }
+            }
+        }
+    }
+    
+    @MainActor
+    private func updateProgress(_ progress: Double, _ text: String) {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            addingProgress = progress
+            addingStageText = text
+        }
     }
 }
 
@@ -847,6 +924,88 @@ struct PodcastSearchResultRow: View {
     }
 }
 
+// MARK: - Progress View Component
+
+struct PodcastAddingProgressView: View {
+    let progress: Double
+    let stageText: String
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var cardBackgroundColor: Color {
+        colorScheme == .dark ? Color(red: 0.15, green: 0.15, blue: 0.17) : Color.white
+    }
+    
+    var body: some View {
+        VStack(spacing: 24) {
+            // Title
+            Text("Adding Podcast")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(colorScheme == .dark ? .white : .primary)
+            
+            // Animated podcast icon
+            ZStack {
+                Circle()
+                    .stroke(Color.blue.opacity(0.3), lineWidth: 3)
+                    .frame(width: 80, height: 80)
+                
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .frame(width: 80, height: 80)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.5), value: progress)
+                
+                Image(systemName: "podcast")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+            
+            // Progress percentage
+            Text("\(Int(progress * 100))%")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(colorScheme == .dark ? Color.gray : .secondary)
+                .animation(.easeInOut(duration: 0.3), value: progress)
+            
+            // Stage text
+            Text(stageText)
+                .font(.system(size: 16))
+                .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.9) : .primary)
+                .multilineTextAlignment(.center)
+                .animation(.easeInOut(duration: 0.3), value: stageText)
+            
+            // Linear progress bar
+            VStack(spacing: 8) {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 6)
+                            .cornerRadius(3)
+                        
+                        Rectangle()
+                            .fill(LinearGradient(
+                                gradient: Gradient(colors: [Color.blue, Color.purple]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ))
+                            .frame(width: geometry.size.width * progress, height: 6)
+                            .cornerRadius(3)
+                            .animation(.easeInOut(duration: 0.5), value: progress)
+                    }
+                }
+                .frame(height: 6)
+            }
+        }
+        .padding(32)
+        .background(cardBackgroundColor)
+        .cornerRadius(16)
+        .shadow(color: colorScheme == .dark ? .black.opacity(0.4) : .black.opacity(0.1), radius: 15, x: 0, y: 8)
+        .scaleEffect(0.9)
+        .animation(.spring(response: 0.6, dampingFraction: 0.8), value: progress)
+    }
+}
+
 struct AddPodcastView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
@@ -883,6 +1042,14 @@ struct AddPodcastView_Previews: PreviewProvider {
             .environmentObject(PodcastViewModel())
             .preferredColorScheme(.light)
             .previewDisplayName("Light Mode")
+            
+            // Progress view preview
+            PodcastAddingProgressView(
+                progress: 0.6,
+                stageText: "Downloading podcast feed..."
+            )
+            .preferredColorScheme(.dark)
+            .previewDisplayName("Progress View")
         }
     }
 }
