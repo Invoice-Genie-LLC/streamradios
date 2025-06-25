@@ -899,26 +899,41 @@ struct EpisodeRowView: View {
             }
         }) {
             ZStack {
-                Circle()
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 2)
-                    .frame(width: buttonSize, height: buttonSize)
-                
                 if episode.state.isDownloaded {
+                    // Downloaded state - green checkmark
                     Image(systemName: "checkmark.circle.fill")
                         .resizable()
                         .frame(width: buttonSize, height: buttonSize)
                         .foregroundColor(.green)
-                } else if isDownloading {
-                    Circle()
-                                                        .trim(from: 0, to: CGFloat(viewModel.downloadProgress[episode.id] ?? 0))
-                        .stroke(Color.blue, lineWidth: 2)
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: buttonSize, height: buttonSize)
-                    
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: buttonSize * 0.5))
-                        .foregroundColor(.blue)
+                } else if isDownloading, let progress = viewModel.downloadProgress[episode.id] {
+                    // Downloading state - circular progress with percentage
+                    ZStack {
+                        // Background circle
+                        Circle()
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                            .frame(width: buttonSize, height: buttonSize)
+                        
+                        // Progress circle
+                        Circle()
+                            .trim(from: 0, to: CGFloat(progress))
+                            .stroke(Color.blue, lineWidth: 2)
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: buttonSize, height: buttonSize)
+                            .animation(.easeInOut(duration: 0.3), value: progress)
+                        
+                        // Percentage text or download icon
+                        if progress > 0.05 { // Show percentage after 5% to avoid cramped text
+                            Text("\(Int(progress * 100))%")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundColor(.blue)
+                        } else {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: buttonSize * 0.4))
+                                .foregroundColor(.blue)
+                        }
+                    }
                 } else {
+                    // Default state - download arrow
                     Image(systemName: "arrow.down.circle")
                         .resizable()
                         .frame(width: buttonSize, height: buttonSize)
@@ -926,6 +941,7 @@ struct EpisodeRowView: View {
                 }
             }
         }
+        .disabled(isDownloading) // Disable button during download
     }
     
     private func showBannerAlert(message: String) {
@@ -1323,19 +1339,51 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 }
             }
         }) {
-            if episode.state.isDownloaded {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                                    } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
-                ProgressView(value: downloadProgress)
-                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                    .scaleEffect(0.8)
-            } else {
-                Image(systemName: "arrow.down.circle")
-                    .foregroundColor(.blue)
+            ZStack {
+                if episode.state.isDownloaded {
+                    // Downloaded state - green checkmark
+                    Image(systemName: "checkmark.circle.fill")
+                        .resizable()
+                        .frame(width: buttonSize, height: buttonSize)
+                        .foregroundColor(.green)
+                } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
+                    // Downloading state - circular progress with percentage
+                    ZStack {
+                        // Background circle
+                        Circle()
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                            .frame(width: buttonSize, height: buttonSize)
+                        
+                        // Progress circle
+                        Circle()
+                            .trim(from: 0, to: CGFloat(downloadProgress))
+                            .stroke(Color.blue, lineWidth: 2)
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: buttonSize, height: buttonSize)
+                            .animation(.easeInOut(duration: 0.3), value: downloadProgress)
+                        
+                        // Percentage text or download icon
+                        if downloadProgress > 0.05 { // Show percentage after 5% to avoid cramped text
+                            Text("\(Int(downloadProgress * 100))%")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundColor(.blue)
+                        } else {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: buttonSize * 0.4))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                } else {
+                    // Default state - download arrow
+                    Image(systemName: "arrow.down.circle")
+                        .resizable()
+                        .frame(width: buttonSize, height: buttonSize)
+                        .foregroundColor(.gray)
+                }
             }
         }
         .frame(width: buttonSize, height: buttonSize)
+        .disabled(isDownloading) // Disable button during download
     }
     
     private func showBannerAlert(message: String) {

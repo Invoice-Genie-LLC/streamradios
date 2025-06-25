@@ -107,6 +107,9 @@ class PodcastViewModel: ObservableObject {
     @Published var episodeProgress: [String: Double] = [:]
     @Published var downloadProgress: [String: Double] = [:]
     
+    // Store progress observations to prevent deallocation
+    private var progressObservations: [String: NSKeyValueObservation] = [:]
+    
     // MARK: - Private Properties
     private let log = OSLog(subsystem: "StreamRadios", category: "PodcastViewModel")
     private let feedManager = PodcastFeedManager()
@@ -1835,12 +1838,14 @@ extension PodcastViewModel {
             DispatchQueue.main.async {
                 if let error = error {
                     self.downloadProgress.removeValue(forKey: episode.id)
+                    self.progressObservations.removeValue(forKey: episode.id)
                     completion(.failure(error))
                     return
                 }
                 
                 guard let tempURL = tempURL else {
                     self.downloadProgress.removeValue(forKey: episode.id)
+                    self.progressObservations.removeValue(forKey: episode.id)
                     completion(.failure(NSError(domain: "PodcastViewModel", code: 2, userInfo: [NSLocalizedDescriptionKey: "No download URL"])))
                     return
                 }
@@ -1918,15 +1923,17 @@ extension PodcastViewModel {
                     self.downloadProgress[episode.id] = 1.0
                     completion(.success(true))
                     
-                    // Clear download progress after a delay
+                    // Clear download progress and observation after a delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         self.downloadProgress.removeValue(forKey: episode.id)
+                        self.progressObservations.removeValue(forKey: episode.id)
                     }
                     
                     print("📁 Episode downloaded successfully to: \(localURL.path)")
                     
                 } catch {
                     self.downloadProgress.removeValue(forKey: episode.id)
+                    self.progressObservations.removeValue(forKey: episode.id)
                     completion(.failure(error))
                     print("❌ Failed to save downloaded episode: \(error)")
                 }
@@ -1937,13 +1944,14 @@ extension PodcastViewModel {
         let observation = downloadTask.progress.observe(\.fractionCompleted) { [weak self] (progress: Progress, _: NSKeyValueObservedChange<Double>) in
             DispatchQueue.main.async {
                 self?.downloadProgress[episode.id] = progress.fractionCompleted
+                print("📥 Download progress for \(episode.title): \(Int(progress.fractionCompleted * 100))%")
             }
         }
         
-        downloadTask.resume()
-        
         // Store observation to prevent deallocation
-        // Note: In a production app, you'd want to manage these observations properly
+        progressObservations[episode.id] = observation
+        
+        downloadTask.resume()
     }
     
     /// For PodcastListView compatibility
