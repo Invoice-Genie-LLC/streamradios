@@ -111,6 +111,7 @@ class PodcastViewModel: ObservableObject {
     private let log = OSLog(subsystem: "StreamRadios", category: "PodcastViewModel")
     private let feedManager = PodcastFeedManager()
     private let episodeManager = PodcastEpisodeManager()
+    private let cloudKitManager = PodcastCloudKitManager.shared
     private var cancellables = Set<AnyCancellable>()
     
     // Performance optimizations
@@ -1608,7 +1609,7 @@ extension PodcastViewModel {
         }
         print("📡   New - Title: '\(feed.title)', URL: '\(feed.url)'")
         
-        // Update the feed in the array
+        // Update the feed in the array immediately for UI responsiveness
         if let index = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
             podcastFeeds[index] = feed
             print("📡 Updated feed at index \(index)")
@@ -1617,8 +1618,25 @@ extension PodcastViewModel {
             return
         }
         
+        // Trigger immediate UI update
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+        }
+        
         // Save to Core Data
         saveFeedsToCoreData()
+        
+        // Save to CloudKit in background
+        Task {
+            do {
+                try await cloudKitManager.savePodcastFeedToCloudKit(feed)
+                print("☁️ Successfully saved podcast feed to CloudKit: \(feed.title)")
+            } catch {
+                print("❌ Failed to save podcast feed to CloudKit: \(error)")
+                // Note: We don't revert CoreData changes on CloudKit failure
+                // CloudKit sync will retry later
+            }
+        }
         
         print("📡 Updated podcast feed completed: \(feed.title)")
         
