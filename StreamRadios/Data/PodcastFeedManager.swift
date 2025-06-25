@@ -41,8 +41,23 @@ class PodcastFeedManager {
         let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString)
         let (feed, episodes) = try parser.parseComplete()
         
-        // Save feed and episodes in background context
-        return try await saveFeedWithEpisodes(feed: feed, episodes: episodes)
+        // CRITICAL: Download artwork immediately and save to Core Data for fast app restart
+        var feedWithArtwork = feed
+        if let artworkUrlString = feed.artworkUrl, !artworkUrlString.isEmpty,
+           let artworkUrl = URL(string: artworkUrlString) {
+            os_log("🖼️ Downloading artwork for feed: %@", log: log, type: .info, feed.title)
+            
+            do {
+                let (artworkData, _) = try await URLSession.shared.data(from: artworkUrl)
+                feedWithArtwork.imageData = artworkData
+                os_log("✅ Downloaded artwork (%d bytes) for feed: %@", log: log, type: .info, artworkData.count, feed.title)
+            } catch {
+                os_log("⚠️ Failed to download artwork for feed: %@ - %@", log: log, type: .error, feed.title, error.localizedDescription)
+            }
+        }
+        
+        // Save feed and episodes in background context (with artwork if downloaded)
+        return try await saveFeedWithEpisodes(feed: feedWithArtwork, episodes: episodes)
     }
     
     /// Refresh feed and parse new episodes
@@ -59,10 +74,31 @@ class PodcastFeedManager {
         let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url)
         let (updatedFeed, newEpisodes) = try parser.parseComplete()
         
+        // CRITICAL: Download artwork if URL changed or if we don't have artwork yet
+        var feedWithArtwork = updatedFeed
+        if let artworkUrlString = updatedFeed.artworkUrl, !artworkUrlString.isEmpty,
+           let artworkUrl = URL(string: artworkUrlString),
+           (existingFeed.artworkUrl != artworkUrlString || existingFeed.imageData == nil) {
+            os_log("🖼️ Downloading updated artwork for feed: %@", log: log, type: .info, updatedFeed.title)
+            
+            do {
+                let (artworkData, _) = try await URLSession.shared.data(from: artworkUrl)
+                feedWithArtwork.imageData = artworkData
+                os_log("✅ Downloaded updated artwork (%d bytes) for feed: %@", log: log, type: .info, artworkData.count, updatedFeed.title)
+            } catch {
+                os_log("⚠️ Failed to download updated artwork for feed: %@ - %@", log: log, type: .error, updatedFeed.title, error.localizedDescription)
+                // Keep existing artwork if download fails
+                feedWithArtwork.imageData = existingFeed.imageData
+            }
+        } else {
+            // Keep existing artwork if URL hasn't changed
+            feedWithArtwork.imageData = existingFeed.imageData
+        }
+        
         // Update feed and add new episodes
         return try await updateFeedWithNewEpisodes(
             existingFeed: existingFeed,
-            updatedFeed: updatedFeed,
+            updatedFeed: feedWithArtwork,
             newEpisodes: newEpisodes
         )
     }

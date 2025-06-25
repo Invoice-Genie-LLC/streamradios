@@ -1173,10 +1173,57 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("Podcast Now Playing: No cached artwork available, skipping download to optimize CPU usage", log: log, type: .debug)
         }
         
+        // Third priority: Download from artwork URL (async)
+        if !artworkSet, let artworkUrlString = currentFeed.artworkUrl, !artworkUrlString.isEmpty {
+            if let artworkUrl = URL(string: artworkUrlString) {
+                os_log("Podcast Now Playing: Downloading artwork from URL: %@", log: log, type: .info, artworkUrlString)
+                
+                URLSession.shared.dataTask(with: artworkUrl) { data, _, error in
+                    if let data = data, let image = UIImage(data: data) {
+                        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                        var updatedInfo = nowPlayingInfo
+                        updatedInfo[MPMediaItemPropertyArtwork] = artwork
+                        
+                        DispatchQueue.main.async {
+                            MPNowPlayingInfoCenter.default().nowPlayingInfo = updatedInfo
+                            os_log("Podcast Now Playing: Successfully set artwork from URL (%d bytes, %dx%d)", 
+                                   log: self.log, type: .info, data.count, Int(image.size.width), Int(image.size.height))
+                            
+                            // CRITICAL: Save artwork to Core Data immediately for fast app restart and podcast player display
+                            Task {
+                                do {
+                                    try await PodcastCoreDataManager.shared.updateFeedArtwork(currentFeed.id, imageData: data)
+                                    os_log("📦 Saved downloaded artwork to Core Data for feed: %@", log: self.log, type: .info, currentFeed.title)
+                                    
+                                    // Update the viewModel's feed with the downloaded artwork for immediate UI update
+                                    await MainActor.run {
+                                        if let viewModel = self.viewModel {
+                                            if let feedIndex = viewModel.podcastFeeds.firstIndex(where: { $0.id == currentFeed.id }) {
+                                                viewModel.podcastFeeds[feedIndex].imageData = data
+                                                os_log("🔄 Updated in-memory feed artwork for immediate display: %@", log: self.log, type: .info, currentFeed.title)
+                                            }
+                                        }
+                                    }
+                                } catch {
+                                    os_log("❌ Failed to save artwork to Core Data: %@", log: self.log, type: .error, error.localizedDescription)
+                                }
+                            }
+                        }
+                    } else {
+                        os_log("Podcast Now Playing: Failed to load artwork from URL: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")
+                    }
+                }.resume()
+            }
+        }
+        
         // Set the now playing info (with or without artwork)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         
-        os_log("Podcast Now Playing: Updated info for episode '%@' from feed '%@'", log: log, type: .debug, currentEpisode.title, currentFeed.title)
+        if !artworkSet {
+            os_log("Podcast Now Playing: No artwork available for feed '%@'", log: log, type: .info, currentFeed.title)
+        }
+        
+        os_log("Podcast Now Playing: Update complete for episode '%@' from feed '%@'", log: log, type: .debug, currentEpisode.title, currentFeed.title)
     }
     
     func getCurrentProgress(for episode: PodcastEpisode) -> Double {
@@ -1380,6 +1427,26 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                             MPNowPlayingInfoCenter.default().nowPlayingInfo = updatedInfo
                             os_log("Podcast Setup: Successfully set artwork from URL (%d bytes, %dx%d)", 
                                    log: self.log, type: .info, data.count, Int(image.size.width), Int(image.size.height))
+                            
+                            // CRITICAL: Save artwork to Core Data immediately for fast app restart and podcast player display
+                            Task {
+                                do {
+                                    try await PodcastCoreDataManager.shared.updateFeedArtwork(feed.id, imageData: data)
+                                    os_log("📦 Saved downloaded artwork to Core Data for feed: %@", log: self.log, type: .info, feed.title)
+                                    
+                                    // Update the viewModel's feed with the downloaded artwork for immediate UI update
+                                    await MainActor.run {
+                                        if let viewModel = self.viewModel {
+                                            if let feedIndex = viewModel.podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
+                                                viewModel.podcastFeeds[feedIndex].imageData = data
+                                                os_log("🔄 Updated in-memory feed artwork for immediate display: %@", log: self.log, type: .info, feed.title)
+                                            }
+                                        }
+                                    }
+                                } catch {
+                                    os_log("❌ Failed to save artwork to Core Data: %@", log: self.log, type: .error, error.localizedDescription)
+                                }
+                            }
                         }
                     } else {
                         os_log("Podcast Setup: Failed to load artwork from URL: %@", log: self.log, type: .error, error?.localizedDescription ?? "Unknown error")

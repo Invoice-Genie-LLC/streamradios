@@ -1549,6 +1549,7 @@ struct PodcastPlayerView: View {
                                         .foregroundColor(.secondary)
                                         .lineLimit(4)
                                         .multilineTextAlignment(.leading)
+                                        .padding(.trailing, 8) // Add right padding to prevent text cutoff
                                 }
                                 .frame(height: 50)
                             }
