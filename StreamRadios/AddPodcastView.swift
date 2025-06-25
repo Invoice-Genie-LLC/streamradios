@@ -355,10 +355,19 @@ struct AddPodcastView: View {
                 trailing: modernSaveButton
             )
             .onAppear {
-                // Populate fields when editing
                 if let podcastToEdit = podcastToEdit {
+                    // Populate fields when editing
                     title = podcastToEdit.title
                     url = podcastToEdit.url
+                } else {
+                    // Clear all form values for a fresh start when adding new podcast
+                    title = ""
+                    url = ""
+                    searchText = ""
+                    searchService.clearResults()
+                    
+                    // Dismiss keyboard if it's showing
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             }
         }
