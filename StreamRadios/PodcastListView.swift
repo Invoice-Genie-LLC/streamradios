@@ -1575,17 +1575,7 @@ struct PodcastPlayerView: View {
                                 }
                                 .frame(height: 45)
                                 
-                                if let currentEpisode = podcastPlayer.currentEpisode {
-                                    Text(formatDate(currentEpisode.publicationDate))
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(.blue)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(Color.blue.opacity(0.1))
-                                        )
-                                }
+
                             }
                         }
                         .frame(width: geometry.size.width - min(130, geometry.size.width * 0.35) - 40)
@@ -1605,22 +1595,7 @@ struct PodcastPlayerView: View {
                 )
             )
             
-            // Bottom separator with gradient
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.blue.opacity(0.3))
-                    .frame(height: 2)
-                
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.blue.opacity(0.2), Color.clear]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(height: 4)
-            }
+
         }
     }
     
