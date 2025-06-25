@@ -1784,6 +1784,12 @@ struct PodcastPlayerView: View {
         .onChange(of: selectedTab) { _, newValue in
             // Update the current tab and reload episodes with proper filtering
             viewModel.currentTab = newValue
+            
+            // Re-enable auto-scroll for tab changes
+            shouldAllowAutoScroll = true
+            hasPerformedInitialScroll = false
+            print("📱 Tab changed to: \(newValue), auto-scroll re-enabled")
+            
             Task {
                 await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
             }
@@ -1816,19 +1822,20 @@ struct PodcastPlayerView: View {
 
 
     private var modernEpisodeList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(viewModel.currentEpisodes, id: \.id) { episode in
-                    OptimizedEpisodeRowView(
-                        episode: episode,
-                        isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                        onPlay: { playEpisode(episode) },
-                        onStop: { podcastPlayer.togglePlayPause() },
-                        viewModel: viewModel,
-                        podcastPlayer: podcastPlayer
-                    )
-                    .id(episode.id)
-                }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(viewModel.currentEpisodes, id: \.id) { episode in
+                        OptimizedEpisodeRowView(
+                            episode: episode,
+                            isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                            onPlay: { playEpisode(episode) },
+                            onStop: { podcastPlayer.togglePlayPause() },
+                            viewModel: viewModel,
+                            podcastPlayer: podcastPlayer
+                        )
+                        .id(episode.id)
+                    }
                 
                 // Loading indicator and invisible trigger area for pull-up gesture
                 if viewModel.hasMoreEpisodes && !viewModel.currentEpisodes.isEmpty {
@@ -1933,32 +1940,56 @@ struct PodcastPlayerView: View {
                             }
                     )
             }
-        }
-        .background(Color.black)
-        .gesture(
-            // Track scroll gestures to optimize performance during scrolling
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    if !userIsScrolling {
-                        userIsScrolling = true
-                        UserDefaults.standard.set(true, forKey: "isUserScrolling")
-                        
-                        // Cancel any existing timer
+            }
+            .background(Color.black)
+            .gesture(
+                // Track scroll gestures to optimize performance during scrolling
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if !userIsScrolling {
+                            userIsScrolling = true
+                            UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                            
+                            // Cancel any existing timer
+                            scrollDebounceTimer?.invalidate()
+                            
+                            // Disable auto-scroll once user manually scrolls
+                            shouldAllowAutoScroll = false
+                            print("🔒 Auto-scroll disabled due to user interaction")
+                        }
+                    }
+                    .onEnded { _ in
+                        // Debounce the end of scrolling to avoid rapid state changes
                         scrollDebounceTimer?.invalidate()
+                        scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { _ in
+                            userIsScrolling = false
+                            UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                        }
+                    }
+            )
+            .onAppear {
+                // Start end indicator animation
+                endIndicatorScale = 1.3
+                
+                // Perform initial scroll to currently playing episode
+                scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: true)
+            }
+            .onChange(of: viewModel.currentEpisodes) { _, _ in
+                // When episodes load, scroll to currently playing episode if this is initial load
+                if shouldAllowAutoScroll && !hasPerformedInitialScroll {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: true)
                     }
                 }
-                .onEnded { _ in
-                    // Debounce the end of scrolling to avoid rapid state changes
-                    scrollDebounceTimer?.invalidate()
-                    scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { _ in
-                        userIsScrolling = false
-                        UserDefaults.standard.set(false, forKey: "isUserScrolling")
+            }
+            .onChange(of: selectedTab) { _, _ in
+                // When tab changes, scroll to currently playing episode after a short delay
+                if shouldAllowAutoScroll {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: false)
                     }
                 }
-        )
-        .onAppear {
-            // Start end indicator animation
-            endIndicatorScale = 1.3
+            }
         }
         .overlay(
             // Success toast notification
@@ -1996,16 +2027,73 @@ struct PodcastPlayerView: View {
         )
     }
 
+    private func scrollToCurrentlyPlayingEpisode(proxy: ScrollViewProxy, isInitialLoad: Bool = false) {
+        guard shouldAllowAutoScroll else {
+            print("🔒 Auto-scroll blocked due to user interaction")
+            return
+        }
+        
+        guard let currentEpisode = podcastPlayer.currentEpisode,
+              currentEpisode.feedId == feed.id else {
+            print("📍 No currently playing episode for this feed")
+            return
+        }
+        
+        print("🎯 Attempting to scroll to episode: \(currentEpisode.title) in tab: \(selectedTab)")
+        
+        // Check if the episode exists in current episodes list (filtered by current tab)
+        if viewModel.currentEpisodes.contains(where: { $0.id == currentEpisode.id }) {
+            print("✅ Episode found in current tab (\(getTabName(selectedTab))), scrolling...")
+            
+            withAnimation(.easeInOut(duration: 0.8)) {
+                proxy.scrollTo(currentEpisode.id, anchor: .center)
+            }
+            
+            hasPerformedInitialScroll = true
+            print("📍 Scrolled to currently playing episode: \(currentEpisode.title)")
+            
+            // Disable auto-scroll after initial scroll
+            if isInitialLoad {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    shouldAllowAutoScroll = false
+                    print("🔒 Auto-scroll disabled after initial scroll")
+                }
+            }
+            
+        } else {
+            print("⚠️ Currently playing episode not found in \(getTabName(selectedTab)) tab - staying in current tab")
+            
+            // Don't automatically switch tabs - just let user stay in their chosen tab
+            // The episode might not be a favorite or downloaded, so it won't appear in those tabs
+            
+            hasPerformedInitialScroll = true // Mark as completed so we don't keep trying
+        }
+    }
+    
+    private func getTabName(_ tab: Int) -> String {
+        switch tab {
+        case 0: return "All"
+        case 1: return "Favorites"
+        case 2: return "Downloads"
+        default: return "Unknown"
+        }
+    }
+
     private func handleOnAppear() {
         let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
+        
+        // Reset auto-scroll state for fresh view appearance
+        shouldAllowAutoScroll = true
+        hasPerformedInitialScroll = false
+        userIsScrolling = false
+        
+        print("📱 PodcastPlayerView appeared for feed: \(feed.title)")
         
         // Synchronize viewModel.currentTab with selectedTab to ensure proper filtering
         viewModel.currentTab = selectedTab
         
         if viewModel.currentEpisodes.isEmpty || !currentEpisodesForThisFeed {
-            hasPerformedInitialScroll = false
             hasManuallyScrolled = false
-            userIsScrolling = false
             scrollOffset = .zero
             lastScrollOffset = .zero
             
