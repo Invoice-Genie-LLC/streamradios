@@ -133,6 +133,9 @@ class PodcastViewModel: ObservableObject {
         // Load feeds from Core Data (radio station pattern)
         loadFeedsFromCoreData()
         
+        // Load last played episodes from UserDefaults
+        loadLastPlayedEpisodes()
+        
         // Note: CloudKit sync is now handled by explicit initializeWithCloudKitSupport() call
         // This prevents duplicate syncing when multiple ViewModels are created
     }
@@ -1501,10 +1504,55 @@ extension PodcastViewModel {
     }
     
     /// For backward compatibility with PodcastPlayer
-    @available(*, deprecated, message: "Use updateEpisodeState instead")
     func updateLastPlayedEpisode(_ episode: PodcastEpisode) {
-        // Simply mark as played for now
-        updateEpisodeState(episode.id, isPlayed: true)
+        print("🎯 DEBUG: updateLastPlayedEpisode called for: \(episode.title) in feed: \(episode.feedId)")
+        
+        // Update the lastPlayedEpisodes dictionary immediately on main thread
+        self.lastPlayedEpisodes[episode.feedId] = episode.id
+        self.saveLastPlayedEpisodes()
+        
+        print("🎯 DEBUG: lastPlayedEpisodes after update: \(self.lastPlayedEpisodes)")
+        
+        // Force UI update by triggering objectWillChange
+        self.objectWillChange.send()
+        
+        print("🎯 Updated last played episode for feed \(episode.feedId): \(episode.title)")
+        
+        // Also update episode state in background
+        Task {
+            self.updateEpisodeState(episode.id, isPlayed: false) // Don't mark as played yet, just track
+        }
+    }
+    
+    /// Non-MainActor version for immediate updates from background threads
+    nonisolated func updateLastPlayedEpisodeImmediate(_ episode: PodcastEpisode) {
+        print("🎯 DEBUG: updateLastPlayedEpisodeImmediate called for: \(episode.title) in feed: \(episode.feedId)")
+        
+        // Update UserDefaults immediately (thread-safe)
+        var currentDict = UserDefaults.standard.object(forKey: "LastPlayedEpisodes") as? [String: String] ?? [:]
+        currentDict[episode.feedId] = episode.id
+        UserDefaults.standard.set(currentDict, forKey: "LastPlayedEpisodes")
+        
+        print("🎯 DEBUG: Updated UserDefaults with lastPlayedEpisodes")
+        
+        // Update the main actor state asynchronously
+        Task { @MainActor in
+            self.lastPlayedEpisodes[episode.feedId] = episode.id
+            self.objectWillChange.send()
+            print("🎯 DEBUG: Updated MainActor state for feed \(episode.feedId): \(episode.title)")
+        }
+    }
+    
+    /// Save lastPlayedEpisodes to UserDefaults
+    private func saveLastPlayedEpisodes() {
+        UserDefaults.standard.set(lastPlayedEpisodes, forKey: "LastPlayedEpisodes")
+    }
+    
+    /// Load lastPlayedEpisodes from UserDefaults
+    private func loadLastPlayedEpisodes() {
+        if let savedLastPlayed = UserDefaults.standard.object(forKey: "LastPlayedEpisodes") as? [String: String] {
+            lastPlayedEpisodes = savedLastPlayed
+        }
     }
     
     /// For backward compatibility with PodcastPlayer

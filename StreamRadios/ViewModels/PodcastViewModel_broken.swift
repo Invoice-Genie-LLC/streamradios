@@ -473,6 +473,25 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    /// Non-isolated version for immediate updates from background threads
+    func updateLastPlayedEpisodeImmediate(_ episode: PodcastEpisode) {
+        print("🎯 DEBUG: updateLastPlayedEpisodeImmediate called for: \(episode.title) in feed: \(episode.feedId)")
+        
+        // Update UserDefaults immediately (thread-safe)
+        var currentDict = UserDefaults.standard.object(forKey: "LastPlayedEpisodes") as? [String: String] ?? [:]
+        currentDict[episode.feedId] = episode.id
+        UserDefaults.standard.set(currentDict, forKey: "LastPlayedEpisodes")
+        
+        print("🎯 DEBUG: Updated UserDefaults with lastPlayedEpisodes")
+        
+        // Update the main thread state asynchronously
+        DispatchQueue.main.async {
+            self.lastPlayedEpisodes[episode.feedId] = episode.id
+            self.objectWillChange.send()
+            print("🎯 DEBUG: Updated main thread state for feed \(episode.feedId): \(episode.title)")
+        }
+    }
+    
     // Add new method to save lastPlayedEpisodes to UserDefaults
     private func saveLastPlayedEpisodes() {
         UserDefaults.standard.set(lastPlayedEpisodes, forKey: "LastPlayedEpisodes")

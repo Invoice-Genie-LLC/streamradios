@@ -619,10 +619,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             player?.replaceCurrentItem(with: playerItem)
         }
 
-        // Save last played episode in the view model
-        Task { @MainActor in
-            viewModel?.updateLastPlayedEpisode(episode)
-        }
+        // Save last played episode in the view model immediately (thread-safe)
+        viewModel?.updateLastPlayedEpisodeImmediate(episode)
         
         // Add to CarPlay recently played list for CarPlay integration
         CarPlayManager.shared.addEpisodeToRecentlyPlayed(episode)

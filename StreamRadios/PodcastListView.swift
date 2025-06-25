@@ -404,34 +404,51 @@ struct PodcastRowView: View {
         return feedEpisodes.contains { $0.state.progress > 0 && $0.state.progress < 1 }
     }
     
-    // Computed property to get the appropriate button text
+    // Computed property to get the appropriate button text - reactive to viewModel changes
     private var buttonText: String {
-        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-        let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+        // Get episodes from the feed object itself, which has all episodes
+        var feedEpisodes = feed.episodes
         
-        // Priority 1: Check if we have a last played episode for this feed
+        // If feed doesn't have episodes, try to get from viewModel
+        if feedEpisodes.isEmpty {
+            feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+        }
+        
+        print("🔍 BUTTON TEXT: Feed '\(feed.title)' - \(feedEpisodes.count) episodes available")
+        print("🔍 BUTTON TEXT: lastPlayedEpisodes dict: \(viewModel.lastPlayedEpisodes)")
+        
+        // Priority 1: Check if we have a specific last played episode for this feed
         if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id] {
-            // Always return "Resume Episode" if we have a last played episode recorded
-            // This handles the case where episodes haven't loaded yet or progress data is still syncing
+            print("🔍 BUTTON TEXT: Feed \(feed.title) has last played episode: \(lastPlayedEpisodeId)")
             return "Resume Episode"
         }
         
-        // Priority 2: Check for any episodes in progress (fallback for older data)
-        if !episodesInProgress.isEmpty {
-            return "Resume Podcast"
-        }
-        
-        // Priority 3: Check if we have any episodes with stored progress from UserDefaults
-        // This is a backup check for episodes that might have progress but aren't in lastPlayedEpisodes yet
+        // Priority 2: Check for any episodes with progress (any playback history) using EpisodeStateManager
+        var episodesWithProgress: [PodcastEpisode] = []
         for episode in feedEpisodes {
-            let progressKey = "PodcastProgress_\(episode.id)"
-            let storedProgress = UserDefaults.standard.double(forKey: progressKey)
-            if storedProgress > 0 && storedProgress < 1 {
-                return "Resume Podcast"
+            let progress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            if progress > 0 {
+                episodesWithProgress.append(episode)
             }
         }
         
-        // Default case: No previous playback detected
+        if !episodesWithProgress.isEmpty {
+            print("🔍 BUTTON TEXT: Feed \(feed.title) has \(episodesWithProgress.count) episodes with progress (EpisodeStateManager)")
+            return "Resume Episode"
+        }
+        
+        // Priority 3: Check UserDefaults for any stored progress (backup check)
+        for episode in feedEpisodes {
+            let progressKey = "PodcastProgress_\(episode.id)"
+            let storedProgress = UserDefaults.standard.double(forKey: progressKey)
+            if storedProgress > 0 {
+                print("🔍 BUTTON TEXT: Feed \(feed.title) has UserDefaults progress for episode: \(episode.title)")
+                return "Resume Episode"
+            }
+        }
+        
+        // Default case: No episodes have ever been played in this feed
+        print("🔍 BUTTON TEXT: Feed \(feed.title) showing Play Latest - no previous playback")
         return "Play Latest"
     }
     
@@ -547,35 +564,89 @@ struct PodcastRowView: View {
             return
         }
         
-        // Get all episodes for this feed
-        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-        let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+        print("🎯 DEBUG: Starting playLastPlayedEpisode for feed: \(feed.title)")
+        print("🎯 DEBUG: lastPlayedEpisodes dictionary: \(viewModel.lastPlayedEpisodes)")
         
-        // Case 1: If there are episodes in progress (Resume Podcast button)
-        if !episodesInProgress.isEmpty {
-            // Try to play the specific last played episode if it has progress
-            if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id],
-               let lastPlayedEpisode = episodesInProgress.first(where: { $0.id == lastPlayedEpisodeId }) {
+        // First try to get episodes from the feed object
+        var feedEpisodes = feed.episodes
+        
+        // If the feed object doesn't have episodes loaded, try to get them from viewModel
+        if feedEpisodes.isEmpty {
+            print("⚠️ Feed object has no episodes, trying viewModel.allEpisodes...")
+            feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+        }
+        
+        // If still no episodes, try loading from Core Data
+        if feedEpisodes.isEmpty {
+            print("⚠️ No episodes found anywhere, loading from Core Data...")
+            Task {
+                await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
+                await MainActor.run {
+                    self.attemptPlayback()
+                }
+            }
+            return
+        }
+        
+        print("🔍 Found \(feedEpisodes.count) episodes in feed: \(feed.title)")
+        
+        // Update episode states with EpisodeStateManager data for accuracy
+        feedEpisodes = feedEpisodes.map { episode in
+            var updatedEpisode = episode
+            updatedEpisode.state.progress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            return updatedEpisode
+        }
+        
+        // Case 1: Resume Episode - when there's a specific last played episode
+        if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id] {
+            print("🔍 Looking for last played episode ID: \(lastPlayedEpisodeId)")
+            if let lastPlayedEpisode = feedEpisodes.first(where: { $0.id == lastPlayedEpisodeId }) {
+                print("🎯 Playing last played episode: \(lastPlayedEpisode.title)")
                 podcastPlayer.playEpisode(lastPlayedEpisode, feed: feed)
                 return
+            } else {
+                print("⚠️ Last played episode ID '\(lastPlayedEpisodeId)' not found in episodes list")
+                print("🔍 Available episode IDs: \(feedEpisodes.map { $0.id })")
             }
-            
-            // If no specific last played episode found, play the first in-progress episode
-            if let firstInProgressEpisode = episodesInProgress.first {
-                podcastPlayer.playEpisode(firstInProgressEpisode, feed: feed)
+        }
+        
+        // Case 2: Resume Episode - when there are episodes with any progress but no specific last played
+        let episodesWithProgress = feedEpisodes.filter { $0.state.progress > 0 }
+        if !episodesWithProgress.isEmpty {
+            print("🔍 Found \(episodesWithProgress.count) episodes with progress")
+            for episode in episodesWithProgress {
+                print("  - \(episode.title): progress \(episode.state.progress)")
+            }
+            // Play the episode with the highest progress, or most recently started if tied
+            let sortedByProgress = episodesWithProgress.sorted { episode1, episode2 in
+                if episode1.state.progress != episode2.state.progress {
+                    return episode1.state.progress > episode2.state.progress
+                }
+                return episode1.publicationDate > episode2.publicationDate
+            }
+            if let mostProgressedEpisode = sortedByProgress.first {
+                print("🎯 Playing most progressed episode: \(mostProgressedEpisode.title) (progress: \(mostProgressedEpisode.state.progress))")
+                podcastPlayer.playEpisode(mostProgressedEpisode, feed: feed)
                 return
             }
         }
         
-        // Case 2: No episodes in progress (Play Latest button)
+        // Case 3: Play Latest - no episodes have been previously played
         // Play the most recent episode (newest by publication date)
         if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
+            print("🎯 Playing latest episode: \(latestEpisode.title)")
             podcastPlayer.playEpisode(latestEpisode, feed: feed)
             return
         }
         
         // Fallback: Use the existing logic if no episodes found
+        print("⚠️ No episodes found, using fallback")
         podcastPlayer.playLastEpisodeForFeed(feed)
+    }
+    
+    private func attemptPlayback() {
+        // Retry the playback after episodes are loaded
+        playLastPlayedEpisode()
     }
 }
 
