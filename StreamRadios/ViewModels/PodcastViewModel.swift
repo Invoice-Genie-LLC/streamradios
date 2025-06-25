@@ -129,25 +129,8 @@ class PodcastViewModel: ObservableObject {
         // Load feeds from Core Data (radio station pattern)
         loadFeedsFromCoreData()
         
-        // Always check for CloudKit sync in background
-        Task {
-            // Clean up any duplicate episodes first to prevent crashes
-            do {
-                try await episodeManager.cleanupDuplicateEpisodes()
-            } catch {
-                print("⚠️ Failed to cleanup duplicate episodes: \(error)")
-            }
-            
-            await checkForFreshInstallAndSetup()
-            
-            // After CloudKit sync, check if any feeds need episode refreshing
-            await refreshFeedsWithoutEpisodes()
-            
-            // Always attempt episode state sync after all initialization is complete
-            print("🔄 Final episode state sync after full initialization...")
-            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
-        }
+        // Note: CloudKit sync is now handled by explicit initializeWithCloudKitSupport() call
+        // This prevents duplicate syncing when multiple ViewModels are created
     }
     
     deinit {
@@ -596,7 +579,18 @@ class PodcastViewModel: ObservableObject {
     // MARK: - Fresh Install & CloudKit Integration
     
     /// Check for CloudKit sync and setup new feeds if needed
+    private var cloudKitSyncInProgress = false
+    
     private func checkForFreshInstallAndSetup() async {
+        // Prevent multiple concurrent CloudKit syncs
+        guard !cloudKitSyncInProgress else {
+            print("⚠️ CloudKit sync already in progress, skipping duplicate call")
+            return
+        }
+        
+        cloudKitSyncInProgress = true
+        defer { cloudKitSyncInProgress = false }
+        
         print("🔄 Checking for CloudKit sync...")
         
         do {
@@ -704,6 +698,51 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    /// Public method for DataSyncManager to process fresh install feeds
+    func loadFreshInstallPodcastData(_ cloudKitFeeds: [PodcastFeed]) async {
+        // Use the existing fresh install logic with progress updates  
+        await MainActor.run {
+            self.isLoading = true
+        }
+        
+        print("🚀 Processing \(cloudKitFeeds.count) feeds for fresh install")
+        
+        // Start artwork download tracking
+        await MainActor.run {
+            DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: cloudKitFeeds.count)
+        }
+        
+        // Process feeds directly without accessing private methods
+        for feed in cloudKitFeeds {
+            do {
+                print("📡 Processing feed: \(feed.title)")
+                
+                // Use public FeedManager to properly add feed with RSS parsing
+                guard let url = URL(string: feed.url) else {
+                    print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
+                    continue
+                }
+                
+                let feedManager = PodcastFeedManager()
+                let addedFeed = try await feedManager.addFeed(from: url)
+                print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+                
+            } catch {
+                print("❌ Failed to process feed \(feed.title): \(error)")
+                
+                // Skip saving if RSS parsing fails - let the existing system handle it
+                print("⚠️ Skipping feed save due to RSS parsing failure")
+            }
+        }
+        
+        await MainActor.run {
+            self.isLoading = false
+            self.loadFeedsFromCoreData()
+        }
+        
+        print("🎉 Fresh install processing complete")
+    }
+    
     /// Process fresh install feeds by parsing RSS and saving to Core Data
     private func processFreshInstallFeeds(_ cloudKitFeeds: [PodcastFeed]) async {
         print("🚀 Processing \(cloudKitFeeds.count) feeds for fresh install")
@@ -716,7 +755,28 @@ class PodcastViewModel: ObservableObject {
         let uniqueFeeds = removeDuplicateFeeds(cloudKitFeeds)
         print("📊 Removed \(cloudKitFeeds.count - uniqueFeeds.count) duplicate feeds from CloudKit data")
         
-        for feed in uniqueFeeds {
+        // Check what feeds already exist in Core Data to prevent duplicate processing
+        let existingFeedUrls = await getExistingFeedUrls()
+        let feedsToProcess = uniqueFeeds.filter { !existingFeedUrls.contains($0.url) }
+        
+        if feedsToProcess.isEmpty {
+            print("✅ All feeds already exist in Core Data, skipping processing")
+            await MainActor.run { 
+                self.isLoading = false
+                // Start artwork tracking even if no new feeds to process
+                DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: 0)
+            }
+            return
+        }
+        
+        print("📊 Processing \(feedsToProcess.count) new feeds (skipping \(uniqueFeeds.count - feedsToProcess.count) existing)")
+        
+        // Start artwork download tracking for the feeds we're about to process
+        await MainActor.run {
+            DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: feedsToProcess.count)
+        }
+        
+        for feed in feedsToProcess {
             do {
                 print("📡 Processing feed: \(feed.title)")
                 
@@ -749,6 +809,27 @@ class PodcastViewModel: ObservableObject {
         // IMPORTANT: Now that episodes are loaded, sync their states from CloudKit
         print("🔄 Starting episode state sync after fresh install processing...")
         await syncEpisodeStatesFromCloudKit(isFreshInstall: true)
+    }
+    
+    /// Get existing feed URLs from Core Data to prevent duplicate processing
+    private func getExistingFeedUrls() async -> Set<String> {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    request.propertiesToFetch = ["url"]
+                    request.resultType = .dictionaryResultType
+                    
+                    let results = try context.fetch(request) as! [[String: Any]]
+                    let urls = Set(results.compactMap { $0["url"] as? String })
+                    continuation.resume(returning: urls)
+                } catch {
+                    print("❌ Failed to fetch existing feed URLs: \(error)")
+                    continuation.resume(returning: Set())
+                }
+            }
+        }
     }
     
     /// Merge CloudKit feeds with existing local feeds
@@ -932,12 +1013,25 @@ class PodcastViewModel: ObservableObject {
     func initializeWithCloudKitSupport() {
         print("🚀 Initializing PodcastViewModel with CloudKit support...")
         
+        // Prevent multiple initializations
+        guard !isLoading else {
+            print("⚠️ CloudKit initialization already in progress, skipping duplicate call")
+            return
+        }
+        
         // Start with Core Data load for immediate UI
         loadFeedsFromCoreData()
         print("📊 Loaded \(podcastFeeds.count) feeds from Core Data")
         
-        // Always check for CloudKit sync in background
+        // Single CloudKit sync in background
         Task {
+            // Clean up any duplicate episodes first to prevent crashes
+            do {
+                try await episodeManager.cleanupDuplicateEpisodes()
+            } catch {
+                print("⚠️ Failed to cleanup duplicate episodes: \(error)")
+            }
+            
             await checkForFreshInstallAndSetup()
             
             // After CloudKit sync, check if any feeds need episode refreshing
@@ -1022,6 +1116,11 @@ class PodcastViewModel: ObservableObject {
         if !feedsToRefresh.isEmpty {
             print("🔄 Refreshing \(feedsToRefresh.count) feeds without episodes...")
             
+            // Start artwork download tracking for refreshed feeds
+            await MainActor.run {
+                DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: feedsToRefresh.count)
+            }
+            
             for feed in feedsToRefresh {
                 do {
                     guard let url = URL(string: feed.url) else {
@@ -1045,6 +1144,10 @@ class PodcastViewModel: ObservableObject {
             }
         } else {
             print("✅ All feeds have episodes")
+            // Complete artwork tracking immediately if no feeds need refreshing
+            await MainActor.run {
+                DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: 0)
+            }
         }
     }
     
@@ -1499,15 +1602,30 @@ extension PodcastViewModel {
     /// For PodcastListView compatibility
     @available(*, deprecated, message: "Use new feed management")
     func updatePodcastFeed(_ feed: PodcastFeed) {
+        print("📡 PodcastViewModel - Before update:")
+        if let existingFeed = podcastFeeds.first(where: { $0.id == feed.id }) {
+            print("📡   Existing - Title: '\(existingFeed.title)', URL: '\(existingFeed.url)'")
+        }
+        print("📡   New - Title: '\(feed.title)', URL: '\(feed.url)'")
+        
         // Update the feed in the array
         if let index = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
             podcastFeeds[index] = feed
+            print("📡 Updated feed at index \(index)")
+        } else {
+            print("❌ Feed with ID \(feed.id) not found in podcastFeeds array")
+            return
         }
         
         // Save to Core Data
         saveFeedsToCoreData()
         
-        print("📡 Updated podcast feed: \(feed.title)")
+        print("📡 Updated podcast feed completed: \(feed.title)")
+        
+        // Verify the update
+        if let verifyFeed = podcastFeeds.first(where: { $0.id == feed.id }) {
+            print("📡 Verification - Title: '\(verifyFeed.title)', URL: '\(verifyFeed.url)'")
+        }
     }
     
     /// For PodcastListView compatibility

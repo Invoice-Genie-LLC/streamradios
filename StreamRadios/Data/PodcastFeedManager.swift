@@ -51,8 +51,23 @@ class PodcastFeedManager {
                 let (artworkData, _) = try await URLSession.shared.data(from: artworkUrl)
                 feedWithArtwork.imageData = artworkData
                 os_log("✅ Downloaded artwork (%d bytes) for feed: %@", log: log, type: .info, artworkData.count, feed.title)
+                
+                // Report artwork download completion to DataSyncManager
+                await MainActor.run {
+                    DataSyncManager.shared.reportArtworkDownloadCompleted(feedTitle: feed.title)
+                }
             } catch {
                 os_log("⚠️ Failed to download artwork for feed: %@ - %@", log: log, type: .error, feed.title, error.localizedDescription)
+                
+                // Report artwork download failure to DataSyncManager
+                await MainActor.run {
+                    DataSyncManager.shared.reportArtworkDownloadFailed(feedTitle: feed.title, error: error)
+                }
+            }
+        } else {
+            // No artwork to download, still report completion
+            await MainActor.run {
+                DataSyncManager.shared.reportArtworkDownloadCompleted(feedTitle: feed.title)
             }
         }
         
@@ -85,14 +100,29 @@ class PodcastFeedManager {
                 let (artworkData, _) = try await URLSession.shared.data(from: artworkUrl)
                 feedWithArtwork.imageData = artworkData
                 os_log("✅ Downloaded updated artwork (%d bytes) for feed: %@", log: log, type: .info, artworkData.count, updatedFeed.title)
+                
+                // Report artwork download completion to DataSyncManager
+                await MainActor.run {
+                    DataSyncManager.shared.reportArtworkDownloadCompleted(feedTitle: updatedFeed.title)
+                }
             } catch {
                 os_log("⚠️ Failed to download updated artwork for feed: %@ - %@", log: log, type: .error, updatedFeed.title, error.localizedDescription)
                 // Keep existing artwork if download fails
                 feedWithArtwork.imageData = existingFeed.imageData
+                
+                // Report artwork download failure to DataSyncManager
+                await MainActor.run {
+                    DataSyncManager.shared.reportArtworkDownloadFailed(feedTitle: updatedFeed.title, error: error)
+                }
             }
         } else {
             // Keep existing artwork if URL hasn't changed
             feedWithArtwork.imageData = existingFeed.imageData
+            
+            // Still report completion even if no download was needed
+            await MainActor.run {
+                DataSyncManager.shared.reportArtworkDownloadCompleted(feedTitle: updatedFeed.title)
+            }
         }
         
         // Update feed and add new episodes

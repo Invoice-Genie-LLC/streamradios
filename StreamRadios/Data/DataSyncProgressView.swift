@@ -72,6 +72,12 @@ struct DataSyncProgressView: View {
                         )
                         
                         SyncStatusItem(
+                            title: "Artwork Downloads",
+                            status: syncManager.artworkDownloadsStatus,
+                            progress: syncManager.artworkDownloadsProgress
+                        )
+                        
+                        SyncStatusItem(
                             title: "Episode States",
                             status: syncManager.episodeStatesStatus,
                             progress: syncManager.episodeStatesProgress

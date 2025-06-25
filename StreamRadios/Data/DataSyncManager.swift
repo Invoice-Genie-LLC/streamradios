@@ -19,6 +19,10 @@ class DataSyncManager: ObservableObject {
     @Published var podcastFeedsStatus: DataSyncStatus = .pending
     @Published var podcastFeedsProgress: Double = 0.0
     
+    // Artwork Downloads
+    @Published var artworkDownloadsStatus: DataSyncStatus = .pending
+    @Published var artworkDownloadsProgress: Double = 0.0
+    
     // Episode States
     @Published var episodeStatesStatus: DataSyncStatus = .pending
     @Published var episodeStatesProgress: Double = 0.0
@@ -26,6 +30,10 @@ class DataSyncManager: ObservableObject {
     // User Preferences
     @Published var userPreferencesStatus: DataSyncStatus = .pending
     @Published var userPreferencesProgress: Double = 0.0
+    
+    // MARK: - Artwork Download Tracking
+    private var totalArtworkDownloads = 0
+    private var completedArtworkDownloads = 0
     
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
@@ -75,6 +83,9 @@ class DataSyncManager: ObservableObject {
                 }
             }
             
+            // Wait for artwork downloads to complete before finishing
+            await waitForArtworkDownloads()
+            
             // Final completion
             await completeSynchronization()
         }
@@ -122,56 +133,13 @@ class DataSyncManager: ObservableObject {
     
     @MainActor
     private func syncPodcastFeeds() async {
-        podcastFeedsStatus = .inProgress
-        currentOperation = "Fetching podcast feeds from iCloud..."
+        // DISABLED: DataSyncManager no longer handles podcast sync to prevent duplicates
+        // PodcastViewModel handles its own CloudKit sync via initializeWithCloudKitSupport()
+        print("📡 DataSyncManager: Podcast sync disabled - handled by PodcastViewModel")
         
-        do {
-            // Check if this is a fresh install
-            let existingFeedCount = await countExistingPodcastFeeds()
-            let isFreshInstall = existingFeedCount == 0
-            
-            if isFreshInstall {
-                currentOperation = "Processing podcast feeds..."
-                
-                // Simulate progress for CloudKit fetch
-                podcastFeedsProgress = 0.2
-                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                
-                // Fetch from CloudKit
-                let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
-                podcastFeedsProgress = 0.4
-                
-                if !cloudKitFeeds.isEmpty {
-                    currentOperation = "Parsing RSS feeds and episodes..."
-                    
-                    // Process feeds with progress updates
-                    let feedCount = cloudKitFeeds.count
-                    for (index, feed) in cloudKitFeeds.enumerated() {
-                        currentOperation = "Processing \(feed.title)..."
-                        
-                        // Update progress based on current feed
-                        let baseProgress = 0.4
-                        let feedProgress = 0.6 * (Double(index + 1) / Double(feedCount))
-                        podcastFeedsProgress = baseProgress + feedProgress
-                        
-                        // Small delay to show progress
-                        try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
-                    }
-                    
-                    // Process feeds using existing logic
-                    await processFreshInstallFeeds(cloudKitFeeds)
-                } 
-            }
-            
-            podcastFeedsStatus = .completed
-            podcastFeedsProgress = 1.0
-            print("✅ Podcast feeds sync completed")
-            
-        } catch {
-            podcastFeedsStatus = .failed
-            currentOperation = "Failed to sync podcast feeds"
-            print("❌ Podcast feeds sync failed: \(error)")
-        }
+        podcastFeedsStatus = .completed
+        podcastFeedsProgress = 1.0
+        print("✅ Podcast feeds sync completed")
     }
     
     @MainActor
@@ -271,26 +239,104 @@ class DataSyncManager: ObservableObject {
         podcastFeedsStatus = .pending
         podcastFeedsProgress = 0.0
         
+        artworkDownloadsStatus = .pending
+        artworkDownloadsProgress = 0.0
+        
         episodeStatesStatus = .pending
         episodeStatesProgress = 0.0
         
         userPreferencesStatus = .pending
         userPreferencesProgress = 0.0
+        
+        // Reset artwork tracking
+        totalArtworkDownloads = 0
+        completedArtworkDownloads = 0
     }
     
     private func setupProgressCalculation() {
-        // Calculate overall progress based on individual progress values
-        Publishers.CombineLatest4(
-            $radioStationsProgress,
-            $podcastFeedsProgress,
-            $episodeStatesProgress,
+        // Calculate overall progress based on individual progress values including artwork
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(
+                $radioStationsProgress,
+                $podcastFeedsProgress,
+                $artworkDownloadsProgress,
+                $episodeStatesProgress
+            ),
             $userPreferencesProgress
         )
-        .map { radio, podcast, episode, preference in
-            return (radio + podcast + episode + preference) / 4.0
+        .map { first, preference in
+            let (radio, podcast, artwork, episode) = first
+            return (radio + podcast + artwork + episode + preference) / 5.0
         }
         .assign(to: \.overallProgress, on: self)
         .store(in: &cancellables)
+    }
+    
+    // MARK: - Artwork Download Tracking Methods
+    
+    /// Start tracking artwork downloads for a given number of feeds
+    @MainActor
+    func startArtworkDownloadTracking(totalFeeds: Int) {
+        guard totalFeeds > 0 else {
+            artworkDownloadsStatus = .completed
+            artworkDownloadsProgress = 1.0
+            return
+        }
+        
+        totalArtworkDownloads = totalFeeds
+        completedArtworkDownloads = 0
+        artworkDownloadsStatus = .inProgress
+        artworkDownloadsProgress = 0.0
+        currentOperation = "Downloading artwork..."
+        
+        print("🎨 Started tracking artwork downloads for \(totalFeeds) feeds")
+    }
+    
+    /// Report that an artwork download has completed
+    @MainActor
+    func reportArtworkDownloadCompleted(feedTitle: String) {
+        completedArtworkDownloads += 1
+        artworkDownloadsProgress = Double(completedArtworkDownloads) / Double(totalArtworkDownloads)
+        currentOperation = "Downloaded artwork for \(feedTitle) (\(completedArtworkDownloads)/\(totalArtworkDownloads))"
+        
+        print("🎨 Artwork completed for \(feedTitle): \(completedArtworkDownloads)/\(totalArtworkDownloads)")
+        
+        if completedArtworkDownloads >= totalArtworkDownloads {
+            artworkDownloadsStatus = .completed
+            artworkDownloadsProgress = 1.0
+            currentOperation = "All artwork downloads completed"
+            print("✅ All artwork downloads completed")
+        }
+    }
+    
+    /// Report that an artwork download failed
+    @MainActor
+    func reportArtworkDownloadFailed(feedTitle: String, error: Error) {
+        completedArtworkDownloads += 1
+        artworkDownloadsProgress = Double(completedArtworkDownloads) / Double(totalArtworkDownloads)
+        currentOperation = "Artwork failed for \(feedTitle) (\(completedArtworkDownloads)/\(totalArtworkDownloads))"
+        
+        print("⚠️ Artwork failed for \(feedTitle): \(error.localizedDescription)")
+        
+        if completedArtworkDownloads >= totalArtworkDownloads {
+            artworkDownloadsStatus = .completed
+            artworkDownloadsProgress = 1.0
+            currentOperation = "Artwork downloads completed (some failed)"
+            print("✅ All artwork downloads completed (some failed)")
+        }
+    }
+    
+    /// Wait for artwork downloads to complete
+    @MainActor
+    private func waitForArtworkDownloads() async {
+        print("⏳ Waiting for artwork downloads to complete...")
+        
+        // Wait until artwork downloads are completed or failed
+        while artworkDownloadsStatus == .inProgress {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        }
+        
+        print("✅ Artwork downloads completed, proceeding with app initialization")
     }
     
     @MainActor
@@ -348,56 +394,9 @@ class DataSyncManager: ObservableObject {
     }
     
     private func processFreshInstallFeeds(_ cloudKitFeeds: [PodcastFeed]) async {
-        // Use existing PodcastViewModel logic for processing feeds
-        let podcastViewModel = await PodcastViewModel()
-        
-        // This integrates with the existing fresh install logic
-        await podcastViewModel.loadFreshInstallPodcastData(cloudKitFeeds)
-        
-        print("📡 Processed \(cloudKitFeeds.count) podcast feeds from CloudKit")
-    }
-
-}
-
-// MARK: - PodcastViewModel Extension for Fresh Install
-extension PodcastViewModel {
-    func loadFreshInstallPodcastData(_ cloudKitFeeds: [PodcastFeed]) async {
-        // Use the existing fresh install logic with progress updates  
-        await MainActor.run {
-            self.isLoading = true
-        }
-        
-        print("🚀 Processing \(cloudKitFeeds.count) feeds for fresh install")
-        
-        // Process feeds directly without accessing private methods
-        for feed in cloudKitFeeds {
-            do {
-                print("📡 Processing feed: \(feed.title)")
-                
-                // Use public FeedManager to properly add feed with RSS parsing
-                guard let url = URL(string: feed.url) else {
-                    print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
-                    continue
-                }
-                
-                let feedManager = PodcastFeedManager()
-                let addedFeed = try await feedManager.addFeed(from: url)
-                print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
-                
-            } catch {
-                print("❌ Failed to process feed \(feed.title): \(error)")
-                
-                // Skip saving if RSS parsing fails - let the existing system handle it
-                print("⚠️ Skipping feed save due to RSS parsing failure")
-            }
-        }
-        
-        await MainActor.run {
-            self.isLoading = false
-            self.loadFeedsFromCoreData()
-        }
-        
-        print("🎉 Fresh install processing complete")
+        // NOTE: This method is no longer used to prevent duplicate PodcastViewModel creation
+        // PodcastViewModel handles its own CloudKit sync via initializeWithCloudKitSupport()
+        print("📡 DataSyncManager: Skipping duplicate feed processing - handled by PodcastViewModel")
     }
 }
 

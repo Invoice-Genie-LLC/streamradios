@@ -76,6 +76,29 @@ struct PodcastListView: View {
                                .padding(.bottom, podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
                        }
                    }
+                   
+                   // Mini Player Overlay (positioned at bottom of ZStack)
+                   if podcastPlayer.isPlaying && !radioPlayer.isPlaying, 
+                      let currentEpisode = podcastPlayer.currentEpisode, 
+                      let currentFeed = podcastPlayer.currentFeed {
+                       MiniPodcastPlayerView(
+                           currentEpisode: currentEpisode,
+                           currentFeed: currentFeed,
+                           podcastPlayer: podcastPlayer,
+                           viewModel: viewModel,
+                           selectedPodcast: $selectedPodcast,
+                           onListButtonTap: {
+                               selectedPodcast = currentFeed
+                               scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                           },
+                           onCloseButtonTap: {
+                               podcastPlayer.pause()
+                               podcastPlayer.currentEpisode = nil
+                               podcastPlayer.currentFeed = nil
+                           }
+                       )
+                       .transition(.move(edge: .bottom))
+                   }
                }
                .navigationTitle("Podcasts")
                .toolbar {
@@ -131,28 +154,6 @@ struct PodcastListView: View {
                            updatePodcast(updatedPodcast)
                        }
                    )
-                   .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 40 : 0)
-                   
-                   // Fixed Mini Player
-                   if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                       MiniPodcastPlayerView(
-                           currentEpisode: currentEpisode,
-                           currentFeed: currentFeed,
-                           podcastPlayer: podcastPlayer,
-                           viewModel: viewModel,
-                           selectedPodcast: $selectedPodcast,
-                           onListButtonTap: {
-                               selectedPodcast = currentFeed
-                               scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                           },
-                           onCloseButtonTap: {
-                               podcastPlayer.pause()
-                               podcastPlayer.currentEpisode = nil
-                               podcastPlayer.currentFeed = nil
-                           }
-                       )
-                       .transition(.move(edge: .bottom))
-                   }
                }
                
            }
@@ -312,13 +313,24 @@ struct PodcastListView: View {
     }
     
     private func updatePodcast(_ updatedPodcast: PodcastFeed) {
-        print("DEBUG: Updating podcast - Title: '\(updatedPodcast.title)', URL: '\(updatedPodcast.url)'")
+        print("DEBUG: PodcastListView - Updating podcast - ID: \(updatedPodcast.id), Title: '\(updatedPodcast.title)', URL: '\(updatedPodcast.url)'")
+        
+        // Update the podcast feed
         viewModel.updatePodcastFeed(updatedPodcast)
+        
+        // Force UI refresh by triggering objectWillChange
+        DispatchQueue.main.async {
+            self.viewModel.objectWillChange.send()
+        }
+        
+        // Clean up edit state
         showingEditPodcast = false
         editPodcastTitle = ""
         editPodcastURL = ""
         podcastToEdit = nil
         refreshID = UUID() // Force view refresh to show updated data
+        
+        print("DEBUG: PodcastListView - Edit completed and UI refreshed")
     }
     
     private func playLatestEpisode(for feed: PodcastFeed) {
