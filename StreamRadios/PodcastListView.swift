@@ -431,15 +431,12 @@ struct PodcastRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 HStack(alignment: .top, spacing: 12) {
-                                         AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { image in
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                    } placeholder: {
-                        Image(systemName: "music.note")
-                            .foregroundColor(.gray)
-                            .frame(width: 60, height: 60)
-                    }
+                    // Use PodcastIconView for immediate loading from Core Data
+                    PodcastIconView(
+                        iconData: feed.iconData,
+                        imageData: feed.imageData,
+                        artworkUrl: feed.artworkUrl
+                    )
                     .frame(width: iconSize, height: iconSize)
                     .onTapGesture {
                         onTap()
@@ -1512,21 +1509,12 @@ struct PodcastPlayerView: View {
             GeometryReader { geometry in
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 20) {
-                        // Enhanced artwork with shadow and border
-                        AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                        } placeholder: {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color.gray.opacity(0.2))
-                                
-                                Image(systemName: "music.note")
-                                    .font(.system(size: 30))
-                                    .foregroundColor(.gray)
-                            }
-                        }
+                        // Enhanced artwork with shadow and border using pre-downloaded data
+                        PodcastIconView(
+                            iconData: feed.iconData,
+                            imageData: feed.imageData,
+                            artworkUrl: feed.artworkUrl
+                        )
                         .frame(width: min(130, geometry.size.width * 0.35))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .overlay(
