@@ -432,6 +432,24 @@ class EpisodeStateManager: ObservableObject {
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded)")
     }
     
+    /// Clear all data for a specific episode (used when deleting podcasts)
+    func clearEpisodeData(_ episodeId: String) {
+        episodeStates.removeValue(forKey: episodeId)
+        episodeProgress.removeValue(forKey: episodeId)
+        episodeFavorites.removeValue(forKey: episodeId)
+        episodeDownloads.removeValue(forKey: episodeId)
+        episodeCurrentTime.removeValue(forKey: episodeId)
+        
+        // Clear currently playing if this is the episode
+        if currentlyPlayingEpisodeId == episodeId {
+            currentlyPlayingEpisodeId = nil
+        }
+        
+        saveCurrentStates()
+        sendThrottledUpdate()
+        print("🗑️ EpisodeStateManager: Cleared all data for episode \(episodeId)")
+    }
+    
     func clearAllStates() {
         episodeStates.removeAll()
         episodeProgress.removeAll()

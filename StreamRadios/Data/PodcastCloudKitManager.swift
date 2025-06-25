@@ -23,16 +23,27 @@ class PodcastCloudKitManager {
     // MARK: - Episode State CloudKit Sync
     
     /// Save episode state to CloudKit with proper conflict resolution
-    func saveEpisodeState(episodeId: String, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool) async {
+    func saveEpisodeState(episodeId: String, feedId: String, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool) async {
         do {
-            try await saveEpisodeStateToCloudKit(episodeId, progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
+            try await saveEpisodeStateToCloudKit(episodeId, feedId: feedId, progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
         } catch {
             os_log("❌ Failed to save episode state to CloudKit: %@", log: log, type: .error, error.localizedDescription)
         }
     }
     
-    /// Save episode state to CloudKit with proper update/insert logic
-    private func saveEpisodeStateToCloudKit(_ episodeId: String, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool) async throws {
+    /// Save episode state to CloudKit with proper update/insert logic and feed relationship
+    private func saveEpisodeStateToCloudKit(_ episodeId: String, feedId: String, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool) async throws {
+        // Validate inputs to prevent crashes
+        guard !episodeId.isEmpty else {
+            os_log("❌ Cannot save episode state: episodeId is empty", log: log, type: .error)
+            throw CKError(.invalidArguments)
+        }
+        
+        guard !feedId.isEmpty else {
+            os_log("❌ Cannot save episode state: feedId is empty for episode %@", log: log, type: .error, episodeId)
+            throw CKError(.invalidArguments)
+        }
+        
         let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
         
         // First try to fetch existing record
@@ -50,11 +61,17 @@ class PodcastCloudKitManager {
         
         // Update record fields
         record["episodeId"] = episodeId as CKRecordValue
+        record["feedId"] = feedId as CKRecordValue  // Add feed reference for relationship
         record["progress"] = progress as CKRecordValue
         record["isFavorite"] = isFavorite as CKRecordValue
         record["isDownloaded"] = isDownloaded as CKRecordValue
         record["isPlayed"] = isPlayed as CKRecordValue
         record["lastUpdated"] = Date() as CKRecordValue
+        
+        // Create CloudKit reference to the podcast feed for automatic deletion
+        let feedRecordID = CKRecord.ID(recordName: feedId)
+        let feedReference = CKRecord.Reference(recordID: feedRecordID, action: .deleteSelf)
+        record["podcastFeed"] = feedReference as CKRecordValue
         
         // Save with proper policy
         let operation = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
@@ -62,11 +79,11 @@ class PodcastCloudKitManager {
         operation.qualityOfService = .userInitiated
         
         try await privateDatabase.add(operation)
-        os_log("✅ Saved episode state to CloudKit: %@", log: log, type: .info, episodeId)
+        os_log("✅ Saved episode state to CloudKit with feed reference: %@ -> %@", log: log, type: .info, episodeId, feedId)
     }
     
     /// Fetch episode state from CloudKit
-    func fetchEpisodeStateFromCloudKit(_ episodeId: String) async throws -> (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool)? {
+    func fetchEpisodeStateFromCloudKit(_ episodeId: String) async throws -> (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool, feedId: String?)? {
         let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
         
         do {
@@ -76,8 +93,9 @@ class PodcastCloudKitManager {
             let isFavorite = record["isFavorite"] as? Bool ?? false
             let isDownloaded = record["isDownloaded"] as? Bool ?? false
             let isPlayed = record["isPlayed"] as? Bool ?? false
+            let feedId = record["feedId"] as? String  // Extract feedId for reference
             
-            return (progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
+            return (progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed, feedId: feedId)
         } catch CKError.unknownItem {
             // Episode state doesn't exist in CloudKit yet
             return nil
@@ -154,13 +172,13 @@ class PodcastCloudKitManager {
     }
     
     /// Fetch all episode states from CloudKit (for bulk sync operations)
-    func fetchAllEpisodeStatesFromCloudKit() async throws -> [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool)] {
+    func fetchAllEpisodeStatesFromCloudKit() async throws -> [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool, feedId: String?)] {
         os_log("🔄 Fetching all episode states from CloudKit", log: log, type: .info)
         
         let query = CKQuery(recordType: RecordType.episodeState, predicate: NSPredicate(value: true))
         query.sortDescriptors = [NSSortDescriptor(key: "lastUpdated", ascending: false)]
         
-        var episodeStates: [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool)] = [:]
+        var episodeStates: [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool, feedId: String?)] = [:]
         
         do {
             let (matchResults, _) = try await privateDatabase.records(matching: query)
@@ -173,8 +191,9 @@ class PodcastCloudKitManager {
                         let isFavorite = record["isFavorite"] as? Bool ?? false
                         let isDownloaded = record["isDownloaded"] as? Bool ?? false
                         let isPlayed = record["isPlayed"] as? Bool ?? false
+                        let feedId = record["feedId"] as? String
                         
-                        episodeStates[episodeId] = (progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
+                        episodeStates[episodeId] = (progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed, feedId: feedId)
                     }
                 case .failure(let error):
                     os_log("❌ Failed to fetch episode state record %@: %@", log: log, type: .error, recordID.recordName, error.localizedDescription)
@@ -308,4 +327,6 @@ class PodcastCloudKitManager {
             throw error
         }
     }
+    
+
 }

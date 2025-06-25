@@ -163,40 +163,46 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Add a new podcast feed with background processing and CloudKit sync
+    /// Add a new podcast feed with immediate UI update and background processing
     func addPodcastFeed(url: String) async -> Bool {
-        isLoading = true
-        
         guard let feedURL = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            self.error = "Invalid URL format"
-            isLoading = false
+            await MainActor.run {
+                self.error = "Invalid URL format"
+            }
             return false
         }
         
         do {
-            // Step 1: Use feed manager to add the feed (this handles Core Data saving)
+            // Step 1: Parse feed and create feed object
             let feed = try await feedManager.addFeed(from: feedURL)
+            print("📊 Parsed feed: \(feed.title)")
             
-            print("📊 Added feed: \(feed.title)")
-            
-            // Step 2: Save to CloudKit for future fresh installs
-            do {
-                try await PodcastCloudKitManager.shared.savePodcastFeedToCloudKit(feed)
-                print("✅ Saved feed to CloudKit: \(feed.title)")
-            } catch {
-                print("⚠️ Failed to save feed to CloudKit (local save succeeded): \(error)")
-                // Continue even if CloudKit save fails
+            // Step 2: Immediate UI update - add to arrays for instant feedback
+            await MainActor.run {
+                self.podcastFeeds.append(feed)
+                self.podcastFeedOrder.append(feed.id)
+                self.objectWillChange.send()
+                print("✅ Feed immediately added to UI: \(feed.title)")
             }
             
-            // Step 3: Update UI
-            self.loadFeedsFromCoreData()
-            isLoading = false
+            // Step 3: Background CloudKit sync
+            Task {
+                do {
+                    try await cloudKitManager.savePodcastFeedToCloudKit(feed)
+                    print("☁️ Successfully saved feed to CloudKit: \(feed.title)")
+                } catch {
+                    print("⚠️ Failed to save feed to CloudKit (local save succeeded): \(error)")
+                    // Continue even if CloudKit save fails - local data is preserved
+                }
+            }
+            
             return true
             
         } catch {
             print("❌ Failed to add podcast feed: \(error)")
-            self.error = "Failed to add podcast feed: \(error.localizedDescription)"
-            isLoading = false
+            await MainActor.run {
+                self.error = "Failed to add podcast feed: \(error.localizedDescription)"
+            }
             return false
         }
     }
@@ -404,15 +410,34 @@ class PodcastViewModel: ObservableObject {
                 self.episodeProgress[episodeId] = finalProgress
             }
             
-            // Sync to CloudKit (single call, non-blocking)
-            Task.detached(priority: .userInitiated) {
-                await PodcastCloudKitManager.shared.saveEpisodeState(
-                    episodeId: episodeId,
-                    progress: finalProgress,
-                    isFavorite: currentFavorite,
-                    isDownloaded: currentDownloaded,
-                    isPlayed: finalIsPlayed
-                )
+            // Get feedId for the episode to establish CloudKit relationship
+            let episodeFeedId: String?
+            if let currentEpisode = self.currentEpisodes.first(where: { $0.id == episodeId }) {
+                episodeFeedId = currentEpisode.feedId
+            } else if let selectedId = self.selectedFeedId, !selectedId.isEmpty {
+                // Fallback: use currently selected feed
+                episodeFeedId = selectedId
+            } else {
+                // Last resort: query Core Data for the episode's feedId
+                episodeFeedId = await self.getFeedIdForEpisode(episodeId)
+            }
+            
+            // Sync to CloudKit (single call, non-blocking) with feed relationship
+            // Only sync if we have a valid feedId to prevent crashes
+            if let validFeedId = episodeFeedId, !validFeedId.isEmpty {
+                Task.detached(priority: .userInitiated) {
+                    await PodcastCloudKitManager.shared.saveEpisodeState(
+                        episodeId: episodeId,
+                        feedId: validFeedId,
+                        progress: finalProgress,
+                        isFavorite: currentFavorite,
+                        isDownloaded: currentDownloaded,
+                        isPlayed: finalIsPlayed
+                    )
+                }
+            } else {
+                print("⚠️ Skipping CloudKit sync for episode \(episodeId) - no valid feedId found")
+                print("⚠️ Debug: selectedFeedId=\(self.selectedFeedId ?? "nil"), currentEpisodes.count=\(self.currentEpisodes.count)")
             }
             
             // CRITICAL: Save to Core Data immediately for persistence and fast app restart
@@ -460,35 +485,69 @@ class PodcastViewModel: ObservableObject {
     /// Delete a podcast feed
     @MainActor
     func deletePodcastFeed(_ feed: PodcastFeed) {
-        isLoading = true
+        print("🗑️ Starting comprehensive deletion of feed: \(feed.title)")
         
+        // Step 1: Get all episode IDs BEFORE any deletion starts to ensure we capture all episodes
         Task {
-            do {
-                print("🗑️ Deleting feed: \(feed.title)")
+            let episodeIds = await getEpisodeIdsForFeed(feed.id)
+            print("🗑️ Found \(episodeIds.count) episodes to clean up for feed: \(feed.title)")
+            
+            // Step 2: Immediate UI update - remove from arrays for instant feedback
+            await MainActor.run {
+                if let index = self.podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
+                    self.podcastFeeds.remove(at: index)
+                }
+                self.podcastFeedOrder.removeAll { $0 == feed.id }
+                self.currentEpisodes.removeAll { $0.feedId == feed.id }
                 
-                // Step 1: Delete from CloudKit
-                do {
-                    try await PodcastCloudKitManager.shared.deletePodcastFeedFromCloudKit(feed.id)
-                    print("✅ Deleted feed from CloudKit: \(feed.title)")
-                } catch {
-                    print("⚠️ Failed to delete from CloudKit (will continue with local deletion): \(error)")
-                    // Continue even if CloudKit deletion fails
+                // Clear selected feed if it's the one being deleted
+                if self.selectedFeedId == feed.id {
+                    self.selectedFeedId = nil
                 }
                 
-                // Step 2: Delete from Core Data
+                // Trigger immediate UI update
+                self.objectWillChange.send()
+            }
+            
+            // Step 3: Background cleanup - all data associated with the feed
+            do {
+                // Delete episode progress, favorites, and downloads from EpisodeStateManager
+                for episodeId in episodeIds {
+                    EpisodeStateManager.shared.clearEpisodeData(episodeId)
+                }
+                print("✅ Cleared \(episodeIds.count) episode states from EpisodeStateManager")
+                
+                // Delete downloaded episode files
+                await deleteDownloadedEpisodeFiles(episodeIds)
+                
+                // Delete feed from CloudKit (this will automatically delete all related episode states)
+                do {
+                    try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
+                    print("☁️ Deleted feed from CloudKit: \(feed.title)")
+                    print("☁️ CloudKit automatically deleted \(episodeIds.count) related episode states due to .deleteSelf relationship")
+                } catch {
+                    print("⚠️ Failed to delete feed from CloudKit: \(error)")
+                }
+                
+                // Delete from Core Data (episodes and feed) - this will also remove episode states
                 try await deleteFeedFromCoreData(feed)
-                print("✅ Deleted feed from Core Data: \(feed.title)")
+                print("💾 Deleted feed and \(episodeIds.count) episodes from Core Data: \(feed.title)")
                 
-                // Step 3: Update UI
-                self.loadFeedsFromCoreData()
-                self.isLoading = false
-                
-                print("🎉 Successfully deleted podcast feed: \(feed.title)")
+                print("🎉 Successfully completed comprehensive deletion of: \(feed.title)")
+                print("📊 Cleanup summary:")
+                print("   - EpisodeStateManager: \(episodeIds.count) episode states cleared")
+                print("   - CloudKit: Feed deleted with automatic cascade deletion of \(episodeIds.count) episode states")
+                print("   - Downloaded files: cleaned up")
+                print("   - Core Data: feed and \(episodeIds.count) episodes deleted")
                 
             } catch {
-                print("❌ Failed to delete podcast feed: \(error)")
-                self.error = "Failed to delete podcast feed: \(error.localizedDescription)"
-                self.isLoading = false
+                print("❌ Error during background cleanup: \(error)")
+                
+                // If background cleanup fails, reload UI to show correct state
+                await MainActor.run {
+                    self.loadFeedsFromCoreData()
+                    self.error = "Failed to completely delete podcast: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -499,6 +558,81 @@ class PodcastViewModel: ObservableObject {
         // Setup observers for episode state changes
         // Note: EpisodeStateManager.shared.progressPublisher is not implemented yet
         // Will be added when state management is fully integrated
+    }
+    
+    /// Get all episode IDs for a feed from Core Data
+    private func getEpisodeIdsForFeed(_ feedId: String) async -> [String] {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                request.predicate = NSPredicate(format: "feedId == %@", feedId)
+                
+                do {
+                    let episodes = try context.fetch(request)
+                    let episodeIds = episodes.compactMap { $0.id }
+                    continuation.resume(returning: episodeIds)
+                } catch {
+                    print("❌ Failed to get episode IDs: \(error)")
+                    continuation.resume(returning: [])
+                }
+            }
+        }
+    }
+    
+    /// Get feedId for a specific episode from Core Data (fallback method)
+    private func getFeedIdForEpisode(_ episodeId: String) async -> String? {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                request.predicate = NSPredicate(format: "id == %@", episodeId)
+                request.propertiesToFetch = ["feedId"]
+                request.fetchLimit = 1
+                
+                do {
+                    let episodes = try context.fetch(request)
+                    let feedId = episodes.first?.feedId
+                    print("🔍 Core Data lookup for episode \(episodeId) found feedId: \(feedId ?? "nil")")
+                    continuation.resume(returning: feedId)
+                } catch {
+                    print("❌ Failed to get feedId for episode \(episodeId): \(error)")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+    
+    /// Delete downloaded episode files from device storage
+    private func deleteDownloadedEpisodeFiles(_ episodeIds: [String]) async {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let episodesFolder = documentsPath.appendingPathComponent("DownloadedEpisodes")
+        
+        var deletedCount = 0
+        
+        for episodeId in episodeIds {
+            // Try multiple file extensions as episodes might have different formats
+            let extensions = ["mp3", "m4a", "wav", "aac"]
+            let sanitizedId = sanitizeFilename(episodeId)
+            
+            for ext in extensions {
+                let fileName = "\(sanitizedId).\(ext)"
+                let fileURL = episodesFolder.appendingPathComponent(fileName)
+                
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    do {
+                        try FileManager.default.removeItem(at: fileURL)
+                        deletedCount += 1
+                        print("🗑️ Deleted downloaded file: \(fileName)")
+                        break // Found and deleted the file, no need to check other extensions
+                    } catch {
+                        print("❌ Failed to delete file \(fileName): \(error)")
+                    }
+                }
+            }
+        }
+        
+        print("📁 Deleted \(deletedCount) downloaded episode files")
     }
     
     private func performEpisodeLoad(feedId: String, page: Int, isInitialLoad: Bool = false, isAppending: Bool = false) async {
@@ -1173,7 +1307,7 @@ class PodcastViewModel: ObservableObject {
     // MARK: - Delete Feed with CloudKit Integration
     
     private func deleteFeedFromCoreData(_ feed: PodcastFeed) async throws {
-        return try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { continuation in
             let context = CoreDataStack.shared.context
             
             context.perform {
@@ -1969,31 +2103,7 @@ extension PodcastViewModel {
         }
     }
     
-    /// Delete a podcast feed from Core Data (following radio station pattern)
-    func deletePodcastFeedFromCoreData(_ feed: PodcastFeed) {
-        let context = CoreDataStack.shared.persistentContainer.viewContext
-        let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-        request.predicate = NSPredicate(format: "id == %@", feed.id)
-        
-        do {
-            let results = try context.fetch(request)
-            for object in results {
-                context.delete(object)
-            }
-            try context.save()
-            
-            // Remove from in-memory arrays
-            podcastFeeds.removeAll { $0.id == feed.id }
-            podcastFeedOrder.removeAll { $0 == feed.id }
-            
-            // Remove associated episodes
-            currentEpisodes.removeAll { $0.feedId == feed.id }
-            
-            print("📡 Podcast feed deleted from CoreData successfully.")
-        } catch {
-            print("❌ Failed to delete podcast feed from CoreData: \(error)")
-        }
-    }
+
     
     /// Clear all podcast data from Core Data (following radio station pattern)
     func clearPodcastCoreData(completion: @escaping (Bool, Error?) -> Void) {
