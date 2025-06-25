@@ -487,9 +487,16 @@ struct AddPodcastView: View {
         LazyVStack(spacing: 12) {
             ForEach(searchService.searchResults, id: \.id) { result in
                 PodcastSearchResultRow(result: result) {
+                    // Dismiss keyboard when a podcast is selected
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    
                     // Populate the form fields when a podcast is selected
                     title = result.title
                     url = result.feedUrl
+                    
+                    // Clear search results and text to dismiss the selection list
+                    searchText = ""
+                    searchService.clearResults()
                 }
             }
         }
