@@ -6,6 +6,253 @@
 //
 
 import SwiftUI
+import CryptoKit
+import CommonCrypto
+
+// MARK: - PodcastIndex Authentication Extension
+extension String {
+    func sha1() -> String {
+        let data = Data(self.utf8)
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
+        data.withUnsafeBytes {
+            _ = CC_SHA1($0.baseAddress, CC_LONG(data.count), &digest)
+        }
+        let hexBytes = digest.map { String(format: "%02hhx", $0) }
+        return hexBytes.joined()
+    }
+}
+
+// MARK: - Podcast Search Models
+struct PodcastSearchResult: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let feedUrl: String
+    let artworkUrl: String?
+    let description: String?
+    let author: String?
+    let source: SearchSource
+    
+    enum SearchSource {
+        case podcastIndex
+        case iTunes
+    }
+}
+
+struct PodcastIndexResponse: Codable {
+    let feeds: [PodcastIndexFeed]
+}
+
+struct PodcastIndexFeed: Codable {
+    let id: Int
+    let title: String
+    let url: String
+    let description: String?
+    let author: String?
+    let image: String?
+    let artwork: String?
+    
+    var searchResult: PodcastSearchResult {
+        PodcastSearchResult(
+            id: "pi_\(id)",
+            title: title,
+            feedUrl: url,
+            artworkUrl: image ?? artwork,
+            description: description,
+            author: author,
+            source: .podcastIndex
+        )
+    }
+}
+
+struct iTunesSearchResponse: Codable {
+    let results: [iTunesResult]
+}
+
+struct iTunesResult: Codable {
+    let collectionId: Int
+    let collectionName: String
+    let feedUrl: String?
+    let artworkUrl100: String?
+    let artistName: String?
+    let collectionCensoredName: String?
+    
+    var searchResult: PodcastSearchResult? {
+        guard let feedUrl = feedUrl else { return nil }
+        return PodcastSearchResult(
+            id: "itunes_\(collectionId)",
+            title: collectionCensoredName ?? collectionName,
+            feedUrl: feedUrl,
+            artworkUrl: artworkUrl100,
+            description: nil,
+            author: artistName,
+            source: .iTunes
+        )
+    }
+}
+
+// MARK: - Podcast Search Service
+@MainActor
+class PodcastSearchService: ObservableObject {
+    @Published var searchResults: [PodcastSearchResult] = []
+    @Published var isSearching = false
+    @Published var searchError: String?
+    
+    private let podcastIndexAPIKey = "CCWZDUP9ANLKNFNCJTNC"
+    let podcastIndexAPISecret = "Fz3pSCAcLdJpGF$JUEdvxLHc#Z^UT96FEgHcB9Wg" // Get from https://api.podcastindex.org/signup
+    
+    func searchPodcasts(query: String) async {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            self.searchResults = []
+            return
+        }
+        
+        self.isSearching = true
+        self.searchError = nil
+        
+        // Search both APIs, but handle failures gracefully
+        var piResults: [PodcastSearchResult] = []
+        var itunesResults: [PodcastSearchResult] = []
+        
+        // Try PodcastIndex first, but don't fail if it doesn't work
+        do {
+            piResults = try await searchPodcastIndex(query: query)
+            print("✅ PodcastIndex returned \(piResults.count) results")
+        } catch {
+            print("⚠️ PodcastIndex search failed: \(error.localizedDescription)")
+            // Don't set error here, we'll fall back to iTunes
+        }
+        
+        // Always try iTunes as fallback
+        do {
+            itunesResults = try await searchiTunes(query: query)
+            print("✅ iTunes returned \(itunesResults.count) results")
+        } catch {
+            print("⚠️ iTunes search failed: \(error.localizedDescription)")
+        }
+        
+        // Combine results, removing duplicates by feed URL
+        var combinedResults: [PodcastSearchResult] = []
+        var seenUrls: Set<String> = []
+        
+        // Add PodcastIndex results first
+        for result in piResults {
+            if !seenUrls.contains(result.feedUrl) {
+                combinedResults.append(result)
+                seenUrls.insert(result.feedUrl)
+            }
+        }
+        
+        // Add iTunes results if not already present
+        for result in itunesResults {
+            if !seenUrls.contains(result.feedUrl) {
+                combinedResults.append(result)
+                seenUrls.insert(result.feedUrl)
+            }
+        }
+        
+        self.searchResults = combinedResults
+        
+        // Only show error if both APIs failed and we have no results
+        if combinedResults.isEmpty && piResults.isEmpty && itunesResults.isEmpty {
+            if podcastIndexAPISecret == "Fz3pSCAcLdJpGF$JUEdvxLHc#Z^UT96FEgHcB9Wg" {
+                self.searchError = "Please add your PodcastIndex.org API secret to enable full search functionality. Currently using iTunes only."
+            } else {
+                self.searchError = "Search temporarily unavailable. Please try again."
+            }
+        }
+        
+        self.isSearching = false
+    }
+    
+    private func searchPodcastIndex(query: String) async throws -> [PodcastSearchResult] {
+        // Skip PodcastIndex if secret is not configured
+        guard podcastIndexAPISecret != "YOUR_SECRET_HERE" else {
+            print("🔑 PodcastIndex API secret not configured, skipping...")
+            return []
+        }
+        
+        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "https://api.podcastindex.org/api/1.0/search/byterm?q=\(encodedQuery)&max=50") else {
+            throw URLError(.badURL)
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("StreamRadios/1.0", forHTTPHeaderField: "User-Agent")
+        
+        // Generate authorization headers for PodcastIndex
+        // Create authorization header (using PodcastIndex.org official method)
+        let timestamp = String(Int(Date().timeIntervalSince1970))
+        let authString = podcastIndexAPIKey + podcastIndexAPISecret + timestamp
+        let hashString = authString.sha1()
+        
+        request.setValue(podcastIndexAPIKey, forHTTPHeaderField: "X-Auth-Key")
+        request.setValue(timestamp, forHTTPHeaderField: "X-Auth-Date")
+        request.setValue(hashString, forHTTPHeaderField: "Authorization")
+        
+        print("🔑 PodcastIndex Auth Debug:")
+        print("   API Key: \(String(podcastIndexAPIKey.prefix(8)))...")
+        print("   Secret: \(String(podcastIndexAPISecret.prefix(8)))...")
+        print("   Timestamp: \(timestamp)")
+        print("   Auth String: \(String(authString.prefix(20)))...")
+        print("   Hash: \(hashString)")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        // Check if we got HTML instead of JSON (common with auth errors)
+        if let httpResponse = response as? HTTPURLResponse,
+           let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type"),
+           contentType.contains("text/html") {
+            print("🚫 PodcastIndex returned HTML (likely auth error), status: \(httpResponse.statusCode)")
+            throw NSError(domain: "PodcastIndexError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Authentication failed"])
+        }
+        
+        // Try to decode as JSON
+        do {
+            let response = try JSONDecoder().decode(PodcastIndexResponse.self, from: data)
+            return response.feeds.map { $0.searchResult }
+        } catch {
+            // Log the actual response for debugging
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🚫 PodcastIndex JSON decode failed. Response: \(responseString.prefix(200))")
+            }
+            throw error
+        }
+    }
+    
+    private func searchiTunes(query: String) async throws -> [PodcastSearchResult] {
+        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "https://itunes.apple.com/search?term=\(encodedQuery)&media=podcast&limit=50") else {
+            throw URLError(.badURL)
+        }
+        
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        // Check HTTP response
+        if let httpResponse = response as? HTTPURLResponse,
+           httpResponse.statusCode != 200 {
+            print("🚫 iTunes API error, status: \(httpResponse.statusCode)")
+            throw NSError(domain: "iTunesError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "iTunes API error"])
+        }
+        
+        do {
+            let response = try JSONDecoder().decode(iTunesSearchResponse.self, from: data)
+            return response.results.compactMap { $0.searchResult }
+        } catch {
+            // Log the actual response for debugging
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🚫 iTunes JSON decode failed. Response: \(responseString.prefix(200))")
+            }
+            throw error
+        }
+    }
+    
+    func clearResults() {
+        searchResults = []
+        searchError = nil
+    }
+}
 
 struct AddPodcastView: View {
     @Binding var isPresented: Bool
@@ -21,6 +268,9 @@ struct AddPodcastView: View {
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
     @StateObject private var radioPlayer = RadioPlayer.shared
+    @StateObject private var searchService = PodcastSearchService()
+    @State private var searchText = ""
+    @State private var searchTask: Task<Void, Never>?
     
     // Add editing support
     let podcastToEdit: PodcastFeed?
@@ -61,6 +311,7 @@ struct AddPodcastView: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         LazyVStack(spacing: 24) {
+                            podcastSearchCard
                             modernPodcastDetailsCard
                         }
                         .padding(.horizontal, 16)
@@ -139,6 +390,190 @@ struct AddPodcastView: View {
     }
     
     // MARK: - Modern UI Components
+    
+    @ViewBuilder
+    private var podcastSearchCard: some View {
+        VStack(spacing: 16) {
+            // Search Header
+            searchHeader
+            
+            // Search Results
+            if searchService.isSearching {
+                loadingView
+            } else if !searchService.searchResults.isEmpty {
+                searchResultsList
+            } else if !searchText.isEmpty && !searchService.isSearching {
+                noResultsView
+            }
+            
+            // Error Message
+            if let error = searchService.searchError {
+                errorView(error)
+            }
+            
+            // Credit Section (required by PodcastIndex.org)
+            creditSection
+        }
+    }
+    
+    @ViewBuilder
+    private var searchHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                
+                Text("Search Podcasts")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                
+                Spacer()
+            }
+            
+            HStack {
+                TextField("Search for podcasts...", text: $searchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                    .onChange(of: searchText) { newValue in
+                        performSearch(query: newValue)
+                    }
+                    .padding(.leading, 4)
+                
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                        searchService.clearResults()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(8)
+        }
+        .padding(20)
+        .background(cardBackgroundColor)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+        )
+    }
+    
+    @ViewBuilder
+    private var loadingView: some View {
+        HStack {
+            ProgressView()
+                .scaleEffect(0.8)
+            Text("Searching podcasts...")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(cardBackgroundColor)
+        .cornerRadius(8)
+    }
+    
+    @ViewBuilder
+    private var searchResultsList: some View {
+        LazyVStack(spacing: 12) {
+            ForEach(searchService.searchResults, id: \.id) { result in
+                PodcastSearchResultRow(result: result) {
+                    // Populate the form fields when a podcast is selected
+                    title = result.title
+                    url = result.feedUrl
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+    
+    @ViewBuilder
+    private var noResultsView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 32))
+                .foregroundColor(.gray)
+            
+            Text("No podcasts found")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.primary)
+            
+            Text("Try adjusting your search terms")
+                .font(.system(size: 14))
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(cardBackgroundColor)
+        .cornerRadius(8)
+    }
+    
+    @ViewBuilder
+    private func errorView(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+            
+            Text(error)
+                .font(.system(size: 14))
+                .foregroundColor(.primary)
+        }
+        .padding()
+        .background(Color.orange.opacity(0.1))
+        .cornerRadius(8)
+    }
+    
+    @ViewBuilder
+    private var creditSection: some View {
+        HStack(spacing: 4) {
+            Text("Powered by")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            
+            Text("Apple iTunes")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.gray)
+            
+            Text("&")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            
+            Text("PodcastIndex.org")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.gray)
+        }
+        .padding(.horizontal)
+    }
+    
+    private func performSearch(query: String) {
+        searchTask?.cancel()
+        
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !trimmedQuery.isEmpty else {
+            searchService.clearResults()
+            return
+        }
+        
+        // Don't search for very short queries to avoid too many API calls
+        guard trimmedQuery.count >= 2 else {
+            return
+        }
+        
+        searchTask = Task {
+            // Debounce search by 800ms to reduce cancellations
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            
+            if !Task.isCancelled {
+                await searchService.searchPodcasts(query: trimmedQuery)
+            }
+        }
+    }
     
     @ViewBuilder
     private var modernPodcastDetailsCard: some View {
@@ -317,6 +752,79 @@ struct ModernTextField: View {
             .background(Color.blue.opacity(0.1))
             .cornerRadius(8)
         }
+    }
+}
+
+struct PodcastSearchResultRow: View {
+    let result: PodcastSearchResult
+    let onTap: () -> Void
+    
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var cardBackgroundColor: Color {
+        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
+    }
+    
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                // Podcast Artwork
+                AsyncImage(url: URL(string: result.artworkUrl ?? "")) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .foregroundColor(.gray)
+                        )
+                }
+                .frame(width: 60, height: 60)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                
+                // Podcast Info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(result.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    
+                    if let author = result.author {
+                        Text(author)
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    
+                    HStack(spacing: 6) {
+                        Image(systemName: result.source == .podcastIndex ? "radio" : "applelogo")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        
+                        Text(result.source == .podcastIndex ? "PodcastIndex" : "iTunes")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .padding(16)
+            .background(cardBackgroundColor)
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
