@@ -109,20 +109,11 @@ class PodcastSearchService: ObservableObject {
         self.isSearching = true
         self.searchError = nil
         
-        // Search both APIs, but handle failures gracefully
+        // Search with iTunes priority - iTunes first, PodcastIndex as fallback
         var piResults: [PodcastSearchResult] = []
         var itunesResults: [PodcastSearchResult] = []
         
-        // Try PodcastIndex first, but don't fail if it doesn't work
-        do {
-            piResults = try await searchPodcastIndex(query: query)
-            print("✅ PodcastIndex returned \(piResults.count) results")
-        } catch {
-            print("⚠️ PodcastIndex search failed: \(error.localizedDescription)")
-            // Don't set error here, we'll fall back to iTunes
-        }
-        
-        // Always try iTunes as fallback
+        // Try iTunes first (priority source)
         do {
             itunesResults = try await searchiTunes(query: query)
             print("✅ iTunes returned \(itunesResults.count) results")
@@ -130,20 +121,32 @@ class PodcastSearchService: ObservableObject {
             print("⚠️ iTunes search failed: \(error.localizedDescription)")
         }
         
-        // Combine results, removing duplicates by feed URL
+        // Use PodcastIndex as fallback only if iTunes has insufficient results
+        if itunesResults.count < 10 {
+            do {
+                piResults = try await searchPodcastIndex(query: query)
+                print("✅ PodcastIndex returned \(piResults.count) results (fallback)")
+            } catch {
+                print("⚠️ PodcastIndex search failed: \(error.localizedDescription)")
+            }
+        } else {
+            print("📱 iTunes provided sufficient results (\(itunesResults.count)), skipping PodcastIndex")
+        }
+        
+        // Combine results with iTunes priority
         var combinedResults: [PodcastSearchResult] = []
         var seenUrls: Set<String> = []
         
-        // Add PodcastIndex results first
-        for result in piResults {
+        // Add iTunes results first (priority)
+        for result in itunesResults {
             if !seenUrls.contains(result.feedUrl) {
                 combinedResults.append(result)
                 seenUrls.insert(result.feedUrl)
             }
         }
         
-        // Add iTunes results if not already present
-        for result in itunesResults {
+        // Add PodcastIndex results only if not already present from iTunes
+        for result in piResults {
             if !seenUrls.contains(result.feedUrl) {
                 combinedResults.append(result)
                 seenUrls.insert(result.feedUrl)
@@ -154,7 +157,7 @@ class PodcastSearchService: ObservableObject {
         
         // Only show error if both APIs failed and we have no results
         if combinedResults.isEmpty && piResults.isEmpty && itunesResults.isEmpty {
-            if podcastIndexAPISecret == "Fz3pSCAcLdJpGF$JUEdvxLHc#Z^UT96FEgHcB9Wg" {
+            if podcastIndexAPISecret == "YOUR_SECRET_HERE" {
                 self.searchError = "Please add your PodcastIndex.org API secret to enable full search functionality. Currently using iTunes only."
             } else {
                 self.searchError = "Search temporarily unavailable. Please try again."
