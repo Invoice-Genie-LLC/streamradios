@@ -626,6 +626,8 @@ struct InternalDataManagementView: View {
     
     // State variables for import/export
     @State private var showDocumentPicker = false
+    @State private var showExportSheet = false
+    @State private var exportURL: URL?
     @State private var isImporting = false
     @State private var importProgress: Double = 0.0
     @State private var importURL: URL?
@@ -677,6 +679,34 @@ struct InternalDataManagementView: View {
         }
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPicker(url: $importURL)
+        }
+        .sheet(isPresented: $showExportSheet) {
+            if let exportURL = exportURL {
+                ExportSheet(fileURL: exportURL) {
+                    print("🔚 DEBUG: ExportSheet onDismiss callback called")
+                    showExportSheet = false
+                    self.exportURL = nil
+                    print("📊 DEBUG: Reset showExportSheet to false and exportURL to nil")
+                }
+                .onAppear {
+                    print("📱 DEBUG: Export sheet appeared with URL: \(exportURL.path)")
+                }
+            } else {
+                VStack {
+                    Text("Export URL is nil")
+                        .foregroundColor(.red)
+                        .padding()
+                }
+                .onAppear {
+                    print("❌ DEBUG: Export sheet appeared but exportURL is nil")
+                }
+            }
+        }
+        .onChange(of: showExportSheet) { isPresented in
+            if isPresented {
+                print("📱 DEBUG: Export sheet is being presented")
+                print("📊 DEBUG: exportURL is: \(String(describing: exportURL))")
+            }
         }
         .onChange(of: importURL) { url in
             if let url = url {
@@ -882,13 +912,26 @@ struct InternalDataManagementView: View {
     // MARK: - Import/Export Methods
     
     private func exportAction() {
+        print("🔄 DEBUG: Export action started")
         if viewModel.selectedCountry == "Select Country" {
+            print("⚠️ DEBUG: No country selected, showing alert")
             showAlert(for: .exportWithoutCountry)
         } else {
+            print("✅ DEBUG: Country selected: \(viewModel.selectedCountry), starting export")
             viewModel.exportStationsToFile { fileURL in
-                guard let fileURL = fileURL else { return }
-                let documentPicker = UIDocumentPickerViewController(forExporting: [fileURL])
-                UIApplication.shared.windows.first?.rootViewController?.present(documentPicker, animated: true, completion: nil)
+                print("📁 DEBUG: Export callback received")
+                guard let fileURL = fileURL else { 
+                    print("❌ DEBUG: Export failed - no file URL returned")
+                    return 
+                }
+                print("✅ DEBUG: Export file created at: \(fileURL.path)")
+                DispatchQueue.main.async {
+                    print("🎯 DEBUG: Setting exportURL and showing sheet")
+                    self.exportURL = fileURL
+                    self.showExportSheet = true
+                    print("📊 DEBUG: exportURL set to: \(String(describing: self.exportURL))")
+                    print("📊 DEBUG: showExportSheet set to: \(self.showExportSheet)")
+                }
             }
         }
     }

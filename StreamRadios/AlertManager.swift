@@ -109,7 +109,7 @@ enum AlertType: Identifiable {
     var message: String {
         switch self {
         case .exportWithoutCountry:
-            return "Please select a country from the Country Selection before importing stations."
+            return "Please select a country from the Country Selection before exporting stations."
         case .importWithoutCountry:
             return "Please select a country from the Country Selection before importing stations."
         case .deleteAllData:

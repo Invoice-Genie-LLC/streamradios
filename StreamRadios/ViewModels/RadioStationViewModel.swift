@@ -434,24 +434,36 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func exportStationsToFile(completion: @escaping (URL?) -> Void) {
+        print("🚀 DEBUG: exportStationsToFile called")
+        print("📊 DEBUG: Total stations: \(self.stations.count)")
+        print("🌍 DEBUG: Selected country: \(self.selectedCountry)")
+        
         let filteredStations = self.stations.filter { $0.country == self.selectedCountry || self.selectedCountry == "Select Country" }
                                             .map(ExportStation.init)
 
+        print("📋 DEBUG: Filtered stations for export: \(filteredStations.count)")
+        
         // Create JSON string manually for each station and join them in an array format
         let jsonStrings = filteredStations.map { $0.jsonString }
         let jsonArrayString = "[\n" + jsonStrings.joined(separator: ",\n") + "\n]"
 
         let fileName = "stations_export.json"
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        print("📁 DEBUG: Export file path: \(fileURL.path)")
 
         do {
             try jsonArrayString.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("✅ DEBUG: JSON file written successfully")
+            print("📏 DEBUG: JSON content length: \(jsonArrayString.count) characters")
             DispatchQueue.main.async {
+                print("🎯 DEBUG: Calling completion with fileURL")
                 completion(fileURL)
             }
         } catch {
-            print("Failed to export stations: \(error)")
+            print("❌ DEBUG: Failed to export stations: \(error)")
             DispatchQueue.main.async {
+                print("💥 DEBUG: Calling completion with nil due to error")
                 completion(nil)
             }
         }
