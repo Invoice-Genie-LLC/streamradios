@@ -457,6 +457,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
+    /// Clear stations from UI immediately for instant user feedback
+    func clearStationsFromUI() {
+        DispatchQueue.main.async {
+            self.stations.removeAll()
+            print("🎧 ✅ Immediately cleared radio stations from UI")
+        }
+    }
+    
     func deleteAllData(completion: @escaping (Bool, Error?) -> Void) {
         DispatchQueue.main.async {
             self.isDeletingData = true

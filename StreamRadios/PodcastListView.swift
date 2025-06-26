@@ -141,18 +141,18 @@ struct PodcastListView: View {
                    }
                }
                .onChange(of: viewModel.podcastFeeds.count) { _, newCount in
-                   // React to feed count changes for fresh install scenarios
+                   // React to ALL feed count changes (including clearing)
+                   print("🎯 UI: Detected feed count change to \(newCount) - refreshing view")
+                   
                    if newCount > 0 {
-                       print("🎯 UI: Detected feed count change to \(newCount) - refreshing view")
-                       
                        // Cancel monitoring timer since data is now available
                        dataCheckTimer?.invalidate()
                        dataCheckTimer = nil
-                       
-                       // Debounced refresh to prevent excessive updates
-                       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                           self.refreshID = UUID()
-                       }
+                   }
+                   
+                   // Always refresh when count changes (including when cleared to 0)
+                   DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                       self.refreshID = UUID()
                    }
                }
                .id(refreshID)

@@ -2411,52 +2411,141 @@ extension PodcastViewModel {
     
 
     
-    /// Clear all podcast data from Core Data (following radio station pattern)
+    /// Clear podcast feeds from UI immediately for instant user feedback
+    func clearPodcastFeedsFromUI() {
+        // Must be called on main queue since it updates @Published properties
+        DispatchQueue.main.async {
+            self.podcastFeeds.removeAll()
+            self.podcastFeedOrder.removeAll()
+            self.currentEpisodes.removeAll()
+            self.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+            self.objectWillChange.send()
+            print("📡 ✅ Immediately cleared podcast feeds from UI")
+            print("🔍 DEBUG: After immediate clearing - podcastFeeds count: \(self.podcastFeeds.count)")
+            print("🔍 DEBUG: After immediate clearing - podcastFeedOrder count: \(self.podcastFeedOrder.count)")
+            
+            // Force UI refresh by triggering objectWillChange again with slight delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self.objectWillChange.send()
+                print("📡 ✅ Forced additional UI refresh after clearing")
+            }
+        }
+    }
+    
+    /// Clear all podcast data from Core Data and CloudKit
     func clearPodcastCoreData(completion: @escaping (Bool, Error?) -> Void) {
-        // Create a private context for deletion to avoid merge conflicts
-        let privateMOC = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
-        privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
-        
-        // Set merge policy to handle conflicts
-        privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
-        
-        privateMOC.perform {
+        Task {
+            var allSuccess = true
+            var lastError: Error?
+            
+            // First, get the feed IDs before deletion for CloudKit cleanup
+            let context = CoreDataStack.shared.persistentContainer.viewContext
+            let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+            var feedIdsToDelete: [String] = []
+            
             do {
-                // Fetch and delete episodes first
-                let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                let episodes = try privateMOC.fetch(episodeFetchRequest)
-                for episode in episodes {
-                    privateMOC.delete(episode)
-                }
+                let feeds = try context.fetch(feedFetchRequest)
+                feedIdsToDelete = feeds.compactMap { $0.id }
+                print("🗑️ Found \(feedIdsToDelete.count) feeds to delete from CloudKit")
                 
-                // Fetch and delete feeds
-                let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                let feeds = try privateMOC.fetch(feedFetchRequest)
+                // Debug: List all feeds that will be deleted
                 for feed in feeds {
-                    privateMOC.delete(feed)
-                }
-                
-                // Save private context first
-                try privateMOC.save()
-                
-                // Then save main context
-                DispatchQueue.main.async {
-                    do {
-                        try CoreDataStack.shared.persistentContainer.viewContext.save()
-                        
-                        // Clear in-memory data after successful save
-                        self.podcastFeeds.removeAll()
-                        self.podcastFeedOrder.removeAll()
-                        self.currentEpisodes.removeAll()
-                        completion(true, nil)
-                    } catch {
-                        print("❌ Error saving main context after podcast deletion: \(error.localizedDescription)")
-                        completion(false, error)
+                    if let feedId = feed.id, let title = feed.title {
+                        print("🗑️ Will delete feed: '\(title)' (ID: \(feedId))")
                     }
                 }
+                
+                // Also check in-memory feeds for comparison
+                print("🔍 DEBUG: In-memory feeds at deletion time: \(self.podcastFeeds.count)")
+                for feed in self.podcastFeeds {
+                    print("🔍 DEBUG: In-memory feed: '\(feed.title)' (ID: \(feed.id))")
+                }
             } catch {
-                print("❌ Error deleting podcast data from CoreData: \(error.localizedDescription)")
-                DispatchQueue.main.async {
+                print("❌ Error fetching feeds for CloudKit deletion: \(error.localizedDescription)")
+                // Continue with local deletion even if we can't get feed IDs
+            }
+            
+            // Delete from CloudKit first (for each feed) with retry mechanism for race conditions
+            for feedId in feedIdsToDelete {
+                do {
+                    // Add a small delay to handle CloudKit eventual consistency
+                    try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                    try await cloudKitManager.deletePodcastFeedFromCloudKit(feedId)
+                    print("☁️ Successfully deleted feed \(feedId) from CloudKit")
+                } catch {
+                    print("❌ Failed to delete feed \(feedId) from CloudKit: \(error)")
+                    
+                    // Check if it's a "not found" error (which might be okay - feed might not have been synced to CloudKit yet)
+                    if let ckError = error as? CKError, ckError.code == .unknownItem {
+                        print("⚠️ Feed \(feedId) not found in CloudKit - this may be expected for recently added feeds")
+                        // Don't mark as failure for "not found" errors since the feed doesn't exist anyway
+                    } else {
+                        allSuccess = false
+                        lastError = error
+                    }
+                    // Continue deleting other feeds even if one fails
+                }
+            }
+            
+            // Now delete from local Core Data
+            let privateMOC = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+            privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
+            privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
+            
+            await withCheckedContinuation { continuation in
+                privateMOC.perform {
+                    do {
+                        // Fetch and delete episodes first
+                        let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        let episodes = try privateMOC.fetch(episodeFetchRequest)
+                        for episode in episodes {
+                            privateMOC.delete(episode)
+                        }
+                        
+                        // Fetch and delete feeds
+                        let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                        let feeds = try privateMOC.fetch(feedFetchRequest)
+                        for feed in feeds {
+                            privateMOC.delete(feed)
+                        }
+                        
+                        // Save private context first
+                        try privateMOC.save()
+                        
+                        continuation.resume()
+                    } catch {
+                        print("❌ Error deleting podcast data from CoreData: \(error.localizedDescription)")
+                        allSuccess = false
+                        lastError = error
+                        continuation.resume()
+                    }
+                }
+            }
+            
+            // Then save main context and clear in-memory data
+            DispatchQueue.main.async {
+                do {
+                    try CoreDataStack.shared.persistentContainer.viewContext.save()
+                    
+                    // Ensure in-memory data is cleared after successful Core Data deletion
+                    self.podcastFeeds.removeAll()
+                    self.podcastFeedOrder.removeAll()
+                    self.currentEpisodes.removeAll()
+                    self.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+                    self.objectWillChange.send()
+                    print("📡 ✅ Cleared in-memory data after Core Data deletion")
+                    print("🔍 DEBUG: After clearing - podcastFeeds count: \(self.podcastFeeds.count)")
+                    print("🔍 DEBUG: After clearing - podcastFeedOrder count: \(self.podcastFeedOrder.count)")
+                    
+                    if allSuccess {
+                        print("🎯 ✅ Successfully deleted all podcast data from both CloudKit and Core Data")
+                    } else {
+                        print("⚠️ Partial success: Local deletion completed, but some CloudKit deletions failed")
+                    }
+                    
+                    completion(allSuccess, lastError)
+                } catch {
+                    print("❌ Error saving main context after podcast deletion: \(error.localizedDescription)")
                     completion(false, error)
                 }
             }

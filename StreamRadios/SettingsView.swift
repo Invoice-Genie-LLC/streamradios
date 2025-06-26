@@ -25,7 +25,7 @@ struct SettingsView: View {
     @State private var activeAlert: AlertType?
     @EnvironmentObject var alertManager: AlertManager
     var onImportComplete: ((String) -> Void)?
-    @StateObject private var podcastViewModel = PodcastViewModel()
+    @EnvironmentObject private var podcastViewModel: PodcastViewModel
     @State private var isCleaningPodcasts = false
     @State private var podcastCleanupComplete = false
     @StateObject private var podcastPlayer = PodcastPlayer.shared
@@ -325,7 +325,6 @@ struct SettingsView: View {
         .sheet(isPresented: $showDataManagement) {
             InternalDataManagementView(
                 viewModel: viewModel,
-                podcastViewModel: podcastViewModel,
                 onImportComplete: onImportComplete
             )
         }
@@ -680,7 +679,7 @@ struct ModernWarningText: View {
 struct InternalDataManagementView: View {
     @StateObject private var alertManager = AlertManager()
     @ObservedObject var viewModel: RadioStationViewModel
-    @ObservedObject var podcastViewModel: PodcastViewModel
+    @EnvironmentObject var podcastViewModel: PodcastViewModel
     @ObservedObject private var notificationManager = NotificationManager.shared
     
     let onImportComplete: ((String) -> Void)?
@@ -963,6 +962,10 @@ struct InternalDataManagementView: View {
         DispatchQueue.main.async {
             self.isDeletingAllAppData = true
             self.appDataDeletionComplete = false
+            
+            // Clear UI immediately for instant feedback
+            self.viewModel.clearStationsFromUI()
+            self.podcastViewModel.clearPodcastFeedsFromUI()
         }
         
         notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all app data in batches...")
@@ -1054,10 +1057,10 @@ struct InternalDataManagementView: View {
             self.isDeletingAllAppData = false
             self.appDataDeletionComplete = allSuccess
             
-            // Refresh view models to update UI immediately
+            // Refresh view models to update UI immediately  
             if allSuccess {
                 self.viewModel.loadStationsFromCoreData()
-                self.podcastViewModel.loadFeedsFromCoreData()
+                // Note: podcastViewModel already clears its data in clearPodcastCoreData completion
             }
             
             // Force UI refresh and show notification
@@ -1083,6 +1086,9 @@ struct InternalDataManagementView: View {
             self.isDeletingStationData = true
             self.stationDataDeletionComplete = false
             self.stationDataDeletionError = nil
+            
+            // Clear radio stations from UI immediately for instant feedback
+            self.viewModel.clearStationsFromUI()
         }
         
         notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all radio station data...")
@@ -1162,6 +1168,9 @@ struct InternalDataManagementView: View {
             self.isDeletingPodcastData = true
             self.podcastDataDeletionComplete = false
             self.podcastDataDeletionError = nil
+            
+            // Clear podcast feeds from UI immediately for instant feedback
+            self.podcastViewModel.clearPodcastFeedsFromUI()
         }
         
         notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all podcast data...")
@@ -1219,7 +1228,7 @@ struct InternalDataManagementView: View {
             
             // Refresh view models to update UI immediately
             if allSuccess {
-                self.podcastViewModel.loadFeedsFromCoreData()
+                // Note: podcastViewModel already clears its data in clearPodcastCoreData completion
             }
             
             // Force UI refresh and show notification
