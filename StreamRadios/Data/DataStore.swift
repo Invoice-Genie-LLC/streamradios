@@ -385,9 +385,32 @@ class DataStore {
                 }
             }
         }
+    
+    // Add a method to fetch existing station URLs from CloudKit
+    private func fetchExistingStationURLs(completion: @escaping (Set<String>, Error?) -> Void) {
+            let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
+            privateDatabase.perform(query, inZoneWith: nil) { records, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("Failed to fetch existing station URLs: \(error.localizedDescription)")
+                        completion([], error)
+                    } else {
+                        let urls = Set(records?.compactMap { $0["url"] as? String } ?? [])
+                        completion(urls, nil)
+                    }
+                }
+            }
+        }
 
-    // Modify the saveStationsToCloudKit method to only save new stations
+    // Save stations to CloudKit - replaces all existing stations
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        // During import, we want to force save all stations regardless of existing ones
+        // This ensures fresh data replaces any potentially stale CloudKit records
+        processAllStations(stations, completion: completion)
+    }
+    
+    // Original method for incremental saves (used elsewhere)
+    func saveNewStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
         fetchExistingStationIDs { existingIDs, error in
             guard error == nil else {
                 print("Error fetching existing station IDs: \(error?.localizedDescription ?? "Unknown error")")
@@ -405,7 +428,51 @@ class DataStore {
             self.processNewStations(newStations, completion: completion)
         }
     }
+    
+    // Method specifically for import operations - checks for URL duplicates
+    func saveImportedStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        fetchExistingStationURLs { existingURLs, error in
+            guard error == nil else {
+                print("Error fetching existing station URLs: \(error?.localizedDescription ?? "Unknown error")")
+                completion(false, nil)
+                return
+            }
 
+            let newStations = stations.filter { !existingURLs.contains($0.url) }
+            if newStations.isEmpty {
+                print("No new stations to save; all station URLs already exist in CloudKit.")
+                completion(true, [])
+                return
+            }
+
+            print("Saving \(newStations.count) new stations to CloudKit (filtered by URL).")
+            self.processNewStations(newStations, completion: completion)
+        }
+    }
+
+
+    // Method to process and save all stations (used during import)
+    private func processAllStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        var recordsToSave = [CKRecord]()
+        for station in stations {
+            let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
+            record["name"] = station.name
+            record["url"] = station.url
+            record["country"] = station.country
+            record["isFavorite"] = station.isFavorite ? "true" : "false"
+            record["favoritedAt"] = station.favoritedAt
+            record["favoriteOrder"] = station.favoriteOrder
+            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                if let asset = createAsset(from: image) {
+                    record["iconData"] = asset
+                }
+            }
+            recordsToSave.append(record)
+        }
+
+        // Process batches - this will create or update records as needed
+        processBatch(records: recordsToSave, maxBatchSize: 400, completion: completion)
+    }
 
     // Method to process and save new stations
     private func processNewStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
@@ -434,11 +501,20 @@ class DataStore {
         let end = min(start + maxBatchSize, records.count)
         let batch = Array(records[start..<end])
         let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
+        
+        // Set save policy to handle conflicts gracefully
+        modifyOperation.savePolicy = .changedKeys
 
         modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
             if let error = error {
                 print("Error during CloudKit batch save: \(error.localizedDescription)")
-                completion(false, nil)
+                // Even if there's an error, continue with the next batch if applicable
+                if end >= records.count {
+                    completion(false, savedRecords?.map { $0.recordID.recordName })
+                } else {
+                    print("Processing next batch for CloudKit save despite error.")
+                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
+                }
             } else {
                 if end >= records.count {
                     print("Successfully saved all batches to CloudKit.")
@@ -452,7 +528,17 @@ class DataStore {
 
         modifyOperation.perRecordCompletionBlock = { record, error in
             if let error = error {
-                print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
+                // Check if it's a specific "record already exists" error and handle it gracefully
+                if let ckError = error as? CKError {
+                    switch ckError.code {
+                    case .serverRecordChanged, .unknownItem:
+                        print("Record \(record.recordID.recordName) already exists in CloudKit, skipping.")
+                    default:
+                        print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
+                    }
+                } else {
+                    print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
+                }
             } else {
                 print("Successfully saved record \(record.recordID.recordName) to CloudKit.")
             }

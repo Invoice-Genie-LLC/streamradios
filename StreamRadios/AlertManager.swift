@@ -33,7 +33,7 @@ class AlertManager: ObservableObject {
                 self?.dismissAlert()
             }
             customAlertSecondaryAction = nil
-        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .confirmImportWithDataClear:
             customAlertPrimaryAction = deleteAction
             customAlertSecondaryAction = { [weak self] in
                 self?.dismissAlert()
@@ -63,6 +63,7 @@ enum AlertType: Identifiable {
     case deleteStationError
     case clearAllPodcasts
     case deleteAllAppData
+    case confirmImportWithDataClear
     
     var id: Int {
         switch self {
@@ -74,6 +75,7 @@ enum AlertType: Identifiable {
         case .deleteStationError: return 5
         case .clearAllPodcasts: return 6
         case .deleteAllAppData: return 7
+        case .confirmImportWithDataClear: return 8
         }
     }
     
@@ -91,6 +93,8 @@ enum AlertType: Identifiable {
             return "Clear All Podcast Episodes"
         case .deleteAllAppData:
             return "Delete All App Data"
+        case .confirmImportWithDataClear:
+            return "Import Station Playlist"
         }
     }
     
@@ -112,6 +116,8 @@ enum AlertType: Identifiable {
             return "Are you sure you want to clear all podcast episodes? This will erase all downloaded episodes and their progress. This action cannot be undone."
         case .deleteAllAppData:
             return "Important: You're about to delete ALL app data. This will remove all stations, podcasts, downloads, progress, favorites, and settings from both iCloud and your device's local storage. This action is permanent and cannot be reversed."
+        case .confirmImportWithDataClear:
+            return "Are you sure you want to import stations from this file? New stations will be added to your existing collection. Duplicate URLs will be skipped."
         }
     }
     
@@ -121,12 +127,14 @@ enum AlertType: Identifiable {
             return "OK"
         case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData:
             return "Delete"
+        case .confirmImportWithDataClear:
+            return "Import"
         }
     }
     
     var secondaryButtonText: String? {
         switch self {
-        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .confirmImportWithDataClear:
             return "Cancel"
         default:
             return nil

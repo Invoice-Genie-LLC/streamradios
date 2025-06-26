@@ -49,21 +49,62 @@ class NotificationManager: NSObject, ObservableObject {
     }
 
     func notifyUser(title: String, message: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = message
-        content.sound = UNNotificationSound.default
+        // Check if we're authorized to send notifications
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            print("🔔 Notification Authorization Status: \(settings.authorizationStatus.rawValue)")
+            print("🔔 Attempting to send notification: \(title) - \(message)")
+            
+            guard settings.authorizationStatus == .authorized else {
+                print("❌ Notifications not authorized. Status: \(settings.authorizationStatus.rawValue)")
+                return
+            }
+            
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = message
+            content.sound = UNNotificationSound.default
 
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+            
+            UNUserNotificationCenter.current().add(request) { [weak self] error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("❌ Error scheduling notification: \(error.localizedDescription)")
+                    } else {
+                        print("✅ Notification scheduled successfully: \(title)")
+                        self?.lastNotificationTitle = title
+                        self?.lastNotificationMessage = message
+                    }
+                }
+            }
+        }
+    }
+    
+    // Alternative method for immediate notifications that works better for operations
+    func notifyUserImmediate(title: String, message: String) {
+        print("🔔 Immediate notification: \(title) - \(message)")
         
-        UNUserNotificationCenter.current().add(request) { [weak self] error in
-            DispatchQueue.main.async {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else {
+                print("❌ Immediate notification failed - not authorized")
+                return
+            }
+            
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = message
+            content.sound = UNNotificationSound.default
+            
+            // Use immediate trigger (0.1 seconds)
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+            
+            UNUserNotificationCenter.current().add(request) { error in
                 if let error = error {
-                    print("Error scheduling notification: \(error.localizedDescription)")
+                    print("❌ Error scheduling immediate notification: \(error.localizedDescription)")
                 } else {
-                    self?.lastNotificationTitle = title
-                    self?.lastNotificationMessage = message
+                    print("✅ Immediate notification scheduled: \(title)")
                 }
             }
         }
@@ -102,7 +143,14 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         // This method is called when a notification is delivered to a foreground app
-        completionHandler([.banner, .sound])
+        print("🔔 Foreground notification received: \(notification.request.content.title)")
+        
+        // Show notification even when app is in foreground
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .sound, .list])
+        } else {
+            completionHandler([.alert, .sound])
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

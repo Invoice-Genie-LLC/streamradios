@@ -362,6 +362,8 @@ struct SettingsView: View {
             switch alertType {
             case .deleteAllAppData:
                 initiateAppDataDeletion()
+            case .confirmImportWithDataClear:
+                showDocumentPicker = true
             default:
                 break
             }
@@ -422,6 +424,7 @@ struct SettingsView: View {
         isImporting = true
         importProgress = 0.0
         
+        // Directly proceed with import (appending to existing stations)
         viewModel.importStationsFromFile(url: url) { progress in
             DispatchQueue.main.async {
                 importProgress = progress
@@ -439,7 +442,7 @@ struct SettingsView: View {
         isDeletingRadioStationRecords = true
         radioStationRecordsDeletionComplete = false
         radioStationRecordsDeletionError = nil
-        DataStore.shared.fetchAllRecordIDs(ofType: "RadioStation") { recordIDs, error in
+        DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
             if let error = error {
                 DispatchQueue.main.async {
                     self.isDeletingRadioStationRecords = false

@@ -294,6 +294,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var isCloudKitOperationRunning = false
     @Published var isDeletionInProgress = false
     @Published var isUploadingToCloudKit = false
+    @Published var isImportInProgress = false
     
     // Flag to prevent infinite loop in favorite timestamp migration
     private var isMigrationInProgress = false
@@ -363,38 +364,74 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     
     func importStationsFromFile(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
-            do {
-                let data = try Data(contentsOf: url)
-                let jsonDecoder = JSONDecoder()
-                let stationsFromJson = try jsonDecoder.decode([RadioStation].self, from: data)
-
-                let totalStations = Double(stationsFromJson.count)
-                var importedStations = 0.0
-
-                DispatchQueue.main.async {
-                    for station in stationsFromJson {
-                        self.stations.append(station)
-                        importedStations += 1
-                        progressHandler(importedStations / totalStations)
-                    }
-
-                    print("Imported \(stationsFromJson.count) stations.")
-
-                    // Save these to CoreData
-                    self.saveStationsToCoreData()
-
-                    // Save to CloudKit
-                    self.saveStationsToCloudKit()
-
-                    // Optionally, if there is a need to notify or refresh the UI, do it here
-                    NotificationCenter.default.post(name: .stationsUpdated, object: nil)
-                    completion() // Call the completion handler
-                }
-            } catch {
-                print("Failed to import stations: \(error)")
-                completion() // Call the completion handler even in case of failure
-            }
+        // Set import flag to prevent sync interference
+        DispatchQueue.main.async {
+            self.isImportInProgress = true
         }
+        
+        // Ensure notification permissions are granted
+        NotificationManager.shared.requestAuthorization()
+        
+        // Notify user that import has started
+        NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing station playlist from file...")
+        
+        do {
+            let data = try Data(contentsOf: url)
+            let jsonDecoder = JSONDecoder()
+            let stationsFromJson = try jsonDecoder.decode([RadioStation].self, from: data)
+
+            // Get existing URLs to check for duplicates
+            let existingURLs = Set(stations.map { $0.url })
+            
+            // Filter out stations that already exist by URL
+            let newStations = stationsFromJson.filter { !existingURLs.contains($0.url) }
+            
+            let totalNewStations = Double(newStations.count)
+            var importedStations = 0.0
+
+            DispatchQueue.main.async {
+                // Append new stations instead of removing existing ones
+                for station in newStations {
+                    self.stations.append(station)
+                    importedStations += 1
+                    progressHandler(importedStations / max(totalNewStations, 1))
+                }
+
+                print("Imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+
+                // Save these to CoreData first
+                self.saveStationsToCoreData()
+
+                // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    // Only save the newly imported stations to CloudKit (with URL duplicate checking)
+                    DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
+                        DispatchQueue.main.async {
+                            if success {
+                                print("Successfully saved \(newStations.count) new stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+                            } else {
+                                print("Failed to save some or all new stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
+                            }
+                            
+                            // Clear import flag and notify completion
+                            self.isImportInProgress = false
+                            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                            completion()
+                        }
+                    }
+                }
+            }
+        } catch {
+            DispatchQueue.main.async {
+                self.isImportInProgress = false
+            }
+            NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import stations: \(error.localizedDescription)")
+            print("Failed to import stations: \(error)")
+            completion() // Call the completion handler even in case of failure
+        }
+    }
     
     func exportStationsToFile(completion: @escaping (URL?) -> Void) {
         let filteredStations = self.stations.filter { $0.country == self.selectedCountry || self.selectedCountry == "Select Country" }
@@ -507,6 +544,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func syncStationsWithCloudKit() {
+        // Don't sync during import or deletion operations
+        guard !isImportInProgress && !isDeletionInProgress else {
+            print("Skipping CloudKit sync - import or deletion in progress")
+            return
+        }
+        
         CoreDataStack.shared.syncStationsFromCloudKit { [weak self] error in
             if let error = error {
                 print("Error syncing with CloudKit: \(error.localizedDescription)")
