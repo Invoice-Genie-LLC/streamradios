@@ -471,7 +471,7 @@ class DataStore {
         }
 
         // Process batches - this will create or update records as needed
-        processBatch(records: recordsToSave, maxBatchSize: 400, completion: completion)
+        processBatch(records: recordsToSave, maxBatchSize: 200, completion: completion)
     }
 
     // Method to process and save new stations
@@ -493,34 +493,57 @@ class DataStore {
             recordsToSave.append(record)
         }
 
-        // Process batches
-        processBatch(records: recordsToSave, maxBatchSize: 400, completion: completion)
+        // Process batches with optimized batch size for CloudKit
+        processBatch(records: recordsToSave, maxBatchSize: 200, completion: completion)
     }
 
     private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
         let end = min(start + maxBatchSize, records.count)
         let batch = Array(records[start..<end])
+        let batchNumber = (start / maxBatchSize) + 1
+        let totalBatches = (records.count + maxBatchSize - 1) / maxBatchSize
+        
+        print("Processing CloudKit batch \(batchNumber)/\(totalBatches) (\(batch.count) records)")
+        
         let modifyOperation = CKModifyRecordsOperation(recordsToSave: batch, recordIDsToDelete: nil)
         
         // Set save policy to handle conflicts gracefully
         modifyOperation.savePolicy = .changedKeys
+        
+        // Configure operation for better performance with large datasets
+        modifyOperation.qualityOfService = .userInitiated
+        modifyOperation.isLongLived = records.count > 1000 // Use long-lived operations for large datasets
 
         modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
             if let error = error {
-                print("Error during CloudKit batch save: \(error.localizedDescription)")
-                // Even if there's an error, continue with the next batch if applicable
+                print("❌ Error during CloudKit batch \(batchNumber) save: \(error.localizedDescription)")
+                
+                // Handle rate limiting errors with exponential backoff
+                if let ckError = error as? CKError, ckError.code == .requestRateLimited {
+                    if let retryAfter = ckError.errorUserInfo[CKErrorRetryAfterKey] as? TimeInterval {
+                        print("⏱️ Rate limited. Retrying batch \(batchNumber) after \(retryAfter) seconds...")
+                        DispatchQueue.global().asyncAfter(deadline: .now() + retryAfter) {
+                            self.processBatch(records: records, maxBatchSize: maxBatchSize, start: start, completion: completion)
+                        }
+                        return
+                    }
+                }
+                
+                // Continue with next batch even if current batch fails
                 if end >= records.count {
+                    print("⚠️ Completed processing with errors. Some records may not have been saved.")
                     completion(false, savedRecords?.map { $0.recordID.recordName })
                 } else {
-                    print("Processing next batch for CloudKit save despite error.")
+                    print("⏭️ Processing next batch despite error in batch \(batchNumber).")
                     self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
                 }
             } else {
+                print("✅ Successfully saved batch \(batchNumber)/\(totalBatches)")
                 if end >= records.count {
-                    print("Successfully saved all batches to CloudKit.")
+                    print("🎉 Successfully saved all \(records.count) records to CloudKit in \(totalBatches) batches.")
                     completion(true, savedRecords?.map { $0.recordID.recordName })
                 } else {
-                    print("Processing next batch for CloudKit save.")
+                    // Continue with next batch
                     self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
                 }
             }
@@ -574,51 +597,83 @@ class DataStore {
 
     
     func fetchRadioStations(completion: @escaping ([RadioStation]?, Error?) -> Void) {
+        print("Starting paginated fetch of radio stations from CloudKit...")
+        fetchRadioStationsWithPagination(allRecords: [], cursor: nil, completion: completion)
+    }
+    
+    private func fetchRadioStationsWithPagination(allRecords: [CKRecord], cursor: CKQueryOperation.Cursor?, completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)
         let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
         
-        privateDatabase.perform(query, inZoneWith: nil) { records, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("Error fetching radio stations: \(error.localizedDescription)")
-                    completion(nil, error)
-                    return
-                }
-
-                guard let records = records else {
-                    print("No records found in CloudKit.")
-                    completion([], nil)
-                    return
-                }
-
-                let stations = records.compactMap { record -> RadioStation? in
-                    guard let name = record["name"] as? String,
-                          let url = record["url"] as? String,
-                          let country = record["country"] as? String else {
-                        print("Essential data missing in record; skipping...")
-                        return nil
-                    }
-
-                    let iconData = self.decodeIconData(record: record)
-                    let isFavorite = (record["isFavorite"] as? String)?.lowercased() == "true"
-                    let favoritedAt = record["favoritedAt"] as? Date
-                    let favoriteOrder = record["favoriteOrder"] as? Int
-                    let id = record.recordID.recordName
-
-                    return RadioStation(
-                        id: id,
-                        name: name,
-                        url: url,
-                        iconData: iconData,
-                        country: country,
-                        isFavorite: isFavorite,
-                        favoritedAt: favoritedAt,
-                        favoriteOrder: favoriteOrder
-                    )
-                }
-                print("Fetched \(stations.count) stations from CloudKit.")
-                completion(stations, nil)
+        let queryOperation = CKQueryOperation(query: query)
+        
+        // Set limits to handle large datasets efficiently
+        queryOperation.resultsLimit = 200 // CloudKit recommended batch size for queries
+        queryOperation.cursor = cursor
+        
+        var fetchedRecords = allRecords
+        
+        queryOperation.recordMatchedBlock = { recordID, result in
+            switch result {
+            case .success(let record):
+                fetchedRecords.append(record)
+            case .failure(let error):
+                print("Error fetching individual record \(recordID.recordName): \(error.localizedDescription)")
             }
+        }
+        
+        queryOperation.queryResultBlock = { result in
+            switch result {
+            case .success(let cursor):
+                if let cursor = cursor {
+                    // More records available, continue fetching
+                    print("Fetched \(fetchedRecords.count - allRecords.count) records, continuing with pagination...")
+                    self.fetchRadioStationsWithPagination(allRecords: fetchedRecords, cursor: cursor, completion: completion)
+                } else {
+                    // All records fetched
+                    print("Completed fetching all \(fetchedRecords.count) records from CloudKit.")
+                    self.processAndReturnStations(from: fetchedRecords, completion: completion)
+                }
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    print("Error during CloudKit query operation: \(error.localizedDescription)")
+                    completion(nil, error)
+                }
+            }
+        }
+        
+        privateDatabase.add(queryOperation)
+    }
+    
+    private func processAndReturnStations(from records: [CKRecord], completion: @escaping ([RadioStation]?, Error?) -> Void) {
+        DispatchQueue.main.async {
+            let stations = records.compactMap { record -> RadioStation? in
+                guard let name = record["name"] as? String,
+                      let url = record["url"] as? String,
+                      let country = record["country"] as? String else {
+                    print("Essential data missing in record; skipping...")
+                    return nil
+                }
+
+                let iconData = self.decodeIconData(record: record)
+                let isFavorite = (record["isFavorite"] as? String)?.lowercased() == "true"
+                let favoritedAt = record["favoritedAt"] as? Date
+                let favoriteOrder = record["favoriteOrder"] as? Int
+                let id = record.recordID.recordName
+
+                return RadioStation(
+                    id: id,
+                    name: name,
+                    url: url,
+                    iconData: iconData,
+                    country: country,
+                    isFavorite: isFavorite,
+                    favoritedAt: favoritedAt,
+                    favoriteOrder: favoriteOrder
+                )
+            }
+            print("Successfully processed \(stations.count) stations from CloudKit.")
+            completion(stations, nil)
         }
     }
     
