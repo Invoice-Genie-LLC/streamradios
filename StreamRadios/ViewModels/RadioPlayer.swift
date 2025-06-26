@@ -98,68 +98,109 @@ class RadioPlayer: NSObject, ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 // Only auto-play if we're not currently handling an alarm
                 if !self.isHandlingAlarm {
-                    // Use shared UserDefaults consistently for CarPlay compatibility
-                    if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID") {
-                        print("🔍 Auto-play: Found LastPlayedStationID: \(lastStationID)")
-                        
-                        if let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
-                            print("✅ Auto-play: Found matching station: \(lastStation.name)")
-                            print("🌍 Auto-play: Station from \(lastStation.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
-                            print("📍 Auto-play: Country picker will remain unchanged")
-                        
-
-                        
-                        // Play the last played station using the proper playStation method
-                        if let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
-                            print("🎵 Auto-play: Playing last station using playStation method to ensure Recent tab update")
-                            self.playStation(at: index, from: self.viewModel?.stations ?? [])
-                        } else {
-                            // Fallback to manual setup if index not found
-                            print("⚠️ Auto-play: Station index not found, using fallback method")
-                            self.currentlyPlayingStation = lastStation
-                            if let url = URL(string: lastStation.url) {
-                                self.setStationURL(url)
-                                self.play()
-                                // Manually update lastPlayed for Recent tab
-                                self.updateLastPlayed(lastStation)
-                            }
-                        }
-                        } else {
-                            print("❌ Auto-play: Station with ID \(lastStationID) not found in stations array")
-                        }
-                    } else {
-                        print("❌ Auto-play: No LastPlayedStationID found in UserDefaults")
-                    }
-                    
-                    if let lastStationURL = self.userDefaults?.url(forKey: "lastStationURL") {
-                        // Fall back to the old method if LastPlayedStationID is not available
-                        let storedIndex = self.userDefaults?.integer(forKey: "lastStationIndex") ?? 0
-                        if storedIndex < self.viewModel?.stations.count ?? 0,
-                           let stations = self.viewModel?.stations, !stations.isEmpty {
-                            let station = stations[storedIndex]
-                            
-                            print("🌍 Auto-play (fallback): Station from \(station.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
-                            print("📍 Auto-play (fallback): Country picker will remain unchanged")
-                            
-
-                            
-                            // Use proper playStation method to ensure Recent tab update
-                            print("🎵 Auto-play (fallback): Playing last station using playStation method")
-                            self.playStation(at: storedIndex, from: stations)
-                        } else {
-                            // Ultimate fallback - manual setup
-                            self.setStationURL(lastStationURL)
-                            self.currentStationIndex = storedIndex
-                            self.play()
-                        }
+                    self.restoreLastPlayedStation()
+                }
+            }
+        } else {
+            // Even if auto-play is disabled, still restore the UI state for manual play
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                if !self.isHandlingAlarm {
+                    self.restoreLastPlayedStationUIOnly()
+                }
+            }
+        }
+    }
+    
+    private func restoreLastPlayedStation() {
+        // Use shared UserDefaults consistently for CarPlay compatibility
+        if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID") {
+            print("🔍 Auto-play: Found LastPlayedStationID: \(lastStationID)")
+            
+            if let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
+                print("✅ Auto-play: Found matching station: \(lastStation.name)")
+                print("🌍 Auto-play: Station from \(lastStation.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
+                print("📍 Auto-play: Country picker will remain unchanged")
+            
+                // Play the last played station using the proper playStation method
+                if let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+                    print("🎵 Auto-play: Playing last station using playStation method to ensure Recent tab update")
+                    self.playStation(at: index, from: self.viewModel?.stations ?? [])
+                } else {
+                    // Fallback to manual setup if index not found
+                    print("⚠️ Auto-play: Station index not found, using fallback method")
+                    self.currentlyPlayingStation = lastStation
+                    if let url = URL(string: lastStation.url) {
+                        self.setStationURL(url)
+                        self.play()
+                        // Manually update lastPlayed for Recent tab
+                        self.updateLastPlayed(lastStation)
                     }
                 }
+            } else {
+                print("❌ Auto-play: Station with ID \(lastStationID) not found in stations array")
+            }
+        } else {
+            print("❌ Auto-play: No LastPlayedStationID found in UserDefaults")
+        }
+        
+        if let lastStationURL = self.userDefaults?.url(forKey: "lastStationURL") {
+            // Fall back to the old method if LastPlayedStationID is not available
+            let storedIndex = self.userDefaults?.integer(forKey: "lastStationIndex") ?? 0
+            if storedIndex < self.viewModel?.stations.count ?? 0,
+               let stations = self.viewModel?.stations, !stations.isEmpty {
+                let station = stations[storedIndex]
+                
+                print("🌍 Auto-play (fallback): Station from \(station.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
+                print("📍 Auto-play (fallback): Country picker will remain unchanged")
+                
+                // Use proper playStation method to ensure Recent tab update
+                print("🎵 Auto-play (fallback): Playing last station using playStation method")
+                self.playStation(at: storedIndex, from: stations)
+            } else {
+                // Ultimate fallback - manual setup
+                self.setStationURL(lastStationURL)
+                self.currentStationIndex = storedIndex
+                self.play()
+            }
+        }
+    }
+    
+    private func restoreLastPlayedStationUIOnly() {
+        // Restore UI state without auto-playing
+        if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID") {
+            print("🔍 Restore UI: Found LastPlayedStationID: \(lastStationID)")
+            
+            if let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }),
+               let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+                print("✅ Restore UI: Found matching station: \(lastStation.name)")
+                
+                // Set up the UI state without playing
+                self.currentStationIndex = index
+                self.currentlyPlayingStation = lastStation
+                
+                // Set up the player URL so play button will work
+                if let url = URL(string: lastStation.url) {
+                    self.setStationURL(url)
+                    print("🔄 Restore UI: Set station URL for \(lastStation.name)")
+                }
+            } else {
+                print("❌ Restore UI: Station with ID \(lastStationID) not found in stations array")
             }
         }
     }
     
     func resetAlarmState() {
         isHandlingAlarm = false
+    }
+    
+    func restoreStateAfterStationsLoaded() {
+        print("🔄 Restoring radio player state after stations loaded")
+        
+        if autoPlayLastStation {
+            restoreLastPlayedStation()
+        } else {
+            restoreLastPlayedStationUIOnly()
+        }
     }
     
 

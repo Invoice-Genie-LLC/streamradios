@@ -63,6 +63,15 @@ struct RadioStreamApp: App {
                 fetchStationsFromCloudKit()
             } else {
                 viewModel.loadStationsFromCoreData()
+                // After loading stations, ensure radio player state is restored
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    radioPlayer.restoreStateAfterStationsLoaded()
+                }
+            }
+        } else {
+            // Stations are already loaded, ensure radio player state is restored
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                radioPlayer.restoreStateAfterStationsLoaded()
             }
         }
         
@@ -80,6 +89,11 @@ struct RadioStreamApp: App {
                     
                     // Notify that stations have been updated
                     NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                    
+                    // After loading stations from CloudKit, ensure radio player state is restored
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        RadioPlayer.shared.restoreStateAfterStationsLoaded()
+                    }
                 }
             } else if let error = error {
                 print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")
