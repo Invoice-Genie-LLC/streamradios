@@ -103,6 +103,7 @@ struct PodcastListView: View {
                    }
                }
                .navigationTitle("Podcasts")
+               .navigationBarTitleDisplayMode(.inline)
                .toolbar {
                    ToolbarItem(placement: .navigationBarLeading) {
                        Button(action: {

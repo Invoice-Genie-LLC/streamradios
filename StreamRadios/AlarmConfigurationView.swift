@@ -65,54 +65,51 @@ struct AlarmConfigurationView: View {
     }
     
     var body: some View {
-        NavigationView {
-            ZStack(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    ScrollView {
-                        LazyVStack(spacing: 24) {
-                            modernAlarmToggleSection
-                            modernStationSelectionSection
-                            modernAlarmTypeSection
-                            modernTimeSection
-                            modernDaysSection
-                            modernShowNameSection
-                            modernSavedIndicator
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 120 : 80)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                ScrollView {
+                    LazyVStack(spacing: 24) {
+                        modernAlarmToggleSection
+                        modernStationSelectionSection
+                        modernAlarmTypeSection
+                        modernTimeSection
+                        modernDaysSection
+                        modernShowNameSection
+                        modernSavedIndicator
                     }
-                    
-                    // Fixed Mini Player
-                    if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                        MiniPodcastPlayerView(
-                            currentEpisode: currentEpisode,
-                            currentFeed: currentFeed,
-                            podcastPlayer: podcastPlayer,
-                            viewModel: podcastViewModel,
-                            selectedPodcast: $selectedPodcast,
-                            onListButtonTap: {
-                                selectedPodcast = currentFeed
-                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                showPodcastPlayerSheet = true
-                            },
-                            onCloseButtonTap: {
-                                podcastPlayer.pause()
-                                podcastPlayer.currentEpisode = nil
-                                podcastPlayer.currentFeed = nil
-                            }
-                        )
-                        .transition(.move(edge: .bottom))
-                        .frame(height: miniPlayerHeight)
-                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 120 : 80)
                 }
-                .background(backgroundColor)
+                
+                // Fixed Mini Player
+                if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+                    MiniPodcastPlayerView(
+                        currentEpisode: currentEpisode,
+                        currentFeed: currentFeed,
+                        podcastPlayer: podcastPlayer,
+                        viewModel: podcastViewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            selectedPodcast = currentFeed
+                            podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                            scrollToEpisodeID = podcastPlayer.currentEpisode?.id
+                            showPodcastPlayerSheet = true
+                        },
+                        onCloseButtonTap: {
+                            podcastPlayer.pause()
+                            podcastPlayer.currentEpisode = nil
+                            podcastPlayer.currentFeed = nil
+                        }
+                    )
+                    .transition(.move(edge: .bottom))
+                    .frame(height: miniPlayerHeight)
+                }
             }
-            .navigationTitle("Set Program Alert")
-            .navigationBarTitleDisplayMode(.large)
+            .background(backgroundColor)
         }
-        .navigationViewStyle(StackNavigationViewStyle())
+        .navigationTitle("Set Program Alert")
+        .navigationBarTitleDisplayMode(.inline)
         .alert(isPresented: $showCalendarAccessAlert) {
             Alert(
                 title: Text("Calendar Access Required"),

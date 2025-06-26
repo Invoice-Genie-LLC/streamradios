@@ -34,8 +34,6 @@ struct SettingsView: View {
     @State private var showPodcastPlayerSheet = false
     @State private var safeAreaBottom: CGFloat = 0
     @State private var miniPlayerHeight: CGFloat = 60
-    // Navigation state
-    @State private var showDataManagement = false
     
     // Modern color system for adaptive theming
     private var backgroundColor: Color {
@@ -96,7 +94,7 @@ struct SettingsView: View {
             .background(backgroundColor)
             .navigationTitle("Settings")
             .navigationBarBackButtonHidden(true)
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .onChange(of: isDarkMode) { newValue in
                 updateDarkMode(to: newValue)
             }
@@ -233,7 +231,10 @@ struct SettingsView: View {
             title: "Data Management",
             icon: "externaldrive.fill"
         ) {
-            Button(action: { showDataManagement = true }) {
+            NavigationLink(destination: InternalDataManagementView(
+                viewModel: viewModel,
+                onImportComplete: onImportComplete
+            )) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         Image(systemName: "externaldrive.fill")
@@ -261,12 +262,6 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
-        }
-        .sheet(isPresented: $showDataManagement) {
-            InternalDataManagementView(
-                viewModel: viewModel,
-                onImportComplete: onImportComplete
-            )
         }
     }
     
@@ -655,28 +650,21 @@ struct InternalDataManagementView: View {
     }
     
     var body: some View {
-        NavigationView {
-            ScrollView {
-                LazyVStack(spacing: 24) {
-                    // Import/Export Section
-                    importExportSection
-                    
-                    // Data Deletion Section
-                    dataDeletionSection
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 80)
+        ScrollView {
+            LazyVStack(spacing: 24) {
+                // Import/Export Section
+                importExportSection
+                
+                // Data Deletion Section
+                dataDeletionSection
             }
-            .background(backgroundColor)
-            .navigationTitle("Data Management")
-            .navigationBarTitleDisplayMode(.large)
-            .navigationBarItems(
-                leading: Button("Done") {
-                    presentationMode.wrappedValue.dismiss()
-                }
-            )
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 80)
         }
+        .background(backgroundColor)
+        .navigationTitle("Data Management")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPicker(url: $importURL)
         }

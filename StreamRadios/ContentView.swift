@@ -37,13 +37,8 @@ struct ContentView: View {
     @State private var scrollToEpisodeID: String?
 
     init() {
-        let savedTab: Tab
-        if let savedTabRawValue = UserDefaults.standard.object(forKey: "selectedTab") as? Int,
-           let tab = Tab(rawValue: savedTabRawValue) {
-            savedTab = tab
-        } else {
-            savedTab = .radio
-        }
+        // Always start on the radio tab regardless of previous state
+        let savedTab: Tab = .radio
         
         self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
         self._podcastPlayer = StateObject(wrappedValue: PodcastPlayer.shared)
@@ -192,9 +187,7 @@ struct ContentView: View {
                 setupTabView()
                 checkAndStartDataSync()
             }
-            .onChange(of: selectedTab) { oldTab, newTab in
-                UserDefaults.standard.set(newTab.rawValue, forKey: "selectedTab")
-            }
+            // Removed tab state persistence - app always starts on radio tab
             
             // Data Sync Progress Overlay
             DataSyncProgressView()
@@ -470,10 +463,6 @@ struct ContentView: View {
     }
     
     // MARK: - Helper Functions
-    
-    private func saveSelectedTab(_ tab: Tab) {
-        UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
-    }
     
     private func setupTabView() {
         // Configure tab bar appearance
