@@ -44,6 +44,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private let stateManager = EpisodeStateManager.shared
     private var shouldStartFromBeginning: Bool = false
     private var lastCarPlayProgress: Double?
+    
+    // Track if position has been restored to prevent repeated calls during scrolling
+    private var hasRestoredPositionForCurrentEpisode: Bool = false
+    private var currentEpisodeIdForRestoration: String?
 
     // Performance optimization flags
     private var isCarPlayActive: Bool {
@@ -536,6 +540,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+        // Reset position restoration flag for the new episode
+        hasRestoredPositionForCurrentEpisode = false
+        currentEpisodeIdForRestoration = nil
+        
         // Stop radio playback if it's currently playing
         RadioPlayer.shared.stopCurrentStation()
         
@@ -787,6 +795,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private func seekToSavedProgress() {
         guard let currentEpisode = currentEpisode else { return }
         
+        // Prevent repeated restoration calls for the same episode to improve scrolling performance
+        if hasRestoredPositionForCurrentEpisode && currentEpisodeIdForRestoration == currentEpisode.id {
+            os_log("⚡ Skipping position restoration - already restored for episode: %@", log: log, type: .debug, currentEpisode.title)
+            return
+        }
+        
         // If this is a replay action, always start from the beginning
         if shouldStartFromBeginning {
             os_log("Replay requested - starting from the beginning", log: log, type: .info)
@@ -794,6 +808,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             currentTime = 0
             currentProgress = 0
             shouldStartFromBeginning = false  // Reset the flag
+            hasRestoredPositionForCurrentEpisode = true
+            currentEpisodeIdForRestoration = currentEpisode.id
             // Update Now Playing info immediately with correct elapsed time
             updateNowPlayingInfo()
             return
@@ -829,6 +845,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         self?.currentProgress = targetProgress
                         self?.updatePlaybackInfo()
                         self?.updateNowPlayingInfo()
+                        self?.hasRestoredPositionForCurrentEpisode = true
+                        self?.currentEpisodeIdForRestoration = currentEpisode.id
                         os_log("✅ Perfectly restored playback position to %.1f seconds", log: self?.log ?? OSLog.default, type: .info, targetTime)
                     }
                 }
@@ -865,6 +883,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         self?.updatePlaybackInfo()
                         // Update Now Playing info with correct elapsed time
                         self?.updateNowPlayingInfo()
+                        self?.hasRestoredPositionForCurrentEpisode = true
+                        self?.currentEpisodeIdForRestoration = currentEpisode.id
                         os_log("Successfully restored playback position to %.1f seconds", log: self?.log ?? OSLog.default, type: .info, targetTime)
                     }
                 } else {
@@ -872,6 +892,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     // Even if seeking fails, update Now Playing info
                     DispatchQueue.main.async {
                         self?.updateNowPlayingInfo()
+                        self?.hasRestoredPositionForCurrentEpisode = true
+                        self?.currentEpisodeIdForRestoration = currentEpisode.id
                     }
                 }
             }
@@ -889,6 +911,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
             // Update Now Playing info immediately
             updateNowPlayingInfo()
+            
+            // Mark restoration as complete even if no seeking was needed
+            hasRestoredPositionForCurrentEpisode = true
+            currentEpisodeIdForRestoration = currentEpisode.id
         }
     }
     

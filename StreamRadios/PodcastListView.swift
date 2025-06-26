@@ -1652,16 +1652,14 @@ struct PodcastPlayerView: View {
     @State private var debounceTimer: Timer?
     @State private var scrollProxy: ScrollViewProxy?
     @State private var showPodcastPlayerSheet = false
-    @State private var hasPerformedInitialScroll = false
-    @State private var hasInitiallyScrolled = false
-    @State private var shouldAllowAutoScroll = true
-    @State private var hasManuallyScrolled = false
+    
+    // Simple auto-scroll state management
+    @State private var hasScrolledToCurrentEpisode = false
+    @State private var viewDidAppear = false
+    @State private var episodesDidLoad = false
+    @State private var lastAppearanceTime = Date()
+    
     @State private var isLoadingMore = false
-    @State private var scrollOffset: CGPoint = .zero
-    @State private var viewportHeight: CGFloat = 0
-    @State private var userIsScrolling = false
-    @State private var scrollStartOffset: CGPoint = .zero
-    @State private var lastScrollOffset: CGPoint = .zero
     @State private var scrollDebounceTimer: Timer?
     
     // Animation states for enhanced UI feedback
@@ -1721,10 +1719,9 @@ struct PodcastPlayerView: View {
             scrollDebounceTimer?.invalidate()
             scrollDebounceTimer = nil
             
-            // Reset scrolling state when view disappears
-            userIsScrolling = false
-            UserDefaults.standard.set(false, forKey: "isUserScrolling")
-            NotificationCenter.default.post(name: .userStoppedScrolling, object: false)
+            // Reset view state for fresh appearance next time
+            viewDidAppear = false
+            episodesDidLoad = false
         }
                 .onChange(of: viewModel.podcastFeedOrder) { _ in 
                     // Only refresh if episodes haven't been loaded yet or if there's a significant change
@@ -1953,14 +1950,8 @@ struct PodcastPlayerView: View {
             // Update the current tab and reload episodes with proper filtering
             viewModel.currentTab = newValue
             
-            // Only re-enable auto-scroll for tab changes if user hasn't been scrolling recently
-            if !userIsScrolling {
-                shouldAllowAutoScroll = true
-                hasPerformedInitialScroll = false
-                print("📱 Tab changed to: \(newValue), auto-scroll re-enabled")
-            } else {
-                print("📱 Tab changed to: \(newValue), but auto-scroll remains disabled (user was scrolling)")
-            }
+            // Reset scroll state when changing tabs so auto-scroll can work again if needed
+            hasScrolledToCurrentEpisode = false
             
             Task {
                 await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
@@ -2114,62 +2105,30 @@ struct PodcastPlayerView: View {
             }
             }
             .background(Color.black)
-            .gesture(
-                // Track scroll gestures to immediately disable auto-scroll during user interaction
-                DragGesture(minimumDistance: 1) // Minimum distance to avoid false triggers
-                    .onChanged { _ in
-                        if !userIsScrolling {
-                            userIsScrolling = true
-                            shouldAllowAutoScroll = false // Immediately disable auto-scroll
-                            UserDefaults.standard.set(true, forKey: "isUserScrolling")
-                            
-                            // Cancel any existing timer
-                            scrollDebounceTimer?.invalidate()
-                            
-                            print("🔒 User started scrolling - auto-scroll disabled")
-                        }
-                    }
-                    .onEnded { _ in
-                        // Debounce the end of scrolling to avoid rapid state changes
-                        scrollDebounceTimer?.invalidate()
-                        scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
-                            userIsScrolling = false
-                            UserDefaults.standard.set(false, forKey: "isUserScrolling")
-                            print("✅ User finished scrolling")
-                            // Note: Don't re-enable shouldAllowAutoScroll here to prevent jumps
-                        }
-                    }
-            )
-            .simultaneousGesture(
-                // Additional gesture to catch scroll wheel and other scroll interactions
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        if shouldAllowAutoScroll {
-                            shouldAllowAutoScroll = false
-                            print("🔒 Auto-scroll disabled by scroll interaction")
-                        }
-                    }
-            )
             .onAppear {
                 // Start end indicator animation
                 endIndicatorScale = 1.3
+                viewDidAppear = true
+                lastAppearanceTime = Date()
                 
-                // Perform initial scroll to currently playing episode
-                scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: true)
+                // Reset scroll tracking for this view session
+                hasScrolledToCurrentEpisode = false
+                
+                // Attempt scroll if episodes are already loaded
+                scrollToCurrentEpisodeIfNeeded(proxy: proxy)
             }
-            .onChange(of: viewModel.currentEpisodes) { _, _ in
-                // When episodes load, scroll to currently playing episode if this is initial load
-                // ONLY if user is not scrolling and auto-scroll is allowed
-                if shouldAllowAutoScroll && !hasPerformedInitialScroll && !userIsScrolling {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        // Double-check user is still not scrolling before executing
-                        if !userIsScrolling && shouldAllowAutoScroll {
-                            scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: true)
-                        } else {
-                            print("🔒 Auto-scroll cancelled - user is scrolling")
-                        }
-                    }
+            .onChange(of: viewModel.currentEpisodes) { _, newEpisodes in
+                // Mark that episodes have loaded
+                if !newEpisodes.isEmpty && !episodesDidLoad {
+                    episodesDidLoad = true
+                    
+                    // Attempt scroll when episodes load
+                    scrollToCurrentEpisodeIfNeeded(proxy: proxy)
                 }
+            }
+            .onChange(of: selectedTab) { _, _ in
+                // Reset scroll state when changing tabs so it can scroll again if needed
+                hasScrolledToCurrentEpisode = false
             }
         }
         .overlay(
@@ -2208,54 +2167,53 @@ struct PodcastPlayerView: View {
         )
     }
 
-    private func scrollToCurrentlyPlayingEpisode(proxy: ScrollViewProxy, isInitialLoad: Bool = false) {
-        // Multiple safety checks to prevent unwanted scrolling
-        guard shouldAllowAutoScroll else {
-            print("🔒 Auto-scroll blocked - shouldAllowAutoScroll is false")
+    /// Scrolls to currently playing episode when returning to the view
+    private func scrollToCurrentEpisodeIfNeeded(proxy: ScrollViewProxy) {
+        // Only scroll once per view session
+        guard !hasScrolledToCurrentEpisode else {
             return
         }
         
-        guard !userIsScrolling else {
-            print("🔒 Auto-scroll blocked - user is currently scrolling")
+        // Ensure view has appeared and episodes have loaded
+        guard viewDidAppear && episodesDidLoad else {
             return
         }
         
+        // Check if there's a currently playing episode for this feed
         guard let currentEpisode = podcastPlayer.currentEpisode,
               currentEpisode.feedId == feed.id else {
-            print("📍 No currently playing episode for this feed")
+            // No episode playing for this feed - mark as complete so we don't keep checking
+            hasScrolledToCurrentEpisode = true
             return
         }
         
-        print("🎯 Attempting to scroll to episode: \(currentEpisode.title) in tab: \(selectedTab)")
-        
-        // Check if the episode exists in current episodes list (filtered by current tab)
+        // Check if the episode exists in the current tab
         if viewModel.currentEpisodes.contains(where: { $0.id == currentEpisode.id }) {
-            print("✅ Episode found in current tab (\(getTabName(selectedTab))), scrolling...")
+            print("📍 Scrolling to currently playing episode: \(currentEpisode.title) in current tab: \(getTabName(selectedTab))")
             
-            withAnimation(.easeInOut(duration: 0.8)) {
-                proxy.scrollTo(currentEpisode.id, anchor: .center)
-            }
-            
-            hasPerformedInitialScroll = true
-            print("📍 Scrolled to currently playing episode: \(currentEpisode.title)")
-            
-            // Disable auto-scroll after initial scroll
-            if isInitialLoad {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    shouldAllowAutoScroll = false
-                    print("🔒 Auto-scroll disabled after initial scroll")
-                }
-            }
+            performScrollToEpisode(currentEpisode.id, proxy: proxy)
             
         } else {
-            print("⚠️ Currently playing episode not found in \(getTabName(selectedTab)) tab - staying in current tab")
-            
-            // Don't automatically switch tabs - just let user stay in their chosen tab
-            // The episode might not be a favorite or downloaded, so it won't appear in those tabs
-            
-            hasPerformedInitialScroll = true // Mark as completed so we don't keep trying
+            // Episode not in current tab - stay in current tab without scrolling
+            print("📍 Currently playing episode not available in current tab (\(getTabName(selectedTab))) - staying in current view")
+            hasScrolledToCurrentEpisode = true
         }
     }
+    
+    /// Performs the actual scroll animation to the episode
+    private func performScrollToEpisode(_ episodeId: String, proxy: ScrollViewProxy) {
+        // Add a small delay to ensure the view is fully rendered
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.easeInOut(duration: 0.8)) {
+                proxy.scrollTo(episodeId, anchor: .center)
+            }
+        }
+        
+        // Mark as completed for this view session
+        hasScrolledToCurrentEpisode = true
+    }
+    
+
     
     private func getTabName(_ tab: Int) -> String {
         switch tab {
@@ -2269,10 +2227,9 @@ struct PodcastPlayerView: View {
     private func handleOnAppear() {
         let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
         
-        // Reset auto-scroll state for fresh view appearance
-        shouldAllowAutoScroll = true
-        hasPerformedInitialScroll = false
-        userIsScrolling = false
+        // Reset state for this view appearance
+        viewDidAppear = false  // Will be set to true in onAppear
+        episodesDidLoad = !viewModel.currentEpisodes.isEmpty && currentEpisodesForThisFeed
         
         print("📱 PodcastPlayerView appeared for feed: \(feed.title)")
         
@@ -2280,10 +2237,6 @@ struct PodcastPlayerView: View {
         viewModel.currentTab = selectedTab
         
         if viewModel.currentEpisodes.isEmpty || !currentEpisodesForThisFeed {
-            hasManuallyScrolled = false
-            scrollOffset = .zero
-            lastScrollOffset = .zero
-            
             loadInitialEpisodes()
         } else {
             // Reload episodes with the current tab filter to ensure proper filtering
