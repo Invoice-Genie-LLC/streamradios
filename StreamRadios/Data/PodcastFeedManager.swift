@@ -33,7 +33,7 @@ class PodcastFeedManager {
     }
     
     /// Add new feed with background processing and episode parsing
-    func addFeed(from url: URL) async throws -> PodcastFeed {
+    func addFeed(from url: URL, forceRefresh: Bool = false) async throws -> PodcastFeed {
         os_log("🆕 Adding new feed from: %@", log: log, type: .info, url.absoluteString)
         
         // Parse RSS feed in background
@@ -72,7 +72,7 @@ class PodcastFeedManager {
         }
         
         // Save feed and episodes in background context (with artwork if downloaded)
-        return try await saveFeedWithEpisodes(feed: feedWithArtwork, episodes: episodes)
+        return try await saveFeedWithEpisodes(feed: feedWithArtwork, episodes: episodes, forceRefresh: forceRefresh)
     }
     
     /// Refresh feed and parse new episodes
@@ -154,7 +154,7 @@ class PodcastFeedManager {
         }
     }
     
-    private func saveFeedWithEpisodes(feed: PodcastFeed, episodes: [PodcastEpisode]) async throws -> PodcastFeed {
+    private func saveFeedWithEpisodes(feed: PodcastFeed, episodes: [PodcastEpisode], forceRefresh: Bool = false) async throws -> PodcastFeed {
         return try await withCheckedThrowingContinuation { continuation in
             let backgroundContext = CoreDataStack.shared.newBackgroundContext()
             
@@ -166,10 +166,27 @@ class PodcastFeedManager {
                     fetchRequest.fetchLimit = 1
                     
                     if let existingFeed = try backgroundContext.fetch(fetchRequest).first {
-                        os_log("⚠️ Feed already exists, skipping duplicate: %@", log: self.log, type: .info, feed.title)
-                        let podcastFeed = existingFeed.toPodcastFeed()
-                        continuation.resume(returning: podcastFeed)
-                        return
+                        // If forceRefresh is true (e.g., during fresh install), skip duplicate check and parse episodes
+                        if forceRefresh {
+                            os_log("🔄 Feed exists but forceRefresh=true, will parse episodes: %@", log: self.log, type: .info, feed.title)
+                        } else {
+                            os_log("⚠️ Feed already exists, loading episodes for existing feed: %@", log: self.log, type: .info, feed.title)
+                            
+                            // Load episodes for the existing feed
+                            let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                            episodeRequest.predicate = NSPredicate(format: "feedId == %@", existingFeed.id ?? "")
+                            episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                            
+                            let existingEpisodes = try backgroundContext.fetch(episodeRequest)
+                            let episodes = existingEpisodes.compactMap { $0.toPodcastEpisode() }
+                            
+                            var feedWithEpisodes = existingFeed.toPodcastFeed()
+                            feedWithEpisodes.episodes = episodes
+                            
+                            os_log("✅ Loaded existing feed with %d episodes: %@", log: self.log, type: .info, episodes.count, feedWithEpisodes.title)
+                            continuation.resume(returning: feedWithEpisodes)
+                            return
+                        }
                     }
                     
                     // Double-check with a more comprehensive search to prevent any duplicates
@@ -178,10 +195,27 @@ class PodcastFeedManager {
                     titleCheckRequest.fetchLimit = 1
                     
                     if let duplicateFeed = try backgroundContext.fetch(titleCheckRequest).first {
-                        os_log("⚠️ Duplicate feed detected by title+URL, skipping: %@", log: self.log, type: .info, feed.title)
-                        let podcastFeed = duplicateFeed.toPodcastFeed()
-                        continuation.resume(returning: podcastFeed)
-                        return
+                        // If forceRefresh is true (e.g., during fresh install), skip duplicate check and parse episodes
+                        if forceRefresh {
+                            os_log("🔄 Duplicate feed detected but forceRefresh=true, will parse episodes: %@", log: self.log, type: .info, feed.title)
+                        } else {
+                            os_log("⚠️ Duplicate feed detected by title+URL, loading episodes for existing feed: %@", log: self.log, type: .info, feed.title)
+                            
+                            // Load episodes for the existing feed
+                            let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                            episodeRequest.predicate = NSPredicate(format: "feedId == %@", duplicateFeed.id ?? "")
+                            episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                            
+                            let existingEpisodes = try backgroundContext.fetch(episodeRequest)
+                            let episodes = existingEpisodes.compactMap { $0.toPodcastEpisode() }
+                            
+                            var feedWithEpisodes = duplicateFeed.toPodcastFeed()
+                            feedWithEpisodes.episodes = episodes
+                            
+                            os_log("✅ Loaded duplicate feed with %d episodes: %@", log: self.log, type: .info, episodes.count, feedWithEpisodes.title)
+                            continuation.resume(returning: feedWithEpisodes)
+                            return
+                        }
                     }
                     
                     // Create new feed
@@ -193,8 +227,31 @@ class PodcastFeedManager {
                     
                     try backgroundContext.save()
                     
+                    // CRITICAL: Ensure main context sees the changes immediately for fresh install
+                    DispatchQueue.main.async {
+                        do {
+                            try CoreDataStack.shared.context.save()
+                            print("✅ Synchronized main context after feed save for: \(feed.title)")
+                            
+                            // Check if this is a fresh install before posting notification
+                            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+                            if isFreshInstall {
+                                print("🚀 IMMEDIATE FEED SAVE: Triggering UI refresh for fresh install")
+                                NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
+                                print("📢 IMMEDIATE FEED SAVE: Posted notification for feed: \(feed.title)")
+                            }
+                            
+                        } catch {
+                            print("⚠️ Failed to sync main context: \(error)")
+                        }
+                    }
+                    
+                    // Create feed with episodes for return
+                    var feedWithEpisodes = feed
+                    feedWithEpisodes.episodes = episodes
+                    
                     os_log("✅ Saved new feed with %d episodes: %@", log: self.log, type: .info, episodes.count, feed.title)
-                    continuation.resume(returning: feed)
+                    continuation.resume(returning: feedWithEpisodes)
                     
                 } catch {
                     os_log("❌ Failed to save feed: %@", log: self.log, type: .error, error.localizedDescription)
@@ -236,6 +293,16 @@ class PodcastFeedManager {
                     try self.saveEpisodesInBatches(actuallyNewEpisodes, for: managedFeed, in: backgroundContext)
                     
                     try backgroundContext.save()
+                    
+                    // CRITICAL: Ensure main context sees the changes immediately
+                    DispatchQueue.main.async {
+                        do {
+                            try CoreDataStack.shared.context.save()
+                            print("✅ Synchronized main context after feed update for: \(updatedFeed.title)")
+                        } catch {
+                            print("⚠️ Failed to sync main context: \(error)")
+                        }
+                    }
                     
                     os_log("🔄 Updated feed with %d new episodes", log: self.log, type: .info, actuallyNewEpisodes.count)
                     continuation.resume(returning: (updatedFeed, actuallyNewEpisodes))

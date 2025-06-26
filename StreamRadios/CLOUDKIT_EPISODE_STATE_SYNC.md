@@ -173,13 +173,23 @@ try await episodeManager.updateEpisodeStates(coreDataUpdates)
 - After RSS parsing in fresh install processing
 - After all initialization is complete (safety net)
 
+#### Issue: Progress displays only for one feed on fresh install
+**Cause**: Episode state sync was getting episode IDs from in-memory `podcastFeeds` array which may be incomplete during fresh install
+**Solution**: Changed to get episode IDs directly from Core Data via `getAllEpisodeIdsFromCoreData()` method
+**Fix Applied**: Lines 832-839 in PodcastViewModel.swift - now uses Core Data as source of truth for episode IDs
+
+#### Issue: CloudKit rate limiting with large numbers of episodes
+**Cause**: Individual episode state fetches for thousands of episodes overwhelm CloudKit
+**Solution**: Use bulk fetch (`fetchAllEpisodeStatesFromCloudKit()`) with fallback to batched individual fetches
+**Fix Applied**: PodcastCloudKitManager.swift - replaced individual fetches with bulk query, added batching for fallback
+
 #### Issue: isFavorite not syncing but isDownloaded working incorrectly
 **Cause**: Install type detection issue
 **Solution**: Verify `HasLaunchedBefore` UserDefaults key and fresh install detection
 
 #### Issue: Episode IDs array empty during sync
 **Cause**: Sync happening before feeds are processed
-**Solution**: Sync now gets episode IDs from all loaded feeds in Core Data
+**Solution**: Sync now gets episode IDs directly from Core Data, not from in-memory arrays
 
 #### Issue: Fatal error "Duplicate values for key" during episode state updates
 **Cause**: Duplicate episode IDs exist in Core Data

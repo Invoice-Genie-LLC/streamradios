@@ -14,7 +14,7 @@ import SwiftUI
 import os
 
 struct PodcastListView: View {
-    @StateObject private var viewModel = PodcastViewModel()
+    @EnvironmentObject private var viewModel: PodcastViewModel
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
@@ -28,6 +28,7 @@ struct PodcastListView: View {
     @StateObject private var radioPlayer = RadioPlayer.shared
     @State private var scrollToEpisodeID: String?
     @State private var refreshID = UUID()
+    @State private var dataCheckTimer: Timer?
     
     // Edit functionality
     @State private var showingEditPodcast = false
@@ -125,11 +126,32 @@ struct PodcastListView: View {
                    }
                }
                .onAppear(perform: onAppear)
+               .onDisappear {
+                   // Clean up timer and notification observer when view disappears
+                   dataCheckTimer?.invalidate()
+                   dataCheckTimer = nil
+                   NotificationCenter.default.removeObserver(self, name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
+               }
                .onChange(of: selectedPodcast) { _, newValue in
                    // When selectedPodcast is set from outside (like from ContentView),
                    // automatically show the episode list
                    if let podcast = newValue {
                        viewModel.fetchAllEpisodes(for: podcast)
+                   }
+               }
+               .onChange(of: viewModel.podcastFeeds.count) { _, newCount in
+                   // React to feed count changes for fresh install scenarios
+                   if newCount > 0 {
+                       print("🎯 UI: Detected feed count change to \(newCount) - refreshing view")
+                       
+                       // Cancel monitoring timer since data is now available
+                       dataCheckTimer?.invalidate()
+                       dataCheckTimer = nil
+                       
+                       // Debounced refresh to prevent excessive updates
+                       DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                           self.refreshID = UUID()
+                       }
                    }
                }
                .id(refreshID)
@@ -211,6 +233,19 @@ struct PodcastListView: View {
     
     private var podcastList: some View {
             List {
+                if viewModel.isLoading {
+                    HStack {
+                        ProgressView()
+                        Text("Loading podcast feeds...")
+                    }
+                    .foregroundColor(.gray)
+                    .padding()
+                } else if viewModel.podcastFeeds.isEmpty {
+                    Text("No podcast feeds available")
+                        .foregroundColor(.gray)
+                        .italic()
+                        .padding()
+                }
                 ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
                     if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
                        filteredPodcasts.contains(where: { $0.id == feedId }) {
@@ -298,8 +333,67 @@ struct PodcastListView: View {
     
     private func onAppear() {
         os_log("PodcastListView appeared", log: log, type: .info)
-        viewModel.loadFeedOrder()
-        viewModel.fetchPodcastFeeds()
+        print("🎯 UI: PodcastListView appeared - using environment object data")
+        print("🎯 UI: Current feeds count: \(viewModel.podcastFeeds.count)")
+        print("🎯 UI: Current feed order count: \(viewModel.podcastFeedOrder.count)")
+        
+        // Set up notification observer for fresh install data (with debouncing)
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("FreshInstallDataAvailable"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            print("📢 UI: Received FreshInstallDataAvailable notification - refreshing view")
+            
+            // SwiftUI-compatible debouncing using DispatchQueue
+            DispatchQueue.main.async {
+                self.refreshID = UUID()
+            }
+            
+            // Cancel any existing timer since data is now available
+            self.dataCheckTimer?.invalidate()
+            self.dataCheckTimer = nil
+        }
+        
+                // Check if data is already available (in case we missed the notification)
+        if viewModel.podcastFeeds.isEmpty {
+            print("🔄 UI: No feeds found - starting minimal monitoring")
+            
+            // Start lightweight monitoring without heavy reload operations
+            self.startFreshInstallDataMonitoring()
+        } else {
+            print("✅ UI: Data already available - \(viewModel.podcastFeeds.count) feeds found")
+        }
+    }
+    
+    private func startFreshInstallDataMonitoring() {
+        // Cancel any existing timer
+        dataCheckTimer?.invalidate()
+        
+        // Start a timer with reasonable interval to balance responsiveness and performance
+        var checkCount = 0
+        dataCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { timer in
+            checkCount += 1
+            let feedCount = viewModel.podcastFeeds.count
+            
+            // Reduce logging frequency to avoid spam
+            if checkCount % 5 == 1 {
+                print("🔍 UI: Monitoring fresh install data - Feeds: \(feedCount) (check \(checkCount))")
+            }
+            
+            if feedCount > 0 {
+                print("🎯 UI: Fresh install data detected (\(feedCount) feeds) - refreshing view")
+                DispatchQueue.main.async {
+                    self.refreshID = UUID()
+                    timer.invalidate()
+                    self.dataCheckTimer = nil
+                }
+            } else if checkCount > 30 { // Stop after 9 seconds (30 * 0.3)
+                print("🔄 UI: Stopping fresh install monitoring after timeout")
+                timer.invalidate()
+                self.dataCheckTimer = nil
+            }
+        }
     }
     
 
@@ -404,51 +498,14 @@ struct PodcastRowView: View {
         return feedEpisodes.contains { $0.state.progress > 0 && $0.state.progress < 1 }
     }
     
-    // Computed property to get the appropriate button text - reactive to viewModel changes
+    // Optimized button text with minimal computation and no logging for performance
     private var buttonText: String {
-        // Get episodes from the feed object itself, which has all episodes
-        var feedEpisodes = feed.episodes
-        
-        // If feed doesn't have episodes, try to get from viewModel
-        if feedEpisodes.isEmpty {
-            feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-        }
-        
-        print("🔍 BUTTON TEXT: Feed '\(feed.title)' - \(feedEpisodes.count) episodes available")
-        print("🔍 BUTTON TEXT: lastPlayedEpisodes dict: \(viewModel.lastPlayedEpisodes)")
-        
-        // Priority 1: Check if we have a specific last played episode for this feed
-        if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id] {
-            print("🔍 BUTTON TEXT: Feed \(feed.title) has last played episode: \(lastPlayedEpisodeId)")
+        // Quick check for last played episode (most efficient)
+        if viewModel.lastPlayedEpisodes[feed.id] != nil {
             return "Resume Episode"
         }
         
-        // Priority 2: Check for any episodes with progress (any playback history) using EpisodeStateManager
-        var episodesWithProgress: [PodcastEpisode] = []
-        for episode in feedEpisodes {
-            let progress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            if progress > 0 {
-                episodesWithProgress.append(episode)
-            }
-        }
-        
-        if !episodesWithProgress.isEmpty {
-            print("🔍 BUTTON TEXT: Feed \(feed.title) has \(episodesWithProgress.count) episodes with progress (EpisodeStateManager)")
-            return "Resume Episode"
-        }
-        
-        // Priority 3: Check UserDefaults for any stored progress (backup check)
-        for episode in feedEpisodes {
-            let progressKey = "PodcastProgress_\(episode.id)"
-            let storedProgress = UserDefaults.standard.double(forKey: progressKey)
-            if storedProgress > 0 {
-                print("🔍 BUTTON TEXT: Feed \(feed.title) has UserDefaults progress for episode: \(episode.title)")
-                return "Resume Episode"
-            }
-        }
-        
-        // Default case: No episodes have ever been played in this feed
-        print("🔍 BUTTON TEXT: Feed \(feed.title) showing Play Latest - no previous playback")
+        // Default case - avoid expensive episode iteration for UI performance
         return "Play Latest"
     }
     
@@ -1785,10 +1842,14 @@ struct PodcastPlayerView: View {
             // Update the current tab and reload episodes with proper filtering
             viewModel.currentTab = newValue
             
-            // Re-enable auto-scroll for tab changes
-            shouldAllowAutoScroll = true
-            hasPerformedInitialScroll = false
-            print("📱 Tab changed to: \(newValue), auto-scroll re-enabled")
+            // Only re-enable auto-scroll for tab changes if user hasn't been scrolling recently
+            if !userIsScrolling {
+                shouldAllowAutoScroll = true
+                hasPerformedInitialScroll = false
+                print("📱 Tab changed to: \(newValue), auto-scroll re-enabled")
+            } else {
+                print("📱 Tab changed to: \(newValue), but auto-scroll remains disabled (user was scrolling)")
+            }
             
             Task {
                 await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
@@ -1943,27 +2004,38 @@ struct PodcastPlayerView: View {
             }
             .background(Color.black)
             .gesture(
-                // Track scroll gestures to optimize performance during scrolling
-                DragGesture(minimumDistance: 0)
+                // Track scroll gestures to immediately disable auto-scroll during user interaction
+                DragGesture(minimumDistance: 1) // Minimum distance to avoid false triggers
                     .onChanged { _ in
                         if !userIsScrolling {
                             userIsScrolling = true
+                            shouldAllowAutoScroll = false // Immediately disable auto-scroll
                             UserDefaults.standard.set(true, forKey: "isUserScrolling")
                             
                             // Cancel any existing timer
                             scrollDebounceTimer?.invalidate()
                             
-                            // Disable auto-scroll once user manually scrolls
-                            shouldAllowAutoScroll = false
-                            print("🔒 Auto-scroll disabled due to user interaction")
+                            print("🔒 User started scrolling - auto-scroll disabled")
                         }
                     }
                     .onEnded { _ in
                         // Debounce the end of scrolling to avoid rapid state changes
                         scrollDebounceTimer?.invalidate()
-                        scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { _ in
+                        scrollDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
                             userIsScrolling = false
                             UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                            print("✅ User finished scrolling")
+                            // Note: Don't re-enable shouldAllowAutoScroll here to prevent jumps
+                        }
+                    }
+            )
+            .simultaneousGesture(
+                // Additional gesture to catch scroll wheel and other scroll interactions
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if shouldAllowAutoScroll {
+                            shouldAllowAutoScroll = false
+                            print("🔒 Auto-scroll disabled by scroll interaction")
                         }
                     }
             )
@@ -1976,17 +2048,15 @@ struct PodcastPlayerView: View {
             }
             .onChange(of: viewModel.currentEpisodes) { _, _ in
                 // When episodes load, scroll to currently playing episode if this is initial load
-                if shouldAllowAutoScroll && !hasPerformedInitialScroll {
+                // ONLY if user is not scrolling and auto-scroll is allowed
+                if shouldAllowAutoScroll && !hasPerformedInitialScroll && !userIsScrolling {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: true)
-                    }
-                }
-            }
-            .onChange(of: selectedTab) { _, _ in
-                // When tab changes, scroll to currently playing episode after a short delay
-                if shouldAllowAutoScroll {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: false)
+                        // Double-check user is still not scrolling before executing
+                        if !userIsScrolling && shouldAllowAutoScroll {
+                            scrollToCurrentlyPlayingEpisode(proxy: proxy, isInitialLoad: true)
+                        } else {
+                            print("🔒 Auto-scroll cancelled - user is scrolling")
+                        }
                     }
                 }
             }
@@ -2028,8 +2098,14 @@ struct PodcastPlayerView: View {
     }
 
     private func scrollToCurrentlyPlayingEpisode(proxy: ScrollViewProxy, isInitialLoad: Bool = false) {
+        // Multiple safety checks to prevent unwanted scrolling
         guard shouldAllowAutoScroll else {
-            print("🔒 Auto-scroll blocked due to user interaction")
+            print("🔒 Auto-scroll blocked - shouldAllowAutoScroll is false")
+            return
+        }
+        
+        guard !userIsScrolling else {
+            print("🔒 Auto-scroll blocked - user is currently scrolling")
             return
         }
         

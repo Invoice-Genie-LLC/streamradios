@@ -27,7 +27,7 @@ struct ContentView: View {
     @State private var activeSheet: ActiveSheet?
     @State private var selectedTab: Tab
     @EnvironmentObject var alertManager: AlertManager
-    @StateObject private var podcastViewModel: PodcastViewModel
+    @EnvironmentObject var podcastViewModel: PodcastViewModel
     @StateObject private var podcastPlayer = PodcastPlayer.shared
     @State private var selectedPodcast: PodcastFeed?
     @State private var showPodcastListView: Bool
@@ -46,7 +46,6 @@ struct ContentView: View {
         }
         
         self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
-        self._podcastViewModel = StateObject(wrappedValue: PodcastViewModel())
         self._podcastPlayer = StateObject(wrappedValue: PodcastPlayer.shared)
         
         self._isAddStationViewPresented = State(initialValue: false)

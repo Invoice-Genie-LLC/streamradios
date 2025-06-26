@@ -2,6 +2,15 @@ import Foundation
 import CloudKit
 import os
 
+// MARK: - Array Extension for Batching
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
+    }
+}
+
 /// CloudKit manager for podcast feeds and episode states with proper conflict resolution
 class PodcastCloudKitManager {
     static let shared = PodcastCloudKitManager()
@@ -114,52 +123,114 @@ class PodcastCloudKitManager {
         var skippedDownloadsCount = 0
         var coreDataUpdates: [EpisodeStateUpdate] = []
         
-        for episodeId in episodeIds {
-            do {
-                if let cloudState = try await fetchEpisodeStateFromCloudKit(episodeId) {
-                    // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager
-                    EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
-                    EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
-                    
-                    // Handle isDownloaded based on install type
-                    let finalIsDownloaded: Bool
-                    if isFreshInstall {
-                        // Fresh install: Don't sync isDownloaded because download files don't exist
-                        finalIsDownloaded = false
-                        EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
-                        if cloudState.isDownloaded {
-                            skippedDownloadsCount += 1
-                            os_log("📱 Fresh install: Skipped download state for episode %@ (file doesn't exist)", 
-                                   log: log, type: .debug, episodeId)
-                        }
-                    } else {
-                        // Upgrade: Sync isDownloaded because files might still exist locally
-                        finalIsDownloaded = cloudState.isDownloaded
-                        EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: cloudState.isDownloaded)
-                        os_log("📱 Upgrade: Synced download state for episode %@ (isDownloaded: %@)", 
-                               log: log, type: .debug, episodeId, cloudState.isDownloaded ? "YES" : "NO")
+        do {
+            // PERFORMANCE FIX: Use bulk fetch instead of individual requests to avoid rate limits
+            os_log("📡 Fetching all episode states from CloudKit in bulk to avoid rate limits", log: log, type: .info)
+            let allCloudStates = try await fetchAllEpisodeStatesFromCloudKit()
+            
+            os_log("📊 Retrieved %d episode states from CloudKit, filtering for %d local episodes", 
+                   log: log, type: .info, allCloudStates.count, episodeIds.count)
+            
+            // Convert episodeIds to a Set for faster lookup
+            let episodeIdSet = Set(episodeIds)
+            
+            // Process only the episode states we care about
+            for (episodeId, cloudState) in allCloudStates {
+                // Only process if this episode exists locally
+                guard episodeIdSet.contains(episodeId) else { continue }
+                
+                // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager
+                EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
+                
+                // Handle isDownloaded based on install type
+                let finalIsDownloaded: Bool
+                if isFreshInstall {
+                    // Fresh install: Don't sync isDownloaded because download files don't exist
+                    finalIsDownloaded = false
+                    EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                    if cloudState.isDownloaded {
+                        skippedDownloadsCount += 1
+                        os_log("📱 Fresh install: Skipped download state for episode %@ (file doesn't exist)", 
+                               log: log, type: .debug, episodeId)
                     }
-                    
-                    // Prepare Core Data update
-                    coreDataUpdates.append(EpisodeStateUpdate(
-                        episodeId: episodeId,
-                        progress: cloudState.progress,
-                        isFavorite: cloudState.isFavorite,
-                        isDownloaded: finalIsDownloaded,
-                        isPlayed: cloudState.isPlayed
-                    ))
-                    
-                    syncedCount += 1
+                } else {
+                    // Upgrade: Sync isDownloaded because files might still exist locally
+                    finalIsDownloaded = cloudState.isDownloaded
+                    EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: cloudState.isDownloaded)
+                    os_log("📱 Upgrade: Synced download state for episode %@ (isDownloaded: %@)", 
+                           log: log, type: .debug, episodeId, cloudState.isDownloaded ? "YES" : "NO")
                 }
-            } catch {
-                os_log("❌ Failed to sync episode state for %@: %@", log: log, type: .error, episodeId, error.localizedDescription)
+                
+                // Prepare Core Data update
+                coreDataUpdates.append(EpisodeStateUpdate(
+                    episodeId: episodeId,
+                    progress: cloudState.progress,
+                    isFavorite: cloudState.isFavorite,
+                    isDownloaded: finalIsDownloaded,
+                    isPlayed: cloudState.isPlayed
+                ))
+                
+                syncedCount += 1
+                
+                // Log progress sync for debugging
+                if cloudState.progress > 0 {
+                    os_log("📊 Synced progress for episode %@: %.3f", log: log, type: .debug, episodeId, cloudState.progress)
+                }
+            }
+            
+        } catch {
+            os_log("❌ Failed to bulk fetch episode states from CloudKit: %@", log: log, type: .error, error.localizedDescription)
+            
+            // Fallback to individual fetches with batching to avoid overwhelming CloudKit
+            os_log("🔄 Falling back to batched individual fetches", log: log, type: .info)
+            let batchSize = 50 // Smaller batches to avoid rate limits
+            let batches = episodeIds.chunked(into: batchSize)
+            
+            for (batchIndex, batch) in batches.enumerated() {
+                os_log("📦 Processing batch %d/%d (%d episodes)", log: log, type: .debug, batchIndex + 1, batches.count, batch.count)
+                
+                for episodeId in batch {
+                    do {
+                        if let cloudState = try await fetchEpisodeStateFromCloudKit(episodeId) {
+                            // Process the same way as bulk fetch
+                            EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                            EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
+                            
+                            let finalIsDownloaded: Bool
+                            if isFreshInstall {
+                                finalIsDownloaded = false
+                                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                                if cloudState.isDownloaded { skippedDownloadsCount += 1 }
+                            } else {
+                                finalIsDownloaded = cloudState.isDownloaded
+                                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: cloudState.isDownloaded)
+                            }
+                            
+                            coreDataUpdates.append(EpisodeStateUpdate(
+                                episodeId: episodeId,
+                                progress: cloudState.progress,
+                                isFavorite: cloudState.isFavorite,
+                                isDownloaded: finalIsDownloaded,
+                                isPlayed: cloudState.isPlayed
+                            ))
+                            
+                            syncedCount += 1
+                        }
+                    } catch {
+                        os_log("❌ Failed to sync episode state for %@: %@", log: log, type: .error, episodeId, error.localizedDescription)
+                    }
+                }
+                
+                // Add small delay between batches to respect rate limits
+                if batchIndex < batches.count - 1 {
+                    try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+                }
             }
         }
         
         // Save all synced states to Core Data immediately for fast app restart
         if !coreDataUpdates.isEmpty {
-            // Note: Core Data saving will be handled by the caller (PodcastViewModel)
-            // since PodcastEpisodeManager doesn't have a shared instance
             os_log("📦 Prepared %d episode state updates for Core Data saving", 
                    log: log, type: .info, coreDataUpdates.count)
         }
@@ -319,11 +390,41 @@ class PodcastCloudKitManager {
     func deletePodcastFeedFromCloudKit(_ feedId: String) async throws {
         let recordID = CKRecord.ID(recordName: feedId)
         
+        os_log("🔄 CloudKit: Starting deletion of feed record: %@", log: log, type: .info, feedId)
+        
         do {
-            _ = try await privateDatabase.deleteRecord(withID: recordID)
-            os_log("✅ Deleted podcast feed from CloudKit: %@", log: log, type: .info, feedId)
+            // First check if the record exists
+            do {
+                let existingRecord = try await privateDatabase.record(for: recordID)
+                os_log("✅ CloudKit: Found existing feed record to delete: %@", log: log, type: .info, existingRecord["title"] as? String ?? feedId)
+            } catch CKError.unknownItem {
+                os_log("⚠️ CloudKit: Feed record not found, already deleted: %@", log: log, type: .default, feedId)
+                return // Consider this a success - record is already gone
+            }
+            
+            // Delete the record (this will cascade delete all episode states with .deleteSelf references)
+            let deletedRecordID = try await privateDatabase.deleteRecord(withID: recordID)
+            os_log("✅ CloudKit: Successfully deleted podcast feed: %@ (recordID: %@)", log: log, type: .info, feedId, deletedRecordID.recordName)
+            os_log("🗑️ CloudKit: Cascade deletion should have removed all related episode states", log: log, type: .info)
+            
         } catch {
-            os_log("❌ Failed to delete podcast feed from CloudKit: %@", log: log, type: .error, error.localizedDescription)
+            os_log("❌ CloudKit: Failed to delete podcast feed %@: %@", log: log, type: .error, feedId, error.localizedDescription)
+            
+            if let ckError = error as? CKError {
+                os_log("❌ CloudKit: Error code %ld: %@", log: log, type: .error, ckError.code.rawValue, ckError.localizedDescription)
+                
+                switch ckError.code {
+                case .networkUnavailable:
+                    os_log("📶 CloudKit: Network unavailable - feed deletion will be retried when network is restored", log: log, type: .default)
+                case .quotaExceeded:
+                    os_log("💾 CloudKit: Quota exceeded - deletion failed", log: log, type: .error)
+                case .requestRateLimited:
+                    os_log("⏱️ CloudKit: Rate limited - deletion will be retried", log: log, type: .default)
+                default:
+                    os_log("❓ CloudKit: Unexpected error during deletion", log: log, type: .error)
+                }
+            }
+            
             throw error
         }
     }
