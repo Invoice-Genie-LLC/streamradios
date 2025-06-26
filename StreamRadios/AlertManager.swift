@@ -109,9 +109,9 @@ enum AlertType: Identifiable {
     var message: String {
         switch self {
         case .exportWithoutCountry:
-            return "Please select a country from the country selector in the app before exporting stations."
+            return "Please select a country from the Country Selection before importing stations."
         case .importWithoutCountry:
-            return "Please select a country from the country selector in the app before importing stations."
+            return "Please select a country from the Country Selection before importing stations."
         case .deleteAllData:
             return "Important: You're about to delete all station playlist data. This will remove all your saved playlists from both iCloud and your device's local storage. This action is permanent and cannot be reversed."
         case .selectCountryBeforeAddingStation:

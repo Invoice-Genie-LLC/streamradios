@@ -12,6 +12,7 @@ import OSLog
 import CoreData
 import AVKit
 import CloudKit
+import UserNotifications
 
 struct PodcastFeed: Identifiable, Codable, Equatable {
     var id: String
@@ -180,6 +181,11 @@ class PodcastViewModel: ObservableObject {
             return false
         }
         
+        // Notify user that import started
+        await MainActor.run {
+            NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing podcast feed from URL...")
+        }
+        
         do {
             // Step 1: Parse feed and create feed object
             let feed = try await feedManager.addFeed(from: feedURL)
@@ -198,9 +204,19 @@ class PodcastViewModel: ObservableObject {
                 do {
                     try await cloudKitManager.savePodcastFeedToCloudKit(feed)
                     print("☁️ Successfully saved feed to CloudKit: \(feed.title)")
+                    
+                    // Notify user of successful import
+                    await MainActor.run {
+                        NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported podcast '\(feed.title)'.")
+                    }
                 } catch {
                     print("⚠️ Failed to save feed to CloudKit (local save succeeded): \(error)")
                     // Continue even if CloudKit save fails - local data is preserved
+                    
+                    // Notify user of successful import with warning
+                    await MainActor.run {
+                        NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported podcast '\(feed.title)' locally. Some data may not sync to iCloud.")
+                    }
                 }
             }
             
@@ -210,6 +226,7 @@ class PodcastViewModel: ObservableObject {
             print("❌ Failed to add podcast feed: \(error)")
             await MainActor.run {
                 self.error = "Failed to add podcast feed: \(error.localizedDescription)"
+                NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import podcast feed: \(error.localizedDescription)")
             }
             return false
         }
@@ -519,6 +536,7 @@ class PodcastViewModel: ObservableObject {
     @MainActor
     func deletePodcastFeed(_ feed: PodcastFeed) {
         print("🗑️ Starting comprehensive deletion of feed: \(feed.title)")
+        NotificationManager.shared.notifyUserImmediate(title: "Deletion Started", message: "Deleting podcast '\(feed.title)' and all episodes...")
         
         // Step 1: Get all episode IDs BEFORE any deletion starts to ensure we capture all episodes
         Task {
@@ -597,6 +615,11 @@ class PodcastViewModel: ObservableObject {
                 print("   - Downloaded files: cleaned up")
                 print("   - Core Data: feed and \(episodeIds.count) episodes deleted")
                 
+                // Notify user of successful deletion
+                await MainActor.run {
+                    NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Successfully deleted podcast '\(feed.title)' and all \(episodeIds.count) episodes.")
+                }
+                
             } catch {
                 print("❌ Error during background cleanup: \(error)")
                 
@@ -604,6 +627,7 @@ class PodcastViewModel: ObservableObject {
                 await MainActor.run {
                     self.loadFeedsFromCoreData()
                     self.error = "Failed to completely delete podcast: \(error.localizedDescription)"
+                    NotificationManager.shared.notifyUserImmediate(title: "Deletion Failed", message: "Failed to delete podcast '\(feed.title)': \(error.localizedDescription)")
                 }
             }
         }
@@ -1588,6 +1612,11 @@ class PodcastViewModel: ObservableObject {
     func deleteDownloadedEpisode(_ episode: PodcastEpisode) async {
         print("🔍 DEBUG: Deleting download for '\(episode.title)' on tab \(currentTab)")
         
+        // Notify user that deletion started
+        await MainActor.run {
+            NotificationManager.shared.notifyUserImmediate(title: "Deletion Started", message: "Deleting downloaded episode '\(episode.title)'...")
+        }
+        
         // Delete the downloaded file from local storage
         print("🗑️ Deleting downloaded episode: \(episode.title)")
         
@@ -1645,8 +1674,18 @@ class PodcastViewModel: ObservableObject {
             
             print("✅ Successfully deleted download for episode: \(episode.title)")
             
+            // Notify user of successful deletion
+            await MainActor.run {
+                NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Successfully deleted download for '\(episode.title)'.")
+            }
+            
         } catch {
             print("❌ Failed to delete downloaded episode: \(error)")
+            
+            // Notify user of failed deletion
+            await MainActor.run {
+                NotificationManager.shared.notifyUserImmediate(title: "Deletion Failed", message: "Failed to delete download for '\(episode.title)': \(error.localizedDescription)")
+            }
             
             // Even if file deletion fails, still update the database states to prevent ghost downloads
             EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
@@ -2539,13 +2578,16 @@ extension PodcastViewModel {
                     
                     if allSuccess {
                         print("🎯 ✅ Successfully deleted all podcast data from both CloudKit and Core Data")
+                        NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "All podcast data has been successfully deleted.")
                     } else {
                         print("⚠️ Partial success: Local deletion completed, but some CloudKit deletions failed")
+                        NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Podcast data deletion completed with some warnings.")
                     }
                     
                     completion(allSuccess, lastError)
                 } catch {
                     print("❌ Error saving main context after podcast deletion: \(error.localizedDescription)")
+                    NotificationManager.shared.notifyUserImmediate(title: "Deletion Failed", message: "Failed to complete podcast data deletion: \(error.localizedDescription)")
                     completion(false, error)
                 }
             }

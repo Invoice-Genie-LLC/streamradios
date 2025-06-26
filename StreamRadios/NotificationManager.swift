@@ -20,6 +20,7 @@ class NotificationManager: NSObject, ObservableObject {
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
+        setupNotificationCategories()
         checkAuthorizationStatus()
     }
 
@@ -40,6 +41,38 @@ class NotificationManager: NSObject, ObservableObject {
         }
     }
 
+    private func setupNotificationCategories() {
+        // Create a category that allows for longer text display
+        let fullTextCategory = UNNotificationCategory(
+            identifier: "FULL_TEXT_CATEGORY",
+            actions: [],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+        
+        // Register the category with the notification center
+        UNUserNotificationCenter.current().setNotificationCategories([fullTextCategory])
+    }
+    
+    private func configureNotificationContent(title: String, message: String) -> UNMutableNotificationContent {
+        let content = UNMutableNotificationContent()
+        
+        // If the message is long, use subtitle for better display
+        if message.count > 60 {
+            content.title = title
+            content.subtitle = ""
+            content.body = message
+        } else {
+            content.title = title
+            content.body = message
+        }
+        
+        content.sound = UNNotificationSound.default
+        content.categoryIdentifier = "FULL_TEXT_CATEGORY"
+        
+        return content
+    }
+    
     private func checkAuthorizationStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             DispatchQueue.main.async {
@@ -59,10 +92,7 @@ class NotificationManager: NSObject, ObservableObject {
                 return
             }
             
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = message
-            content.sound = UNNotificationSound.default
+            let content = self.configureNotificationContent(title: title, message: message)
 
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
             let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
@@ -91,10 +121,7 @@ class NotificationManager: NSObject, ObservableObject {
                 return
             }
             
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = message
-            content.sound = UNNotificationSound.default
+            let content = self.configureNotificationContent(title: title, message: message)
             
             // Use immediate trigger (0.1 seconds)
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
@@ -111,10 +138,7 @@ class NotificationManager: NSObject, ObservableObject {
     }
 
     func scheduleNotification(title: String, message: String, date: Date) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = message
-        content.sound = UNNotificationSound.default
+        let content = configureNotificationContent(title: title, message: message)
 
         let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
@@ -145,11 +169,11 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         // This method is called when a notification is delivered to a foreground app
         print("🔔 Foreground notification received: \(notification.request.content.title)")
         
-        // Show notification even when app is in foreground
+        // Show notification even when app is in foreground with full content
         if #available(iOS 14.0, *) {
-            completionHandler([.banner, .sound, .list])
+            completionHandler([.banner, .sound, .list, .badge])
         } else {
-            completionHandler([.alert, .sound])
+            completionHandler([.alert, .sound, .badge])
         }
     }
 

@@ -62,7 +62,6 @@ struct SettingsView: View {
                          modernPlaybackSettings
                          modernDisplaySettings
                          modernAlarmSettings
-                         modernImportExportSettings
                          modernDataManagementLink
                      }
                     .padding(.horizontal, 16)
@@ -227,66 +226,7 @@ struct SettingsView: View {
             .buttonStyle(PlainButtonStyle())
          }
      }
-    
-    @ViewBuilder
-    private var modernImportExportSettings: some View {
-        ModernSettingsCard(
-            title: "Station Playlist Export/Import",
-            icon: ""
-        ) {
-            VStack(spacing: 16) {
-                                 // Country Selection
-                 VStack(alignment: .leading, spacing: 8) {
-                     HStack(spacing: 8) {
-                         Image(systemName: "globe")
-                             .font(.system(size: 16, weight: .medium))
-                             .foregroundColor(.blue)
-                             .frame(width: 20)
-                         
-                         Text("Country Selection")
-                             .font(.system(size: 16, weight: .semibold))
-                             .foregroundColor(primaryTextColor)
-                         
-                         Spacer()
-                     }
-                    
-                    ElegantCountryPickerButton(
-                        selectedCountry: $viewModel.selectedCountry,
-                        countries: viewModel.countries
-                    )
-                    .onChange(of: viewModel.selectedCountry) { newValue in
-                        viewModel.selectedCountry = newValue
-                    }
-                }
-                
-                // Export Button
-                ModernActionButton(
-                    title: "Export Playlist",
-                    subtitle: "Save your stations to a file",
-                    icon: "arrow.up.circle.fill",
-                    action: exportAction
-                )
-                
-                // Import Button and Progress
-                VStack(spacing: 12) {
-                    ModernActionButton(
-                        title: "Import Playlist", 
-                        subtitle: "Load stations from a file",
-                        icon: "arrow.down.circle.fill",
-                        action: importAction
-                    )
-                    
-                    if isImporting {
-                        ModernProgressView(
-                            title: "Importing station playlists...",
-                            progress: importProgress
-                        )
-                    }
-                }
-            }
-        }
-    }
-    
+ 
     @ViewBuilder
     private var modernDataManagementLink: some View {
         ModernSettingsCard(
@@ -775,6 +715,30 @@ struct InternalDataManagementView: View {
                 icon: "externaldrive.fill"
             ) {
                 VStack(spacing: 12) {
+                    // Country Selection
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.blue)
+                                .frame(width: 20)
+                            
+                            Text("Country Selection")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(colorScheme == .dark ? .white : .primary)
+                            
+                            Spacer()
+                        }
+                       
+                       ElegantCountryPickerButton(
+                           selectedCountry: $viewModel.selectedCountry,
+                           countries: viewModel.countries
+                       )
+                       .onChange(of: viewModel.selectedCountry) { newValue in
+                           viewModel.selectedCountry = newValue
+                       }
+                    }
+                    
                     ModernActionButton(
                         title: "Export Stations",
                         subtitle: "Save stations to a file",

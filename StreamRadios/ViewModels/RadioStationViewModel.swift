@@ -819,6 +819,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func deleteStationFromCoreData(_ station: RadioStation) {
+        NotificationManager.shared.notifyUserImmediate(title: "Deletion Started", message: "Deleting station '\(station.name)'...")
+        
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
         request.predicate = NSPredicate(format: "id == %@", station.id)
@@ -838,8 +840,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             
             print("Station deleted from CoreData successfully.")
+            NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Successfully deleted station '\(station.name)'.")
         } catch {
             print("Failed to delete station from CoreData: \(error)")
+            NotificationManager.shared.notifyUserImmediate(title: "Deletion Failed", message: "Failed to delete station '\(station.name)': \(error.localizedDescription)")
         }
     }
     
