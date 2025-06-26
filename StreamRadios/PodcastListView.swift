@@ -35,6 +35,8 @@ struct PodcastListView: View {
     @State private var podcastToEdit: PodcastFeed?
     @State private var editPodcastTitle = ""
     @State private var editPodcastURL = ""
+    @State private var isEditDataReady = false
+    @State private var isPreparingEditData = false
     
 
     
@@ -67,7 +69,6 @@ struct PodcastListView: View {
                                set: { _ in }
                            )
                        )
-                       .transition(.slide)
                    } else {
                        // Show the podcast list when no podcast is selected
                        VStack(spacing: 0) {
@@ -165,11 +166,45 @@ struct PodcastListView: View {
                        onUpdate: nil
                    )
                }
-               .sheet(isPresented: $showingEditPodcast) {
+               .sheet(isPresented: Binding(
+                   get: { showingEditPodcast && isEditDataReady },
+                   set: { newValue in 
+                       showingEditPodcast = newValue
+                       if !newValue {
+                           resetEditState()
+                       }
+                   }
+               )) {
                    AddPodcastView(
-                       isPresented: $showingEditPodcast,
-                       title: $editPodcastTitle,
-                       url: $editPodcastURL,
+                       isPresented: Binding(
+                           get: { showingEditPodcast && isEditDataReady },
+                           set: { newValue in 
+                               showingEditPodcast = newValue
+                               if !newValue {
+                                   resetEditState()
+                               }
+                           }
+                       ),
+                       title: Binding(
+                           get: { 
+                               print("🔧 DEBUG: Getting title binding value: '\(editPodcastTitle)' (ready: \(isEditDataReady))")
+                               return editPodcastTitle 
+                           },
+                           set: { newValue in 
+                               print("🔧 DEBUG: Setting title binding to: '\(newValue)'")
+                               editPodcastTitle = newValue 
+                           }
+                       ),
+                       url: Binding(
+                           get: { 
+                               print("🔧 DEBUG: Getting URL binding value: '\(editPodcastURL)' (ready: \(isEditDataReady))")
+                               return editPodcastURL 
+                           },
+                           set: { newValue in 
+                               print("🔧 DEBUG: Setting URL binding to: '\(newValue)'")
+                               editPodcastURL = newValue 
+                           }
+                       ),
                        podcastToEdit: podcastToEdit,
                        onAdd: { },
                        onUpdate: { updatedPodcast in
@@ -256,11 +291,17 @@ struct PodcastListView: View {
                             onStop: { podcastPlayer.togglePlayPause() },
                             onTap: { 
                                 if isEditing {
-                                    // In edit mode, open edit view
-                                    podcastToEdit = feed
-                                    editPodcastTitle = feed.title
-                                    editPodcastURL = feed.url
-                                    showingEditPodcast = true
+                                    // In edit mode, prepare edit data reliably
+                                    if !isPreparingEditData {
+                                        prepareEditData(for: feed) { success in
+                                            if success {
+                                                showingEditPodcast = true
+                                            } else {
+                                                print("🔧 ERROR: Failed to prepare edit data for feed: \(feed.title)")
+                                                // Show user feedback that edit failed
+                                            }
+                                        }
+                                    }
                                 } else {
                                     // Normal mode, show podcast episodes
                                     selectedPodcast = feed
@@ -286,13 +327,19 @@ struct PodcastListView: View {
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button {
-                                // Edit button action
-                                podcastToEdit = feed
-                                editPodcastTitle = feed.title
-                                editPodcastURL = feed.url
-                                showingEditPodcast = true
+                                // Edit button action - use reliable edit data preparation
+                                if !isPreparingEditData {
+                                    prepareEditData(for: feed) { success in
+                                        if success {
+                                            showingEditPodcast = true
+                                        } else {
+                                            print("🔧 ERROR: Failed to prepare swipe edit data for feed: \(feed.title)")
+                                            // Show user feedback that edit failed
+                                        }
+                                    }
+                                }
                             } label: {
-                                Label("Edit", systemImage: "pencil")
+                                Label("Edit", systemImage: isPreparingEditData ? "hourglass" : "pencil")
                             }
                             .tint(.blue)
                         }
@@ -406,25 +453,90 @@ struct PodcastListView: View {
         showingAddPodcast = false
     }
     
+    // MARK: - Edit Helper Methods
+    
+    private func prepareEditData(for feed: PodcastFeed, completion: @escaping (Bool) -> Void) {
+        print("🔧 DEBUG: Preparing edit data for feed: '\(feed.title)' (ID: \(feed.id))")
+        
+        // Prevent multiple concurrent preparations
+        guard !isPreparingEditData else {
+            print("🔧 WARNING: Already preparing edit data, ignoring duplicate request")
+            return
+        }
+        
+        isPreparingEditData = true
+        
+        // First, check if the feed data is already valid
+        if !feed.title.isEmpty && !feed.url.isEmpty {
+            print("🔧 DEBUG: Feed data is valid, proceeding with edit")
+            podcastToEdit = feed
+            editPodcastTitle = feed.title
+            editPodcastURL = feed.url
+            isEditDataReady = true
+            isPreparingEditData = false
+            completion(true)
+            return
+        }
+        
+        // Data is invalid, try to reload from Core Data
+        print("🔧 WARNING: Feed data invalid - Title: '\(feed.title)', URL: '\(feed.url)'")
+        print("🔧 DEBUG: Reloading feeds from Core Data...")
+        
+        viewModel.loadFeedsFromCoreData()
+        
+        // Wait for data to load and then check again
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { // Increased delay to ensure data loads
+            // Find the refreshed feed
+            if let refreshedFeed = self.viewModel.podcastFeeds.first(where: { $0.id == feed.id }) {
+                print("🔧 DEBUG: Found refreshed feed - Title: '\(refreshedFeed.title)', URL: '\(refreshedFeed.url)'")
+                
+                if !refreshedFeed.title.isEmpty && !refreshedFeed.url.isEmpty {
+                    print("🔧 SUCCESS: Refreshed feed data is valid")
+                    self.podcastToEdit = refreshedFeed
+                    self.editPodcastTitle = refreshedFeed.title
+                    self.editPodcastURL = refreshedFeed.url
+                    self.isEditDataReady = true
+                    self.isPreparingEditData = false
+                    completion(true)
+                } else {
+                    print("🔧 ERROR: Refreshed feed data is still invalid")
+                    self.isEditDataReady = false
+                    self.isPreparingEditData = false
+                    completion(false)
+                }
+            } else {
+                print("🔧 ERROR: Could not find feed with ID: \(feed.id) after reload")
+                self.isEditDataReady = false
+                self.isPreparingEditData = false
+                completion(false)
+            }
+        }
+    }
+    
+    private func resetEditState() {
+        podcastToEdit = nil
+        editPodcastTitle = ""
+        editPodcastURL = ""
+        isEditDataReady = false
+        isPreparingEditData = false
+    }
+
     private func updatePodcast(_ updatedPodcast: PodcastFeed) {
-        print("DEBUG: PodcastListView - Updating podcast - ID: \(updatedPodcast.id), Title: '\(updatedPodcast.title)', URL: '\(updatedPodcast.url)'")
+        print("🔧 DEBUG: PodcastListView - Updating podcast - ID: \(updatedPodcast.id), Title: '\(updatedPodcast.title)', URL: '\(updatedPodcast.url)'")
         
         // Update the podcast feed
         viewModel.updatePodcastFeed(updatedPodcast)
         
+        // Clean up edit state immediately
+        resetEditState()
+        
         // Force UI refresh by triggering objectWillChange
         DispatchQueue.main.async {
             self.viewModel.objectWillChange.send()
+            self.refreshID = UUID() // Force view refresh to show updated data
         }
         
-        // Clean up edit state
-        showingEditPodcast = false
-        editPodcastTitle = ""
-        editPodcastURL = ""
-        podcastToEdit = nil
-        refreshID = UUID() // Force view refresh to show updated data
-        
-        print("DEBUG: PodcastListView - Edit completed and UI refreshed")
+        print("🔧 DEBUG: PodcastListView - Edit completed and UI refreshed")
     }
     
     private func playLatestEpisode(for feed: PodcastFeed) {
@@ -1642,7 +1754,11 @@ struct PodcastPlayerView: View {
         VStack(spacing: 0) {
             // Enhanced Navigation Bar with gradient background
             HStack {
-                Button(action: { selectedPodcast = nil }) {
+                Button(action: { 
+                    withAnimation(.none) {
+                        selectedPodcast = nil 
+                    }
+                }) {
                     HStack(spacing: 8) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .semibold))
@@ -1650,13 +1766,8 @@ struct PodcastPlayerView: View {
                             .font(.system(size: 16, weight: .medium))
                     }
                     .foregroundColor(.blue)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.blue.opacity(0.1))
-                    )
                 }
+                .buttonStyle(PlainButtonStyle())
                 
                 Spacer()
                 

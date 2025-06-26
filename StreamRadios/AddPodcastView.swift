@@ -360,19 +360,51 @@ struct AddPodcastView: View {
                 trailing: modernSaveButton
             )
             .onAppear {
+                print("🔧 DEBUG: AddPodcastView onAppear - podcastToEdit: \(podcastToEdit?.title ?? "nil")")
+                print("🔧 DEBUG: AddPodcastView onAppear - current title binding: '\(title)', url binding: '\(url)'")
+                
                 if let podcastToEdit = podcastToEdit {
-                    // Populate fields when editing
-                    title = podcastToEdit.title
-                    url = podcastToEdit.url
-                } else {
-                    // Clear all form values for a fresh start when adding new podcast
-                    title = ""
-                    url = ""
-                    searchText = ""
-                    searchService.clearResults()
+                    // Populate fields when editing - force binding updates
+                    print("🔧 DEBUG: Populating edit fields - Title: '\(podcastToEdit.title)', URL: '\(podcastToEdit.url)'")
                     
-                    // Dismiss keyboard if it's showing
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    // Ensure we have valid data before setting
+                    if !podcastToEdit.title.isEmpty && !podcastToEdit.url.isEmpty {
+                        title = podcastToEdit.title
+                        url = podcastToEdit.url
+                        print("🔧 SUCCESS: Edit fields populated successfully")
+                    } else {
+                        print("🔧 WARNING: podcastToEdit has empty title or URL")
+                        print("🔧 DEBUG: Trying to use current binding values as fallback")
+                        
+                        // If bindings already have values from parent, use them
+                        if !title.isEmpty && !url.isEmpty {
+                            print("🔧 SUCCESS: Using existing binding values")
+                        } else {
+                            print("🔧 ERROR: Both podcastToEdit and bindings are empty - edit will fail")
+                        }
+                    }
+                } else {
+                    // Adding new podcast - only clear fields if they're not already set from bindings
+                    if title.isEmpty && url.isEmpty {
+                        print("🔧 DEBUG: Clearing fields for new podcast")
+                        title = ""
+                        url = ""
+                        searchText = ""
+                        searchService.clearResults()
+                        
+                        // Dismiss keyboard if it's showing
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    } else {
+                        print("🔧 DEBUG: New podcast mode but fields already have values - preserving them")
+                    }
+                }
+                
+                print("🔧 DEBUG: AddPodcastView onAppear completed - title: '\(title)', url: '\(url)'")
+                
+                // Final validation - if we're editing and still have empty fields, log an error
+                if podcastToEdit != nil && (title.isEmpty || url.isEmpty) {
+                    print("🔧 ERROR: Edit mode but fields are still empty after onAppear - this indicates a data preparation issue")
+                    print("🔧 ERROR: podcastToEdit - Title: '\(podcastToEdit?.title ?? "nil")', URL: '\(podcastToEdit?.url ?? "nil")'")
                 }
             }
         }
