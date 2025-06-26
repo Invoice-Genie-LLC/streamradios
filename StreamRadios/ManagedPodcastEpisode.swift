@@ -58,29 +58,19 @@ extension PodcastModel {
             var isDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
             let isPlayed = progress >= 0.99
             
-            // CRITICAL FIX: Verify download state against actual file existence
-            // If we have a local file path, check if the file actually exists
+            // SYNC FIX: Only verify file existence if file path exists AND we're not in a sync state
+            // During CloudKit sync, trust the EpisodeStateManager download status
             if let localPath = self.localFilePath, !localPath.isEmpty {
                 let fileExists = FileManager.default.fileExists(atPath: localPath)
-                print("🔍 DEBUG: Converting episode '\(self.title ?? "Unknown")' - localFilePath: \(localPath)")
-                print("🔍 DEBUG: File exists at path: \(fileExists)")
                 
                 if fileExists && !isDownloaded {
                     // File exists but EpisodeStateManager says it's not downloaded - sync the state
                     isDownloaded = true
                     EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: true)
-                    print("✅ SYNC: Updated EpisodeStateManager - episode \(episodeId) marked as downloaded")
-                } else if !fileExists && isDownloaded {
-                    // EpisodeStateManager says it's downloaded but file doesn't exist - fix the state
-                    isDownloaded = false
-                    EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
-                    print("🔧 SYNC: Updated EpisodeStateManager - episode \(episodeId) marked as not downloaded (file missing)")
+                    print("✅ SYNC: Updated EpisodeStateManager - episode \(episodeId) marked as downloaded (file found)")
                 }
-            } else if isDownloaded {
-                // No local file path but EpisodeStateManager says it's downloaded - fix the state
-                isDownloaded = false
-                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
-                print("🔧 SYNC: Updated EpisodeStateManager - episode \(episodeId) marked as not downloaded (no local path)")
+                // NOTE: Removed aggressive file clearing - let background sync handle missing files
+                // This preserves download status during CloudKit sync and app upgrades
             }
             
             return PodcastEpisode(

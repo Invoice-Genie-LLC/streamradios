@@ -436,17 +436,27 @@ class PodcastViewModel: ObservableObject {
             let episodeFeedId: String?
             if let currentEpisode = self.currentEpisodes.first(where: { $0.id == episodeId }) {
                 episodeFeedId = currentEpisode.feedId
+                print("💾 DEBUG: Found feedId from currentEpisodes: \(episodeFeedId ?? "nil")")
             } else if let selectedId = self.selectedFeedId, !selectedId.isEmpty {
                 // Fallback: use currently selected feed
                 episodeFeedId = selectedId
+                print("💾 DEBUG: Using selectedFeedId as fallback: \(episodeFeedId ?? "nil")")
             } else {
                 // Last resort: query Core Data for the episode's feedId
                 episodeFeedId = await self.getFeedIdForEpisode(episodeId)
+                print("💾 DEBUG: Core Data lookup returned feedId: \(episodeFeedId ?? "nil")")
             }
             
             // Sync to CloudKit (single call, non-blocking) with feed relationship
             // Only sync if we have a valid feedId to prevent crashes
             if let validFeedId = episodeFeedId, !validFeedId.isEmpty {
+                print("💾 DEBUG: Starting CloudKit save for episode \(episodeId)")
+                print("💾 DEBUG: - feedId: \(validFeedId)")
+                print("💾 DEBUG: - finalProgress: \(finalProgress)")
+                print("💾 DEBUG: - currentFavorite: \(currentFavorite)")
+                print("💾 DEBUG: - currentDownloaded: \(currentDownloaded)")
+                print("💾 DEBUG: - finalIsPlayed: \(finalIsPlayed)")
+                
                 Task.detached(priority: .userInitiated) {
                     await PodcastCloudKitManager.shared.saveEpisodeState(
                         episodeId: episodeId,
@@ -460,6 +470,7 @@ class PodcastViewModel: ObservableObject {
             } else {
                 print("⚠️ Skipping CloudKit sync for episode \(episodeId) - no valid feedId found")
                 print("⚠️ Debug: selectedFeedId=\(self.selectedFeedId ?? "nil"), currentEpisodes.count=\(self.currentEpisodes.count)")
+                print("⚠️ Debug: currentEpisodes contain this episode? \(self.currentEpisodes.contains { $0.id == episodeId })")
             }
             
             // CRITICAL: Save to Core Data immediately for persistence and fast app restart
@@ -542,12 +553,26 @@ class PodcastViewModel: ObservableObject {
                 // Delete downloaded episode files
                 await deleteDownloadedEpisodeFiles(episodeIds)
                 
-                // Delete feed from CloudKit (this will automatically delete all related episode states)
+                // Delete feed and all associated episode states from CloudKit
                 do {
-                    print("🔄 Attempting to delete feed from CloudKit: \(feed.id)")
+                    print("🔄 Attempting to delete feed and episode states from CloudKit: \(feed.id)")
+                    print("🔍 Feed details - Title: '\(feed.title)', URL: '\(feed.url)'")
+                    
+                    // Debug: List all feeds in CloudKit before deletion
+                    print("🔍 DEBUG: Listing all feeds in CloudKit before deletion:")
+                    await cloudKitManager.debugListAllFeeds()
+                    
+                    // Debug: Check if feed exists by exact ID
+                    await cloudKitManager.debugCheckFeedExists(feed.id)
+                    
                     try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
                     print("☁️ Successfully deleted feed from CloudKit: \(feed.title)")
-                    print("☁️ CloudKit automatically deleted \(episodeIds.count) related episode states due to .deleteSelf relationship")
+                    print("☁️ CloudKit explicitly deleted all \(episodeIds.count) related episode states (progress, favorites, downloads)")
+                    
+                    // Debug: List all feeds in CloudKit after deletion
+                    print("🔍 DEBUG: Listing all feeds in CloudKit after deletion:")
+                    await cloudKitManager.debugListAllFeeds()
+                    
                 } catch {
                     print("❌ Failed to delete feed from CloudKit: \(error)")
                     print("❌ CloudKit deletion error details: \(error.localizedDescription)")
@@ -555,6 +580,10 @@ class PodcastViewModel: ObservableObject {
                         print("❌ CloudKit error code: \(ckError.code)")
                         print("❌ CloudKit error description: \(ckError.localizedDescription)")
                     }
+                    
+                    // Debug: List all feeds after failed deletion
+                    print("🔍 DEBUG: Listing all feeds in CloudKit after failed deletion:")
+                    await cloudKitManager.debugListAllFeeds()
                 }
                 
                 // Delete from Core Data (episodes and feed) - this will also remove episode states
@@ -564,7 +593,7 @@ class PodcastViewModel: ObservableObject {
                 print("🎉 Successfully completed comprehensive deletion of: \(feed.title)")
                 print("📊 Cleanup summary:")
                 print("   - EpisodeStateManager: \(episodeIds.count) episode states cleared")
-                print("   - CloudKit: Feed deleted with automatic cascade deletion of \(episodeIds.count) episode states")
+                print("   - CloudKit: Feed and \(episodeIds.count) episode states explicitly deleted")
                 print("   - Downloaded files: cleaned up")
                 print("   - Core Data: feed and \(episodeIds.count) episodes deleted")
                 
@@ -709,8 +738,10 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func refreshEpisodeStatesFromManager() {
-        // Update episode states without triggering a full reload
-        let updatedEpisodes = currentEpisodes.map { episode in
+        print("🔄 Refreshing episode states from EpisodeStateManager for ALL feeds")
+        
+        // Update episode states in currentEpisodes (currently displayed episodes)
+        let updatedCurrentEpisodes = currentEpisodes.map { episode in
             var updated = episode
             updated.state.progress = EpisodeStateManager.shared.getProgress(for: episode.id)
             updated.state.isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
@@ -718,8 +749,25 @@ class PodcastViewModel: ObservableObject {
             updated.state.isPlayed = updated.state.progress >= 0.99
             return updated
         }
+        currentEpisodes = updatedCurrentEpisodes
         
-        currentEpisodes = updatedEpisodes
+        // CRITICAL: Also update episode states in ALL podcastFeeds so that download states
+        // are preserved when switching between feeds after CloudKit sync
+        var updatedFeeds = podcastFeeds
+        for feedIndex in 0..<updatedFeeds.count {
+            let updatedEpisodes = updatedFeeds[feedIndex].episodes.map { episode in
+                var updated = episode
+                updated.state.progress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                updated.state.isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                updated.state.isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                updated.state.isPlayed = updated.state.progress >= 0.99
+                return updated
+            }
+            updatedFeeds[feedIndex].episodes = updatedEpisodes
+        }
+        podcastFeeds = updatedFeeds
+        
+        print("✅ Updated episode states for \(currentEpisodes.count) current episodes and \(podcastFeeds.count) feeds")
     }
     
     private func updateEpisodeCountsForCurrentFeed() async {
@@ -873,7 +921,7 @@ class PodcastViewModel: ObservableObject {
             context.perform {
                 do {
                     let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                    request.propertiesToFetch = ["id", "feedId"]
+                    request.propertiesToFetch = ["id", "feedId", "title"]
                     request.resultType = .dictionaryResultType
                     
                     // Core Data returns [NSDictionary] for dictionary result type, not [[String: Any]]
@@ -888,6 +936,12 @@ class PodcastViewModel: ObservableObject {
                     print("🔍 DEBUG: Retrieved \(episodeIds.count) episode IDs from Core Data across \(episodesByFeed.count) feeds")
                     for (feedId, episodes) in episodesByFeed {
                         print("🔍 DEBUG: Feed '\(feedId)' has \(episodes.count) episodes for sync")
+                        
+                        // Show some example episode titles for verification
+                        let sampleTitles = episodes.prefix(3).compactMap { $0["title"] as? String }
+                        if !sampleTitles.isEmpty {
+                            print("🔍 DEBUG: Sample episodes from feed '\(feedId)': \(sampleTitles.joined(separator: ", "))")
+                        }
                     }
                     
                     continuation.resume(returning: episodeIds)
@@ -1052,7 +1106,11 @@ class PodcastViewModel: ObservableObject {
         
         // IMPORTANT: Now that episodes are loaded, sync their states from CloudKit
         print("🔄 Starting episode state sync after fresh install processing...")
-        await syncEpisodeStatesFromCloudKit(isFreshInstall: true)
+        // CRITICAL FIX: Determine fresh install status properly instead of hard-coding
+        let existingFeedCount = await countExistingFeeds()
+        let isFreshInstall = existingFeedCount <= 1 // Allow for the feeds we just added
+        print("🔍 Fresh install determination: existingFeedCount=\(existingFeedCount), isFreshInstall=\(isFreshInstall)")
+        await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
     }
     
     /// Wait for Core Data to contain the fresh install data and then refresh UI
@@ -1189,7 +1247,11 @@ class PodcastViewModel: ObservableObject {
         // After merging feeds, sync episode states for existing installation (upgrade)
         if !cloudKitFeeds.isEmpty {
             print("🔄 Starting episode state sync after merging feeds for existing installation...")
-            await syncEpisodeStatesFromCloudKit(isFreshInstall: false)
+            // CRITICAL FIX: Determine fresh install status properly instead of hard-coding
+            let existingFeedCount = await countExistingFeeds()
+            let isFreshInstall = existingFeedCount == 0
+            print("🔍 Fresh install determination in merge: existingFeedCount=\(existingFeedCount), isFreshInstall=\(isFreshInstall)")
+            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
         }
     }
     
@@ -2136,6 +2198,10 @@ extension PodcastViewModel {
                     
                     self.downloadProgress[episode.id] = 1.0
                     completion(.success(true))
+                    
+                    // CRITICAL: Trigger CloudKit sync for the download state change
+                    self.updateEpisodeState(episode.id, isDownloaded: true)
+                    print("💾 Triggered CloudKit sync for downloaded episode: \(episode.title)")
                     
                     // Clear download progress and observation after a delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
