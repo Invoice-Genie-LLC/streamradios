@@ -2322,6 +2322,14 @@ extension PodcastViewModel {
             let results = try context.fetch(request)
             if results.isEmpty {
                 print("📡 No podcast feeds found in CoreData.")
+                // CRITICAL: Clear in-memory arrays when no feeds found in Core Data
+                DispatchQueue.main.async {
+                    self.podcastFeeds.removeAll()
+                    self.podcastFeedOrder.removeAll()
+                    self.currentEpisodes.removeAll()
+                    self.objectWillChange.send()
+                    print("📡 ✅ MAIN THREAD: Cleared all in-memory podcast data due to empty Core Data")
+                }
                 return
             }
             
@@ -2405,26 +2413,46 @@ extension PodcastViewModel {
     
     /// Clear all podcast data from Core Data (following radio station pattern)
     func clearPodcastCoreData(completion: @escaping (Bool, Error?) -> Void) {
-        let context = CoreDataStack.shared.persistentContainer.viewContext
+        // Create a private context for deletion to avoid merge conflicts
+        let privateMOC = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
         
-        // Delete episodes first
-        let episodeDeleteRequest = NSBatchDeleteRequest(fetchRequest: PodcastModel.fetchRequest())
+        // Set merge policy to handle conflicts
+        privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
         
-        // Delete feeds
-        let feedDeleteRequest = NSBatchDeleteRequest(fetchRequest: FeedModel.fetchRequest())
-        
-        context.perform {
+        privateMOC.perform {
             do {
-                try context.execute(episodeDeleteRequest)
-                try context.execute(feedDeleteRequest)
-                try context.save()
+                // Fetch and delete episodes first
+                let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                let episodes = try privateMOC.fetch(episodeFetchRequest)
+                for episode in episodes {
+                    privateMOC.delete(episode)
+                }
                 
-                // Clear in-memory data
+                // Fetch and delete feeds
+                let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                let feeds = try privateMOC.fetch(feedFetchRequest)
+                for feed in feeds {
+                    privateMOC.delete(feed)
+                }
+                
+                // Save private context first
+                try privateMOC.save()
+                
+                // Then save main context
                 DispatchQueue.main.async {
-                    self.podcastFeeds.removeAll()
-                    self.podcastFeedOrder.removeAll()
-                    self.currentEpisodes.removeAll()
-                    completion(true, nil)
+                    do {
+                        try CoreDataStack.shared.persistentContainer.viewContext.save()
+                        
+                        // Clear in-memory data after successful save
+                        self.podcastFeeds.removeAll()
+                        self.podcastFeedOrder.removeAll()
+                        self.currentEpisodes.removeAll()
+                        completion(true, nil)
+                    } catch {
+                        print("❌ Error saving main context after podcast deletion: \(error.localizedDescription)")
+                        completion(false, error)
+                    }
                 }
             } catch {
                 print("❌ Error deleting podcast data from CoreData: \(error.localizedDescription)")

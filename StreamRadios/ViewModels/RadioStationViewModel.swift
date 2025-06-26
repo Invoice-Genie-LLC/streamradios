@@ -524,21 +524,47 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func clearCoreData(completion: @escaping (Bool, Error?) -> Void) {
-        let context = CoreDataStack.shared.persistentContainer.viewContext
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: CDStation.fetchRequest())
+        // Create a private context for deletion to avoid merge conflicts
+        let privateMOC = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
         
-        context.perform {
+        // Set merge policy to handle conflicts
+        privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
+        
+        privateMOC.perform {
             do {
-                try context.execute(deleteRequest)
-                try context.save()
-                self.stations.removeAll()
-                self.isDeletingData = false
-                self.deletionComplete = true
-                completion(true, nil)
+                // Fetch and delete stations
+                let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                let stations = try privateMOC.fetch(fetchRequest)
+                for station in stations {
+                    privateMOC.delete(station)
+                }
+                
+                // Save private context first
+                try privateMOC.save()
+                
+                // Then save main context
+                DispatchQueue.main.async {
+                    do {
+                        try CoreDataStack.shared.persistentContainer.viewContext.save()
+                        
+                        // Clear in-memory data after successful save
+                        self.stations.removeAll()
+                        self.isDeletingData = false
+                        self.deletionComplete = true
+                        completion(true, nil)
+                    } catch {
+                        print("Error saving main context after station deletion: \(error.localizedDescription)")
+                        self.isDeletingData = false
+                        completion(false, error)
+                    }
+                }
             } catch {
                 print("Error deleting stations from CoreData: \(error.localizedDescription)")
-                self.isDeletingData = false
-                completion(false, error)
+                DispatchQueue.main.async {
+                    self.isDeletingData = false
+                    completion(false, error)
+                }
             }
         }
     }
@@ -949,6 +975,9 @@ extension RadioStationViewModel {
             let results = try context.fetch(request)
             if results.isEmpty {
                 print("No stations found in CoreData.")
+                stations.removeAll()
+                print("📡 ✅ Cleared all in-memory station data due to empty Core Data")
+                return
             }
             stations = results.map { cdStation in
                 RadioStation(
