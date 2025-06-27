@@ -105,17 +105,6 @@ struct PodcastListView: View {
                .navigationTitle("Podcasts")
                .navigationBarTitleDisplayMode(.inline)
                .toolbar {
-                   ToolbarItem(placement: .navigationBarLeading) {
-                       Button(action: {
-                           isEditing.toggle()
-                           if !isEditing {
-                               viewModel.saveFeedOrder()
-                               refreshID = UUID() // Force view refresh
-                           }
-                       }) {
-                           Text(isEditing ? "Done" : "Edit")
-                       }
-                   }
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
                        if !isEditing {
                            Button(action: { viewModel.sortFeedsAlphabetically() }) {
@@ -268,6 +257,36 @@ struct PodcastListView: View {
     }
     
     private var podcastList: some View {
+        VStack(spacing: 0) {
+            // Editing mode header right above the list
+            if isEditing {
+                HStack {
+                    Text("Drag to Reorder Podcasts")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                        .allowsHitTesting(false)
+                    
+                    Spacer()
+                        .allowsHitTesting(false)
+                    
+                    Button("Done") {
+                        isEditing = false
+                        viewModel.saveFeedOrder()
+                        refreshID = UUID()
+                    }
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.blue)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                
+                // Separator line
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 0.5)
+            }
+            
             List {
                 if viewModel.isLoading {
                     HStack {
@@ -318,31 +337,60 @@ struct PodcastListView: View {
                             podcastPlayer: podcastPlayer,
                             isEditMode: isEditing
                         )
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.5)
+                                .onEnded { _ in
+                                    // Long press activates sorting mode
+                                    if !isEditing {
+                                        // Stop any currently playing audio to prevent interference with sorting
+                                        if podcastPlayer.isPlaying {
+                                            podcastPlayer.pause()
+                                        }
+                                        
+                                        // Also stop radio playback if it's currently playing
+                                        let radioPlayer = RadioPlayer.shared
+                                        if radioPlayer.isPlaying {
+                                            radioPlayer.pause()
+                                        }
+                                        
+                                        isEditing = true
+                                        // Haptic feedback for long press
+                                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                                        impactFeedback.impactOccurred()
+                                    }
+                                }
+                        )
+                        .disabled(isEditing)
+                        .opacity(isEditing ? 0.6 : 1.0)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                podcastToDelete = feed
-                                showingDeleteConfirmation = true
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            if !isEditing {
+                                Button(role: .destructive) {
+                                    podcastToDelete = feed
+                                    showingDeleteConfirmation = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                // Edit button action - use reliable edit data preparation
-                                if !isPreparingEditData {
-                                    prepareEditData(for: feed) { success in
-                                        if success {
-                                            showingEditPodcast = true
-                                        } else {
-                                            print("🔧 ERROR: Failed to prepare swipe edit data for feed: \(feed.title)")
-                                            // Show user feedback that edit failed
+                            if !isEditing {
+                                Button {
+                                    // Edit button action - use reliable edit data preparation
+                                    if !isPreparingEditData {
+                                        prepareEditData(for: feed) { success in
+                                            if success {
+                                                showingEditPodcast = true
+                                            } else {
+                                                print("🔧 ERROR: Failed to prepare swipe edit data for feed: \(feed.title)")
+                                                // Show user feedback that edit failed
+                                            }
                                         }
                                     }
+                                } label: {
+                                    Label("Edit", systemImage: isPreparingEditData ? "hourglass" : "pencil")
                                 }
-                            } label: {
-                                Label("Edit", systemImage: isPreparingEditData ? "hourglass" : "pencil")
+                                .tint(.blue)
                             }
-                            .tint(.blue)
                         }
                     }
                 }
@@ -370,6 +418,18 @@ struct PodcastListView: View {
                 Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
             }
         }
+        .background(
+            Color.clear
+                .onTapGesture {
+                    // Tap on background to exit edit mode
+                    if isEditing {
+                        isEditing = false
+                        viewModel.saveFeedOrder()
+                        refreshID = UUID()
+                    }
+                }
+        )
+    }
     
     private func moveFeeds(from source: IndexSet, to destination: Int) {
         viewModel.moveFeed(from: source, to: destination)
@@ -698,13 +758,15 @@ struct PodcastRowView: View {
                 
                 Spacer()
                 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: arrowSize))
-                    .foregroundColor(.gray)
-                    .frame(width: arrowSize, height: iconSize)
-                    .onTapGesture {
-                        onTap()
-                    }
+                if !isEditMode {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: arrowSize))
+                        .foregroundColor(.gray)
+                        .frame(width: arrowSize, height: iconSize)
+                        .onTapGesture {
+                            onTap()
+                        }
+                }
             }
         }
       //  .padding(.horizontal, 10)
