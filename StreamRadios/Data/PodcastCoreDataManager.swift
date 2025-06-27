@@ -260,12 +260,12 @@ class PodcastCoreDataManager {
     
     /// Get existing episode IDs for deduplication
     private func getExistingEpisodeIds(for feedId: String, in context: NSManagedObjectContext) throws -> Set<String> {
-        let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        let request: NSFetchRequest<NSFetchRequestResult> = NSFetchRequest(entityName: "PodcastModel")
         request.predicate = NSPredicate(format: "feedId == %@", feedId)
         request.propertiesToFetch = ["id"]
         request.resultType = .dictionaryResultType
         
-        let results = try context.fetch(request) as! [[String: Any]]
+        let results = try context.fetch(request) as? [[String: Any]] ?? []
         return Set(results.compactMap { $0["id"] as? String })
     }
     

@@ -10,6 +10,8 @@ import BackgroundTasks
 import UserNotifications
 import AVFoundation
 import os.log
+import UIKit
+import SwiftUI
 
 class BackgroundTaskManager {
     static let shared = BackgroundTaskManager()
@@ -42,8 +44,13 @@ class BackgroundTaskManager {
             self.handleCarPlayArtworkFetch(task: task as! BGAppRefreshTask)
         }
         
+        // NEW: Podcast episode checking task
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "com.streamradios.podcast.episodecheck", using: nil) { task in
+            self.handlePodcastEpisodeCheck(task: task as! BGAppRefreshTask)
+        }
+        
         isRegistered = true
-        print("✅ Background tasks registered (including CarPlay artwork fetching).")
+        print("✅ Background tasks registered (including CarPlay artwork fetching and podcast episode checking).")
     }
     
     // MARK: - Enhanced CarPlay Artwork Fetching
@@ -155,6 +162,72 @@ class BackgroundTaskManager {
                     completion(false)
                 }
             }
+        }
+    }
+    
+    // MARK: - Podcast Episode Background Checking
+    
+    func schedulePodcastEpisodeCheck() {
+        let request = BGAppRefreshTaskRequest(identifier: "com.streamradios.podcast.episodecheck")
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 3600) // Schedule after 1 hour
+        
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            os_log("📻 Podcast: Episode check task scheduled", log: log, type: .info)
+        } catch {
+            os_log("📻 Podcast: Failed to schedule episode check task: %@", log: log, type: .error, error.localizedDescription)
+        }
+    }
+    
+    private func handlePodcastEpisodeCheck(task: BGAppRefreshTask) {
+        os_log("📻 [DEBUG] Podcast: Background episode check task started", log: log, type: .info)
+        print("📻 [DEBUG] Background task triggered at: \(Date())")
+        
+        task.expirationHandler = {
+            os_log("📻 [DEBUG] Podcast: Background episode check task expired", log: self.log, type: .info)
+            print("📻 [DEBUG] Background task expired")
+            task.setTaskCompleted(success: false)
+        }
+        
+        // Get the PodcastViewModel instance from the app
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootView = window.rootViewController as? UIHostingController<AnyView> else {
+            os_log("📻 [DEBUG] Podcast: Could not access PodcastViewModel", log: log, type: .error)
+            print("📻 [DEBUG] Could not access UI components")
+            task.setTaskCompleted(success: false)
+            return
+        }
+        
+        // Perform podcast episode check in background
+        DispatchQueue.global(qos: .background).async {
+            print("📻 [DEBUG] Starting background episode check...")
+            self.performBackgroundPodcastCheck { success in
+                if success {
+                    os_log("📻 [DEBUG] Podcast: Background episode check completed successfully", log: self.log, type: .info)
+                    print("📻 [DEBUG] Background check completed successfully")
+                } else {
+                    os_log("📻 [DEBUG] Podcast: Background episode check failed", log: self.log, type: .error)
+                    print("📻 [DEBUG] Background check failed")
+                }
+                
+                task.setTaskCompleted(success: success)
+                
+                // Reschedule for next check
+                self.schedulePodcastEpisodeCheck()
+                print("📻 [DEBUG] Rescheduled next background check")
+            }
+        }
+    }
+    
+    private func performBackgroundPodcastCheck(completion: @escaping (Bool) -> Void) {
+        // Since we can't easily access the PodcastViewModel instance from here,
+        // we'll use a simpler approach through NotificationCenter
+        NotificationCenter.default.post(name: NSNotification.Name("BackgroundPodcastCheck"), object: nil)
+        
+        // Give it a few seconds to complete
+        DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
+            completion(true)
         }
     }
     

@@ -11,6 +11,7 @@
             <string>com.radio.streamradios.backgroundfetch</string>
             <string>com.streamradios.playalarm</string>
             <string>com.radio.streamradios.carplay.artwork</string>
+            <string>com.streamradios.podcast.episodecheck</string>
         </array>
         <key>CFBundleGetInfoString</key>
         <string></string>

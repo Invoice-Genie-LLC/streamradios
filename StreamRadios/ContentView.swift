@@ -181,6 +181,8 @@ struct ContentView: View {
                     Text(Tab.settings.title)
                 }
                 .tag(Tab.settings)
+                
+
             }
             .accentColor(.blue)
             .onAppear {

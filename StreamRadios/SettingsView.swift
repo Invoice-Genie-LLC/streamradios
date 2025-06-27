@@ -61,6 +61,9 @@ struct SettingsView: View {
                          modernDisplaySettings
                          modernAlarmSettings
                          modernDataManagementLink
+#if DEBUG
+                         modernDebugSettings
+#endif
                      }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -264,6 +267,53 @@ struct SettingsView: View {
             .buttonStyle(PlainButtonStyle())
         }
     }
+    
+#if DEBUG
+    @ViewBuilder
+    private var modernDebugSettings: some View {
+        ModernSettingsCard(
+            title: "Debug Tools",
+            icon: "wrench.and.screwdriver"
+        ) {
+            VStack(spacing: 12) {
+                ModernActionButton(
+                    title: "Test Episode Check",
+                    subtitle: "Manually trigger new episode checking",
+                    icon: "bell.badge"
+                ) {
+                    podcastViewModel.manuallyCheckForNewEpisodes()
+                }
+                
+                ModernActionButton(
+                    title: "Test Background Notification",
+                    subtitle: "Simulate background notification trigger",
+                    icon: "bell.circle"
+                ) {
+                    podcastViewModel.testBackgroundNotification()
+                }
+                
+                ModernActionButton(
+                    title: "Schedule Background Task",
+                    subtitle: "Schedule next background check",
+                    icon: "calendar.badge.clock"
+                ) {
+                    BackgroundTaskManager.shared.schedulePodcastEpisodeCheck()
+                }
+                
+                ModernActionButton(
+                    title: "Send Test Notification",
+                    subtitle: "Test system notification delivery",
+                    icon: "paperplane"
+                ) {
+                    NotificationManager.shared.notifyUser(
+                        title: "Test Notification",
+                        message: "This is a test notification to verify the system is working."
+                    )
+                }
+            }
+        }
+    }
+#endif
     
     // MARK: - Helper Properties
     
