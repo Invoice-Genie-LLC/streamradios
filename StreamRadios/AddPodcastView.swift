@@ -287,22 +287,7 @@ struct AddPodcastView: View {
     
     private let miniPlayerHeight: CGFloat = 60
     
-    // Modern color system for adaptive theming
-    private var backgroundColor: Color {
-        colorScheme == .dark ? .black : Color(.systemGray6)
-    }
-    
-    private var cardBackgroundColor: Color {
-        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
-    }
-    
-    private var primaryTextColor: Color {
-        colorScheme == .dark ? .white : .primary
-    }
-    
-    private var secondaryTextColor: Color {
-        colorScheme == .dark ? .gray : .secondary
-    }
+    // Modern color system for adaptive theming - using shared adaptive colors
     
     // Computed properties for UI
     private var navigationTitle: String {
@@ -323,7 +308,7 @@ struct AddPodcastView: View {
                             modernPodcastDetailsCard
                         }
                         .padding(.horizontal, 16)
-                        .padding(.top, 16)
+                        .padding(.top, 80) // Add padding for custom navigation bar
                         .padding(.bottom, podcastPlayer.isPlaying && !radioPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 120 : 80)
                     }
                     
@@ -351,14 +336,9 @@ struct AddPodcastView: View {
                         .frame(height: miniPlayerHeight)
                     }
                 }
-                .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+                .background(Color.adaptiveBackground)
             }
-            .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationBarItems(
-                leading: modernCancelButton,
-                trailing: modernSaveButton
-            )
+            .navigationBarHidden(true)
             .onAppear {
                 print("🔧 DEBUG: AddPodcastView onAppear - podcastToEdit: \(podcastToEdit?.title ?? "nil")")
                 print("🔧 DEBUG: AddPodcastView onAppear - current title binding: '\(title)', url binding: '\(url)'")
@@ -408,8 +388,8 @@ struct AddPodcastView: View {
                 }
             }
         }
-        .background(Color(red: 0.08, green: 0.08, blue: 0.08))
-        .preferredColorScheme(.dark)
+        .background(Color.adaptiveBackground)
+        .overlay(simpleNavigationBar, alignment: .top)
         .overlay(
             Group {
                 if showAlert {
@@ -484,7 +464,7 @@ struct AddPodcastView: View {
                 
                 Text("Search Podcasts")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                    .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
             }
@@ -492,6 +472,7 @@ struct AddPodcastView: View {
             HStack {
                 TextField("Search for podcasts...", text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
+                    .foregroundColor(.adaptivePrimaryText)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                     .onChange(of: searchText) { newValue in
@@ -501,25 +482,25 @@ struct AddPodcastView: View {
                 
                 if !searchText.isEmpty {
                     Button(action: {
-                        searchText = ""
-                        searchService.clearResults()
+                                            searchText = ""
+                    searchService.clearResults()
                     }) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color.blue.opacity(0.1))
+            .background(Color.adaptiveFieldBackground)
             .cornerRadius(8)
         }
         .padding(20)
-        .background(cardBackgroundColor)
+        .background(Color.adaptiveCardBackground)
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+                .stroke(Color.adaptiveBorder, lineWidth: 0.5)
         )
     }
     
@@ -533,7 +514,7 @@ struct AddPodcastView: View {
                 .foregroundColor(.secondary)
         }
         .padding()
-        .background(cardBackgroundColor)
+        .background(Color.adaptiveCardBackground)
         .cornerRadius(8)
     }
     
@@ -563,7 +544,7 @@ struct AddPodcastView: View {
         VStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 32))
-                .foregroundColor(.gray)
+                .foregroundColor(.adaptiveSecondaryText)
             
             Text("No podcasts found")
                 .font(.system(size: 16, weight: .medium))
@@ -574,7 +555,7 @@ struct AddPodcastView: View {
                 .foregroundColor(.secondary)
         }
         .padding()
-        .background(cardBackgroundColor)
+        .background(Color.adaptiveCardBackground)
         .cornerRadius(8)
     }
     
@@ -602,7 +583,7 @@ struct AddPodcastView: View {
             
             Text("Apple iTunes")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.gray)
+                .foregroundColor(.adaptiveSecondaryText)
             
             Text("&")
                 .font(.system(size: 12))
@@ -610,7 +591,7 @@ struct AddPodcastView: View {
             
             Text("PodcastIndex.org")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.gray)
+                .foregroundColor(.adaptiveSecondaryText)
         }
         .padding(.horizontal)
     }
@@ -781,6 +762,46 @@ struct AddPodcastView: View {
             addingStageText = text
         }
     }
+    
+    // MARK: - Navigation Bar
+    
+    @ViewBuilder
+    private var simpleNavigationBar: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Cancel") {
+                    if !isAddingPodcast {
+                        isPresented = false
+                    }
+                }
+                .font(.system(size: 17))
+                .foregroundColor(isAddingPodcast ? .gray : .blue)
+                .disabled(isAddingPodcast)
+                
+                Spacer()
+                
+                Text(navigationTitle)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.adaptivePrimaryText)
+                
+                Spacer()
+                
+                Button(actionButtonText) {
+                    validateAndSavePodcast()
+                }
+                .font(.system(size: 17, weight: .medium))
+                .foregroundColor(isAddingPodcast ? .gray : .blue)
+                .disabled(isAddingPodcast)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 15)
+            .padding(.bottom, 15)
+            .background(Color.adaptiveSecondaryBackground)
+            
+            Divider()
+                .background(Color.adaptiveSeparator)
+        }
+    }
 }
 
 // MARK: - Modern UI Components for Forms
@@ -792,7 +813,7 @@ struct ModernFormCard<Content: View>: View {
     @Environment(\.colorScheme) var colorScheme
     
     private var cardBackgroundColor: Color {
-        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
+        Color.adaptiveCardBackground
     }
     
     var body: some View {
@@ -801,7 +822,7 @@ struct ModernFormCard<Content: View>: View {
             HStack {
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                    .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
             }
@@ -814,7 +835,7 @@ struct ModernFormCard<Content: View>: View {
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+                .stroke(Color.adaptiveBorder, lineWidth: 0.5)
         )
     }
 }
@@ -848,7 +869,7 @@ struct ModernTextField: View {
                 
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                    .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
             }
@@ -856,6 +877,7 @@ struct ModernTextField: View {
             HStack {
                 TextField(placeholder, text: $text)
                     .textFieldStyle(PlainTextFieldStyle())
+                    .foregroundColor(.adaptivePrimaryText)
                     .keyboardType(keyboardType)
                     .autocapitalization(.none)
                     .disableAutocorrection(keyboardType == .URL)
@@ -871,13 +893,13 @@ struct ModernTextField: View {
                         text = ""
                     }) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color.blue.opacity(0.1))
+            .background(Color.adaptiveFieldBackground)
             .cornerRadius(8)
         }
     }
@@ -889,9 +911,7 @@ struct PodcastSearchResultRow: View {
     
     @Environment(\.colorScheme) var colorScheme
     
-    private var cardBackgroundColor: Color {
-        colorScheme == .dark ? Color.gray.opacity(0.15) : .white
-    }
+    // Now using adaptive color system
     
     var body: some View {
         Button(action: onTap) {
@@ -903,10 +923,10 @@ struct PodcastSearchResultRow: View {
                         .aspectRatio(contentMode: .fill)
                 } placeholder: {
                     Rectangle()
-                        .fill(Color.gray.opacity(0.3))
+                        .fill(Color.adaptiveBorder)
                         .overlay(
                             Image(systemName: "music.note")
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                         )
                 }
                 .frame(width: 60, height: 60)
@@ -916,7 +936,7 @@ struct PodcastSearchResultRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(result.title)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                        .foregroundColor(.adaptivePrimaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     
@@ -945,11 +965,11 @@ struct PodcastSearchResultRow: View {
                     .foregroundColor(.secondary)
             }
             .padding(16)
-            .background(cardBackgroundColor)
+            .background(Color.adaptiveCardBackground)
             .cornerRadius(12)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+                    .stroke(Color.adaptiveBorder, lineWidth: 0.5)
             )
         }
         .buttonStyle(PlainButtonStyle())
@@ -965,7 +985,7 @@ struct PodcastAddingProgressView: View {
     @Environment(\.colorScheme) var colorScheme
     
     private var cardBackgroundColor: Color {
-        colorScheme == .dark ? Color(red: 0.15, green: 0.15, blue: 0.17) : Color.white
+        Color.adaptiveCardBackground
     }
     
     var body: some View {
@@ -973,7 +993,7 @@ struct PodcastAddingProgressView: View {
             // Title
             Text("Adding Podcast")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(colorScheme == .dark ? .white : .primary)
+                .foregroundColor(.adaptivePrimaryText)
             
             // Animated podcast icon
             ZStack {
@@ -996,13 +1016,13 @@ struct PodcastAddingProgressView: View {
             // Progress percentage
             Text("\(Int(progress * 100))%")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(colorScheme == .dark ? Color.gray : .secondary)
+                .foregroundColor(.adaptiveSecondaryText)
                 .animation(.easeInOut(duration: 0.3), value: progress)
             
             // Stage text
             Text(stageText)
                 .font(.system(size: 16))
-                .foregroundColor(colorScheme == .dark ? Color.white.opacity(0.9) : .primary)
+                .foregroundColor(.adaptivePrimaryText)
                 .multilineTextAlignment(.center)
                 .animation(.easeInOut(duration: 0.3), value: stageText)
             
@@ -1011,7 +1031,7 @@ struct PodcastAddingProgressView: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Rectangle()
-                            .fill(Color.gray.opacity(0.3))
+                            .fill(Color.adaptiveBorder)
                             .frame(height: 6)
                             .cornerRadius(3)
                         
@@ -1032,7 +1052,7 @@ struct PodcastAddingProgressView: View {
         .padding(32)
         .background(cardBackgroundColor)
         .cornerRadius(16)
-        .shadow(color: colorScheme == .dark ? .black.opacity(0.4) : .black.opacity(0.1), radius: 15, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 8)
         .scaleEffect(0.9)
         .animation(.spring(response: 0.6, dampingFraction: 0.8), value: progress)
     }

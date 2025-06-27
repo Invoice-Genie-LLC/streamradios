@@ -44,18 +44,7 @@ struct AddStationView: View {
     
     private let miniPlayerHeight: CGFloat = 60
     
-    // Clean, minimal color system
-    private var backgroundColor: Color {
-        Color(red: 0.08, green: 0.08, blue: 0.08)
-    }
-    
-    private var cardBackgroundColor: Color {
-        Color(red: 0.15, green: 0.15, blue: 0.15)
-    }
-    
-    private var accentColor: Color {
-        Color.blue
-    }
+    // Using adaptive color system
     
     init(station: RadioStation? = nil, activeSheet: Binding<ActiveSheet?>, selectedCountry: String, isEditingStation: Binding<RadioStation?>? = nil, onSave: ((String) -> Void)? = nil) {
         self.station = station
@@ -93,7 +82,7 @@ struct AddStationView: View {
                         FloatingMiniPlayer()
                     }
                 }
-                .background(backgroundColor.ignoresSafeArea())
+                .background(Color.adaptiveBackground.ignoresSafeArea())
             }
             .navigationTitle("")
             .navigationBarHidden(true)
@@ -141,7 +130,6 @@ struct AddStationView: View {
                 )
             }
         }
-        .preferredColorScheme(.dark)
     }
     
     // MARK: - Simple UI Components
@@ -154,13 +142,13 @@ struct AddStationView: View {
                     presentedSheet = nil
                 }
                 .font(.system(size: 17))
-                .foregroundColor(accentColor)
+                .foregroundColor(.blue)
                 
                 Spacer()
                 
                 Text("Add Station")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
                 
@@ -168,15 +156,15 @@ struct AddStationView: View {
                     saveStation()
                 }
                 .font(.system(size: 17, weight: .medium))
-                .foregroundColor(accentColor)
+                .foregroundColor(.blue)
             }
             .padding(.horizontal, 20)
             .padding(.top, 15)
             .padding(.bottom, 15)
-            .background(backgroundColor)
+            .background(Color.adaptiveSecondaryBackground)
             
             Divider()
-                .background(Color.gray.opacity(0.3))
+                .background(Color.adaptiveSeparator)
         }
     }
     
@@ -196,20 +184,20 @@ struct AddStationView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 20))
                         .overlay(
                             RoundedRectangle(cornerRadius: 20)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                .stroke(Color.adaptiveBorder, lineWidth: 1)
                         )
                 } else {
                     RoundedRectangle(cornerRadius: 20)
-                        .fill(cardBackgroundColor)
+                        .fill(Color.adaptiveCardBackground)
                         .frame(width: 100, height: 100)
                         .overlay(
                             Text("Add Photo")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 20)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                .stroke(Color.adaptiveBorder, lineWidth: 1)
                         )
                 }
             }
@@ -217,7 +205,7 @@ struct AddStationView: View {
             
             Text(iconImage != nil ? "Tap to change station icon" : "Station Icon")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.gray)
+                .foregroundColor(.adaptiveSecondaryText)
         }
     }
     
@@ -319,7 +307,7 @@ struct AddSimpleCard<Content: View>: View {
             content()
         }
         .padding(24)
-        .background(Color(red: 0.15, green: 0.15, blue: 0.15))
+        .background(Color.adaptiveCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
@@ -350,13 +338,13 @@ struct AddSimpleTextField: View {
                 
                 Text(title)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
             }
             
             HStack {
                 TextField(placeholder, text: $text)
                     .font(.system(size: 16))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                     .keyboardType(keyboardType)
                     .autocapitalization(.none)
                     .disableAutocorrection(keyboardType == .URL)
@@ -370,13 +358,13 @@ struct AddSimpleTextField: View {
                     Button(action: { text = "" }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16))
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.black.opacity(0.3))
+            .background(Color.adaptiveFieldBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
@@ -396,7 +384,7 @@ struct AddSimpleCountryPicker: View {
                 
                 Text(title)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
             }
             
             HStack {
@@ -421,11 +409,11 @@ struct AddSimpleAlertView: View {
             VStack(spacing: 8) {
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                 
                 Text(message)
                     .font(.system(size: 16))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.adaptiveSecondaryText)
                     .multilineTextAlignment(.center)
             }
             
@@ -433,14 +421,14 @@ struct AddSimpleAlertView: View {
                 action()
             }
             .font(.system(size: 17, weight: .medium))
-            .foregroundColor(.white)
+            .foregroundColor(.adaptivePrimaryText)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background(Color.blue)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .padding(24)
-        .background(Color(red: 0.15, green: 0.15, blue: 0.15))
+        .background(Color.adaptiveCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal, 40)
     }

@@ -263,7 +263,7 @@ struct PodcastListView: View {
                 HStack {
                     Text("Drag to Reorder Podcasts")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                         .allowsHitTesting(false)
                     
                     Spacer()
@@ -283,7 +283,7 @@ struct PodcastListView: View {
                 
                 // Separator line
                 Rectangle()
-                    .fill(Color.gray.opacity(0.3))
+                    .fill(Color.adaptiveSeparator)
                     .frame(height: 0.5)
             }
             
@@ -293,11 +293,11 @@ struct PodcastListView: View {
                         ProgressView()
                         Text("Loading podcast feeds...")
                     }
-                    .foregroundColor(.gray)
+                    .foregroundColor(.adaptiveSecondaryText)
                     .padding()
                 } else if viewModel.podcastFeeds.isEmpty {
                     Text("No podcast feeds available")
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                         .italic()
                         .padding()
                 }
@@ -705,7 +705,7 @@ struct PodcastRowView: View {
                     if isExpanded {
                         Text(feed.descriptionText ?? "No description available")
                             .font(.subheadline)
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                             .onTapGesture {
                                 onTap()
@@ -713,7 +713,7 @@ struct PodcastRowView: View {
                     } else {
                         Text(feed.descriptionText ?? "No description available")
                             .font(.subheadline)
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                             .lineLimit(4)
                             .frame(height: iconSize, alignment: .top)
                             .onTapGesture {
@@ -761,7 +761,7 @@ struct PodcastRowView: View {
                 if !isEditMode {
                     Image(systemName: "chevron.right")
                         .font(.system(size: arrowSize))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                         .frame(width: arrowSize, height: iconSize)
                         .onTapGesture {
                             onTap()
@@ -925,7 +925,7 @@ struct PodcastIconView: View {
                     .aspectRatio(contentMode: .fit)
                     .padding(16)
                     .background(Color.blue.opacity(0.3))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                     .cornerRadius(10)
             }
         }
@@ -1004,7 +1004,7 @@ struct EpisodeRowView: View {
                     Image(systemName: episode.state.isPlayed || progress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
                         .resizable()
                         .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .gray : (isPlaying ? .blue : .green))
+                        .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
                 }
                 .frame(width: buttonSize, height: buttonSize)
                 
@@ -1033,11 +1033,11 @@ struct EpisodeRowView: View {
                         if let timeInfo = formatTimeInfo() {
                             Text("•")
                                 .font(.caption2)
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                             
                             Text(timeInfo)
                                 .font(.system(size: 12))
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                                 .lineLimit(nil)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1065,7 +1065,7 @@ struct EpisodeRowView: View {
                         }
                     }) {
                         Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                            .foregroundColor(episode.state.isFavorite ? .blue : .gray)
+                            .foregroundColor(episode.state.isFavorite ? .blue : .adaptiveSecondaryText)
                             .frame(width: buttonSize, height: buttonSize)
                     }
                     
@@ -1101,7 +1101,7 @@ struct EpisodeRowView: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Rectangle()
-                            .fill(Color.gray.opacity(0.2))
+                            .fill(Color.adaptiveSeparator)
                             .frame(height: 3)
                         
                         Rectangle()
@@ -1142,10 +1142,10 @@ struct EpisodeRowView: View {
         Group {
             if episode.state.isPlayed || episode.state.progress >= 0.99 {
                 Text("Played")
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.8))) // Dark gray for played
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.adaptiveBorder)) // Adaptive gray for played
             } else if isPlaying {
                 Text("Playing")
                     .foregroundColor(.white)
@@ -1174,7 +1174,7 @@ struct EpisodeRowView: View {
             Group {
                 if episode.state.isPlayed || episode.state.progress >= 0.99 {
                     Text("Played")
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                 } else if isPlaying {
                     Text("Playing")
                         .foregroundColor(.blue)
@@ -1213,7 +1213,7 @@ struct EpisodeRowView: View {
                     ZStack {
                         // Background circle
                         Circle()
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                            .stroke(Color.adaptiveBorder, lineWidth: 2)
                             .frame(width: buttonSize, height: buttonSize)
                         
                         // Progress circle
@@ -1240,7 +1240,7 @@ struct EpisodeRowView: View {
                     Image(systemName: "arrow.down.circle")
                         .resizable()
                         .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                 }
             }
         }

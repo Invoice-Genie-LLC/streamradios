@@ -41,27 +41,27 @@ struct ElegantCountryPicker: View {
                 // Search bar
                 HStack {
                     Image(systemName: "magnifyingglass")
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                         .font(.system(size: 16, weight: .medium))
                     
                     TextField("Search countries...", text: $searchText)
                         .font(.system(size: 16))
                         .textFieldStyle(PlainTextFieldStyle())
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                     
                     if !searchText.isEmpty {
                         Button(action: {
                             searchText = ""
                         }) {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                                 .font(.system(size: 16))
                         }
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(Color(red: 0.12, green: 0.12, blue: 0.12))
+                .background(Color.adaptiveFieldBackground)
                 .cornerRadius(12)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -78,7 +78,7 @@ struct ElegantCountryPicker: View {
                                 ) {
                                     selectCountry(country.name)
                                 }
-                                .listRowBackground(Color(red: 0.12, green: 0.12, blue: 0.12))
+                                .listRowBackground(Color.adaptiveCardBackground)
                             }
                         } header: {
                             HStack {
@@ -103,7 +103,7 @@ struct ElegantCountryPicker: View {
                                 ) {
                                     selectCountry(country.name)
                                 }
-                                .listRowBackground(Color(red: 0.12, green: 0.12, blue: 0.12))
+                                .listRowBackground(Color.adaptiveCardBackground)
                             }
                         } header: {
                             HStack {
@@ -129,17 +129,17 @@ struct ElegantCountryPicker: View {
                                     ) {
                                         selectCountry(country.name)
                                     }
-                                    .listRowBackground(Color(red: 0.12, green: 0.12, blue: 0.12))
+                                    .listRowBackground(Color.adaptiveCardBackground)
                                 }
                             } header: {
                                 if searchText.isEmpty {
                                     HStack {
                                         Image(systemName: region.icon)
-                                            .foregroundColor(.gray)
+                                            .foregroundColor(.adaptiveSecondaryText)
                                             .font(.system(size: 14, weight: .medium))
                                         Text(region.displayName)
                                             .font(.system(size: 14, weight: .medium))
-                                            .foregroundColor(.gray)
+                                            .foregroundColor(.adaptiveSecondaryText)
                                     }
                                 }
                             }
@@ -148,9 +148,9 @@ struct ElegantCountryPicker: View {
                 }
                 .listStyle(InsetGroupedListStyle())
                 .scrollContentBackground(.hidden)
-                .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+                .background(Color.adaptiveBackground)
             }
-            .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+            .background(Color.adaptiveBackground)
             .navigationTitle("Select Country")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -158,22 +158,13 @@ struct ElegantCountryPicker: View {
                     Button("Cancel") {
                         presentationMode.wrappedValue.dismiss()
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                 }
             }
         }
-        .background(Color(red: 0.08, green: 0.08, blue: 0.08))
-        .preferredColorScheme(.dark)
+        .background(Color.adaptiveBackground)
         .onAppear {
             loadRecentCountries()
-            
-            // Configure navigation bar appearance for dark theme
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(red: 0.08, green: 0.08, blue: 0.08, alpha: 1.0)
-            appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
         }
     }
     
@@ -224,7 +215,7 @@ struct CountryRow: View {
                 Group {
                     if country.flag.isEmpty {
                         Image(systemName: "flag.slash")
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                             .font(.system(size: 20))
                             .frame(width: 32, height: 24)
                     } else {
@@ -236,11 +227,11 @@ struct CountryRow: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 4)
-                                        .stroke(Color.gray.opacity(0.2), lineWidth: 0.5)
+                                        .stroke(Color.adaptiveBorder, lineWidth: 0.5)
                                 )
                         } else {
                             Image(systemName: "flag.slash")
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                                 .font(.system(size: 20))
                                 .frame(width: 32, height: 24)
                         }
@@ -250,13 +241,13 @@ struct CountryRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(country.name)
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                         .multilineTextAlignment(.leading)
                     
                     if showRegion {
                         Text(CountryRegion.region(for: country.name).displayName)
                             .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
                 
@@ -373,11 +364,11 @@ struct ElegantCountryPickerButton: View {
                             .clipShape(RoundedRectangle(cornerRadius: 2))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 2)
-                                    .stroke(Color.gray.opacity(0.2), lineWidth: 0.5)
+                                    .stroke(Color.adaptiveBorder, lineWidth: 0.5)
                             )
                     } else {
                         Image(systemName: "flag.slash")
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                             .font(.system(size: 16))
                             .frame(width: 24, height: 16)
                     }
@@ -385,17 +376,17 @@ struct ElegantCountryPickerButton: View {
                 
                 Text(selectedCountry.isEmpty || selectedCountry == "Select Country" ? "Select Country" : selectedCountry)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 
                 Image(systemName: "chevron.down")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.adaptiveSecondaryText)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(red: 0.1, green: 0.1, blue: 0.1))
+            .background(Color.adaptiveFieldBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .sheet(isPresented: $showingPicker) {

@@ -40,12 +40,12 @@ struct RadioStationListView: View {
             if viewModel.isLoading {
                 VStack {
                     ProgressView("Loading stations...")
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .progressViewStyle(CircularProgressViewStyle(tint: .adaptivePrimaryText))
                         .scaleEffect(1.5)
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
+                .background(Color.adaptiveBackground)
             } else if viewModel.stations.isEmpty {
                 emptyStateView
             } else {
@@ -53,7 +53,7 @@ struct RadioStationListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.adaptiveBackground)
         .onAppear(perform: setup)
         .onAppear {
             setup()
@@ -75,7 +75,7 @@ struct RadioStationListView: View {
         .overlay(
             Group {
                 if alertManager.showCustomAlert {
-                    Color.black.opacity(0.8)
+                    Color.adaptiveBackground.opacity(0.8)
                         .edgesIgnoringSafeArea(.all)
                         .overlay(
                             CustomAlertView(
@@ -101,7 +101,7 @@ struct RadioStationListView: View {
                         HStack {
                             Text("Drag to Reorder Stations")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                                 .allowsHitTesting(false) // Prevent text from blocking gestures
                             
                             Spacer()
@@ -115,10 +115,10 @@ struct RadioStationListView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
-                        .background(Color.black.opacity(0.95))
+                        .background(Color.adaptiveTabBackground)
                         .overlay(
                             Rectangle()
-                                .fill(Color.gray.opacity(0.3))
+                                .fill(Color.adaptiveSeparator)
                                 .frame(height: 0.5),
                             alignment: .bottom
                         )
@@ -152,7 +152,7 @@ struct RadioStationListView: View {
         VStack {
             Text("No stations configured")
                 .font(.title)
-                .foregroundColor(.white)
+                .foregroundColor(.adaptivePrimaryText)
                 .padding(.bottom, 15)
             Button(action: {
                 if viewModel.selectedCountry == "Select Country" {
@@ -163,11 +163,11 @@ struct RadioStationListView: View {
                 }}) {
                     Image(systemName: "plus.circle")
                         .font(.largeTitle)
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.adaptiveBackground)
         .transition(.scale)
     }
     
@@ -192,7 +192,7 @@ struct RadioStationListView: View {
                     .onMove(perform: selectedTab == .radio && isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) ? moveStations : nil)
                 }
                 .listStyle(PlainListStyle())
-                .background(Color.black)
+                .background(Color.adaptiveBackground)
                 .scrollContentBackground(.hidden)
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
@@ -221,7 +221,7 @@ struct RadioStationListView: View {
         }
         .frame(width: screenWidth)
         .background(
-            Color.black
+            Color.adaptiveBackground
                 .onTapGesture {
                     // Tap on background to exit edit mode
                     if isEditing {
@@ -337,10 +337,10 @@ struct RadioStationListView: View {
                     
                     // Station info
                     VStack(alignment: .leading, spacing: 4) {
-                        // Station name - white text
+                        // Station name - adaptive text
                         Text(station.name)
                             .font(.system(size: 17, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(.adaptivePrimaryText)
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
                         
@@ -369,7 +369,7 @@ struct RadioStationListView: View {
                             if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                                 Text(metadata)
                                     .font(.system(size: 12, weight: .regular))
-                                    .foregroundColor(.gray)
+                                    .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(nil)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -402,11 +402,11 @@ struct RadioStationListView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.black)
+        .background(Color.adaptiveCardBackground)
         .overlay(
             // Subtle separator line
             Rectangle()
-                .fill(Color.gray.opacity(0.2))
+                .fill(Color.adaptiveSeparator)
                 .frame(height: 0.5)
                 .padding(.leading, 88), // Align with text content
             alignment: .bottom
@@ -418,7 +418,7 @@ struct RadioStationListView: View {
         ZStack {
             // Background for logo
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(0.2))
+                .fill(Color.adaptiveBorder)
                 .frame(width: 64, height: 64)
             
             // Station image
@@ -525,7 +525,7 @@ struct RadioStationListView: View {
         HStack(spacing: 1.5) {
             ForEach(0..<5, id: \.self) { index in
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.gray.opacity(0.4))
+                    .fill(Color.adaptiveSecondaryText.opacity(0.4))
                     .frame(width: 2.5, height: CGFloat([6, 10, 14, 8, 12][index]))
             }
         }
@@ -539,7 +539,7 @@ struct RadioStationListView: View {
         }) {
             Image(systemName: station.isFavorite ? "heart.fill" : "heart")
                 .font(.system(size: 20, weight: .medium))
-                .foregroundColor(station.isFavorite ? .pink : .gray)
+                .foregroundColor(station.isFavorite ? .pink : .adaptiveSecondaryText)
                 .scaleEffect(station.isFavorite ? 1.1 : 1.0)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
                 .frame(width: 44, height: 44)
@@ -590,16 +590,16 @@ struct RadioStationListView: View {
         // Default radio icon with station initials
         else {
             ZStack {
-                Color.gray.opacity(0.3)
+                Color.adaptiveBorder
                 
                 if !station.name.isEmpty {
                     Text(String(station.name.prefix(2)).uppercased())
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                 } else {
                     Image(systemName: "radio")
                         .font(.system(size: 24, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                 }
             }
         }

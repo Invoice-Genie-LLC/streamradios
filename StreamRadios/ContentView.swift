@@ -201,7 +201,7 @@ struct ContentView: View {
     private var radioTabContent: some View {
         NavigationView {
             ZStack {
-                Color(UIColor.systemBackground)
+                Color.adaptiveBackground
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack(spacing: 0) {
@@ -217,7 +217,7 @@ struct ContentView: View {
                                 
                                 Text("Browse by Country")
                                     .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(.adaptivePrimaryText)
                                 
                                 Spacer()
                                 
@@ -249,7 +249,7 @@ struct ContentView: View {
                             .padding(.horizontal, 16)
                         }
                         .padding(.vertical, 12)
-                        .background(Color.gray.opacity(0.1))
+                        .background(Color.adaptiveSectionBackground)
                         .cornerRadius(12)
                         .padding(.horizontal, 16)
                         
@@ -258,7 +258,7 @@ struct ContentView: View {
                     }
                     .padding(.top, topPadding)
                     .padding(.bottom, 10)
-                    .background(Color.black)
+                    .background(Color.adaptiveBackground)
                     
                     // RadioStationListView now handles its own sub-tabs internally
                                         RadioStationListView(isEditing: $isEditingMode,
@@ -424,7 +424,7 @@ struct ContentView: View {
                 simpleTabButton(for: subTab)
             }
         }
-        .background(Color.gray.opacity(0.1))
+        .background(Color.adaptiveSectionBackground)
         .cornerRadius(10)
         .padding(.horizontal, 16)
     }
@@ -442,11 +442,11 @@ struct ContentView: View {
             VStack(spacing: 6) {
                 Image(systemName: subTab.iconName)
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(isSelected ? .blue : .gray)
+                    .foregroundColor(isSelected ? .blue : .adaptiveSecondaryText)
                 
                 Text(subTab.title)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(isSelected ? .blue : .gray)
+                    .foregroundColor(isSelected ? .blue : .adaptiveSecondaryText)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
@@ -561,7 +561,7 @@ struct CompactPlayerView: View {
                 }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.gray.opacity(0.2))
+                            .fill(Color.adaptiveBorder)
                             .frame(width: 44, height: 44)
                         
                         albumArtworkView
@@ -579,7 +579,7 @@ struct CompactPlayerView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(currentStation.name)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.adaptivePrimaryText)
                             .lineLimit(nil) // Allow unlimited lines
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -588,7 +588,7 @@ struct CompactPlayerView: View {
                         if let metadata = metadata, !metadata.isEmpty {
                             Text(metadata)
                                 .font(.system(size: 12, weight: .regular))
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                                 .lineLimit(nil) // Allow unlimited lines
                                 .multilineTextAlignment(.leading)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -596,7 +596,7 @@ struct CompactPlayerView: View {
                         } else {
                             Text("Live Radio")
                                 .font(.system(size: 12, weight: .regular))
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                                 .lineLimit(nil)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -635,9 +635,7 @@ struct CompactPlayerView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
-        .background(
-            Color(red: 0.05, green: 0.05, blue: 0.05)
-        )
+        .background(Color.adaptiveSecondaryBackground)
         .frame(minHeight: 60) // Minimum height with ability to expand
     }
     
@@ -663,16 +661,16 @@ struct CompactPlayerView: View {
                 .background(Color.white.opacity(0.1))
         } else {
             ZStack {
-                Color.gray.opacity(0.3)
+                Color.adaptiveBorder
                 
                 if !currentStation.name.isEmpty {
                     Text(String(currentStation.name.prefix(2)).uppercased())
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                 } else {
                     Image(systemName: "radio")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(.adaptivePrimaryText)
                 }
             }
         }
@@ -738,7 +736,7 @@ struct UnifiedPodcastPlayerView: View {
                 }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.gray.opacity(0.2))
+                            .fill(Color.adaptiveBorder)
                             .frame(width: 44, height: 44)
                         
                         feedArtworkView
@@ -756,13 +754,13 @@ struct UnifiedPodcastPlayerView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(currentEpisode.title)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.adaptivePrimaryText)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         
                         Text(currentFeed.title)
                             .font(.system(size: 12, weight: .regular))
-                            .foregroundColor(.gray)
+                            .foregroundColor(.adaptiveSecondaryText)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -825,7 +823,7 @@ struct UnifiedPodcastPlayerView: View {
                         }) {
                             Image(systemName: "xmark")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.gray)
+                                .foregroundColor(.adaptiveSecondaryText)
                                 .frame(width: 28, height: 28)
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -868,14 +866,14 @@ struct UnifiedPodcastPlayerView: View {
         }
     }
     
-    @ViewBuilder
+            @ViewBuilder
     private var defaultPodcastIcon: some View {
         ZStack {
-            Color.gray.opacity(0.3)
+            Color.adaptiveBorder
             
                                 Image(systemName: "microphone")
                 .font(.system(size: 20, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(.adaptivePrimaryText)
         }
     }
     
@@ -958,7 +956,7 @@ struct CurrentlyPlayingView: View {
                 } else {
                     Text("Live Radio")
                         .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                         .lineLimit(1)
                 }
             }
@@ -1017,13 +1015,13 @@ struct CurrentlyPlayingView: View {
                 Color.gray.opacity(0.3)
                 
                 if !currentStation.name.isEmpty {
-                    Text(String(currentStation.name.prefix(2)).uppercased())
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.white)
+                                                Text(String(currentStation.name.prefix(2)).uppercased())
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.adaptivePrimaryText)
                 } else {
-                    Image(systemName: "radio")
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundColor(.white)
+                                            Image(systemName: "radio")
+                            .font(.system(size: 24, weight: .medium))
+                            .foregroundColor(.adaptivePrimaryText)
                 }
             }
         }
