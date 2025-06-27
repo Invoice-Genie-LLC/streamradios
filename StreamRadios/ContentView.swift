@@ -720,6 +720,15 @@ struct UnifiedPodcastPlayerView: View {
         sizeClass == .compact ? 8 : 12
     }
     
+    // Navigation action to currently playing episode
+    private func navigateToCurrentEpisode() {
+        print("Navigating to currently playing episode: \(currentEpisode.title)")
+        selectedPodcast = currentFeed
+        viewModel.fetchAllEpisodes(for: currentFeed)
+        // Use the existing onListButtonTap functionality if available
+        onListButtonTap?()
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             // Safe space at top instead of blue line
@@ -727,56 +736,54 @@ struct UnifiedPodcastPlayerView: View {
                 .fill(Color.clear)
                 .frame(height: 8)
             
-            // Compact single-row layout
-            HStack(spacing: 12) {
-                // Tappable artwork area
-                Button(action: {
-                    print("Podcast artwork tapped - opening sheet")
-                    // Add sheet presentation logic here if needed
-                }) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.adaptiveBorder)
-                            .frame(width: 44, height: 44)
-                        
-                        feedArtworkView
-                            .frame(width: 44, height: 44)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
+            // Compact single-row layout with top-aligned artwork
+                    HStack(alignment: .top, spacing: 10) {
+            // Tappable artwork area - top aligned
+            Button(action: navigateToCurrentEpisode) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.adaptiveBorder)
+                        .frame(width: 50, height: 50)
+                    
+                    feedArtworkView
+                        .frame(width: 50, height: 50)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .buttonStyle(PlainButtonStyle())
-                
-                // Tappable text area
-                Button(action: {
-                    print("Podcast text area tapped - opening sheet")
-                    // Add sheet presentation logic here if needed
-                }) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(currentEpisode.title)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.adaptivePrimaryText)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        Text(currentFeed.title)
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+                            // Tappable text area - give it maximum available space with dynamic height
+            Button(action: navigateToCurrentEpisode) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(currentEpisode.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.adaptivePrimaryText)
+                        .lineLimit(nil) // Remove line limit to allow unlimited lines
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Text(currentFeed.title)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundColor(.adaptiveSecondaryText)
+                        .lineLimit(1) // Keep podcast name to 1 line
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(PlainButtonStyle())
-                
-                Spacer()
-                
-                // Essential controls only
-                HStack(spacing: 8) {
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            // Player controls with time elapsed below
+            VStack(spacing: 4) {
+                // Essential controls only - more compact
+                HStack(spacing: 6) {
                     // Skip backward 15s - smaller
                     Button(action: podcastPlayer.skipBackward) {
                         Image(systemName: "gobackward.15")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.white)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 30, height: 30)
                     }
                     .buttonStyle(PlainButtonStyle())
                     
@@ -785,10 +792,10 @@ struct UnifiedPodcastPlayerView: View {
                         ZStack {
                             Circle()
                                 .fill(Color.blue)
-                                .frame(width: 36, height: 36)
+                                .frame(width: 34, height: 34)
                             
                             Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 16, weight: .bold))
+                                .font(.system(size: 14, weight: .bold))
                                 .foregroundColor(.white)
                         }
                     }
@@ -797,46 +804,26 @@ struct UnifiedPodcastPlayerView: View {
                     // Skip forward 30s - smaller
                     Button(action: podcastPlayer.skipForward) {
                         Image(systemName: "goforward.30")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.white)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 30, height: 30)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    
-                    // List button (only show if provided) - smaller
-                    if onListButtonTap != nil {
-                        Button(action: {
-                            onListButtonTap?()
-                        }) {
-                            Image(systemName: "list.bullet")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.gray)
-                                .frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    
-                    // Close button (only show if provided) - smaller
-                    if onCloseButtonTap != nil {
-                        Button(action: {
-                            onCloseButtonTap?()
-                        }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .frame(width: 28, height: 28)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
                 }
+                
+                // Time elapsed/total display
+                Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.adaptiveSecondaryText)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
         }
-        .background(
-            Color(red: 0.05, green: 0.05, blue: 0.05)
-        )
-        .frame(height: 60) // Fixed compact height
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+    .background(
+        Color(red: 0.05, green: 0.05, blue: 0.05)
+    )
+    .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
     }
 
     
@@ -889,6 +876,15 @@ struct UnifiedPodcastPlayerView: View {
         } else {
             return String(format: "%d:%02d", minutes, seconds)
         }
+    }
+    
+    private func formatTimeForDisplay(_ time: TimeInterval) -> String {
+        guard time.isFinite && time >= 0 else { return "00:00" }
+        
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 }
 
