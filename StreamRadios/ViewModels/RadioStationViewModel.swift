@@ -604,6 +604,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     self?.loadStationsFromCoreData() // Reload stations from CoreData after sync
                     NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                    // StationsLoaded notification will be posted by loadStationsFromCoreData()
                 }
             }
         }
@@ -1017,6 +1018,9 @@ extension RadioStationViewModel {
                 )
             }
             print("Loaded \(stations.count) stations from CoreData.")
+            
+            // Post notification that stations have been loaded
+            NotificationCenter.default.post(name: NSNotification.Name("StationsLoaded"), object: nil)
             
             // Migration: Set favoritedAt for existing favorites that don't have a timestamp
             migrateFavoriteTimestamps()

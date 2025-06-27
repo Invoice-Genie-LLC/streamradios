@@ -39,8 +39,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     
     func handleIncomingURL(_ url: URL) {
             if url.absoluteString == "streamradios://openapp" {
-                RadioPlayer.shared.playFavoriteStationForAlarm()
-                presentAlarmTriggeredView()
+                // Use the same method as notification tap handling for consistency
+                if let appDelegate = UIApplication.shared.delegate as? AppDelegate {
+                    appDelegate.openAppAndPlayAlarmStation()
+                } else {
+                    // Fallback if AppDelegate is not available
+                    RadioPlayer.shared.playFavoriteStationForAlarm()
+                }
             }
         }
     

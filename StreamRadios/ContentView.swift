@@ -405,6 +405,9 @@ struct ContentView: View {
                     selectedStationForEdit = nil
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToAlarmStation"))) { notification in
+                handleAlarmStationNavigation(notification)
+            }
             .navigationBarHidden(true)
         }
         .navigationViewStyle(StackNavigationViewStyle())
@@ -481,6 +484,52 @@ struct ContentView: View {
             DataSyncManager.shared.startFreshInstallSync()
         } else {
             print("✅ App has been launched before and sync is complete")
+        }
+    }
+    
+    private func handleAlarmStationNavigation(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String,
+              let stationCountry = userInfo["stationCountry"] as? String,
+              let isFavorite = userInfo["isFavorite"] as? Bool else {
+            print("❌ Invalid alarm station navigation data")
+            return
+        }
+        
+        print("🧭 Navigating to alarm station: \(stationId) in country: \(stationCountry)")
+        
+        // Ensure we're on the radio tab
+        selectedTab = .radio
+        
+        // Navigate to the appropriate sub-tab based on station properties
+        if isFavorite {
+            // Station is a favorite - navigate to favorites tab
+            viewModel.selectedSubTab = .favorites
+            print("📍 Navigated to Favorites tab for alarm station")
+        } else {
+            // Station is not a favorite - navigate to All tab and set country
+            viewModel.selectedCountry = stationCountry
+            viewModel.selectedSubTab = .all
+            print("📍 Navigated to All tab for country: \(stationCountry)")
+        }
+        
+        // Verify navigation completed and station is visible
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            if let station = viewModel.stations.first(where: { $0.id == stationId }) {
+                print("✅ Alarm station found after navigation: \(station.name)")
+                
+                // Ensure the station is playing if it's not already
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if !radioPlayer.isPlaying || radioPlayer.currentlyPlayingStation?.id != stationId {
+                        if let index = viewModel.stations.firstIndex(where: { $0.id == stationId }) {
+                            print("🔄 Ensuring alarm station playback: \(station.name)")
+                            radioPlayer.playStation(at: index, from: viewModel.stations)
+                        }
+                    }
+                }
+            } else {
+                print("❌ Alarm station not found after navigation: \(stationId)")
+            }
         }
     }
 }

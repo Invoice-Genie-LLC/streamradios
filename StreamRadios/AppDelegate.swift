@@ -22,6 +22,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
        var viewModel = RadioStationViewModel.shared
         var podcastViewModel = PodcastViewModel()
     
+    private var shouldPlayAlarmStationOnReady = false
+    private var pendingAlarmStationID: String?
+    
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
             if isFirstLaunch() {
                 deleteLocalCoreDataStore()
@@ -274,7 +277,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         if notification.request.identifier.starts(with: "wakeUpAlarm") {
-            radioPlayer.playFavoriteStationForAlarm()
+            // Use the same consistent behavior for foreground notifications
+            openAppAndPlayAlarmStation()
         }
         completionHandler([.banner, .sound])
     }
@@ -282,18 +286,104 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         if userInfo["alarmType"] as? String == "streamRadiosAlarm" {
-            // Present AlarmTriggeredView
+            // Instead of presenting AlarmTriggeredView, open app and play the station
             DispatchQueue.main.async {
-                if let rootViewController = UIApplication.shared.windows.first?.rootViewController {
-                    let alarmTriggeredView = AlarmTriggeredView()
-                        .environmentObject(RadioPlayer.shared)
-                        .environmentObject(RadioStationViewModel.shared)
-                    let hostingController = UIHostingController(rootView: alarmTriggeredView)
-                    rootViewController.present(hostingController, animated: true, completion: nil)
-                }
+                self.openAppAndPlayAlarmStation()
             }
         }
         completionHandler()
+    }
+    
+    func openAppAndPlayAlarmStation() {
+        print("🚨 Opening app and attempting to play alarm station...")
+        
+        // Get the alarm station ID first
+        guard let favoriteStationID = UserDefaults.standard.string(forKey: "FavoriteStationID") else {
+            print("❌ No FavoriteStationID found for alarm")
+            return
+        }
+        
+        // Store the pending alarm station ID
+        pendingAlarmStationID = favoriteStationID
+        shouldPlayAlarmStationOnReady = true
+        
+        // Try to play immediately if stations are already loaded
+        if !viewModel.stations.isEmpty {
+            playPendingAlarmStation()
+        } else {
+            print("⏳ Stations not loaded yet, will play when ready...")
+            // The station will be played when viewModel finishes loading
+            // We'll set up an observer for this
+            setupStationLoadObserver()
+        }
+    }
+    
+    private func playPendingAlarmStation() {
+        guard shouldPlayAlarmStationOnReady,
+              let alarmStationID = pendingAlarmStationID,
+              let favoriteStation = viewModel.stations.first(where: { $0.id == alarmStationID }),
+              let stationIndex = viewModel.stations.firstIndex(where: { $0.id == alarmStationID }) else {
+            print("❌ Cannot play pending alarm station - missing data")
+            return
+        }
+        
+        print("🚨 Playing alarm station: \(favoriteStation.name)")
+        
+        // Clear the pending flags
+        shouldPlayAlarmStationOnReady = false
+        pendingAlarmStationID = nil
+        
+        // Navigate to radio tab and appropriate sub-tab first
+        navigateToStationLocation(station: favoriteStation)
+        
+        // Add delay to ensure navigation is complete and app is fully loaded
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            print("🎵 Starting playback for alarm station: \(favoriteStation.name)")
+            
+            // Ensure the RadioPlayer has the updated station list
+            self.radioPlayer.setViewModel(self.viewModel)
+            
+            // Play the station
+            self.radioPlayer.playStation(at: stationIndex, from: self.viewModel.stations)
+            
+            // Verify playback started
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if self.radioPlayer.isPlaying && self.radioPlayer.currentlyPlayingStation?.id == alarmStationID {
+                    print("✅ Alarm station playback confirmed: \(favoriteStation.name)")
+                } else {
+                    print("❌ Alarm station playback failed - retrying...")
+                    self.radioPlayer.playStation(at: stationIndex, from: self.viewModel.stations)
+                }
+            }
+        }
+    }
+    
+    private func setupStationLoadObserver() {
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("StationsLoaded"), 
+            object: nil, 
+            queue: .main
+        ) { [weak self] _ in
+            print("📻 Stations loaded - checking for pending alarm...")
+            if self?.shouldPlayAlarmStationOnReady == true {
+                self?.playPendingAlarmStation()
+            }
+        }
+    }
+    
+    func navigateToStationLocation(station: RadioStation) {
+        // Post notification to navigate to the appropriate location in the app
+        let navigationInfo: [String: Any] = [
+            "stationId": station.id,
+            "stationCountry": station.country,
+            "isFavorite": station.isFavorite
+        ]
+        
+        NotificationCenter.default.post(
+            name: NSNotification.Name("NavigateToAlarmStation"), 
+            object: nil, 
+            userInfo: navigationInfo
+        )
     }
     
     func presentAlarmTriggeredView() {
