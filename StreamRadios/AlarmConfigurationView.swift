@@ -103,7 +103,6 @@ struct AlarmConfigurationView: View {
                         }
                     )
                     .transition(.move(edge: .bottom))
-                    .frame(height: miniPlayerHeight)
                 }
             }
             .background(backgroundColor)

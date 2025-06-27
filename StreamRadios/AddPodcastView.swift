@@ -333,7 +333,6 @@ struct AddPodcastView: View {
                             }
                         )
                         .transition(.move(edge: .bottom))
-                        .frame(height: miniPlayerHeight)
                     }
                 }
                 .background(Color.adaptiveBackground)

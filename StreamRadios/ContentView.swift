@@ -270,8 +270,6 @@ struct ContentView: View {
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
                     
-                    Spacer()
-                    
                     // Player area - show podcast players when podcast is playing, radio players when radio is playing
                     if !isEditingMode {
                         if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
@@ -302,7 +300,6 @@ struct ContentView: View {
                                     selectedTab = .podcast
                                 }
                             }
-                            .padding(.horizontal, 16)
                         } else if selectedTab == .radio {
                             // Always show radio player when on radio tab
                             if let currentStation = viewModel.currentlyPlayingStation {
@@ -310,21 +307,19 @@ struct ContentView: View {
                                 CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
                                     .environmentObject(radioPlayer)
                                     .environmentObject(viewModel)
-                                    .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
+                                    .padding(.bottom, 0)
                             } else if !viewModel.stations.isEmpty {
                                 // Show first available station as default when no station is set
                                 let defaultStation = viewModel.stations.first!
                                 CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
                                     .environmentObject(radioPlayer)
                                     .environmentObject(viewModel)
-                                    .padding(.bottom, max(UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0, 16))
+                                    .padding(.bottom, 0)
                             }
                         }
                     }
                 }
-                .padding(.bottom, sizeClass == .regular ? 40 : 0)
-                
-
+                .padding(.bottom, 0)
                 
                 if alertManager.showCustomAlert {
                     CustomAlertContainer()
@@ -734,7 +729,7 @@ struct UnifiedPodcastPlayerView: View {
             // Safe space at top instead of blue line
             Rectangle()
                 .fill(Color.clear)
-                .frame(height: 8)
+                .frame(height: 1)
             
             // Compact single-row layout with top-aligned artwork
                     HStack(alignment: .top, spacing: 10) {
@@ -817,7 +812,7 @@ struct UnifiedPodcastPlayerView: View {
                     .foregroundColor(.adaptiveSecondaryText)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
     .background(
@@ -981,7 +976,7 @@ struct CurrentlyPlayingView: View {
             .buttonStyle(PlainButtonStyle())
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 6)
         .background(Color.black)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }

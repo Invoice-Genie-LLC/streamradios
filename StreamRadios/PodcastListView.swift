@@ -1756,23 +1756,22 @@ struct PodcastPlayerView: View {
             
             // Compact Mini Player
             if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                MiniPodcastPlayerView(
-                    currentEpisode: currentEpisode,
-                    currentFeed: currentFeed,
-                    podcastPlayer: podcastPlayer,
-                    viewModel: viewModel,
-                    selectedPodcast: $selectedPodcast,
-                    onListButtonTap: {
-                        // Already in episode list, no action needed
-                    },
-                    onCloseButtonTap: {
-                        podcastPlayer.pause()
-                        podcastPlayer.currentEpisode = nil
-                        podcastPlayer.currentFeed = nil
-                    }
-                )
-                .transition(.move(edge: .bottom))
-                .frame(height: 60) // Fixed compact height
+                                       MiniPodcastPlayerView(
+                           currentEpisode: currentEpisode,
+                           currentFeed: currentFeed,
+                           podcastPlayer: podcastPlayer,
+                           viewModel: viewModel,
+                           selectedPodcast: $selectedPodcast,
+                           onListButtonTap: {
+                               // Already in episode list, no action needed
+                           },
+                           onCloseButtonTap: {
+                               podcastPlayer.pause()
+                               podcastPlayer.currentEpisode = nil
+                               podcastPlayer.currentFeed = nil
+                           }
+                       )
+                       .transition(.move(edge: .bottom))
             }
         }
         .navigationBarHidden(true)
