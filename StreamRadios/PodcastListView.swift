@@ -1875,10 +1875,6 @@ struct PodcastPlayerView: View {
                         )
                         .frame(width: min(120, geometry.size.width * 0.3))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                        )
                         .shadow(color: Color.black.opacity(0.2), radius: 6, x: 0, y: 3)
                         
                                                     VStack(alignment: .leading, spacing: 12) {
