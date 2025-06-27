@@ -53,6 +53,9 @@ class RadioPlayer: NSObject, ObservableObject {
     var viewModel: RadioStationViewModel?
     private var cancellables = Set<AnyCancellable>()
     
+    // Cache for storing last iTunes artwork per station
+    private var stationArtworkCache: [String: (artwork: UIImage, metadata: String)] = [:]
+    
     override init() {
         monitor = NWPathMonitor()
         
@@ -297,8 +300,8 @@ class RadioPlayer: NSObject, ObservableObject {
         playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
         
-        // CRITICAL: Enhanced metadata observation for CarPlay artwork fetching
-        setupEnhancedMetadataObservation()
+        // Add metadata output immediately
+        addMetadataOutput()
         
         // Observe player status
         statusCancellable = player?.publisher(for: \.timeControlStatus)
@@ -310,8 +313,10 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.isBuffering = false
                         self?.updateNowPlayingInfo()
                         
-                        // CRITICAL: Trigger artwork fetch when playback actually starts
-                        self?.triggerCarPlayArtworkFetchOnPlayback()
+                        // Check for existing metadata and fetch artwork if available
+                        if let metadata = self?.metadata, !metadata.isEmpty {
+                            self?.fetchITunesAlbumArt(for: metadata)
+                        }
                         
                     case .waitingToPlayAtSpecifiedRate:
                         self?.isBuffering = true
@@ -408,10 +413,23 @@ class RadioPlayer: NSObject, ObservableObject {
             print("No current item found in player.")
             return
         }
-        let metadataOutput = AVPlayerItemMetadataOutput()
+        
+        // Remove any existing metadata outputs
+        for output in currentItem.outputs {
+            if output is AVPlayerItemMetadataOutput {
+                currentItem.remove(output)
+            }
+        }
+        
+        // Create new metadata output
+        let metadataOutput = AVPlayerItemMetadataOutput(identifiers: nil)
         metadataOutput.setDelegate(self, queue: DispatchQueue.main)
         currentItem.add(metadataOutput)
-        print("Metadata output added to player item.")
+        
+        // Also observe timed metadata for immediate response
+        currentItem.addObserver(self, forKeyPath: "timedMetadata", options: [.new], context: nil)
+        
+        print("Metadata observation configured for player item")
     }
     
     func playPause() {
@@ -532,15 +550,11 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Clear all metadata and artwork when switching stations
         metadata = nil
-        iTunesAlbumArt = nil
+        clearITunesArtwork()
         albumArt = nil
         songTitle = ""
         artistName = ""
-        lastMetadataSearched = ""
         
-        // Cancel any pending iTunes searches
-        artworkSearchTimer?.invalidate()
-
         guard let url = URL(string: station.url) else {
             print("Invalid URL for station: \(station.name)")
             return
@@ -551,19 +565,10 @@ class RadioPlayer: NSObject, ObservableObject {
         // Always start playing when a station is selected
         play()
         
-        isPlaying = true  // Set isPlaying to true when starting a new station
-        updateNowPlayingInfo()
-        updateWidget()
-        updateLastPlayed(station)
-        saveLastPlayedStation()
-        
-        // Post notification for real-time CarPlay recents update
-        NotificationCenter.default.post(
-            name: NSNotification.Name("StationPlayedForRecents"),
-            object: nil,
-            userInfo: ["stationId": station.id, "station": station]
-        )
-        print("🚗 Posted notification for CarPlay recents update: \(station.name)")
+        // If we already have metadata for this station, fetch iTunes artwork immediately
+        if let currentMetadata = metadata, !currentMetadata.isEmpty {
+            fetchITunesAlbumArt(for: currentMetadata)
+        }
     }
     
     func playStationForAlarm(station: RadioStation) {
@@ -575,15 +580,11 @@ class RadioPlayer: NSObject, ObservableObject {
 
         // Clear all metadata and artwork when playing alarm station
         metadata = nil
-        iTunesAlbumArt = nil
+        clearITunesArtwork()
         albumArt = nil
         songTitle = ""
         artistName = ""
-        lastMetadataSearched = ""
         
-        // Cancel any pending iTunes searches
-        artworkSearchTimer?.invalidate()
-
         setStationURL(url)
         play()
         alarmStation = station
@@ -600,11 +601,10 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Clear all metadata and artwork
         metadata = nil
-        iTunesAlbumArt = nil
+        clearITunesArtwork()
         albumArt = nil
         songTitle = ""
         artistName = ""
-        lastMetadataSearched = ""
         
         // Cancel any pending iTunes searches
         artworkSearchTimer?.invalidate()
@@ -2513,55 +2513,49 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("🔍 === VERIFICATION COMPLETE ===")
     }
+
+    // Maximum number of stations to cache artwork for
+    private let maxArtworkCacheSize = 10
+    
+    private func cleanupArtworkCache() {
+        // If cache exceeds max size, remove oldest entries
+        while stationArtworkCache.count > maxArtworkCacheSize {
+            let oldestKey = stationArtworkCache.keys.first
+            if let key = oldestKey {
+                stationArtworkCache.removeValue(forKey: key)
+            }
+        }
+    }
+    
+    func clearITunesArtwork() {
+        iTunesAlbumArt = nil
+        lastMetadataSearched = ""
+        artworkSearchTimer?.invalidate()
+        updateNowPlayingInfo()
+        updateWidget()
+    }
 }
 
 extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
-    func metadataOutput(_ output: AVPlayerItemMetadataOutput, didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup], from playerItemTrack: AVPlayerItemTrack?) {
-        for group in groups {
-            for item in group.items {
-                if let commonKey = item.commonKey, commonKey.rawValue == "title" {
-                    item.loadValuesAsynchronously(forKeys: ["stringValue"]) { [weak self] in
-                        guard let self = self else { return }
-                        DispatchQueue.main.async {
-                            if let stringValue = item.stringValue, !stringValue.isEmpty {
-                                let newTrackKey = self.generateTrackKey(from: stringValue)
-                                
-                                // Check if this is the same track as currently playing
-                                if let currentKey = self.currentTrackKey, currentKey == newTrackKey {
-                                    // Same track - preserve artwork, just update metadata text
-                                    self.metadata = stringValue
-                                    self.updateNowPlayingInfo() // This will preserve current iTunes artwork
-                                    self.updateWidget()
-                                    return
-                                }
-                                
-                                // New track detected - clear old artwork and search for new
-                                self.currentTrackKey = newTrackKey
-                                self.currentTrackArtwork = nil
-                                self.iTunesAlbumArt = nil
-                                self.metadata = stringValue
-                                self.updateNowPlayingInfo()
-                                self.updateWidget()
-                                
-                                // Fetch iTunes album artwork for the new track
-                                self.fetchITunesAlbumArt(for: stringValue)
-                            } else if self.metadata == nil {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                                    if self.metadata == nil || self.metadata?.isEmpty == true {
-                                        self.metadata = "No song or album title available"
-                                        // Clear track persistence when no metadata
-                                        self.currentTrackKey = nil
-                                        self.currentTrackArtwork = nil
-                                        self.iTunesAlbumArt = nil
-                                        self.updateNowPlayingInfo()
-                                        self.updateWidget()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+    func metadataOutput(_ output: AVPlayerItemMetadataOutput, didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup], from track: AVPlayerItemTrack?) {
+        guard let group = groups.first,
+              let metadataItem = group.items.first,
+              let value = metadataItem.value as? String else {
+            return
+        }
+        
+        // Update metadata and trigger artwork fetch
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.metadata = value
+            
+            // Always attempt to fetch artwork for new metadata
+            if !value.isEmpty {
+                self.fetchITunesAlbumArt(for: value)
             }
+            
+            self.updateNowPlayingInfo()
+            self.updateWidget()
         }
     }
 }

@@ -189,6 +189,12 @@ struct ContentView: View {
                 setupTabView()
                 checkAndStartDataSync()
             }
+            .onChange(of: selectedTab) { oldValue, newValue in
+                if oldValue == .radio && newValue != .radio {
+                    // Clear iTunes artwork when navigating away from radio tab
+                    radioPlayer.clearITunesArtwork()
+                }
+            }
             // Removed tab state persistence - app always starts on radio tab
             
             // Data Sync Progress Overlay

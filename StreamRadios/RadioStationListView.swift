@@ -539,19 +539,19 @@ struct RadioStationListView: View {
         }) {
             Image(systemName: station.isFavorite ? "heart.fill" : "heart")
                 .font(.system(size: 20, weight: .medium))
-                .foregroundColor(station.isFavorite ? .pink : .adaptiveSecondaryText)
+                .foregroundColor(station.isFavorite ? .red : .adaptiveSecondaryText)
                 .scaleEffect(station.isFavorite ? 1.1 : 1.0)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
                 .frame(width: 44, height: 44)
                 .background(
                     Circle()
-                        .fill(station.isFavorite ? Color.pink.opacity(0.1) : Color.clear)
+                        .fill(station.isFavorite ? Color.red.opacity(0.1) : Color.clear)
                         .scaleEffect(station.isFavorite ? 1.0 : 0.8)
                         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
                 )
                 .overlay(
                     Circle()
-                        .stroke(station.isFavorite ? Color.pink.opacity(0.3) : Color.clear, lineWidth: 1)
+                        .stroke(station.isFavorite ? Color.red.opacity(0.3) : Color.clear, lineWidth: 1)
                         .scaleEffect(station.isFavorite ? 1.0 : 0.8)
                         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
                 )
@@ -562,45 +562,51 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func imageForStation(_ station: RadioStation) -> some View {
-        // Show live iTunes artwork for currently playing station if available and playing
-        if isCurrentStation(station: station), radioPlayer.isPlaying, let iTunesArt = radioPlayer.iTunesAlbumArt {
-            Image(uiImage: iTunesArt)
-                .resizable()
-                .scaledToFill()
-                .clipped()
+        // Only show iTunes artwork for currently playing station
+        if isCurrentStation(station: station) && radioPlayer.isPlaying {
+            if let iTunesArt = radioPlayer.iTunesAlbumArt {
+                Image(uiImage: iTunesArt)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+            } else if let iconData = station.iconData,
+                      let imageData = Data(base64Encoded: iconData),
+                      let image = UIImage(data: imageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .background(Color.white.opacity(0.1))
+            } else {
+                defaultStationImage(station)
+            }
         }
-        // Show cached iTunes artwork if available and station is not currently playing
-        else if !isCurrentStation(station: station) || !radioPlayer.isPlaying,
-                let iTunesData = station.iTunesArtworkData, 
-                let imageData = Data(base64Encoded: iTunesData),
-                let image = UIImage(data: imageData) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .clipped()
-        }
-        // Show station icon if available
-        else if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData),
-           let image = UIImage(data: imageData) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .background(Color.white.opacity(0.1))
-        } 
-        // Default radio icon with station initials
+        // For non-playing stations, always show station icon or default
         else {
-            ZStack {
-                Color.adaptiveBorder
-                
-                if !station.name.isEmpty {
-                    Text(String(station.name.prefix(2)).uppercased())
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.adaptivePrimaryText)
-                } else {
-                    Image(systemName: "radio")
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundColor(.adaptivePrimaryText)
-                }
+            if let iconData = station.iconData,
+               let imageData = Data(base64Encoded: iconData),
+               let image = UIImage(data: imageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .background(Color.white.opacity(0.1))
+            } else {
+                defaultStationImage(station)
+            }
+        }
+    }
+    
+    private func defaultStationImage(_ station: RadioStation) -> some View {
+        ZStack {
+            Color.adaptiveBorder
+            
+            if !station.name.isEmpty {
+                Text(String(station.name.prefix(2)).uppercased())
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.adaptivePrimaryText)
+            } else {
+                Image(systemName: "radio")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(.adaptivePrimaryText)
             }
         }
     }
