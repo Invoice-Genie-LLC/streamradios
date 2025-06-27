@@ -1866,71 +1866,47 @@ struct PodcastPlayerView: View {
             // Enhanced Feed Info Area with better hierarchy
             GeometryReader { geometry in
                 VStack(spacing: 0) {
-                    HStack(alignment: .top, spacing: 20) {
+                    HStack(alignment: .top, spacing: 16) {
                         // Enhanced artwork with shadow and border using pre-downloaded data
                         PodcastIconView(
                             iconData: feed.iconData,
                             imageData: feed.imageData,
                             artworkUrl: feed.artworkUrl
                         )
-                        .frame(width: min(130, geometry.size.width * 0.35))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .frame(width: min(120, geometry.size.width * 0.3))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 16)
+                            RoundedRectangle(cornerRadius: 12)
                                 .stroke(Color.white.opacity(0.2), lineWidth: 1)
                         )
-                        .shadow(color: Color.black.opacity(0.2), radius: 8, x: 0, y: 4)
+                        .shadow(color: Color.black.opacity(0.2), radius: 6, x: 0, y: 3)
                         
-                        VStack(alignment: .leading, spacing: 12) {
-                            // Podcast description section
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("ABOUT")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.blue)
-                                    .tracking(1.2)
-                                
-                                ScrollView {
-                                    Text(feed.descriptionText ?? "No description available")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(4)
-                                        .multilineTextAlignment(.leading)
-                                        .padding(.trailing, 8) // Add right padding to prevent text cutoff
+                                                    VStack(alignment: .leading, spacing: 12) {
+                                // Podcast description section
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("ABOUT")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.blue)
+                                        .tracking(1.2)
+                                    
+                                    ScrollView(.vertical, showsIndicators: true) {
+                                        Text(feed.descriptionText ?? "No description available")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                            .padding(.trailing, 8) // Add right padding to prevent text cutoff
+                                            .padding(.bottom, 4) // Add some bottom padding for better scrolling
+                                    }
+                                    .frame(maxHeight: 80) // Set a max height for the scroll view
                                 }
-                                .frame(height: 50)
-                            }
-                            
-                            // Visual separator
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 1)
-                            
-                            // Currently playing section
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("NOW PLAYING")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.blue)
-                                    .tracking(1.2)
-                                
-                                ScrollView(.vertical, showsIndicators: false) {
-                                    Text(podcastPlayer.currentEpisode?.title ?? "No episode playing")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.primary)
-                                        .lineLimit(3)
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                .frame(height: 45)
-                                
 
-                            }
                         }
                         .frame(width: geometry.size.width - min(130, geometry.size.width * 0.35) - 40)
                     }
                     .padding(20)
                 }
             }
-            .frame(height: 190)
+            .frame(height: 140)
             .background(
                 LinearGradient(
                     gradient: Gradient(colors: [
