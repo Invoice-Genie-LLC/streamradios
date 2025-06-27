@@ -354,7 +354,7 @@ struct AddPodcastView: View {
                 .background(Color(red: 0.08, green: 0.08, blue: 0.08))
             }
             .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .navigationBarItems(
                 leading: modernCancelButton,
                 trailing: modernSaveButton
