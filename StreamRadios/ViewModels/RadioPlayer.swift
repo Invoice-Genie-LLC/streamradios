@@ -313,9 +313,16 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.isBuffering = false
                         self?.updateNowPlayingInfo()
                         
-                        // Check for existing metadata and fetch artwork if available
+                        // Enhanced metadata fetching when starting to play
                         if let metadata = self?.metadata, !metadata.isEmpty {
+                            // If we have metadata, fetch iTunes artwork
                             self?.fetchITunesAlbumArt(for: metadata)
+                        } else {
+                            // If no metadata, proactively check for current metadata
+                            // This is especially useful when resuming from pause
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                self?.checkForCurrentMetadata()
+                            }
                         }
                         
                     case .waitingToPlayAtSpecifiedRate:
@@ -435,14 +442,13 @@ class RadioPlayer: NSObject, ObservableObject {
     func playPause() {
         guard let player = player else { return }
         if player.timeControlStatus == .playing {
-            player.pause()
+            // Use our main pause() method to ensure metadata and artwork clearing
+            pause()
         } else {
-            player.play()
-            stopPodcastPlayback()
-            resetRetryCount()
+            // Use our main play() method to ensure proper startup
+            play()
         }
-        updateNowPlayingInfo()
-        updateWidget()
+        // Note: updateNowPlayingInfo() and updateWidget() are called within pause() and play()
     }
     
     func play() {
@@ -475,6 +481,12 @@ class RadioPlayer: NSObject, ObservableObject {
         // Update Now Playing immediately since audio session is already activated
         updateNowPlayingInfo()
         
+        // Trigger immediate metadata checking when resuming from pause
+        // This ensures fresh metadata and iTunes artwork are fetched
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.checkForCurrentMetadata()
+        }
+        
         // Add verification after a brief delay to ensure everything is set up
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.verifyNowPlayingSetup()
@@ -495,11 +507,25 @@ class RadioPlayer: NSObject, ObservableObject {
             player.pause()
             isPlaying = false
             
+            // Clear all song metadata and iTunes artwork when pausing
+            // This immediately removes song info while keeping the station active
+            metadata = nil
+            iTunesAlbumArt = nil
+            albumArt = nil
+            songTitle = ""
+            artistName = ""
+            lastMetadataSearched = ""
+            
             // Cancel any pending iTunes searches when paused
             artworkSearchTimer?.invalidate()
             
+            // Note: We keep currentlyPlayingStation and currentStationIndex intact
+            // This allows the user to resume playing the same station easily
+            
             updateNowPlayingInfo()
             updateWidget()
+            
+            print("⏸️ Radio paused - song metadata and iTunes artwork cleared, station remains active")
         }
     
     func togglePlayPause() {
@@ -516,7 +542,7 @@ class RadioPlayer: NSObject, ObservableObject {
            currentStationIndex = nil
            isPlaying = false
            
-           // Clear all metadata and artwork
+           // Clear all song metadata and iTunes artwork completely
            metadata = nil
            iTunesAlbumArt = nil
            albumArt = nil
@@ -527,9 +553,14 @@ class RadioPlayer: NSObject, ObservableObject {
            // Cancel any pending iTunes searches
            artworkSearchTimer?.invalidate()
            
-           // Update all UI elements
+           // Clear the current station to fully reset player state
+           currentlyPlayingStation = nil
+           
+           // Update all UI elements - this will now show default app info with no station artwork
            updateNowPlayingInfo()
            updateWidget()
+           
+           print("🛑 Radio player stopped - all metadata and iTunes artwork cleared")
        }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
@@ -548,12 +579,15 @@ class RadioPlayer: NSObject, ObservableObject {
         currentStationIndex = index
         currentlyPlayingStation = station
         
-        // Clear all metadata and artwork when switching stations
+        // Clear all metadata and iTunes artwork when switching stations
+        // This ensures old song artwork doesn't carry over to the new station
         metadata = nil
-        clearITunesArtwork()
+        iTunesAlbumArt = nil
         albumArt = nil
         songTitle = ""
         artistName = ""
+        lastMetadataSearched = ""
+        artworkSearchTimer?.invalidate()
         
         guard let url = URL(string: station.url) else {
             print("Invalid URL for station: \(station.name)")
@@ -578,12 +612,14 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
 
-        // Clear all metadata and artwork when playing alarm station
+        // Clear all metadata and iTunes artwork when playing alarm station
         metadata = nil
-        clearITunesArtwork()
+        iTunesAlbumArt = nil
         albumArt = nil
         songTitle = ""
         artistName = ""
+        lastMetadataSearched = ""
+        artworkSearchTimer?.invalidate()
         
         setStationURL(url)
         play()
@@ -599,20 +635,25 @@ class RadioPlayer: NSObject, ObservableObject {
         player = nil
         isPlaying = false
         
-        // Clear all metadata and artwork
+        // Clear all song metadata and iTunes artwork completely
         metadata = nil
-        clearITunesArtwork()
+        iTunesAlbumArt = nil
         albumArt = nil
         songTitle = ""
         artistName = ""
+        lastMetadataSearched = ""
         
         // Cancel any pending iTunes searches
         artworkSearchTimer?.invalidate()
         
-        // Update all UI elements
+        // Clear the current station reference
+        currentlyPlayingStation = nil
+        
+        // Update all UI elements - will show default station artwork only (no song info)
         updateNowPlayingInfo()
         updateWidget()
-        currentlyPlayingStation = nil
+        
+        print("⏹️ Current station stopped - all song metadata and iTunes artwork cleared, showing station artwork only")
     }
     
     func nextStation(from stations: [RadioStation]) {
@@ -718,48 +759,65 @@ class RadioPlayer: NSObject, ObservableObject {
         // Add artwork if available (enhanced priority order)
         var artworkSet = false
         
-        // PRIORITY 1: Current track iTunes artwork (highest priority)
-        if let iTunesArt = iTunesAlbumArt {
-            let artwork = MPMediaItemArtwork(boundsSize: iTunesArt.size) { size in
-                return iTunesArt
+        // When paused, skip iTunes artwork and show only station icon
+        if !isPlaying {
+            // When paused, only show station icon (no iTunes artwork)
+            if let station = currentStation,
+               let iconData = station.iconData,
+               let imageData = Data(base64Encoded: iconData),
+               let image = UIImage(data: imageData) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+                    return image
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                print("🎨 Now Playing: Using station icon only (paused state)")
             }
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-            artworkSet = true
-            print("🎨 Now Playing: Using live iTunes artwork")
-        }
-        // PRIORITY 2: Current track artwork from metadata
-        else if let currentTrackArtwork = currentTrackArtwork {
-            let artwork = MPMediaItemArtwork(boundsSize: currentTrackArtwork.size) { size in
-                return currentTrackArtwork
+        } else {
+            // When playing, use full priority system
+            // PRIORITY 1: Current track iTunes artwork (highest priority)
+            if let iTunesArt = iTunesAlbumArt {
+                let artwork = MPMediaItemArtwork(boundsSize: iTunesArt.size) { size in
+                    return iTunesArt
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                print("🎨 Now Playing: Using live iTunes artwork")
             }
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-            artworkSet = true
-            print("🎨 Now Playing: Using current track artwork")
-        }
-        // PRIORITY 3: Station's saved iTunes artwork (from previous tracks)
-        else if let station = currentStation,
-                  let iTunesData = station.iTunesArtworkData,
-                  !iTunesData.isEmpty,
-                  let imageData = Data(base64Encoded: iTunesData),
-                  let image = UIImage(data: imageData) {
-            let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
-                return image
+            // PRIORITY 2: Current track artwork from metadata
+            else if let currentTrackArtwork = currentTrackArtwork {
+                let artwork = MPMediaItemArtwork(boundsSize: currentTrackArtwork.size) { size in
+                    return currentTrackArtwork
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                print("🎨 Now Playing: Using current track artwork")
             }
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-            artworkSet = true
-            print("🎨 Now Playing: Using station's saved iTunes artwork")
-        }
-        // PRIORITY 4: Station icon (fallback)
-        else if let station = currentStation,
-                  let iconData = station.iconData,
-                  let imageData = Data(base64Encoded: iconData),
-                  let image = UIImage(data: imageData) {
-            let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
-                return image
+            // PRIORITY 3: Station's saved iTunes artwork (from previous tracks)
+            else if let station = currentStation,
+                      let iTunesData = station.iTunesArtworkData,
+                      !iTunesData.isEmpty,
+                      let imageData = Data(base64Encoded: iTunesData),
+                      let image = UIImage(data: imageData) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+                    return image
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                print("🎨 Now Playing: Using station's saved iTunes artwork")
             }
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-            artworkSet = true
-            print("🎨 Now Playing: Using station icon artwork")
+            // PRIORITY 4: Station icon (fallback)
+            else if let station = currentStation,
+                      let iconData = station.iconData,
+                      let imageData = Data(base64Encoded: iconData),
+                      let image = UIImage(data: imageData) {
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+                    return image
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                print("🎨 Now Playing: Using station icon artwork")
+            }
         }
         
         if !artworkSet {
@@ -2533,6 +2591,77 @@ class RadioPlayer: NSObject, ObservableObject {
         artworkSearchTimer?.invalidate()
         updateNowPlayingInfo()
         updateWidget()
+    }
+    
+    /// Actively checks for current metadata when resuming from pause
+    /// This ensures fresh metadata and iTunes artwork are fetched immediately
+    private func checkForCurrentMetadata() {
+        guard isPlaying, let player = player, let playerItem = player.currentItem else {
+            print("🔍 Metadata Check: Player not available or not playing")
+            return
+        }
+        
+        print("🔍 Checking for current metadata after resume...")
+        
+        // Check if we have timed metadata available
+        if let timedMetadata = playerItem.timedMetadata, !timedMetadata.isEmpty {
+            for metadataItem in timedMetadata {
+                if let commonKey = metadataItem.commonKey,
+                   commonKey.rawValue == "title" || commonKey.rawValue == "streamTitle",
+                   let stringValue = metadataItem.stringValue,
+                   !stringValue.isEmpty {
+                    
+                    print("🔍 Found current metadata: \(stringValue)")
+                    
+                    // Update metadata and fetch iTunes artwork
+                    DispatchQueue.main.async { [weak self] in
+                        self?.metadata = stringValue
+                        self?.fetchITunesAlbumArt(for: stringValue)
+                        self?.updateNowPlayingInfo()
+                        self?.updateWidget()
+                    }
+                    return
+                }
+            }
+        }
+        
+        // If no immediate metadata found, set up enhanced monitoring for new metadata
+        print("🔍 No immediate metadata found, setting up enhanced monitoring...")
+        
+        // Reset metadata search state to allow fresh searches
+        lastMetadataSearched = ""
+        
+        // If we still don't have metadata after a short delay, try refreshing the stream connection
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self = self else { return }
+            
+            // If still no metadata after 3 seconds, force a metadata output refresh
+            if self.metadata == nil || self.metadata?.isEmpty == true {
+                print("🔍 Still no metadata after 3 seconds, refreshing metadata output...")
+                self.refreshMetadataOutput()
+            }
+        }
+    }
+    
+    /// Refreshes the metadata output to ensure we capture new metadata
+    private func refreshMetadataOutput() {
+        guard let playerItem = player?.currentItem else { return }
+        
+        print("🔄 Refreshing metadata output for fresh metadata capture...")
+        
+        // Remove existing metadata outputs
+        for output in playerItem.outputs {
+            if output is AVPlayerItemMetadataOutput {
+                playerItem.remove(output)
+            }
+        }
+        
+        // Add fresh metadata output
+        let metadataOutput = AVPlayerItemMetadataOutput(identifiers: nil)
+        metadataOutput.setDelegate(self, queue: DispatchQueue.main)
+        playerItem.add(metadataOutput)
+        
+        print("✅ Metadata output refreshed - ready to capture new metadata")
     }
 }
 

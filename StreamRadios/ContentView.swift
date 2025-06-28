@@ -190,10 +190,9 @@ struct ContentView: View {
                 checkAndStartDataSync()
             }
             .onChange(of: selectedTab) { oldValue, newValue in
-                if oldValue == .radio && newValue != .radio {
-                    // Clear iTunes artwork when navigating away from radio tab
-                    radioPlayer.clearITunesArtwork()
-                }
+                // Do NOT clear iTunes artwork when navigating between views
+                // iTunes artwork should only be cleared when actually stopping the radio player
+                // This preserves the song artwork during view navigation while radio is playing
             }
             // Removed tab state persistence - app always starts on radio tab
             
