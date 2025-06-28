@@ -379,6 +379,9 @@ struct PodcastListView: View {
             }
             .listStyle(PlainListStyle())
             .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 100)  // Add extra space at the bottom
+            }
             .simultaneousGesture(
                 DragGesture()
                     .onChanged { _ in

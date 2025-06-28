@@ -65,12 +65,7 @@ struct EditStationView: View {
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 80)
-                    .padding(.bottom, podcastPlayer.isPlaying && !radioPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 100 : 40)
-                }
-                
-                // Mini Player
-                if podcastPlayer.isPlaying && !radioPlayer.isPlaying, podcastPlayer.currentEpisode != nil {
-                    FloatingMiniPlayer()
+                    .padding(.bottom, 40)
                 }
             }
             .background(Color.adaptiveBackground.ignoresSafeArea())
@@ -225,33 +220,6 @@ struct EditStationView: View {
                     )
                 }
             }
-        }
-    }
-    
-    @ViewBuilder
-    private func FloatingMiniPlayer() -> some View {
-        if let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-            MiniPodcastPlayerView(
-                currentEpisode: currentEpisode,
-                currentFeed: currentFeed,
-                podcastPlayer: podcastPlayer,
-                viewModel: podcastViewModel,
-                selectedPodcast: $selectedPodcast,
-                onListButtonTap: {
-                    selectedPodcast = currentFeed
-                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                    scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                    internalActiveSheet = .podcastPlayer(podcast: currentFeed)
-                },
-                onCloseButtonTap: {
-                    podcastPlayer.pause()
-                    podcastPlayer.currentEpisode = nil
-                    podcastPlayer.currentFeed = nil
-                }
-            )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
     
