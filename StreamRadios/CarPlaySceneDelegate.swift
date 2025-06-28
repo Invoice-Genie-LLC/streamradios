@@ -1641,17 +1641,32 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 }
             }
             
-            // CRITICAL: Apply cached iTunes artwork for CarPlay
+            // CRITICAL: Apply cached iTunes artwork for CarPlay immediately
             // This works even when the main app is force-closed using pre-cached data
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 self.applyCachedArtworkToCarPlay()
-                os_log("🚗 CarPlay: Triggered cached iTunes artwork application for station: %@", log: self.log, type: .info, station.name)
+                os_log("🚗 CarPlay: Triggered immediate cached iTunes artwork application for station: %@", log: self.log, type: .info, station.name)
+            }
+            
+            // CRITICAL: Trigger fresh iTunes artwork fetch immediately for PlayNow
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.triggerImmediateITunesArtworkFetch()
+                os_log("🚗 CarPlay: Triggered immediate iTunes artwork fetch for PlayNow: %@", log: self.log, type: .info, station.name)
             }
             
             // Additional attempts to ensure artwork is applied
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 self.applyCachedArtworkToCarPlay()
                 os_log("🚗 CarPlay: Fallback cached iTunes artwork application for station: %@", log: self.log, type: .info, station.name)
+            }
+            
+            // Final iTunes artwork fetch attempt if still no artwork
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+                if nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
+                    self.triggerImmediateITunesArtworkFetch()
+                    os_log("🚗 CarPlay: Final iTunes artwork fetch attempt for PlayNow: %@", log: self.log, type: .info, station.name)
+                }
             }
             
             completion()
@@ -2952,6 +2967,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             object: nil
         )
         
+        // Monitor for iTunes artwork updates specifically
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(iTunesArtworkUpdated(_:)),
+            name: NSNotification.Name("iTunesArtworkUpdated"),
+            object: nil
+        )
+        
         // Set up aggressive cached artwork monitoring
         setupAggressiveCachedArtworkMonitoring()
         
@@ -3017,6 +3040,26 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.applyCachedArtworkToCarPlay()
+        }
+    }
+    
+    /// Monitors iTunes artwork updates specifically for immediate CarPlay refresh
+    @objc private func iTunesArtworkUpdated(_ notification: Notification) {
+        os_log("🚗 CarPlay: iTunes artwork updated - triggering immediate CarPlay refresh", log: log, type: .info)
+        
+        // Immediate artwork application
+        DispatchQueue.main.async { [weak self] in
+            self?.applyCachedArtworkToCarPlay()
+        }
+        
+        // Force Now Playing update
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.forceCarPlayNowPlayingUpdate()
+        }
+        
+        // Refresh CarPlay interface
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.refreshVisibleStationArtwork()
         }
     }
     
@@ -3253,35 +3296,55 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func triggerImmediateITunesArtworkFetch() {
         let radioPlayer = RadioPlayer.shared
         
-        // Check if we have current metadata to search for
-        guard let metadata = radioPlayer.metadata, !metadata.isEmpty else {
-            os_log("🚗 CarPlay: No metadata available for iTunes artwork fetch", log: log, type: .debug)
+        // First check if we have current metadata to search for
+        var metadata = radioPlayer.metadata
+        
+        // If no metadata available yet, try to construct it from current station
+        if metadata == nil || metadata!.isEmpty {
+            if let currentStation = radioPlayer.currentlyPlayingStation {
+                metadata = currentStation.name
+                os_log("🚗 CarPlay: No metadata available, using station name for iTunes artwork fetch: %@", log: log, type: .info, currentStation.name)
+            } else {
+                os_log("🚗 CarPlay: No metadata or station available for iTunes artwork fetch", log: log, type: .debug)
+                return
+            }
+        }
+        
+        guard let finalMetadata = metadata, !finalMetadata.isEmpty else {
+            os_log("🚗 CarPlay: No valid metadata available for iTunes artwork fetch", log: log, type: .debug)
             return
         }
         
-        // Check if we already have iTunes artwork for this track
+        // Don't skip if artwork already present for PlayNow - always try to get better artwork
         let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
-        if nowPlayingInfo?[MPMediaItemPropertyArtwork] != nil {
-            os_log("🚗 CarPlay: Artwork already present, skipping iTunes fetch", log: log, type: .debug)
-            return
-        }
+        let hasArtwork = nowPlayingInfo?[MPMediaItemPropertyArtwork] != nil
         
-        os_log("🚗 CarPlay: Triggering IMMEDIATE iTunes artwork fetch for: %@", log: log, type: .info, metadata)
+        if hasArtwork {
+            os_log("🚗 CarPlay: Artwork already present, but triggering fresh iTunes fetch for PlayNow: %@", log: log, type: .info, finalMetadata)
+        } else {
+            os_log("🚗 CarPlay: No artwork present, triggering IMMEDIATE iTunes artwork fetch for: %@", log: log, type: .info, finalMetadata)
+        }
         
         // Use background task to ensure network access during CarPlay session
         let taskId = UIApplication.shared.beginBackgroundTask(withName: "CarPlayITunesArtworkFetch") {
             os_log("🚗 CarPlay: iTunes artwork fetch background task expired", log: self.log, type: .default)
         }
         
-        radioPlayer.searchITunesForArtwork(metadata: metadata) { [weak self] image in
+        radioPlayer.searchITunesForArtwork(metadata: finalMetadata) { [weak self] image in
             DispatchQueue.main.async {
                 UIApplication.shared.endBackgroundTask(taskId)
                 
                 if let image = image {
-                    os_log("🚗 CarPlay: iTunes artwork fetch SUCCESS - applying immediately", log: self?.log ?? OSLog.default, type: .info)
+                    os_log("🚗 CarPlay: iTunes artwork fetch SUCCESS - applying immediately for PlayNow", log: self?.log ?? OSLog.default, type: .info)
                     radioPlayer.saveITunesArtworkToCurrentStation(image)
+                    
+                    // Force immediate Now Playing info update to show new artwork
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        radioPlayer.forceUpdateNowPlayingInfo()
+                        self?.forceCarPlayNowPlayingUpdate()
+                    }
                 } else {
-                    os_log("🚗 CarPlay: iTunes artwork fetch failed for: %@", log: self?.log ?? OSLog.default, type: .debug, metadata)
+                    os_log("🚗 CarPlay: iTunes artwork fetch failed for: %@", log: self?.log ?? OSLog.default, type: .debug, finalMetadata)
                 }
             }
         }

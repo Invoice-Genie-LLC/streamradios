@@ -1368,6 +1368,13 @@ class RadioPlayer: NSObject, ObservableObject {
                 userInfo: ["stationId": updatedStation.id, "hasArtwork": true]
             )
             
+            // ENHANCED: Specific iTunes artwork update notification for immediate CarPlay response
+            NotificationCenter.default.post(
+                name: NSNotification.Name("iTunesArtworkUpdated"),
+                object: nil,
+                userInfo: ["stationId": updatedStation.id, "artworkUpdated": true]
+            )
+            
             // ENHANCED: Also trigger CarPlay playback change to force artwork refresh
             NotificationCenter.default.post(
                 name: NSNotification.Name("CarPlayPlaybackChanged"),
