@@ -22,7 +22,7 @@ enum EpisodePlaybackState: String, Codable, Equatable {
         switch self {
         case .new: return "New"
         case .playing: return "Playing"
-        case .inProgress: return "In Progress"
+        case .inProgress: return "IN PROGRESS"
         case .played: return "Played"
         }
     }

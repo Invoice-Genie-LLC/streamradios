@@ -1352,7 +1352,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         } else if episode.state.isPlayed {
             statusText = " • Complete"
         } else if episode.state.progress > 0 {
-            statusText = " • In Progress"
+            statusText = " • IN PROGRESS"
         }
         
         // Add download indicator
@@ -1460,7 +1460,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             } else if episode.state.isPlayed {
                 statusText = " • Complete"
             } else if episode.state.progress > 0 {
-                statusText = " • In Progress"
+                statusText = " • IN PROGRESS"
             }
             
             // Find the podcast feed for artwork
@@ -1515,7 +1515,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             } else if episode.state.isPlayed {
                 statusText = " • Complete"
             } else if episode.state.progress > 0 {
-                statusText = " • In Progress"
+                statusText = " • IN PROGRESS"
             }
             
             // Add download indicator if episode is also downloaded
@@ -2542,7 +2542,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             } else if episode.state.isPlayed {
                 statusText = " • Complete"
             } else if episode.state.progress > 0 {
-                statusText = " • In Progress"
+                statusText = " • IN PROGRESS"
             }
             
             // Add download indicator

@@ -1137,11 +1137,12 @@ struct EpisodeRowView: View {
                     .padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue))
             } else if episode.state.progress > 0 || podcastPlayer.getCurrentProgress(for: episode) > 0 {
-                Text("In Progress")
+                Text("IN PROGRESS")
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange))
+                    .fixedSize()
             } else {
                 Text("New")
                     .foregroundColor(.white)
@@ -1163,8 +1164,9 @@ struct EpisodeRowView: View {
                     Text("Playing")
                         .foregroundColor(.blue)
                 } else if episode.state.progress > 0 || podcastPlayer.getCurrentProgress(for: episode) > 0 {
-                    Text("In Progress")
+                    Text("IN PROGRESS")
                         .foregroundColor(.orange)
+                        .fixedSize()
                 } else {
                     Text("New")
                         .foregroundColor(.blue) // Changed from green to blue for consistency
@@ -1350,6 +1352,43 @@ struct OptimizedEpisodeRowView: View, Equatable {
         viewModel.downloadProgress[episode.id] != nil && viewModel.downloadProgress[episode.id]! > 0 && viewModel.downloadProgress[episode.id]! < 1
     }
     
+    // Real-time computed properties for dynamic updates
+    private var currentStatusText: String {
+        if isPlaying {
+            return "PLAYING"
+        } else {
+            return cachedStatusText
+        }
+    }
+    
+    private var currentStatusColor: Color {
+        if isPlaying {
+            return .blue
+        } else {
+            return cachedStatusColor
+        }
+    }
+    
+    private var currentTimeInfo: String? {
+        if isPlaying && episode.duration > 0 {
+            // Use real-time remaining time for playing episodes
+            let remainingTime = episode.duration - podcastPlayer.currentTime
+            if remainingTime > 0 {
+                let hours = Int(remainingTime) / 3600
+                let minutes = (Int(remainingTime) % 3600) / 60
+                if hours > 0 {
+                    return "\(hours)h \(minutes)m left"
+                } else {
+                    return "\(minutes)m left"
+                }
+            } else {
+                return cachedTimeInfo
+            }
+        } else {
+            return cachedTimeInfo
+        }
+    }
+    
     init(episode: PodcastEpisode,
          isPlaying: Bool,
          onPlay: @escaping () -> Void,
@@ -1512,18 +1551,19 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         .animation(.easeInOut(duration: 0.3), value: podcastPlayer.currentProgress)
                 }
                 
-                // Metadata row - using cached values
-                HStack(spacing: 6) {
-                    // Status indicator - using cached values
-                    Text(cachedStatusText)
+                // Metadata row - with real-time updates and proper layout
+                HStack(spacing: 4) {
+                    // Status indicator - using real-time values for playing episodes
+                    Text(currentStatusText)
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
-                                .fill(cachedStatusColor)
+                                .fill(currentStatusColor)
                         )
+                        .fixedSize()
                     
                     // Date - using cached string
                     Text(cachedDateString)
@@ -1535,9 +1575,10 @@ struct OptimizedEpisodeRowView: View, Equatable {
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(Color.blue.opacity(0.1))
                         )
+                        .fixedSize()
                     
-                    // Duration - using cached time info
-                    if let timeInfo = cachedTimeInfo {
+                    // Duration - using real-time time info for playing episodes
+                    if let timeInfo = currentTimeInfo {
                         Text(timeInfo)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(.gray)
@@ -1547,10 +1588,12 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 RoundedRectangle(cornerRadius: 4)
                                     .fill(Color.gray.opacity(0.1))
                             )
+                            .fixedSize()
                     }
                     
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             
             // Action buttons - simplified
@@ -1598,6 +1641,14 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .contentShape(Rectangle())
         .onTapGesture {
             onPlay()
+        }
+        .onReceive(podcastPlayer.$currentProgress) { _ in
+            // Force view refresh when progress changes for playing episodes
+            // This will update the currentTimeInfo computed property
+        }
+        .onReceive(podcastPlayer.$currentTime) { _ in
+            // Force view refresh when current time changes for playing episodes
+            // This ensures real-time time left updates
         }
     }
     
