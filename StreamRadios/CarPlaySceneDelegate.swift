@@ -2871,14 +2871,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
-    /// Forces immediate Now Playing update specifically for CarPlay
+    /// Forces an immediate CarPlay Now Playing update for real-time artwork display
     private func forceCarPlayNowPlayingUpdate() {
-        os_log("🚗 CarPlay: Forcing immediate Now Playing update for artwork", log: log, type: .info)
+        os_log("🚗 CarPlay: Forcing immediate CarPlay Now Playing update", log: log, type: .info)
         
         let radioPlayer = RadioPlayer.shared
         
-        // Multiple update attempts to ensure CarPlay receives the artwork
-        radioPlayer.updateNowPlayingInfo()
+        // Force immediate Now Playing update
+        radioPlayer.forceUpdateNowPlayingInfo()
+        
+        // Additional immediate forced updates to ensure CarPlay receives the artwork
+        DispatchQueue.main.async {
+            radioPlayer.updateNowPlayingInfo()
+        }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             radioPlayer.updateNowPlayingInfo()
@@ -2888,7 +2893,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             radioPlayer.updateNowPlayingInfo()
         }
         
-        os_log("🚗 CarPlay: Multiple Now Playing updates dispatched for reliable artwork display", log: log, type: .info)
+        os_log("🚗 CarPlay: Immediate CarPlay Now Playing force update completed", log: log, type: .info)
     }
     
     /// Normalizes metadata for consistent caching
@@ -2972,6 +2977,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             self,
             selector: #selector(iTunesArtworkUpdated(_:)),
             name: NSNotification.Name("iTunesArtworkUpdated"),
+            object: nil
+        )
+        
+        // NEW: Monitor for direct CarPlay Now Playing force updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(carPlayForceNowPlayingUpdate(_:)),
+            name: NSNotification.Name("CarPlayForceNowPlayingUpdate"),
             object: nil
         )
         
@@ -3063,10 +3076,41 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
+    /// Handles direct CarPlay Now Playing force update notifications for real-time artwork updates
+    @objc private func carPlayForceNowPlayingUpdate(_ notification: Notification) {
+        os_log("🚗 CarPlay: Received direct CarPlay Now Playing force update request", log: log, type: .info)
+        
+        // Immediate multiple force updates to ensure CarPlay receives the new artwork
+        DispatchQueue.main.async { [weak self] in
+            self?.forceCarPlayNowPlayingUpdate()
+            
+            // Apply cached artwork immediately
+            self?.applyCachedArtworkToCarPlay()
+            
+            // Second immediate update
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self?.forceCarPlayNowPlayingUpdate()
+            }
+            
+            // Third update with slight delay for CarPlay processing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                self?.forceCarPlayNowPlayingUpdate()
+                self?.refreshVisibleStationArtwork()
+            }
+            
+            // Final update to ensure persistence
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self?.forceCarPlayNowPlayingUpdate()
+            }
+        }
+        
+        os_log("🚗 CarPlay: Direct CarPlay Now Playing force update completed", log: log, type: .info)
+    }
+    
     /// Sets up aggressive periodic monitoring for cached artwork
     private func setupAggressiveCachedArtworkMonitoring() {
-        // More frequent checks every 2 seconds for cached artwork
-        Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
+        // ENHANCED: More frequent checks every 1 second for immediate cached artwork updates
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
             guard let self = self else {
                 timer.invalidate()
                 return

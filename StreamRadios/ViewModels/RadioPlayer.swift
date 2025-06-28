@@ -1084,6 +1084,34 @@ class RadioPlayer: NSObject, ObservableObject {
                         // Save iTunes artwork to current station if image was found
                         if let image = image {
                             self.saveITunesArtworkToCurrentStation(image)
+                            
+                            // ENHANCED: If CarPlay is connected, send immediate force update notifications
+                            if CarPlayManager.shared.isCarPlayConnected {
+                                DispatchQueue.main.async {
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("CarPlayForceNowPlayingUpdate"),
+                                        object: nil,
+                                        userInfo: ["metadata": metadata, "hasArtwork": true]
+                                    )
+                                    
+                                    NotificationCenter.default.post(
+                                        name: NSNotification.Name("iTunesArtworkUpdated"),
+                                        object: nil,
+                                        userInfo: ["artworkUpdated": true]
+                                    )
+                                }
+                                
+                                // Additional immediate forced updates for CarPlay real-time response
+                                self.forceUpdateNowPlayingInfo()
+                                
+                                DispatchQueue.main.async {
+                                    self.forceUpdateNowPlayingInfo()
+                                }
+                                
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    self.forceUpdateNowPlayingInfo()
+                                }
+                            }
                         }
                         
                         self.updateNowPlayingInfo()
@@ -1329,20 +1357,21 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func saveITunesArtworkToCurrentStation(_ image: UIImage) {
-        guard let currentIndex = currentStationIndex,
-              let viewModel = viewModel,
-              currentIndex < viewModel.stations.count else {
+        guard let currentIndex = currentStationIndex, let viewModel = viewModel else {
+            print("Cannot save iTunes artwork: no current station")
             return
         }
-        
-        // Convert image to base64
-        guard let imageData = image.jpegData(compressionQuality: 0.7) else {
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("Failed to convert iTunes artwork to JPEG data")
             return
         }
         let base64String = imageData.base64EncodedString()
         
         // Store artwork for current track persistence
         currentTrackArtwork = image
+        
+        // CRITICAL: Set iTunesAlbumArt immediately for highest priority display
+        iTunesAlbumArt = image
         
         // Update the station
         var updatedStation = viewModel.stations[currentIndex]
@@ -1359,6 +1388,22 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // CRITICAL: Immediately update Now Playing with new artwork
         updateNowPlayingInfo()
+        
+        // ENHANCED: Force immediate CarPlay Now Playing update for real-time response
+        DispatchQueue.main.async {
+            // Force multiple immediate updates to ensure CarPlay receives the new artwork
+            self.forceUpdateNowPlayingInfo()
+            
+            // Additional forced update with slight delay for CarPlay processing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.forceUpdateNowPlayingInfo()
+            }
+            
+            // Final update to ensure persistence
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.forceUpdateNowPlayingInfo()
+            }
+        }
         
         // CRITICAL: Notify CarPlay of station data changes for real-time artwork update
         DispatchQueue.main.async {
@@ -1380,6 +1425,13 @@ class RadioPlayer: NSObject, ObservableObject {
                 name: NSNotification.Name("CarPlayPlaybackChanged"),
                 object: nil,
                 userInfo: ["artworkUpdated": true, "stationId": updatedStation.id]
+            )
+            
+            // NEW: Direct CarPlay Now Playing force update notification
+            NotificationCenter.default.post(
+                name: NSNotification.Name("CarPlayForceNowPlayingUpdate"),
+                object: nil,
+                userInfo: ["metadata": self.metadata ?? "", "hasArtwork": true]
             )
         }
         
@@ -2875,17 +2927,50 @@ extension RadioPlayer {
                     if let image = image {
                         print("🚗 RadioPlayer: iTunes artwork fetched successfully during CarPlay playback")
                         
+                        // CRITICAL: Set artwork immediately for highest priority display
                         self.iTunesAlbumArt = image
+                        
+                        // Save to station and cache for persistence
                         self.saveITunesArtworkToCurrentStation(image)
-                        self.updateNowPlayingInfo()
+                        
+                        // CRITICAL: Force immediate Now Playing updates for real-time CarPlay display
+                        self.forceUpdateNowPlayingInfo()
+                        
+                        // Additional immediate updates to ensure CarPlay receives the new artwork
+                        DispatchQueue.main.async {
+                            self.forceUpdateNowPlayingInfo()
+                        }
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            self.forceUpdateNowPlayingInfo()
+                        }
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            self.forceUpdateNowPlayingInfo()
+                        }
+                        
+                        // Update widget
                         self.updateWidget()
                         
-                        // Notify CarPlay of artwork update
+                        // Notify CarPlay of artwork update with enhanced notifications
                         NotificationCenter.default.post(
                             name: NSNotification.Name("CarPlayArtworkUpdated"),
                             object: nil,
                             userInfo: ["metadata": metadata, "hasArtwork": true]
                         )
+                        
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("CarPlayForceNowPlayingUpdate"),
+                            object: nil,
+                            userInfo: ["metadata": metadata, "hasArtwork": true]
+                        )
+                        
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("iTunesArtworkUpdated"),
+                            object: nil,
+                            userInfo: ["artworkUpdated": true]
+                        )
+                        
                     } else {
                         print("🚗 RadioPlayer: No iTunes artwork found during CarPlay playback")
                     }
