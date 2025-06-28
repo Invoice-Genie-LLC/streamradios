@@ -29,11 +29,14 @@ struct SettingsView: View {
     @State private var isCleaningPodcasts = false
     @State private var podcastCleanupComplete = false
     @StateObject private var podcastPlayer = PodcastPlayer.shared
+    @StateObject private var radioPlayer = RadioPlayer.shared
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
     @State private var safeAreaBottom: CGFloat = 0
     @State private var miniPlayerHeight: CGFloat = 60
+    @State private var selectedTab: Tab = .settings
+    @State private var isPlayerSheetPresented = false
     
     // Modern color system for adaptive theming
     private var backgroundColor: Color {
@@ -52,6 +55,8 @@ struct SettingsView: View {
         colorScheme == .dark ? .gray : .secondary
     }
     
+
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -67,31 +72,11 @@ struct SettingsView: View {
                      }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
-                    .padding(.bottom, podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 120 : 80)
+                    .padding(.bottom, 80)
                 }
                 
-                // Fixed Mini Player
-                if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                    MiniPodcastPlayerView(
-                        currentEpisode: currentEpisode,
-                        currentFeed: currentFeed,
-                        podcastPlayer: podcastPlayer,
-                        viewModel: podcastViewModel,
-                        selectedPodcast: $selectedPodcast,
-                        onListButtonTap: {
-                            selectedPodcast = currentFeed
-                            podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                            scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                            showPodcastPlayerSheet = true
-                        },
-                        onCloseButtonTap: {
-                            podcastPlayer.pause()
-                            podcastPlayer.currentEpisode = nil
-                            podcastPlayer.currentFeed = nil
-                        }
-                    )
-                    .transition(.move(edge: .bottom))
-                }
+                // Global Player is now handled by ContentView overlay
+                // This ensures consistent player display across all tabs
             }
             .background(backgroundColor)
             .navigationTitle("Settings")

@@ -285,7 +285,7 @@ struct AddPodcastView: View {
     let onAdd: () -> Void
     let onUpdate: ((PodcastFeed) -> Void)?
     
-    private let miniPlayerHeight: CGFloat = 60
+
     
     // Modern color system for adaptive theming - using shared adaptive colors
     
@@ -309,31 +309,10 @@ struct AddPodcastView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 80) // Add padding for custom navigation bar
-                        .padding(.bottom, podcastPlayer.isPlaying && !radioPlayer.isPlaying && podcastPlayer.currentEpisode != nil ? 120 : 80)
+                        .padding(.bottom, 80)
                     }
                     
-                    // Fixed Mini Player
-                    if podcastPlayer.isPlaying && !radioPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                        MiniPodcastPlayerView(
-                            currentEpisode: currentEpisode,
-                            currentFeed: currentFeed,
-                            podcastPlayer: podcastPlayer,
-                            viewModel: podcastViewModel,
-                            selectedPodcast: $selectedPodcast,
-                            onListButtonTap: {
-                                selectedPodcast = currentFeed
-                                podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                                showPodcastPlayerSheet = true
-                            },
-                            onCloseButtonTap: {
-                                podcastPlayer.pause()
-                                podcastPlayer.currentEpisode = nil
-                                podcastPlayer.currentFeed = nil
-                            }
-                        )
-                        .transition(.move(edge: .bottom))
-                    }
+                    // Global Player now handles all playback display
                 }
                 .background(Color.adaptiveBackground)
             }

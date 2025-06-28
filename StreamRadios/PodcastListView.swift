@@ -26,9 +26,12 @@ struct PodcastListView: View {
     @State private var expandedFeedId: String?
     @State private var isEditing = false
     @StateObject private var radioPlayer = RadioPlayer.shared
+    @EnvironmentObject private var radioStationViewModel: RadioStationViewModel
     @State private var scrollToEpisodeID: String?
     @State private var refreshID = UUID()
     @State private var dataCheckTimer: Timer?
+    @State private var selectedTab: Tab = .podcast
+    @State private var isPlayerSheetPresented = false
     
     // Edit functionality
     @State private var showingEditPodcast = false
@@ -41,7 +44,6 @@ struct PodcastListView: View {
 
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
-    private let miniPlayerHeight: CGFloat = 60 // Compact mini player height
     
     // Default initializer for backward compatibility
     init() {
@@ -75,32 +77,11 @@ struct PodcastListView: View {
                            instructionText
                            searchBar
                            podcastList
-                               .padding(.bottom, podcastPlayer.currentEpisode != nil ? miniPlayerHeight : 0)
                        }
                    }
                    
-                   // Mini Player Overlay (positioned at bottom of ZStack)
-                   if podcastPlayer.isPlaying && !radioPlayer.isPlaying, 
-                      let currentEpisode = podcastPlayer.currentEpisode, 
-                      let currentFeed = podcastPlayer.currentFeed {
-                       MiniPodcastPlayerView(
-                           currentEpisode: currentEpisode,
-                           currentFeed: currentFeed,
-                           podcastPlayer: podcastPlayer,
-                           viewModel: viewModel,
-                           selectedPodcast: $selectedPodcast,
-                           onListButtonTap: {
-                               selectedPodcast = currentFeed
-                               scrollToEpisodeID = podcastPlayer.currentEpisode?.id
-                           },
-                           onCloseButtonTap: {
-                               podcastPlayer.pause()
-                               podcastPlayer.currentEpisode = nil
-                               podcastPlayer.currentFeed = nil
-                           }
-                       )
-                       .transition(.move(edge: .bottom))
-                   }
+                   // Global Player is now handled by ContentView overlay
+                   // This ensures consistent player display across all tabs
                }
                .navigationTitle("Podcasts")
                .navigationBarTitleDisplayMode(.inline)
@@ -1737,7 +1718,7 @@ struct PodcastPlayerView: View {
     // MARK: - Constants
     private let scrollThreshold: CGFloat = 50
     private let rowHeight: CGFloat = 80
-    private let miniPlayerHeight: CGFloat = 60
+
     private let userScrollThreshold: CGFloat = 10.0 // Minimum distance to consider as user scrolling
     
     // MARK: - Computed Properties
@@ -1754,25 +1735,8 @@ struct PodcastPlayerView: View {
                 episodeListContent
             }
             
-            // Compact Mini Player
-            if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                                       MiniPodcastPlayerView(
-                           currentEpisode: currentEpisode,
-                           currentFeed: currentFeed,
-                           podcastPlayer: podcastPlayer,
-                           viewModel: viewModel,
-                           selectedPodcast: $selectedPodcast,
-                           onListButtonTap: {
-                               // Already in episode list, no action needed
-                           },
-                           onCloseButtonTap: {
-                               podcastPlayer.pause()
-                               podcastPlayer.currentEpisode = nil
-                               podcastPlayer.currentFeed = nil
-                           }
-                       )
-                       .transition(.move(edge: .bottom))
-            }
+            // Global Player now handles all playback display
+            // No individual mini player needed here
         }
         .navigationBarHidden(true)
                 .onAppear(perform: handleOnAppear)

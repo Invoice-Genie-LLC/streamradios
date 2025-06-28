@@ -87,6 +87,7 @@
 		77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC82C64725600187488 /* AddPodcastView.swift */; };
 		77F50BCB2C647AEF00187488 /* PodcastListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BCA2C647AEF00187488 /* PodcastListView.swift */; };
 		77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F6689E2C7A56CF00E2618C /* BannerAlert.swift */; };
+		77FC45412E0F816100C823B8 /* GlobalPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FC45402E0F816100C823B8 /* GlobalPlayerView.swift */; };
 		CARPLAY001234567890ABCDEF /* CarPlay.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CARPLAY123456789ABCDEF01 /* CarPlay.framework */; };
 		CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */; };
 		ELEGANTPICKER123456789ABC /* ElegantCountryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEGANTPICKER987654321DEF /* ElegantCountryPicker.swift */; };
@@ -197,6 +198,7 @@
 		77F50BC82C64725600187488 /* AddPodcastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastView.swift; sourceTree = "<group>"; };
 		77F50BCA2C647AEF00187488 /* PodcastListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastListView.swift; sourceTree = "<group>"; };
 		77F6689E2C7A56CF00E2618C /* BannerAlert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BannerAlert.swift; sourceTree = "<group>"; };
+		77FC45402E0F816100C823B8 /* GlobalPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalPlayerView.swift; sourceTree = "<group>"; };
 		CARPLAY123456789ABCDEF01 /* CarPlay.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CarPlay.framework; path = System/Library/Frameworks/CarPlay.framework; sourceTree = SDKROOT; };
 		CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
 		ELEGANTPICKER987654321DEF /* ElegantCountryPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElegantCountryPicker.swift; sourceTree = "<group>"; };
@@ -264,6 +266,7 @@
 				7707DA642C156F7A006D5EBB /* Models */,
 				7707DA4D2C1539F3006D5EBB /* ViewModels */,
 				7707DA3A2C152EF2006D5EBB /* ContentView.swift */,
+				77FC45402E0F816100C823B8 /* GlobalPlayerView.swift */,
 				7746179B2C17834200F442B3 /* CircularProgressView.swift */,
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
@@ -547,6 +550,7 @@
 				775D04572C2A969F00E99061 /* FeatureSwitch.swift in Sources */,
 				77F50BC72C64723600187488 /* PodcastViewModel.swift in Sources */,
 				7780E9682C3D01DA009CCF6F /* CoreDataStack.swift in Sources */,
+				77FC45412E0F816100C823B8 /* GlobalPlayerView.swift in Sources */,
 				77CC1EB22C2D1EB900F8FD5B /* SceneDelegate.swift in Sources */,
 				77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */,
 				775D04592C2B20BE00E99061 /* EditStationView.swift in Sources */,

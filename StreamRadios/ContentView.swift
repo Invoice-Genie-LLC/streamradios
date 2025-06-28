@@ -166,16 +166,21 @@ struct ContentView: View {
                 
                 // Podcast Tab
                 PodcastListView(selectedPodcast: $selectedPodcast)
-                    .environmentObject(podcastViewModel)
+                .environmentObject(podcastPlayer)
+                .environmentObject(podcastViewModel)
                 .tabItem {
                     Image(systemName: Tab.podcast.icon)
                     Text(Tab.podcast.title)
                 }
                 .tag(Tab.podcast)
                 
+
                 // Settings Tab
                 SettingsView()
-                    .environmentObject(viewModel)
+                .environmentObject(radioPlayer)
+                .environmentObject(viewModel)
+                .environmentObject(podcastPlayer)
+                .environmentObject(podcastViewModel)
                 .tabItem {
                     Image(systemName: Tab.settings.icon)
                     Text(Tab.settings.title)
@@ -195,10 +200,46 @@ struct ContentView: View {
                 // This preserves the song artwork during view navigation while radio is playing
             }
             // Removed tab state persistence - app always starts on radio tab
+            .overlay(
+                // Global Player positioned above tab bar, never covering it
+                VStack {
+                    Spacer()
+                    
+                    if shouldShowGlobalPlayer {
+                        GlobalPlayerView(
+                            selectedPodcast: $selectedPodcast,
+                            isPlayerSheetPresented: $isPlayerSheetPresented,
+                            selectedTab: $selectedTab
+                        )
+                        .environmentObject(radioPlayer)
+                        .environmentObject(viewModel)
+                        .environmentObject(podcastPlayer)
+                        .environmentObject(podcastViewModel)
+                        .padding(.bottom, 49) // Just tab bar height, no extra spacing
+                    }
+                }
+                .allowsHitTesting(true) // Allow interaction with player
+            )
             
             // Data Sync Progress Overlay
             DataSyncProgressView()
         }
+    }
+    
+    // MARK: - Global Player Logic
+    
+    /// Determines if global player should be shown
+    /// Shows global player ONLY when something is actively playing:
+    /// - Podcast is playing, OR
+    /// - Radio is actively playing
+    private var shouldShowGlobalPlayer: Bool {
+        // Show if podcast is playing
+        if podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil {
+            return true
+        }
+        
+        // Show if radio is actively playing (regardless of current tab)
+        return radioPlayer.isPlaying
     }
     
     // MARK: - Radio Tab Content with Full Original Functionality
@@ -275,54 +316,9 @@ struct ContentView: View {
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
                     
-                    // Player area - show podcast players when podcast is playing, radio players when radio is playing
-                    if !isEditingMode {
-                        if podcastPlayer.isPlaying, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                            // Podcast is playing - show podcast compact player with enhanced separation
-                            CompactPodcastPlayerView(
-                                currentEpisode: currentEpisode,
-                                currentFeed: currentFeed,
-                                podcastPlayer: podcastPlayer,
-                                viewModel: podcastViewModel,
-                                selectedPodcast: $selectedPodcast,
-                                onListButtonTap: {
-                                    // Switch to podcast tab and set the current feed
-                                    selectedPodcast = currentFeed
-                                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                    selectedTab = .podcast
-                                },
-                                onCloseButtonTap: {
-                                    podcastPlayer.pause()
-                                    podcastPlayer.currentEpisode = nil
-                                    podcastPlayer.currentFeed = nil
-                                }
-                            )
-                            .onTapGesture {
-                                if let currentFeed = podcastPlayer.currentFeed {
-                                    // Switch to podcast tab and set the current feed
-                                    selectedPodcast = currentFeed
-                                    podcastViewModel.fetchAllEpisodes(for: currentFeed)
-                                    selectedTab = .podcast
-                                }
-                            }
-                        } else if selectedTab == .radio {
-                            // Always show radio player when on radio tab
-                            if let currentStation = viewModel.currentlyPlayingStation {
-                                // Show current station (playing or paused)
-                                CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
-                                    .environmentObject(radioPlayer)
-                                    .environmentObject(viewModel)
-                                    .padding(.bottom, 0)
-                            } else if !viewModel.stations.isEmpty {
-                                // Show first available station as default when no station is set
-                                let defaultStation = viewModel.stations.first!
-                                CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
-                                    .environmentObject(radioPlayer)
-                                    .environmentObject(viewModel)
-                                    .padding(.bottom, 0)
-                            }
-                        }
-                    }
+                    // Player area is now handled by the global overlay
+                    // This ensures consistent player display across all tabs
+                    // No individual player needed here as GlobalPlayerView handles all cases
                 }
                 .padding(.bottom, 0)
                 
