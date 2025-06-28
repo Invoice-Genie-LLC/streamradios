@@ -817,7 +817,7 @@ struct UnifiedPodcastPlayerView: View {
         .padding(.vertical, 12)
     }
     .background(
-        Color(red: 0.05, green: 0.05, blue: 0.05)
+        Color.adaptiveSecondaryBackground
     )
     .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
     }
@@ -935,14 +935,14 @@ struct CurrentlyPlayingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(currentStation.name)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.adaptivePrimaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 
                 if let metadata = metadata, !metadata.isEmpty {
                     Text(metadata)
                         .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.adaptiveSecondaryText)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 } else {
@@ -978,7 +978,7 @@ struct CurrentlyPlayingView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color.black)
+        .background(Color.adaptiveSecondaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
     

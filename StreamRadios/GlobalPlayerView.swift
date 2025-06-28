@@ -72,7 +72,7 @@ struct GlobalPlayerView: View {
             }
         }
         .background(
-            Color(red: 0.13, green: 0.13, blue: 0.13)  // Matches the About section's dark gray background
+            Color.adaptiveSecondaryBackground
                 .edgesIgnoringSafeArea(.all)
         )
     }

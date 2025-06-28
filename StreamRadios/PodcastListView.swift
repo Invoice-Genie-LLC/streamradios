@@ -1515,7 +1515,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             
             // Simple separator
             Rectangle()
-                .fill(Color.gray.opacity(0.15))
+                .fill(Color.adaptiveSeparator)
                 .frame(height: 0.5)
                 .padding(.horizontal, 16)
         }
@@ -1545,7 +1545,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     ProgressView(value: podcastPlayer.currentProgress)
                         .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                         .frame(height: 3)
-                        .background(Color.gray.opacity(0.2))
+                        .background(Color.adaptiveBorder)
                         .cornerRadius(1.5)
                         .padding(.vertical, 2)
                         .animation(.easeInOut(duration: 0.3), value: podcastPlayer.currentProgress)
@@ -1586,7 +1586,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                             .padding(.vertical, 2)
                             .background(
                                 RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.gray.opacity(0.1))
+                                    .fill(Color.adaptiveSectionBackground)
                             )
                             .fixedSize()
                     }
@@ -1689,7 +1689,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     ZStack {
                         // Background circle
                         Circle()
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                            .stroke(Color.adaptiveBorder, lineWidth: 2)
                             .frame(width: buttonSize, height: buttonSize)
                         
                         // Progress circle
@@ -1859,7 +1859,7 @@ struct PodcastPlayerView: View {
                     .frame(width: 30, height: 30)
                     .background(
                         Circle()
-                            .fill(Color.gray.opacity(0.1))
+                            .fill(Color.adaptiveSectionBackground)
                     )
             }
             .padding(.horizontal, 20)
@@ -1876,7 +1876,7 @@ struct PodcastPlayerView: View {
             )
             .overlay(
                 Rectangle()
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(Color.adaptiveSeparator)
                     .frame(height: 1),
                 alignment: .bottom
             )
@@ -1893,7 +1893,7 @@ struct PodcastPlayerView: View {
                         )
                         .frame(width: min(120, geometry.size.width * 0.3))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(color: Color.black.opacity(0.2), radius: 6, x: 0, y: 3)
+                        .shadow(color: Color.adaptiveBorder.opacity(0.3), radius: 6, x: 0, y: 3)
                         
                                                     VStack(alignment: .leading, spacing: 12) {
                                 // Podcast description section
@@ -1994,7 +1994,7 @@ struct PodcastPlayerView: View {
         )
         .overlay(
             Rectangle()
-                .fill(Color.gray.opacity(0.2))
+                .fill(Color.adaptiveSeparator)
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -2156,7 +2156,7 @@ struct PodcastPlayerView: View {
                     )
             }
             }
-            .background(Color.black)
+            .background(Color.adaptiveBackground)
             .onAppear {
                 // Start end indicator animation
                 endIndicatorScale = 1.3
@@ -2201,7 +2201,7 @@ struct PodcastPlayerView: View {
                     .background(
                         RoundedRectangle(cornerRadius: 25)
                             .fill(Color.green)
-                            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                            .shadow(color: Color.adaptiveBorder.opacity(0.3), radius: 8, x: 0, y: 4)
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .onAppear {
@@ -2437,7 +2437,7 @@ struct ProgressSlider: View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Rectangle()
-                    .fill(Color.gray.opacity(0.2))
+                                                        .fill(Color.adaptiveBorder)
                     .frame(height: 4)
                 
                 Rectangle()
@@ -2447,7 +2447,7 @@ struct ProgressSlider: View {
                 Circle()
                     .fill(Color.white)
                     .frame(width: 12, height: 12)
-                    .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                    .shadow(color: Color.adaptiveBorder.opacity(0.2), radius: 2, x: 0, y: 1)
                     .offset(x: geometry.size.width * CGFloat((value - inRange.lowerBound) / (inRange.upperBound - inRange.lowerBound)) - 6)
                     .gesture(
                         DragGesture(minimumDistance: 0)
