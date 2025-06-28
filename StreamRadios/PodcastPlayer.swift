@@ -1166,7 +1166,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         var nowPlayingInfo = [String: Any]()
         nowPlayingInfo[MPMediaItemPropertyTitle] = currentEpisode.title
         nowPlayingInfo[MPMediaItemPropertyArtist] = currentFeed.title
-        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
+        // FIXED: Remove duplicate feed title from album field to avoid double display in CarPlay
+        // nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
         
         // CRITICAL: Ensure elapsed time is correctly set for CarPlay progress bar
         let elapsedTime = max(0, currentTime)
