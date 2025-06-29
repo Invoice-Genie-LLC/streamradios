@@ -211,18 +211,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             self.setupRootTemplate()
         }
         
-        // Enhanced restoration with multiple attempts for independent CarPlay operation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.performIndependentCarPlayRestoration()
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            self.performIndependentCarPlayRestoration()
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            self.performIndependentCarPlayRestoration()
-        }
+        // Instant CarPlay restoration with no delays
+        performIndependentCarPlayRestoration()
         
         // Validate CarPlay implementation compliance
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -2818,11 +2808,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func setupDirectArtworkFetching() {
         os_log("🚗 CarPlay: Setting up PRE-CACHED iTunes artwork system for independent operation", log: log, type: .info)
         
-        // NEW APPROACH: Use pre-cached artwork that was fetched when app was active
-        // This completely bypasses network restrictions when app is backgrounded
-        setupPreCachedArtworkSystem()
+        // INSTANT SYNC APPROACH: Zero-delay artwork synchronization for CarPlay
+        setupInstantArtworkSync()
         
-        os_log("🚗 CarPlay: Pre-cached artwork system configured", log: log, type: .info)
+        os_log("🚀 CarPlay: Instant artwork sync system configured", log: log, type: .info)
     }
     
     /// Fetches iTunes artwork using CarPlay's active audio session network privileges
@@ -2873,27 +2862,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     /// Forces an immediate CarPlay Now Playing update for real-time artwork display
     private func forceCarPlayNowPlayingUpdate() {
-        os_log("🚗 CarPlay: Forcing immediate CarPlay Now Playing update", log: log, type: .info)
+        os_log("🚀 CarPlay: INSTANT Now Playing update (zero delay)", log: log, type: .info)
         
         let radioPlayer = RadioPlayer.shared
         
-        // Force immediate Now Playing update
+        // Single immediate Now Playing update - no delays
         radioPlayer.forceUpdateNowPlayingInfo()
         
-        // Additional immediate forced updates to ensure CarPlay receives the artwork
-        DispatchQueue.main.async {
-            radioPlayer.updateNowPlayingInfo()
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            radioPlayer.updateNowPlayingInfo()
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            radioPlayer.updateNowPlayingInfo()
-        }
-        
-        os_log("🚗 CarPlay: Immediate CarPlay Now Playing force update completed", log: log, type: .info)
+        os_log("🚀 CarPlay: Instant Now Playing update completed", log: log, type: .info)
     }
     
     /// Normalizes metadata for consistent caching
@@ -2999,112 +2975,81 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         os_log("🚗 CarPlay: ENHANCED pre-cached artwork monitoring active", log: log, type: .info)
     }
     
-    /// Monitors playback changes to apply cached artwork
+    /// Monitors playback changes for instant artwork sync
     @objc private func carPlayPlaybackChanged(_ notification: Notification) {
-        os_log("🚗 CarPlay: Playback changed - triggering IMMEDIATE cached artwork check", log: log, type: .info)
+        os_log("🚗 CarPlay: Playback changed - triggering INSTANT artwork sync", log: log, type: .info)
         
-        // Apply cached artwork immediately and with multiple attempts
-        applyCachedArtworkToCarPlay()
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        // INSTANT SYNC: Single immediate artwork application
+        DispatchQueue.main.async { [weak self] in
             self?.applyCachedArtworkToCarPlay()
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.applyCachedArtworkToCarPlay()
-        }
-        
-        // ENHANCED: If no cached artwork found, try to fetch from iTunes immediately
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            
+            // Check immediately for iTunes artwork if needed
             let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
             if nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
-                os_log("🚗 CarPlay: No cached artwork applied - triggering iTunes fetch", log: self?.log ?? OSLog.default, type: .info)
+                os_log("🚗 CarPlay: No artwork found - triggering instant iTunes fetch", log: self?.log ?? OSLog.default, type: .info)
                 self?.triggerImmediateITunesArtworkFetch()
             }
         }
     }
     
-    /// Monitors audio route changes for CarPlay connection
+    /// Monitors audio route changes for instant CarPlay artwork application
     @objc private func audioRouteChanged(_ notification: Notification) {
         let session = AVAudioSession.sharedInstance()
         let isCarPlayActive = session.currentRoute.outputs.contains { $0.portType == .carAudio }
         
         if isCarPlayActive {
-            os_log("🚗 CarPlay: Audio route changed to CarPlay - triggering cached artwork check", log: log, type: .info)
+            os_log("🚗 CarPlay: Audio route changed to CarPlay - triggering INSTANT artwork sync", log: log, type: .info)
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            // INSTANT SYNC: Apply cached artwork immediately
+            DispatchQueue.main.async { [weak self] in
                 self?.applyCachedArtworkToCarPlay()
-            }
-            
-            // Also try iTunes artwork fetch if no cached artwork is available
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                
+                // Check for iTunes artwork need and trigger immediately if required
                 let nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
                 if nowPlayingInfo?[MPMediaItemPropertyArtwork] == nil {
-                    os_log("🚗 CarPlay: CarPlay connected but no artwork - triggering iTunes fetch", log: self?.log ?? OSLog.default, type: .info)
+                    os_log("🚗 CarPlay: No artwork present - triggering instant iTunes fetch", log: self?.log ?? OSLog.default, type: .info)
                     self?.triggerImmediateITunesArtworkFetch()
                 }
             }
         }
     }
     
-    /// Monitors station artwork updates
+    /// Monitors station artwork updates for instant sync
     @objc private func stationArtworkUpdated(_ notification: Notification) {
-        os_log("🚗 CarPlay: Station artwork updated - triggering cached artwork refresh", log: log, type: .info)
+        os_log("🚗 CarPlay: Station artwork updated - triggering INSTANT sync", log: log, type: .info)
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        // INSTANT SYNC: Apply artwork immediately with zero delay
+        DispatchQueue.main.async { [weak self] in
             self?.applyCachedArtworkToCarPlay()
         }
     }
     
-    /// Monitors iTunes artwork updates specifically for immediate CarPlay refresh
+    /// Monitors iTunes artwork updates for instant CarPlay sync with zero delays
     @objc private func iTunesArtworkUpdated(_ notification: Notification) {
-        os_log("🚗 CarPlay: iTunes artwork updated - triggering immediate CarPlay refresh", log: log, type: .info)
+        os_log("🚗 CarPlay: iTunes artwork updated - triggering INSTANT CarPlay sync", log: log, type: .info)
         
-        // Immediate artwork application
+        // INSTANT SYNC: All updates happen immediately without any delays
         DispatchQueue.main.async { [weak self] in
             self?.applyCachedArtworkToCarPlay()
-        }
-        
-        // Force Now Playing update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             self?.forceCarPlayNowPlayingUpdate()
-        }
-        
-        // Refresh CarPlay interface
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.refreshVisibleStationArtwork()
         }
+        
+        os_log("🚀 CarPlay: Instant iTunes artwork sync completed", log: log, type: .info)
     }
     
-    /// Handles direct CarPlay Now Playing force update notifications for real-time artwork updates
+    /// Handles instant CarPlay Now Playing updates with zero delays
     @objc private func carPlayForceNowPlayingUpdate(_ notification: Notification) {
-        os_log("🚗 CarPlay: Received direct CarPlay Now Playing force update request", log: log, type: .info)
+        os_log("🚗 CarPlay: Received instant CarPlay Now Playing update request", log: log, type: .info)
         
-        // Immediate multiple force updates to ensure CarPlay receives the new artwork
+        // INSTANT SYNC: Single immediate update - no redundant calls or delays
         DispatchQueue.main.async { [weak self] in
-            self?.forceCarPlayNowPlayingUpdate()
-            
-            // Apply cached artwork immediately
             self?.applyCachedArtworkToCarPlay()
-            
-            // Second immediate update
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                self?.forceCarPlayNowPlayingUpdate()
-            }
-            
-            // Third update with slight delay for CarPlay processing
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                self?.forceCarPlayNowPlayingUpdate()
-                self?.refreshVisibleStationArtwork()
-            }
-            
-            // Final update to ensure persistence
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self?.forceCarPlayNowPlayingUpdate()
-            }
+            self?.forceCarPlayNowPlayingUpdate()
+            self?.refreshVisibleStationArtwork()
         }
         
-        os_log("🚗 CarPlay: Direct CarPlay Now Playing force update completed", log: log, type: .info)
+        os_log("🚀 CarPlay: Instant Now Playing update completed", log: log, type: .info)
     }
     
     /// Sets up aggressive periodic monitoring for cached artwork
@@ -3313,28 +3258,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
     }
     
-    /// Applies cached artwork directly to CarPlay Now Playing interface
-    private func applyArtworkToCarPlayNowPlaying(image: UIImage, metadata: String) {
-        os_log("🚗 CarPlay: Applying CACHED artwork to CarPlay Now Playing", log: log, type: .info)
-        
-        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
-        var nowPlayingInfo = nowPlayingCenter.nowPlayingInfo ?? [:]
-        
-        // Create and apply artwork
-        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
-            return image
-        }
-        
-        nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-        nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
-        
-        os_log("🚗 CarPlay: Cached artwork applied successfully to CarPlay Now Playing", log: log, type: .info)
-        
-        // Refresh CarPlay interface templates
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            self.refreshVisibleStationArtwork()
-        }
-    }
+
     
     /// Triggers immediate iTunes artwork fetching for CarPlay when possible
     private func triggerImmediateITunesArtworkFetch() {
@@ -3379,19 +3303,127 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 UIApplication.shared.endBackgroundTask(taskId)
                 
                 if let image = image {
-                    os_log("🚗 CarPlay: iTunes artwork fetch SUCCESS - applying immediately for PlayNow", log: self?.log ?? OSLog.default, type: .info)
+                    os_log("🚗 CarPlay: iTunes artwork fetch SUCCESS - applying INSTANTLY", log: self?.log ?? OSLog.default, type: .info)
                     radioPlayer.saveITunesArtworkToCurrentStation(image)
                     
-                    // Force immediate Now Playing info update to show new artwork
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        radioPlayer.forceUpdateNowPlayingInfo()
-                        self?.forceCarPlayNowPlayingUpdate()
-                    }
+                    // INSTANT SYNC: Force immediate Now Playing info update with zero delay
+                    radioPlayer.forceUpdateNowPlayingInfo()
+                    self?.forceCarPlayNowPlayingUpdate()
                 } else {
                     os_log("🚗 CarPlay: iTunes artwork fetch failed for: %@", log: self?.log ?? OSLog.default, type: .debug, finalMetadata)
                 }
             }
         }
     }
-
+    
+    // MARK: - Instant CarPlay Artwork Sync System
+    
+    /// Sets up instant artwork synchronization for CarPlay with zero delays
+    private func setupInstantArtworkSync() {
+        os_log("🚀 CarPlay: Initializing INSTANT artwork sync system", log: log, type: .info)
+        
+        // Monitor for instant artwork sync notifications
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantArtworkSync(_:)),
+            name: NSNotification.Name("InstantCarPlayArtworkSync"),
+            object: nil
+        )
+        
+        // Monitor for audio route changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioRouteChanged(_:)),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+        
+        // Set up predictive caching for faster artwork delivery
+        setupPredictiveCaching()
+    }
+    
+    /// Handles instant artwork sync notifications with zero delays
+    @objc private func handleInstantArtworkSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let metadata = userInfo["metadata"] as? String,
+              let hasArtwork = userInfo["hasArtwork"] as? Bool,
+              let syncType = userInfo["syncType"] as? String else {
+            os_log("🚗 CarPlay: Invalid instant artwork sync notification", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚀 CarPlay: Processing INSTANT artwork sync - type: %@, metadata: %@", log: log, type: .info, syncType, metadata)
+        
+        // INSTANT SYNC: All operations happen immediately without any delays
+        DispatchQueue.main.async { [weak self] in
+            // Apply cached artwork immediately
+            self?.applyCachedArtworkToCarPlay()
+            
+            // Force Now Playing update immediately
+            self?.forceCarPlayNowPlayingUpdate()
+            
+            // Refresh visible interface immediately
+            self?.refreshVisibleStationArtwork()
+        }
+        
+        os_log("🚀 CarPlay: Instant artwork sync completed for type: %@", log: log, type: .info, syncType)
+    }
+    
+    /// Sets up predictive caching for instant artwork delivery
+    private func setupPredictiveCaching() {
+        os_log("🚀 CarPlay: Setting up predictive artwork caching", log: log, type: .info)
+        
+        // Cache frequently used artwork in memory for instant access
+        Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] timer in
+            guard let self = self else {
+                timer.invalidate()
+                return
+            }
+            
+            // Only run while CarPlay is connected
+            guard CarPlayManager.shared.isCarPlayConnected else {
+                os_log("🚗 CarPlay: Stopping predictive caching - CarPlay disconnected", log: self.log, type: .info)
+                timer.invalidate()
+                return
+            }
+            
+            // Preload artwork for current and recent stations
+            self.preloadFrequentlyUsedArtwork()
+        }
+    }
+    
+    /// Preloads frequently used artwork for instant access
+    private func preloadFrequentlyUsedArtwork() {
+        let radioPlayer = RadioPlayer.shared
+        
+        // Preload current station artwork
+        if let currentStation = radioPlayer.currentlyPlayingStation {
+            _ = getCachedITunesArtwork(artist: "Current", title: currentStation.name)
+        }
+        
+        // Preload recent stations artwork
+        let recentStations = RadioStationViewModel.shared.stations.prefix(5)
+        for station in recentStations {
+            _ = getCachedITunesArtwork(artist: "Station", title: station.name)
+        }
+    }
+    
+    /// Applies instant artwork to CarPlay Now Playing with zero delays
+    private func applyArtworkToCarPlayNowPlaying(image: UIImage, metadata: String) {
+        let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+            return image
+        }
+        
+        // Get current Now Playing info and update artwork immediately
+        var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        
+        // INSTANT UPDATE: Set Now Playing info immediately
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+        
+        os_log("🚀 CarPlay: Instant artwork applied to Now Playing for: %@", log: log, type: .info, metadata)
+        
+        os_log("🚀 CarPlay: INSTANT artwork sync system active", log: log, type: .info)
+    }
+    
 } 
