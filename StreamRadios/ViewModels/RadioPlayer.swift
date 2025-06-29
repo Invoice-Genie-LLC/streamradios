@@ -1038,6 +1038,7 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Prevent duplicate searches for the same song (ignore timestamp differences)
         if cacheKey == lastMetadataSearched {
+            print("🔄 Skipping duplicate iTunes search for same song: \(cacheKey)")
             return
         }
         
@@ -1053,7 +1054,7 @@ class RadioPlayer: NSObject, ObservableObject {
                 self?.iTunesAlbumArt = cachedImage
                 self?.updateNowPlayingInfo()
                 self?.updateWidget()
-                print("iTunes album art loaded from cache for: \(cacheKey)")
+                print("💾 iTunes album art loaded from cache for: \(cacheKey) (original: \(metadata))")
             }
             return
         }
@@ -1067,7 +1068,7 @@ class RadioPlayer: NSObject, ObservableObject {
             
             self.lastMetadataSearched = cacheKey
             
-            print("Fetching iTunes album art for song: \(cacheKey)")
+            print("🔍 Fetching iTunes album art for song: \(cacheKey) (original: \(metadata))")
             
             // Search iTunes for album artwork
             self.searchITunesForArtwork(metadata: metadata) { [weak self] image in
@@ -1119,6 +1120,11 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Try multiple search strategies
         let searchQueries = buildSearchQueries(parsedData: parsedData, originalMetadata: metadata)
+        
+        print("🎯 Generated \(searchQueries.count) search queries for '\(metadata)':")
+        for (index, query) in searchQueries.enumerated() {
+            print("   \(index + 1). '\(query)'")
+        }
         
         // Use enhanced network session for CarPlay if connected
         if CarPlayManager.shared.isCarPlayConnected {
@@ -1478,15 +1484,24 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Strategy 1: Perfect Match Queries (Highest Success Rate: 85-95%)
         if let artist = parsedData.artist, let track = parsedData.track {
+            // Ensure consistent normalization for case-insensitive matching
+            let normalizedArtist = smartNormalization(artist)
+            let normalizedTrack = smartNormalization(track)
+            
             strategies.append(QueryStrategy(
                 name: "perfect_match",
                 priority: 1.0,
                 queries: [
-                    "\"\(track)\" \"\(artist)\"",        // Double quoted precision
-                    "\"\(track)\" \(artist)",            // Track quoted, artist clean
-                    "\(artist) \"\(track)\"",            // Artist clean, track quoted
-                    "\(track) \(artist)",                // Clean combination
-                    "\(artist) \(track)"                 // Traditional order
+                    "\"\(normalizedTrack)\" \"\(normalizedArtist)\"",   // Double quoted precision (normalized)
+                    "\"\(normalizedTrack)\" \(normalizedArtist)",       // Track quoted, artist clean (normalized)
+                    "\(normalizedArtist) \"\(normalizedTrack)\"",       // Artist clean, track quoted (normalized)
+                    "\(normalizedTrack) \(normalizedArtist)",           // Clean combination (normalized)
+                    "\(normalizedArtist) \(normalizedTrack)",           // Traditional order (normalized)
+                    "\"\(track)\" \"\(artist)\"",                      // Double quoted precision (original case)
+                    "\"\(track)\" \(artist)",                          // Track quoted, artist clean (original case)
+                    "\(artist) \"\(track)\"",                          // Artist clean, track quoted (original case)
+                    "\(track) \(artist)",                              // Clean combination (original case)
+                    "\(artist) \(track)"                               // Traditional order (original case)
                 ]
             ))
         }
@@ -1649,6 +1664,7 @@ class RadioPlayer: NSObject, ObservableObject {
     /// Recursive search through queries with session
     private func searchWithQueriesRecursive(_ queries: [String], using session: URLSession, completion: @escaping (UIImage?) -> Void) {
         guard !queries.isEmpty else {
+            print("🔍 iTunes search exhausted all queries - no artwork found")
             completion(nil)
             return
         }
@@ -1656,10 +1672,14 @@ class RadioPlayer: NSObject, ObservableObject {
         let currentQuery = queries[0]
         let remainingQueries = Array(queries.dropFirst())
         
+        print("🔍 iTunes search trying query: '\(currentQuery)' (remaining: \(remainingQueries.count))")
+        
         searchITunes(query: currentQuery, using: session) { result in
             if let image = result {
+                print("✅ iTunes search SUCCESS with query: '\(currentQuery)'")
                 completion(image)
             } else {
+                print("❌ iTunes search FAILED with query: '\(currentQuery)'")
                 self.searchWithQueriesRecursive(remainingQueries, using: session, completion: completion)
             }
         }
