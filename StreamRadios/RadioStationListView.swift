@@ -190,31 +190,46 @@ struct RadioStationListView: View {
                             .listRowInsets(EdgeInsets())
                     }
                     .onMove(perform: selectedTab == .radio && isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) ? moveStations : nil)
+                    
+                    // Add extra space at the bottom for better scrolling when global player is visible
+                    Color.clear
+                        .frame(height: 120)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets())
                 }
                 .listStyle(PlainListStyle())
                 .background(Color.adaptiveBackground)
                 .scrollContentBackground(.hidden)
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
-                    scrollToCurrentStation(proxy: proxy)
+                    if !isEditing {
+                        scrollToCurrentStation(proxy: proxy)
+                    }
                 }
                 .onReceive(radioPlayer.$isPlaying) { isPlaying in
-                    if isPlaying {
+                    if isPlaying && !isEditing {
                         scrollToCurrentStation(proxy: proxy)
                     }
                 }
                 .onChange(of: selectedTab) { oldTab, newTab in
                     // Handle tab changes - scroll to current station if switching to radio tab
-                    if newTab == .radio {
+                    if newTab == .radio && !isEditing {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            scrollToCurrentStation(proxy: proxy)
+                            if !isEditing {
+                                scrollToCurrentStation(proxy: proxy)
+                            }
                         }
                     }
                 }
                 .onChange(of: selectedSubTab) { oldSubTab, newSubTab in
                     // Handle sub-tab changes - scroll to current station if it exists in new tab
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        scrollToCurrentStation(proxy: proxy)
+                    if !isEditing {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            if !isEditing {
+                                scrollToCurrentStation(proxy: proxy)
+                            }
+                        }
                     }
                 }
             }
@@ -324,6 +339,8 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func modernStationCard(for station: RadioStation) -> some View {
+        let isCurrentlyPlaying = isCurrentStation(station: station) && radioPlayer.isPlaying
+        
         HStack(spacing: 12) {
             // Expanded tappable area for station info (includes more space after signal bars)
             Button(action: {
@@ -365,7 +382,7 @@ struct RadioStationListView: View {
                         }
                         
                         // Show metadata if playing
-                        if isCurrentStation(station: station) && radioPlayer.isPlaying {
+                        if isCurrentlyPlaying {
                             if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                                 Text(metadata)
                                     .font(.system(size: 12, weight: .regular))
@@ -379,7 +396,7 @@ struct RadioStationListView: View {
                     Spacer()
                     
                     // Equalizer (part of tappable area)
-                    if isCurrentStation(station: station) && radioPlayer.isPlaying {
+                    if isCurrentlyPlaying {
                         animatedEqualizer
                     } else {
                         staticEqualizer
@@ -399,16 +416,38 @@ struct RadioStationListView: View {
             if !isEditing {
                 heartFavoriteButton(for: station)
             }
+            
+            // Spacer to fill remaining space and push content to cover hamburger menu area
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.adaptiveCardBackground)
-        .overlay(
-            // Subtle separator line
+        .frame(maxWidth: .infinity, alignment: .leading) // Ensure full width coverage
+        .background(
+            // Background that covers the entire available space
             Rectangle()
-                .fill(Color.adaptiveSeparator)
-                .frame(height: 0.5)
-                .padding(.leading, 88), // Align with text content
+                .fill(
+                    isEditing 
+                        ? Color.clear // No background color when sorting
+                        : (isCurrentlyPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7)) // Darker normal background
+                )
+                .frame(maxWidth: .infinity) // Ensure background fills all available space
+                .overlay(
+                    // Border highlight for currently playing station (only when not editing)
+                    Rectangle()
+                        .stroke(isCurrentlyPlaying && !isEditing ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
+                )
+        )
+        .overlay(
+            // Separator line (hidden during editing mode)
+            Group {
+                if !isEditing {
+                    Rectangle()
+                        .fill(Color.adaptiveSeparator)
+                        .frame(height: 0.5)
+                        .padding(.leading, 88) // Align with text content
+                }
+            },
             alignment: .bottom
         )
     }
