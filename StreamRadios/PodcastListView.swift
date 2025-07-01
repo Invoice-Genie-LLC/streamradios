@@ -755,6 +755,19 @@ struct PodcastRowView: View {
         }
       //  .padding(.horizontal, 10)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            // Enhanced background that covers the entire available space - similar to radio station styling
+            Rectangle()
+                .fill(isPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7))
+                .frame(maxWidth: .infinity)
+                .overlay(
+                    // Border highlight for currently playing episode - matching radio station style
+                    Rectangle()
+                        .stroke(isPlaying ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
+                )
+        )
+        .cornerRadius(8)
     }
     
     private func checkAndPlayEpisode() {
@@ -1097,7 +1110,17 @@ struct EpisodeRowView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(UIColor.secondarySystemBackground))
+        .background(
+            // Enhanced background that covers the entire available space - similar to radio station styling
+            Rectangle()
+                .fill(isPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7))
+                .frame(maxWidth: .infinity)
+                .overlay(
+                    // Border highlight for currently playing episode - matching radio station style
+                    Rectangle()
+                        .stroke(isPlaying ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
+                )
+        )
         .cornerRadius(8)
         .alert(isPresented: $showingDeleteConfirmation) {
             Alert(
@@ -1511,7 +1534,17 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     episodeContent
                 }
             }
-            .background(isPlaying ? Color.blue.opacity(0.03) : Color.clear) // Simple background instead of gradient
+            .background(
+                // Enhanced background that covers the entire available space - similar to radio station styling
+                Rectangle()
+                    .fill(isPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7))
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        // Border highlight for currently playing episode - matching radio station style
+                        Rectangle()
+                            .stroke(isPlaying ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
+                    )
+            )
             
             // Simple separator
             Rectangle()
