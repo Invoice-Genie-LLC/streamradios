@@ -23,11 +23,19 @@ class RadioPlayer: NSObject, ObservableObject {
     private var statusCancellable: AnyCancellable?
     private var retryTimer: Timer?
     private var retryCount = 0
+    let maxRetryAttempts = 3
     private var monitor = NWPathMonitor()
     private var isNetworkAvailable = true
     private var wasPlayingBeforeNetworkLoss = false
     @Published var isBuffering = false
     @Published var isPlaying: Bool = false
+    
+    // Error handling and retry states
+    @Published var hasError = false
+    @Published var errorMessage = ""
+    @Published var isRetrying = false
+    @Published var currentRetryAttempt = 0
+    private var initialConnectionAttempt = true
 
     @Published var currentStationIndex: Int?
     @Published var songTitle: String = ""
@@ -66,8 +74,43 @@ class RadioPlayer: NSObject, ObservableObject {
         
         monitor.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.async {
+                let wasNetworkAvailable = self?.isNetworkAvailable ?? false
                 self?.isNetworkAvailable = (path.status == .satisfied)
                 self?.isOnCellularNetwork = path.usesInterfaceType(.cellular)
+                
+                // Track if we were playing when network was lost
+                if wasNetworkAvailable && self?.isNetworkAvailable == false && self?.isPlaying == true {
+                    self?.wasPlayingBeforeNetworkLoss = true
+                    print("📶❌ Network lost during playback - marking for retry when reconnected")
+                }
+                
+                // Handle network restoration
+                if !wasNetworkAvailable && self?.isNetworkAvailable == true {
+                    print("📶✅ Network restored")
+                    
+                    // If we have an error OR we were playing before network loss OR the player is stuck buffering
+                    if self?.hasError == true || 
+                       self?.wasPlayingBeforeNetworkLoss == true ||
+                       (self?.isBuffering == true && self?.currentlyPlayingStation != nil) {
+                        
+                        print("🔄 Attempting to reconnect stream after network restoration")
+                        self?.wasPlayingBeforeNetworkLoss = false
+                        self?.retryStreamIfNeeded()
+                    }
+                }
+                
+                // If network is lost and we're currently playing, start monitoring for reconnection
+                if self?.isNetworkAvailable == false && self?.isPlaying == true {
+                    // Set up a timer to detect if we're stuck buffering due to network loss
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                        if self?.isNetworkAvailable == false && 
+                           self?.isBuffering == true && 
+                           self?.currentlyPlayingStation != nil {
+                            print("⚠️ Detected stream stalled due to network loss")
+                            self?.handleNetworkLossStall()
+                        }
+                    }
+                }
             }
         }
         
@@ -88,12 +131,144 @@ class RadioPlayer: NSObject, ObservableObject {
         
         autoPlayLastStationSetup()
     }
+    
+    deinit {
+        // Clean up notification observers
+        NotificationCenter.default.removeObserver(self)
+        retryTimer?.invalidate()
+        statusCancellable?.cancel()
+        artworkSearchTimer?.invalidate()
+        player?.pause()
+    }
 
     
     private func updateBitrateText(_ bitrate: Double) {
         let bitrateMessage = "Playing at \(Int(bitrate / 1000)) kbps"
         bitrateSubject.send(bitrateMessage)
         print("Bitrate text updated to: \(bitrateMessage)")
+    }
+    
+    private func clearError() {
+        hasError = false
+        errorMessage = ""
+        isRetrying = false
+        currentRetryAttempt = 0
+        wasPlayingBeforeNetworkLoss = false
+        stopActiveRetryMode()  // Stop any active retry timers
+    }
+    
+    private func setError(_ message: String) {
+        hasError = true
+        errorMessage = message
+        print("❌ RadioPlayer Error: \(message)")
+    }
+    
+    private func checkNetworkAndSetError() {
+        if !isNetworkAvailable {
+            setError("No network connection available. Please check your internet connection and try again.")
+        } else {
+            setError("Stream is not available. The radio station may be temporarily offline.")
+        }
+    }
+    
+    private func handleNetworkLossStall() {
+        guard let currentStation = currentlyPlayingStation else { return }
+        
+        print("🔄 Handling network loss stall for \(currentStation.name)")
+        
+        // Stop the current player to prevent it from staying stuck
+        isPlaying = false
+        isBuffering = false
+        
+        // Set appropriate error message without starting retry yet (wait for network)
+        if !isNetworkAvailable {
+            setError("Connection lost. Waiting for network to reconnect...")
+            print("📶⏸️ Stream paused due to network loss - will retry when network returns")
+        }
+    }
+    
+    private func startActiveRetryMode() {
+        guard let currentStation = currentlyPlayingStation else { return }
+        
+        print("🔄 Starting active retry mode for \(currentStation.name)")
+        
+        // Show the player as actively trying to connect
+        isPlaying = true  // Keep play state in UI
+        isBuffering = true  // Show buffering indicator
+        isRetrying = true
+        currentRetryAttempt = 1
+        
+        // Set initial searching message
+        if !isNetworkAvailable {
+            setError("Waiting for network connection...")
+        } else {
+            setError("Connecting to \(currentStation.name)...")
+        }
+        
+        // Start immediate attempt
+        attemptConnection()
+        
+        // Schedule regular retry attempts
+        retryTimer?.invalidate()
+        retryTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            self?.attemptConnection()
+        }
+    }
+    
+    private func attemptConnection() {
+        guard let currentStation = currentlyPlayingStation else { 
+            stopActiveRetryMode()
+            return 
+        }
+        
+        // Update retry attempt counter
+        currentRetryAttempt += 1
+        
+        print("🔄 Attempting connection... attempt \(currentRetryAttempt)")
+        
+        // Update the error message to show active searching
+        if isNetworkAvailable {
+            setError("Connecting to \(currentStation.name)...")
+            
+            // Try to play the stream
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let url = URL(string: currentStation.url) {
+                    self.setStationURL(url)
+                    self.play()
+                }
+            }
+        } else {
+            setError("Waiting for network connection...")
+        }
+        
+        // After many attempts, slow down the retry frequency
+        if currentRetryAttempt > maxRetryAttempts {
+            print("⚠️ Maximum retry attempts reached, slowing down retry frequency")
+            retryTimer?.invalidate()
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+                self?.attemptConnection()
+            }
+        }
+    }
+    
+    private func actuallyStartPlaying() {
+        guard let currentStation = currentlyPlayingStation else { return }
+        
+        print("▶️ Actually starting playback for \(currentStation.name)")
+        
+        // Clear retry state completely
+        stopActiveRetryMode()
+        resetRetryCount()
+        
+        // Start normal playback
+        play()
+    }
+    
+    private func stopActiveRetryMode() {
+        print("⏹️ Stopping active retry mode")
+        retryTimer?.invalidate()
+        isRetrying = false
+        currentRetryAttempt = 0
     }
     
     func autoPlayLastStationSetup() {
@@ -283,63 +458,125 @@ class RadioPlayer: NSObject, ObservableObject {
     private func resetRetryCount() {
         retryCount = 0
         retryTimer?.invalidate()
+        wasPlayingBeforeNetworkLoss = false
+        clearError()
     }
     
     private func retryStreamIfNeeded() {
-        if !isPlaying && wasPlayingBeforeNetworkLoss {
-            retryStream()
+        guard let currentStation = currentlyPlayingStation else { return }
+        
+        // Don't start new retry if one is already in progress
+        if isRetrying {
+            print("🔄 Retry already in progress for \(currentStation.name)")
+            return
+        }
+        
+        if retryCount < maxRetryAttempts {
+            retryCount += 1
+            currentRetryAttempt = retryCount
+            isRetrying = true
+            
+            print("🔄 Retrying stream attempt \(retryCount)/\(maxRetryAttempts) for \(currentStation.name)")
+            
+            retryTimer?.invalidate()
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                
+                DispatchQueue.main.async {
+                    if self.isNetworkAvailable {
+                        print("📶 Network available for retry \(self.retryCount)")
+                        
+                        // Clear error state for retry
+                        self.hasError = false
+                        self.errorMessage = ""
+                        
+                        // Retry playing the current station
+                        if let url = URL(string: currentStation.url) {
+                            self.setStationURL(url)
+                            self.play()
+                        }
+                    } else {
+                        print("📶 Network still unavailable, starting active search mode...")
+                        // No network available, start active retry mode
+                        self.startActiveRetryMode()
+                    }
+                }
+            }
+        } else {
+            // Max retries reached for normal retries
+            if !isNetworkAvailable {
+                print("🔄 Max retries reached but no network - starting active search mode")
+                startActiveRetryMode()
+            } else {
+                isRetrying = false
+                currentRetryAttempt = 0
+                retryCount = 0  // Reset for future attempts
+                checkNetworkAndSetError()
+                print("❌ Max retry attempts reached for \(currentStation.name)")
+            }
         }
     }
     
     func setStationURL(_ url: URL) {
-        // Stop any existing player and clear status observer
-        player?.pause()
+        print("🎵 Setting station URL: \(url)")
+        
+        // Reset states for new connection
+        isBuffering = true
+        hasError = false
+        errorMessage = ""
+        
+        // Create new player item
+        let asset = AVAsset(url: url)
+        playerItem = AVPlayerItem(asset: asset)
+        
+        // Cancel existing observation
         statusCancellable?.cancel()
         
-        // Create new player item and player
-        playerItem = AVPlayerItem(url: url)
-        player = AVPlayer(playerItem: playerItem)
-        
-        // Add metadata output immediately
-        addMetadataOutput()
-        
-        // Observe player status
-        statusCancellable = player?.publisher(for: \.timeControlStatus)
+        // Observe player item status
+        statusCancellable = playerItem?.publisher(for: \.status)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
-                DispatchQueue.main.async {
-                    switch status {
-                    case .playing:
-                        self?.isPlaying = true
-                        self?.isBuffering = false
-                        self?.updateNowPlayingInfo()
-                        
-                        // Enhanced metadata fetching when starting to play
-                        if let metadata = self?.metadata, !metadata.isEmpty {
-                            // If we have metadata, fetch iTunes artwork
-                            self?.fetchITunesAlbumArt(for: metadata)
-                        } else {
-                            // If no metadata, proactively check for current metadata
-                            // This is especially useful when resuming from pause
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                self?.checkForCurrentMetadata()
-                            }
-                        }
-                        
-                    case .waitingToPlayAtSpecifiedRate:
-                        self?.isBuffering = true
-                    case .paused:
-                        self?.isPlaying = false
-                        self?.isBuffering = false
-                    @unknown default:
-                        break
+                guard let self = self else { return }
+                
+                switch status {
+                case .readyToPlay:
+                    print("✅ Player ready to play")
+                    self.isBuffering = false
+                    self.hasError = false
+                    self.errorMessage = ""
+                    self.initialConnectionAttempt = false
+                    
+                case .failed:
+                    print("❌ Player failed to load")
+                    self.handlePlaybackError()
+                    
+                default:
+                    if self.initialConnectionAttempt {
+                        self.isBuffering = true
+                        self.errorMessage = "Connecting to station..."
                     }
                 }
             }
         
-        // Set up periodic time observer for metadata updates
-        setupPeriodicTimeObserver()
-        
-        adjustForNetworkConditions()
+        // Set up the player
+        if player == nil {
+            player = AVPlayer(playerItem: playerItem)
+        } else {
+            player?.replaceCurrentItem(with: playerItem)
+        }
+    }
+    
+    private func handlePlaybackError() {
+        if !isNetworkAvailable {
+            setError("No network connection. Waiting to reconnect...")
+            startActiveRetryMode()
+        } else if initialConnectionAttempt {
+            setError("Unable to connect to station. Retrying...")
+            startActiveRetryMode()
+        } else {
+            setError("Stream connection lost. Retrying...")
+            startActiveRetryMode()
+        }
     }
     
     private func updateBitrateBasedOnNetwork(path: NWPath) {
@@ -507,6 +744,9 @@ class RadioPlayer: NSObject, ObservableObject {
             player.pause()
             isPlaying = false
             
+            // Stop any active retry mode when user manually pauses
+            stopActiveRetryMode()
+            
             // Clear all song metadata and iTunes artwork when pausing
             // This immediately removes song info while keeping the station active
             metadata = nil
@@ -542,6 +782,9 @@ class RadioPlayer: NSObject, ObservableObject {
            currentStationIndex = nil
            isPlaying = false
            
+           // Stop any active retry mode when user stops
+           stopActiveRetryMode()
+           
            // Clear all song metadata and iTunes artwork completely
            metadata = nil
            iTunesAlbumArt = nil
@@ -569,6 +812,7 @@ class RadioPlayer: NSObject, ObservableObject {
         
         guard index >= 0 && index < stations.count else {
             print("Invalid station index: \(index)")
+            setError("Invalid station selection")
             return
         }
         
@@ -589,15 +833,27 @@ class RadioPlayer: NSObject, ObservableObject {
         lastMetadataSearched = ""
         artworkSearchTimer?.invalidate()
         
+        // Reset error and retry states for new station
+        clearError()
+        
         guard let url = URL(string: station.url) else {
             print("Invalid URL for station: \(station.name)")
+            setError("Invalid station URL. Please check the station configuration.")
             return
         }
         
+        // Always set up the station URL and show the player
         setStationURL(url)
         
-        // Always start playing when a station is selected
-        play()
+        // Always start the player - it will handle network issues internally
+        if !isNetworkAvailable {
+            // Start the player even without network - it will keep trying
+            print("📱 Starting player without network - will keep searching and retrying")
+            startActiveRetryMode()
+        } else {
+            // Network is available, start playing normally
+            play()
+        }
         
         // If we already have metadata for this station, fetch iTunes artwork immediately
         if let currentMetadata = metadata, !currentMetadata.isEmpty {
@@ -634,6 +890,9 @@ class RadioPlayer: NSObject, ObservableObject {
         player?.pause()
         player = nil
         isPlaying = false
+        
+        // Stop any active retry mode when stopping current station
+        stopActiveRetryMode()
         
         // Clear all song metadata and iTunes artwork completely
         metadata = nil
@@ -2405,12 +2664,6 @@ class RadioPlayer: NSObject, ObservableObject {
         checkNetworkAndRetry()
         
         task.setTaskCompleted(success: true)
-    }
-    
-    deinit {
-        artworkSearchTimer?.invalidate()
-        player?.pause()
-        retryTimer?.invalidate()
     }
     
     // MARK: - Now Playing Debug Helper

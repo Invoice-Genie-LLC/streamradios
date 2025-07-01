@@ -689,6 +689,9 @@ struct RadioStationListView: View {
             radioPlayer.togglePlayPause()
         } else {
             if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                // Always show the player when a station is selected
+                isPlayerSheetPresented = true
+                
                 viewModel.updateLastPlayed(for: viewModel.stations[index])
                 radioPlayer.playStation(at: index, from: viewModel.stations)
             }

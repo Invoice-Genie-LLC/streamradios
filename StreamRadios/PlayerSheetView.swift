@@ -90,6 +90,42 @@ struct PlayerSheetView: View {
     @State private var spotifyTrackURI: String?
     @State private var debugMessage = ""
     
+    private var errorMessageView: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: radioPlayer.isRetrying ? "arrow.clockwise" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(radioPlayer.isRetrying ? .orange : .red)
+                    .rotationEffect(.degrees(radioPlayer.isRetrying ? 360 : 0))
+                    .animation(radioPlayer.isRetrying ? .linear(duration: 1).repeatForever(autoreverses: false) : .none, value: radioPlayer.isRetrying)
+                
+                Text(radioPlayer.isRetrying ? "Retrying connection..." : radioPlayer.errorMessage)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.leading)
+                
+                Spacer()
+            }
+            
+            if radioPlayer.isRetrying {
+                HStack {
+                    Text("Attempt \(radioPlayer.currentRetryAttempt) of \(radioPlayer.maxRetryAttempts)")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(.white.opacity(0.8))
+                    
+                    Spacer()
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(radioPlayer.isRetrying ? Color.orange.opacity(0.9) : Color.red.opacity(0.9))
+        )
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+    
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
@@ -101,11 +137,18 @@ struct PlayerSheetView: View {
                     backButton
                             .padding(.top, geometry.safeAreaInsets.top + 10)
                         
-                    contentView
-                            .padding(.top, 20)
-                        
+                                        contentView
+                        .padding(.top, 20)
+                    
                     Spacer()
-                        
+                    
+                    // Error message display
+                    if radioPlayer.hasError {
+                        errorMessageView
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 10)
+                    }
+                    
                     PlayerView()
                         .environmentObject(radioPlayer)
                         .environmentObject(viewModel)
