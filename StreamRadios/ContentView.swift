@@ -229,17 +229,17 @@ struct ContentView: View {
     // MARK: - Global Player Logic
     
     /// Determines if global player should be shown
-    /// Shows global player ONLY when something is actively playing:
+    /// Shows global player when user intends to use audio:
     /// - Podcast is playing, OR
-    /// - Radio is actively playing
+    /// - User wants to play radio (regardless of network connectivity)
     private var shouldShowGlobalPlayer: Bool {
         // Show if podcast is playing
         if podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil {
             return true
         }
         
-        // Show if radio is actively playing (regardless of current tab)
-        return radioPlayer.isPlaying
+        // Show if user wants to play radio (regardless of current network status)
+        return radioPlayer.userWantsToPlay
     }
     
     // MARK: - Radio Tab Content with Full Original Functionality
@@ -573,28 +573,30 @@ struct CompactPlayerView: View {
                     isPlayerSheetPresented.toggle()
                 }) {
                     VStack(alignment: .leading, spacing: 2) {
+                        // Station name
                         Text(currentStation.name)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.adaptivePrimaryText)
-                            .lineLimit(nil) // Allow unlimited lines
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                         
-                        if let metadata = metadata, !metadata.isEmpty {
-                            Text(metadata)
-                                .font(.system(size: 12, weight: .regular))
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .lineLimit(nil) // Allow unlimited lines
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
-                        } else {
-                            Text("Live Radio")
-                                .font(.system(size: 12, weight: .regular))
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .lineLimit(nil)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        // Metadata with connection status
+                        HStack(spacing: 4) {
+                            if let metadata = metadata, !metadata.isEmpty {
+                                Text(metadata)
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            } else {
+                                Text("Live Radio")
+                                    .font(.system(size: 12, weight: .regular))
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                    .lineLimit(1)
+                            }
+                            
+                            // Connection status indicator
+                            connectionStatusView
                         }
                     }
                 }
@@ -614,12 +616,14 @@ struct CompactPlayerView: View {
                                 .fill(Color.blue)
                                 .frame(width: 36, height: 36)
                             
-                            if radioPlayer.isBuffering {
+                            if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                                 ProgressView()
                                     .scaleEffect(0.8)
                                     .tint(.white)
                             } else {
-                                Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                // Show pause if user wants to play (regardless of actual playback state)
+                                // Show play if user doesn't want to play
+                                Image(systemName: radioPlayer.userWantsToPlay ? "pause.fill" : "play.fill")
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
                             }
@@ -668,6 +672,38 @@ struct CompactPlayerView: View {
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(.adaptivePrimaryText)
                 }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var connectionStatusView: some View {
+        HStack(spacing: 2) {
+            switch radioPlayer.connectionState {
+            case .connecting:
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .tint(.orange)
+                Text("•")
+                    .foregroundColor(.orange)
+                    .font(.system(size: 8))
+            case .disconnected:
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 8))
+                    .foregroundColor(.red)
+            case .reconnecting:
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 8))
+                    .foregroundColor(.orange)
+                    .rotationEffect(.degrees(radioPlayer.isAttemptingReconnection ? 360 : 0))
+                    .animation(
+                        radioPlayer.isAttemptingReconnection ? 
+                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : 
+                        .default, 
+                        value: radioPlayer.isAttemptingReconnection
+                    )
+            case .connected:
+                EmptyView()
             }
         }
     }

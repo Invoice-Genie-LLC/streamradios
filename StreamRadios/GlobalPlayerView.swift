@@ -80,9 +80,9 @@ struct GlobalPlayerView: View {
     /// Determines if radio player should be shown
     /// Shows radio player when:
     /// - On radio tab, OR
-    /// - Radio is actively playing (regardless of current tab)
+    /// - User wants to play radio (regardless of current network status or tab)
     private var shouldShowRadioPlayer: Bool {
-        return selectedTab == .radio || radioPlayer.isPlaying
+        return selectedTab == .radio || radioPlayer.userWantsToPlay
     }
 }
 

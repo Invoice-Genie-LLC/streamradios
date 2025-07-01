@@ -16,6 +16,13 @@ import Reachability
 import SystemConfiguration
 import Foundation
 
+enum ConnectionState {
+    case connected
+    case connecting
+    case disconnected
+    case reconnecting
+}
+
 class RadioPlayer: NSObject, ObservableObject {
     static let shared = RadioPlayer()
     @objc var player: AVPlayer?
@@ -28,6 +35,14 @@ class RadioPlayer: NSObject, ObservableObject {
     private var wasPlayingBeforeNetworkLoss = false
     @Published var isBuffering = false
     @Published var isPlaying: Bool = false
+
+    // NEW: Separate user intent from network connectivity
+    @Published var userWantsToPlay: Bool = false
+    @Published var isAttemptingReconnection: Bool = false
+    @Published var connectionState: ConnectionState = .connected
+    private var reconnectionTimer: Timer?
+    private let maxReconnectionAttempts = 10
+    private var currentReconnectionAttempt = 0
 
     @Published var currentStationIndex: Int?
     @Published var songTitle: String = ""
@@ -66,8 +81,27 @@ class RadioPlayer: NSObject, ObservableObject {
         
         monitor.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.async {
-                self?.isNetworkAvailable = (path.status == .satisfied)
+                let wasNetworkAvailable = self?.isNetworkAvailable ?? false
+                let isNetworkNowAvailable = (path.status == .satisfied)
+                self?.isNetworkAvailable = isNetworkNowAvailable
                 self?.isOnCellularNetwork = path.usesInterfaceType(.cellular)
+                
+                // Network state changed from unavailable to available
+                if !wasNetworkAvailable && isNetworkNowAvailable {
+                    print("📶 Network came back online!")
+                    self?.handleNetworkRestored()
+                } 
+                // Network state changed from available to unavailable
+                else if wasNetworkAvailable && !isNetworkNowAvailable {
+                    print("📶 Network went offline")
+                    self?.handleNetworkLost()
+                }
+                // Network is available - ensure proper state
+                else if isNetworkNowAvailable {
+                    if self?.connectionState == .disconnected || self?.connectionState == .reconnecting {
+                        self?.connectionState = .connected
+                    }
+                }
             }
         }
         
@@ -97,17 +131,35 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func autoPlayLastStationSetup() {
+        print("🔄 Auto-play setup initiated - autoPlayLastStation: \(autoPlayLastStation)")
+        
         if autoPlayLastStation {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                // Only auto-play if we're not currently handling an alarm
+            // Wait a bit longer to ensure network monitoring and app state are ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                // Only auto-play if we're not currently handling an alarm and network is available
                 if !self.isHandlingAlarm {
-                    self.restoreLastPlayedStation()
+                    print("🎵 Auto-play: Starting last played station restoration")
+                    print("🌐 Auto-play: Network available: \(self.isNetworkAvailable)")
+                    
+                    if self.isNetworkAvailable {
+                        // Network is available - proceed with auto-play
+                        self.restoreLastPlayedStation()
+                    } else {
+                        // No network - restore UI only and let network restoration handle playback
+                        print("📶 Auto-play: No network, restoring UI only and waiting for network")
+                        self.restoreLastPlayedStationUIOnly()
+                        // Set flag so when network comes back, it will auto-play
+                        self.wasPlayingBeforeNetworkLoss = true
+                    }
+                } else {
+                    print("⏰ Auto-play: Skipped due to alarm handling")
                 }
             }
         } else {
             // Even if auto-play is disabled, still restore the UI state for manual play
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 if !self.isHandlingAlarm {
+                    print("🔄 Auto-play: Disabled, restoring UI only")
                     self.restoreLastPlayedStationUIOnly()
                 }
             }
@@ -115,6 +167,11 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private func restoreLastPlayedStation() {
+        print("🎵 Auto-play: Attempting to restore and play last station")
+        
+        // Set user intent immediately - this is auto-play so user wants to play
+        userWantsToPlay = true
+        
         // Use shared UserDefaults consistently for CarPlay compatibility
         if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID") {
             print("🔍 Auto-play: Found LastPlayedStationID: \(lastStationID)")
@@ -134,11 +191,15 @@ class RadioPlayer: NSObject, ObservableObject {
                     self.currentlyPlayingStation = lastStation
                     if let url = URL(string: lastStation.url) {
                         self.setStationURL(url)
-                        self.play()
-                        // Manually update lastPlayed for Recent tab
-                        self.updateLastPlayed(lastStation)
+                        // Use a small delay to ensure player is set up
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            self.play()
+                            // Manually update lastPlayed for Recent tab
+                            self.updateLastPlayed(lastStation)
+                        }
                     }
                 }
+                return // Exit early if we found the station by ID
             } else {
                 print("❌ Auto-play: Station with ID \(lastStationID) not found in stations array")
             }
@@ -146,9 +207,11 @@ class RadioPlayer: NSObject, ObservableObject {
             print("❌ Auto-play: No LastPlayedStationID found in UserDefaults")
         }
         
+        // Fallback: Try to restore from URL and index
         if let lastStationURL = self.userDefaults?.url(forKey: "lastStationURL") {
-            // Fall back to the old method if LastPlayedStationID is not available
+            print("🔄 Auto-play: Falling back to URL-based restoration")
             let storedIndex = self.userDefaults?.integer(forKey: "lastStationIndex") ?? 0
+            
             if storedIndex < self.viewModel?.stations.count ?? 0,
                let stations = self.viewModel?.stations, !stations.isEmpty {
                 let station = stations[storedIndex]
@@ -161,10 +224,16 @@ class RadioPlayer: NSObject, ObservableObject {
                 self.playStation(at: storedIndex, from: stations)
             } else {
                 // Ultimate fallback - manual setup
+                print("🔄 Auto-play (ultimate fallback): Manual URL setup")
                 self.setStationURL(lastStationURL)
                 self.currentStationIndex = storedIndex
-                self.play()
+                // Use a small delay to ensure player is set up
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.play()
+                }
             }
+        } else {
+            print("❌ Auto-play: No lastStationURL found in UserDefaults")
         }
     }
     
@@ -311,7 +380,12 @@ class RadioPlayer: NSObject, ObservableObject {
                     case .playing:
                         self?.isPlaying = true
                         self?.isBuffering = false
+                        self?.connectionState = .connected
+                        self?.wasPlayingBeforeNetworkLoss = false // Clear offline state when successfully playing
+                        self?.stopReconnectionAttempts() // Stop any ongoing reconnection attempts
                         self?.updateNowPlayingInfo()
+                        
+                        print("▶️ Player is now playing - cleared offline state")
                         
                         // Enhanced metadata fetching when starting to play
                         if let metadata = self?.metadata, !metadata.isEmpty {
@@ -327,9 +401,34 @@ class RadioPlayer: NSObject, ObservableObject {
                         
                     case .waitingToPlayAtSpecifiedRate:
                         self?.isBuffering = true
+                        if self?.userWantsToPlay == true || self?.wasPlayingBeforeNetworkLoss == true {
+                            self?.connectionState = .connecting
+                            print("⏳ Player waiting to play - connecting...")
+                        }
+                        
                     case .paused:
                         self?.isPlaying = false
                         self?.isBuffering = false
+                        
+                        print("⏸️ Player paused - userWantsToPlay: \(self?.userWantsToPlay ?? false), networkAvailable: \(self?.isNetworkAvailable ?? false)")
+                        
+                        // Handle different pause scenarios
+                        if self?.userWantsToPlay == true || self?.wasPlayingBeforeNetworkLoss == true {
+                            // User wants to play but player is paused - might be network issue
+                            if self?.isNetworkAvailable == true {
+                                // Network is available but player paused - could be buffering or failed stream
+                                self?.connectionState = .connecting
+                                print("🔄 Player paused but should be playing - will attempt reconnection")
+                            } else {
+                                // No network - wait for network to return
+                                self?.connectionState = .disconnected
+                                print("📶 Player paused due to no network")
+                            }
+                        } else {
+                            // User doesn't want to play - normal pause state
+                            self?.connectionState = .disconnected
+                        }
+                        
                     @unknown default:
                         break
                     }
@@ -458,6 +557,10 @@ class RadioPlayer: NSObject, ObservableObject {
         PlaybackManager.shared.setActivePlayer(.radio)
         print("📻 Play: Set radio as active player")
         
+        // Track user intent - user wants to play regardless of network state
+        userWantsToPlay = true
+        wasPlayingBeforeNetworkLoss = false // Reset this flag
+        
         // Ensure we have a player
         guard let player = player else { 
             print("❌ Play: No player available")
@@ -471,12 +574,20 @@ class RadioPlayer: NSObject, ObservableObject {
             print("🔄 Play: Restored last station URL")
         }
         
-        // Start playback
-        player.play()
-        isPlaying = true
-        resetRetryCount()
-        
-        print("▶️ Play: Player started, isPlaying: \(isPlaying)")
+        // Check network connectivity and handle accordingly
+        if isNetworkAvailable {
+            // Network is available - start playback normally
+            connectionState = .connecting
+            player.play()
+            resetRetryCount()
+            print("▶️ Play: Player started with network, isPlaying will be set by status observer")
+        } else {
+            // No network - show attempting to connect state and start reconnection attempts
+            connectionState = .reconnecting
+            isAttemptingReconnection = true
+            startReconnectionAttempts()
+            print("📶 Play: No network available, attempting to reconnect...")
+        }
         
         // Update Now Playing immediately since audio session is already activated
         updateNowPlayingInfo()
@@ -503,30 +614,315 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     
     func pause() {
-            guard let player = player else { return }
-            player.pause()
-            isPlaying = false
+        guard let player = player else { return }
+        
+        // User explicitly paused - clear all intent and offline state
+        userWantsToPlay = false
+        wasPlayingBeforeNetworkLoss = false
+        
+        // Stop any reconnection attempts
+        stopReconnectionAttempts()
+        
+        player.pause()
+        isPlaying = false
+        connectionState = .disconnected
+        
+        print("⏸️ User explicitly paused - cleared all reconnection state")
+        
+        // Clear all song metadata and iTunes artwork when pausing
+        // This immediately removes song info while keeping the station active
+        metadata = nil
+        iTunesAlbumArt = nil
+        albumArt = nil
+        songTitle = ""
+        artistName = ""
+        lastMetadataSearched = ""
+        
+        // Cancel any pending iTunes searches when paused
+        artworkSearchTimer?.invalidate()
+        
+        // Note: We keep currentlyPlayingStation and currentStationIndex intact
+        // This allows the user to resume playing the same station easily
+        
+        updateNowPlayingInfo()
+        updateWidget()
+        
+        print("⏸️ Radio paused by user - song metadata and iTunes artwork cleared, station remains active")
+    }
+    
+    // MARK: - Network State Management
+    
+    private func handleNetworkRestored() {
+        print("🔄 Handling network restoration...")
+        
+        // Immediately clear any offline state from memory
+        connectionState = .connecting
+        currentReconnectionAttempt = 0
+        
+        // Force reconnection if user wants to play OR if we were playing before network loss
+        let shouldReconnect = userWantsToPlay || wasPlayingBeforeNetworkLoss
+        
+        if shouldReconnect {
+            // If we were playing before network loss, restore user intent
+            if wasPlayingBeforeNetworkLoss {
+                userWantsToPlay = true
+                print("📝 Restored user intent to play - was playing before network loss")
+            }
             
-            // Clear all song metadata and iTunes artwork when pausing
-            // This immediately removes song info while keeping the station active
-            metadata = nil
-            iTunesAlbumArt = nil
-            albumArt = nil
-            songTitle = ""
-            artistName = ""
-            lastMetadataSearched = ""
+            // Clear the offline memory state immediately
+            wasPlayingBeforeNetworkLoss = false
             
-            // Cancel any pending iTunes searches when paused
-            artworkSearchTimer?.invalidate()
-            
-            // Note: We keep currentlyPlayingStation and currentStationIndex intact
-            // This allows the user to resume playing the same station easily
-            
-            updateNowPlayingInfo()
-            updateWidget()
-            
-            print("⏸️ Radio paused - song metadata and iTunes artwork cleared, station remains active")
+            // Force immediate reconnection
+            print("🚀 Network restored - forcing immediate reconnection")
+            forceReconnection()
+        } else {
+            // No need to reconnect, just update state
+            connectionState = .connected
+            print("✅ Network restored - no reconnection needed")
         }
+    }
+    
+    private func handleNetworkLost() {
+        print("📶 Handling network loss...")
+        connectionState = .disconnected
+        
+        // Track if we were playing when network was lost
+        if isPlaying || userWantsToPlay {
+            wasPlayingBeforeNetworkLoss = true
+            print("📝 Marked wasPlayingBeforeNetworkLoss = true (isPlaying: \(isPlaying), userWantsToPlay: \(userWantsToPlay))")
+        }
+    }
+    
+    private func forceReconnection() {
+        print("🔥 Force reconnection initiated")
+        
+        // Stop any existing reconnection attempts
+        stopReconnectionAttempts()
+        
+        // Set connecting state immediately
+        connectionState = .connecting
+        isAttemptingReconnection = true
+        currentReconnectionAttempt = 1
+        
+        // Try different approaches to restore the stream
+        var playerNeedsRecreation = false
+        
+        // Check if we need to recreate the player
+        if player == nil {
+            print("🔄 No player exists, needs recreation")
+            playerNeedsRecreation = true
+        } else if let currentItem = player?.currentItem {
+            if currentItem.status == .failed {
+                print("🔄 Player item failed, needs recreation")
+                playerNeedsRecreation = true
+            } else if currentItem.asset as? AVURLAsset == nil {
+                print("🔄 Player item has no valid URL asset, needs recreation")
+                playerNeedsRecreation = true
+            }
+        } else {
+            print("🔄 Player has no current item, needs recreation")
+            playerNeedsRecreation = true
+        }
+        
+        if playerNeedsRecreation {
+            // Restore player from saved URL
+            if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+                print("🔄 Recreating player from saved URL: \(lastStationURL)")
+                setStationURL(lastStationURL)
+                // Give the player time to initialize before attempting playback
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.attemptPlayback()
+                }
+            } else {
+                print("❌ No saved URL available for reconnection")
+                stopReconnectionAttempts()
+                return
+            }
+        } else {
+            // Try to use existing player
+            print("🔄 Using existing player for reconnection")
+            attemptPlayback()
+        }
+    }
+    
+    private func attemptPlayback() {
+        guard let player = player else {
+            print("❌ No player available for playback attempt")
+            stopReconnectionAttempts()
+            return
+        }
+        
+        // Ensure audio session is active
+        PlaybackManager.shared.setActivePlayer(.radio)
+        
+        // Start playback
+        player.play()
+        print("▶️ Playback attempt initiated")
+        
+        // Monitor the attempt
+        reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
+            self?.checkReconnectionStatus()
+        }
+    }
+    
+    // MARK: - Enhanced Reconnection Methods
+    
+    private func startReconnectionAttempts() {
+        guard userWantsToPlay else { return }
+        
+        currentReconnectionAttempt = 0
+        isAttemptingReconnection = true
+        connectionState = .reconnecting
+        attemptReconnection()
+    }
+    
+    private func attemptReconnection() {
+        guard userWantsToPlay && currentReconnectionAttempt < maxReconnectionAttempts else {
+            stopReconnectionAttempts()
+            return
+        }
+        
+        currentReconnectionAttempt += 1
+        print("🔄 Attempting to reconnect (attempt \(currentReconnectionAttempt) of \(maxReconnectionAttempts))")
+        
+        // Try to start playback
+        if isNetworkAvailable {
+            // Ensure we have a valid player and URL
+            if let player = player, let currentItem = player.currentItem {
+                // Check if the current item is in a failed state
+                if currentItem.status == .failed {
+                    print("📱 Player item failed, recreating...")
+                    // Recreate the player item with the same URL
+                    if let asset = currentItem.asset as? AVURLAsset {
+                        setStationURL(asset.url)
+                    } else if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+                        setStationURL(lastStationURL)
+                    }
+                } else {
+                    // Try to resume with existing player
+                    player.play()
+                }
+            } else {
+                // No player or no current item - restore from saved URL
+                print("📱 No valid player found, restoring from saved URL...")
+                if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+                    setStationURL(lastStationURL)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.player?.play()
+                    }
+                }
+            }
+            
+            // Check if playback started successfully after a longer delay for stream buffering
+            reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
+                self?.checkReconnectionStatus()
+            }
+        } else {
+            // No network yet, wait and try again
+            reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+                self?.attemptReconnection()
+            }
+        }
+    }
+    
+    private func checkReconnectionStatus() {
+        print("🔍 Checking reconnection status - isPlaying: \(isPlaying), userWantsToPlay: \(userWantsToPlay), networkAvailable: \(isNetworkAvailable)")
+        
+        if isPlaying && connectionState != .connected {
+            // Successfully reconnected
+            connectionState = .connected
+            stopReconnectionAttempts()
+            print("✅ Successfully reconnected to stream")
+            return
+        }
+        
+        // Check if we should continue trying
+        guard userWantsToPlay else {
+            print("🔄 User no longer wants to play, stopping reconnection")
+            stopReconnectionAttempts()
+            return
+        }
+        
+        // Check network availability
+        guard isNetworkAvailable else {
+            print("📶 No network available, waiting for network to return")
+            connectionState = .disconnected
+            return
+        }
+        
+        // Detailed diagnostics
+        if let player = player {
+            if let currentItem = player.currentItem {
+                print("🔍 Player diagnostics:")
+                print("   - Player status: \(player.timeControlStatus.rawValue)")
+                print("   - Item status: \(currentItem.status.rawValue)")
+                print("   - Asset class: \(type(of: currentItem.asset))")
+                
+                if currentItem.status == .failed {
+                    print("❌ Player item failed - error: \(currentItem.error?.localizedDescription ?? "unknown")")
+                    // Force recreation for failed items
+                    if currentReconnectionAttempt < maxReconnectionAttempts {
+                        print("🔄 Forcing player recreation due to failed item")
+                        if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+                            setStationURL(lastStationURL)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                self.attemptPlayback()
+                            }
+                        }
+                        return
+                    }
+                } else if player.timeControlStatus == .paused {
+                    print("🔄 Player is paused, attempting to resume")
+                    player.play()
+                }
+            } else {
+                print("❌ Player has no current item")
+                if currentReconnectionAttempt < maxReconnectionAttempts {
+                    print("🔄 Recreating player due to missing item")
+                    if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+                        setStationURL(lastStationURL)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.attemptPlayback()
+                        }
+                    }
+                    return
+                }
+            }
+        } else {
+            print("❌ No player available")
+        }
+        
+        // Try again if we haven't exceeded attempts
+        if currentReconnectionAttempt < maxReconnectionAttempts {
+            print("🔄 Reconnection not successful (attempt \(currentReconnectionAttempt)/\(maxReconnectionAttempts)), trying again...")
+            // Use longer delay between attempts to avoid overwhelming the stream
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.attemptReconnection()
+            }
+        } else {
+            print("❌ Maximum reconnection attempts reached (\(maxReconnectionAttempts))")
+            stopReconnectionAttempts()
+        }
+    }
+    
+    private func stopReconnectionAttempts() {
+        reconnectionTimer?.invalidate()
+        reconnectionTimer = nil
+        isAttemptingReconnection = false
+        let previousAttempts = currentReconnectionAttempt
+        currentReconnectionAttempt = 0
+        
+        if !isPlaying && userWantsToPlay {
+            print("❌ Failed to reconnect after \(previousAttempts) attempts")
+            connectionState = .disconnected
+        } else if isPlaying {
+            print("✅ Stopping reconnection attempts - successfully playing")
+            connectionState = .connected
+        } else {
+            print("⏹️ Stopping reconnection attempts - user no longer wants to play")
+            connectionState = .disconnected
+        }
+    }
     
     func togglePlayPause() {
             if isPlaying {
@@ -541,6 +937,12 @@ class RadioPlayer: NSObject, ObservableObject {
            player = nil
            currentStationIndex = nil
            isPlaying = false
+           
+           // Clear user intent and connection state
+           userWantsToPlay = false
+           wasPlayingBeforeNetworkLoss = false
+           connectionState = .disconnected
+           stopReconnectionAttempts()
            
            // Clear all song metadata and iTunes artwork completely
            metadata = nil
@@ -595,6 +997,10 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         
         setStationURL(url)
+        
+        // Save the station info for persistence
+        userDefaults?.set(url, forKey: "lastStationURL")
+        userDefaults?.set(index, forKey: "lastStationIndex")
         
         // Always start playing when a station is selected
         play()

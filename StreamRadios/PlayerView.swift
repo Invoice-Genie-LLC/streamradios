@@ -34,12 +34,14 @@ struct PlayerView: View {
                     radioPlayer.playPause()
                 }) {
                     ZStack {
-                        if radioPlayer.isBuffering {
+                        if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(1.2)
                                 .tint(.white)
                         } else {
-                            Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                            // Show pause if user wants to play (regardless of actual playback state)
+                            // Show play if user doesn't want to play
+                            Image(systemName: radioPlayer.userWantsToPlay ? "pause.fill" : "play.fill")
                                 .font(.system(size: 32, weight: .medium))
                                 .foregroundColor(.white)
                         }
@@ -65,14 +67,23 @@ struct PlayerView: View {
                 .buttonStyle(PlainButtonStyle())
             }
             
-            // Bitrate information - compact and subtle
-            Text(bitrateMessage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.gray)
-                .lineLimit(1)
-                .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
-                    self.bitrateMessage = newBitrateMessage
-                }
+            // Connection state indicator or bitrate information
+            VStack(spacing: 4) {
+                // Show connection state indicator when not connected
+                ReconnectingIndicatorView(
+                    connectionState: radioPlayer.connectionState,
+                    isAttemptingReconnection: radioPlayer.isAttemptingReconnection
+                )
+                
+                // Bitrate information - compact and subtle
+                Text(bitrateMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.gray)
+                    .lineLimit(1)
+                    .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
+                        self.bitrateMessage = newBitrateMessage
+                    }
+            }
         }
         .padding(.vertical, 8)
     }
