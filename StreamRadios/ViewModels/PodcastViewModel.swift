@@ -1130,6 +1130,17 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// Sync episode states from CloudKit with different behavior based on install type
+    /// PERFORMANCE OPTIMIZATION: Only sync episode states from CloudKit on fresh installs
+    /// This prevents the app from loading thousands of episode states from CloudKit on every launch
+    /// After the initial sync, episode states are loaded from local storage (CoreData + EpisodeStateManager)
+    /// 
+    /// Benefits:
+    /// - Faster app startup (no CloudKit network requests for episode states)
+    /// - Reduced CloudKit API usage and rate limiting
+    /// - Better offline experience
+    /// - Episode states are still synced TO CloudKit when users make changes
+    /// 
+    /// To force a re-sync (for troubleshooting), call resetEpisodeStatesSyncFlag()
     private func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async {
         print("🔄 Syncing episode states from CloudKit (fresh install: \(isFreshInstall))")
         
@@ -1164,6 +1175,9 @@ class PodcastViewModel: ObservableObject {
                 await MainActor.run {
                     self.refreshEpisodeStatesFromManager()
                 }
+                
+                // Mark episode states as synced to prevent future CloudKit syncing on app launches
+                UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
                 
                 print("✅ Episode states synced from CloudKit for \(allEpisodeIds.count) episodes, \(coreDataUpdates.count) saved to Core Data")
             } else {
@@ -1505,14 +1519,23 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        // After merging feeds, sync episode states for existing installation (upgrade)
+        // PERFORMANCE FIX: Only sync episode states for new feeds that were actually added
+        // Don't sync episode states for existing installations - load from local storage instead
         if !cloudKitFeeds.isEmpty {
-            print("🔄 Starting episode state sync after merging feeds for existing installation...")
-            // CRITICAL FIX: Determine fresh install status properly instead of hard-coding
             let existingFeedCount = await countExistingFeeds()
             let isFreshInstall = existingFeedCount == 0
-            print("🔍 Fresh install determination in merge: existingFeedCount=\(existingFeedCount), isFreshInstall=\(isFreshInstall)")
-            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+            
+            if isFreshInstall {
+                print("🔄 Fresh install - syncing episode states for new feeds...")
+                print("🔍 Fresh install determination in merge: existingFeedCount=\(existingFeedCount), isFreshInstall=\(isFreshInstall)")
+                await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+            } else {
+                print("⚡ Existing installation - skipping CloudKit episode state sync for better performance")
+                // Just refresh local episode states from EpisodeStateManager
+                await MainActor.run {
+                    self.refreshEpisodeStatesFromManager()
+                }
+            }
         }
     }
     
@@ -1666,10 +1689,23 @@ class PodcastViewModel: ObservableObject {
             // After CloudKit sync, check if any feeds need episode refreshing
             await refreshFeedsWithoutEpisodes()
             
-            // Always attempt episode state sync after all initialization is complete
-            print("🔄 Final episode state sync after full initialization...")
+            // PERFORMANCE FIX: Only sync episode states from CloudKit on fresh installs
+            // On subsequent launches, load episode states from local storage only
+            let hasEpisodeStatesSynced = UserDefaults.standard.bool(forKey: "HasEpisodeStatesSynced")
             let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+            
+            if isFreshInstall || !hasEpisodeStatesSynced {
+                print("🔄 Episode state sync needed - fresh install: \(isFreshInstall), states synced: \(hasEpisodeStatesSynced)")
+                await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+                // Mark episode states as synced
+                UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+            } else {
+                print("⚡ Skipping CloudKit episode state sync - loading from local storage only for better performance")
+                // Just refresh local episode states from EpisodeStateManager
+                await MainActor.run {
+                    self.refreshEpisodeStatesFromManager()
+                }
+            }
             
             // CRITICAL: Final UI refresh after all initialization is complete
             await MainActor.run {
@@ -1934,6 +1970,20 @@ class PodcastViewModel: ObservableObject {
             } catch {
                 print("❌ Failed to update episode states: \(error)")
             }
+        }
+    }
+    
+    /// Reset episode states sync flag to force re-sync from CloudKit on next app launch
+    /// This is useful for troubleshooting or if episode states get out of sync
+    @MainActor
+    func resetEpisodeStatesSyncFlag() {
+        print("🔄 Resetting episode states sync flag - next app launch will sync from CloudKit")
+        UserDefaults.standard.removeObject(forKey: "HasEpisodeStatesSynced")
+        
+        // Optionally trigger immediate sync
+        Task {
+            let isFreshInstall = false // Treat as upgrade to preserve download states
+            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
         }
     }
 }
