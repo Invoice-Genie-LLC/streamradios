@@ -347,7 +347,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Always start with Recent tab (no persistence)
             selectedSubTab = .recent
         
-            syncStationsWithCloudKit()
+            // PERFORMANCE FIX: Only sync radio stations from CloudKit on fresh installs
+            // Check if radio stations have been synced to prevent unnecessary CloudKit fetching
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let hasRadioStationsSynced = UserDefaults.standard.bool(forKey: "HasRadioStationsSynced")
+            
+            if isFreshInstall || !hasRadioStationsSynced {
+                print("🔄 Radio station sync needed in ViewModel - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
+                syncStationsWithCloudKit()
+            } else {
+                print("⚡ Skipping CloudKit radio station sync in ViewModel - loading from local storage only for better performance")
+            }
     
             loadStationsFromCoreData()
             
@@ -359,7 +369,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 initializeStationsForFirstTime()
             } else {
                 print("App relaunch detected.")
-                syncStationsWithCloudKit() // This method will ensure data consistency with CloudKit
+                // Removed the second syncStationsWithCloudKit() call for performance optimization
             }
         }
     
@@ -601,6 +611,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 print("Error syncing with CloudKit: \(error.localizedDescription)")
             } else {
                 print("Stations successfully synchronized with CloudKit.")
+                
+                // Mark radio stations as synced to prevent future CloudKit syncing on app launches
+                UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+                
                 DispatchQueue.main.async {
                     self?.loadStationsFromCoreData() // Reload stations from CoreData after sync
                     NotificationCenter.default.post(name: .stationsUpdated, object: nil)

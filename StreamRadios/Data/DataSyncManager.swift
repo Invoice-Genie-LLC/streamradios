@@ -101,6 +101,18 @@ class DataSyncManager: ObservableObject {
     
     // MARK: - Private Sync Methods
     
+    /// Sync radio stations from CloudKit with performance optimization
+    /// PERFORMANCE OPTIMIZATION: Only sync radio stations from CloudKit on fresh installs
+    /// This prevents the app from loading thousands of radio stations from CloudKit on every launch
+    /// After the initial sync, radio stations are loaded from local storage (Core Data)
+    /// 
+    /// Benefits:
+    /// - Faster app startup (no CloudKit network requests for radio stations)
+    /// - Reduced CloudKit API usage and rate limiting  
+    /// - Better offline experience
+    /// - Radio stations are still synced TO CloudKit when users make changes
+    /// 
+    /// To force a re-sync (for troubleshooting), call resetRadioStationsSyncFlag()
     @MainActor
     private func syncRadioStations() async {
         radioStationsStatus = .inProgress
@@ -115,10 +127,24 @@ class DataSyncManager: ObservableObject {
                 }
             }
             
-            // Actual radio station sync logic
+            // PERFORMANCE FIX: Only sync radio stations from CloudKit on fresh installs
+            // Check if this is a fresh install before fetching from CloudKit
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let hasRadioStationsSynced = UserDefaults.standard.bool(forKey: "HasRadioStationsSynced")
+            
             let viewModel = RadioStationViewModel.shared
-            if viewModel.stations.isEmpty {
+            
+            if isFreshInstall || !hasRadioStationsSynced {
+                print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
                 await syncRadioStationsFromCloudKit()
+                // Mark radio stations as synced
+                UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+            } else {
+                print("⚡ Skipping CloudKit radio station sync - loading from local storage only for better performance")
+                // Load from Core Data instead of CloudKit
+                await MainActor.run {
+                    viewModel.loadStationsFromCoreData()
+                }
             }
             
             radioStationsStatus = .completed
@@ -392,6 +418,9 @@ class DataSyncManager: ObservableObject {
                         viewModel.stations = stations
                         viewModel.saveStationsToCoreData()
                         print("✅ Synced \(stations.count) radio stations")
+                        
+                        // Mark radio stations as synced to prevent future CloudKit syncing on app launches
+                        UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
                     }
                 } else if let error = error {
                     print("❌ Failed to sync radio stations: \(error)")
@@ -421,6 +450,16 @@ class DataSyncManager: ObservableObject {
         // NOTE: This method is no longer used to prevent duplicate PodcastViewModel creation
         // PodcastViewModel handles its own CloudKit sync via initializeWithCloudKitSupport()
         print("📡 DataSyncManager: Skipping duplicate feed processing - handled by PodcastViewModel")
+    }
+    
+    // MARK: - Troubleshooting Methods
+    
+    /// Reset the radio stations sync flag to force a re-sync from CloudKit on next launch
+    /// This is useful for troubleshooting if radio stations get out of sync
+    @MainActor
+    func resetRadioStationsSyncFlag() {
+        UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
+        print("🔄 Reset radio stations sync flag - will re-sync from CloudKit on next fresh install sync")
     }
 }
 

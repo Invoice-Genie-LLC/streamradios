@@ -1070,6 +1070,18 @@ class PodcastViewModel: ObservableObject {
         episodeStatesSyncCompleted = true
     }
     
+    /// Check for fresh install and sync podcast feeds from CloudKit with performance optimization
+    /// PERFORMANCE OPTIMIZATION: Only sync podcast feeds from CloudKit on fresh installs
+    /// This prevents the app from loading podcast feeds from CloudKit on every launch
+    /// After the initial sync, podcast feeds are loaded from local storage (Core Data)
+    /// 
+    /// Benefits:
+    /// - Faster app startup (no CloudKit network requests for podcast feeds)
+    /// - Reduced CloudKit API usage and rate limiting
+    /// - Better offline experience
+    /// - Podcast feeds are still synced TO CloudKit when users make changes
+    /// 
+    /// To force a re-sync (for troubleshooting), call resetPodcastFeedsSyncFlag()
     private func checkForFreshInstallAndSetup() async {
         // Prevent multiple concurrent CloudKit syncs
         guard !cloudKitSyncInProgress else {
@@ -1090,38 +1102,55 @@ class PodcastViewModel: ObservableObject {
             let existingFeedCount = await countExistingFeeds()
             let isFreshInstall = existingFeedCount == 0
             
-            if isFreshInstall {
-                print("🆕 Fresh install detected - fetching feeds from CloudKit")
-            } else {
-                print("📱 Existing installation with \(existingFeedCount) feeds - syncing updates")
-            }
+            // PERFORMANCE FIX: Only sync podcast feeds from CloudKit on fresh installs
+            // Check if podcast feeds have been synced to prevent unnecessary CloudKit fetching
+            let hasPodcastFeedsSynced = UserDefaults.standard.bool(forKey: "HasPodcastFeedsSynced")
             
-            // Fetch feeds from CloudKit
-            let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
-            
-            if !cloudKitFeeds.isEmpty {
-                print("🌟 Synced \(cloudKitFeeds.count) feeds from CloudKit")
+            if isFreshInstall || !hasPodcastFeedsSynced {
+                print("🔄 Podcast feed sync needed - fresh install: \(isFreshInstall), feeds synced: \(hasPodcastFeedsSynced)")
                 
-                if isFreshInstall {
-                    // Fresh install: Process all feeds and parse their RSS
-                    await processFreshInstallFeeds(cloudKitFeeds)
+                // Fetch feeds from CloudKit
+                let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
+                
+                if !cloudKitFeeds.isEmpty {
+                    print("🌟 Synced \(cloudKitFeeds.count) feeds from CloudKit")
+                    
+                    if isFreshInstall {
+                        // Fresh install: Process all feeds and parse their RSS
+                        await processFreshInstallFeeds(cloudKitFeeds)
+                    } else {
+                        // Existing install: Merge new feeds only
+                        await mergeCloudKitFeeds(cloudKitFeeds)
+                    }
+                    
+                    // Mark podcast feeds as synced to prevent future CloudKit syncing on app launches
+                    UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
+                    
+                    // Update UI on main thread with explicit refresh
+                    await MainActor.run {
+                        self.loadFeedsFromCoreData()
+                        
+                        // CRITICAL: Explicit UI refresh for CloudKit sync completion
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            self.objectWillChange.send()
+                            print("🎯 CLOUDKIT SYNC: Triggered explicit UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
+                        }
+                    }
                 } else {
-                    // Existing install: Merge new feeds only
-                    await mergeCloudKitFeeds(cloudKitFeeds)
+                    print("📡 No feeds found in CloudKit")
                 }
-                
-                // Update UI on main thread with explicit refresh
+            } else {
+                print("⚡ Skipping CloudKit podcast feed sync - loading from local storage only for better performance")
+                // Just load feeds from Core Data without CloudKit sync
                 await MainActor.run {
                     self.loadFeedsFromCoreData()
                     
-                    // CRITICAL: Explicit UI refresh for CloudKit sync completion
+                    // Still trigger UI refresh for consistency
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         self.objectWillChange.send()
-                        print("🎯 CLOUDKIT SYNC: Triggered explicit UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
+                        print("🎯 LOCAL SYNC: Triggered UI refresh from local data - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
                     }
                 }
-            } else {
-                print("📡 No feeds found in CloudKit")
             }
             
         } catch {
@@ -1973,18 +2002,20 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Reset episode states sync flag to force re-sync from CloudKit on next app launch
-    /// This is useful for troubleshooting or if episode states get out of sync
+    /// Reset the episode states sync flag to force a re-sync from CloudKit on next launch
+    /// This is useful for troubleshooting if episode states get out of sync
     @MainActor
     func resetEpisodeStatesSyncFlag() {
-        print("🔄 Resetting episode states sync flag - next app launch will sync from CloudKit")
-        UserDefaults.standard.removeObject(forKey: "HasEpisodeStatesSynced")
-        
-        // Optionally trigger immediate sync
-        Task {
-            let isFreshInstall = false // Treat as upgrade to preserve download states
-            await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
-        }
+        UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
+        print("🔄 Reset episode states sync flag - will re-sync from CloudKit on next launch")
+    }
+    
+    /// Reset the podcast feeds sync flag to force a re-sync from CloudKit on next launch
+    /// This is useful for troubleshooting if podcast feeds get out of sync
+    @MainActor
+    func resetPodcastFeedsSyncFlag() {
+        UserDefaults.standard.set(false, forKey: "HasPodcastFeedsSynced")
+        print("🔄 Reset podcast feeds sync flag - will re-sync from CloudKit on next launch")
     }
 }
 

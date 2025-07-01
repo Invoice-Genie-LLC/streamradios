@@ -57,19 +57,18 @@ struct RadioStreamApp: App {
             UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
         }
         
-        // Handle the fetched stations if needed
-        if viewModel.stations.isEmpty {
-            if UserDefaults.standard.bool(forKey: "HasLaunchedBefore") == false {
-                fetchStationsFromCloudKit()
-            } else {
-                viewModel.loadStationsFromCoreData()
-                // After loading stations, ensure radio player state is restored
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    radioPlayer.restoreStateAfterStationsLoaded()
-                }
-            }
+        // PERFORMANCE FIX: Check for radio station sync status instead of empty stations
+        // This prevents CloudKit fetching on every app launch after initial sync
+        let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+        let hasRadioStationsSynced = UserDefaults.standard.bool(forKey: "HasRadioStationsSynced")
+        
+        if isFreshInstall || !hasRadioStationsSynced {
+            print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
+            fetchStationsFromCloudKit()
         } else {
-            // Stations are already loaded, ensure radio player state is restored
+            print("⚡ Skipping CloudKit radio station sync - loading from local storage only for better performance")
+            viewModel.loadStationsFromCoreData()
+            // After loading stations, ensure radio player state is restored
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 radioPlayer.restoreStateAfterStationsLoaded()
             }
@@ -92,6 +91,9 @@ struct RadioStreamApp: App {
                     viewModel?.stations = stations
                     viewModel?.saveStationsToCoreData()
                     print("Fetched and populated \(stations.count) stations from CloudKit.")
+                    
+                    // Mark radio stations as synced to prevent future CloudKit syncing on app launches
+                    UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
                     
                     // Notify that stations have been updated
                     NotificationCenter.default.post(name: .stationsUpdated, object: nil)
