@@ -544,8 +544,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         hasRestoredPositionForCurrentEpisode = false
         currentEpisodeIdForRestoration = nil
         
-        // Stop radio playback if it's currently playing
-        RadioPlayer.shared.stopCurrentStation()
+        // Completely stop radio playback to prevent it from getting stuck in "connecting" state
+        RadioPlayer.shared.stop()
         
         // If there's a currently playing episode, mark it as "In Progress" before switching
         if let currentEpisode = currentEpisode, currentEpisode.id != episode.id {
@@ -1016,9 +1016,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func stopRadioPlayback() {
-        if let radioPlayer = radioPlayer, radioPlayer.isPlaying {
-            radioPlayer.pause()
-        }
+        // Completely stop radio playback to prevent it from getting stuck in "connecting" state
+        RadioPlayer.shared.stop()
+        os_log("🛑 Radio playback completely stopped for podcast playback", log: log, type: .info)
     }
     
     func seek(to time: Double) {
