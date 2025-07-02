@@ -269,18 +269,30 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func restorePlaybackStateAfterReconnection() {
         os_log("🚗 CarPlay: Restoring playback state after reconnection", log: log, type: .info)
         
-        // CRITICAL: Clear any stale Now Playing info first
-        DispatchQueue.main.async {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-            os_log("🚗 CarPlay: Cleared stale Now Playing info", log: self.log, type: .info)
-        }
-        
         let radioPlayer = RadioPlayer.shared
         let podcastPlayer = PodcastPlayer.shared
         
-        // Check if current players have active state
+        // CRITICAL: Check what's actually active before interfering
         let hasActiveRadio = radioPlayer.isPlaying && radioPlayer.currentlyPlayingStation != nil
         let hasActivePodcast = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+        let podcastHasContent = podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil
+        let podcastIsActivePlayer = PlaybackManager.shared.activePlayer == .podcast
+        
+        // CRITICAL: Don't interfere if podcast has content and is the active player
+        if podcastHasContent && podcastIsActivePlayer {
+            os_log("🚗 CarPlay: Podcast is active with content - not interfering with restoration", log: log, type: .info)
+            // Just update the Now Playing for the active podcast without changing players
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                podcastPlayer.updateNowPlayingInfo()
+            }
+            return
+        }
+        
+        // Only clear Now Playing if we're actually going to restore something different
+        DispatchQueue.main.async {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            os_log("🚗 CarPlay: Cleared stale Now Playing info for restoration", log: self.log, type: .info)
+        }
         
         if hasActiveRadio {
             os_log("🚗 CarPlay: Restoring active radio playback state", log: log, type: .info)
@@ -359,6 +371,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func attemptRestoreFromSavedState() {
         os_log("🚗 CarPlay: Attempting to restore from saved state after app kill", log: log, type: .info)
         
+        // CRITICAL: Check if podcast is currently active before interfering
+        let podcastPlayer = PodcastPlayer.shared
+        let podcastHasContent = podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil
+        let podcastIsActivePlayer = PlaybackManager.shared.activePlayer == .podcast
+        
+        if podcastHasContent && podcastIsActivePlayer {
+            os_log("🚗 CarPlay: Podcast is currently active - not restoring from saved state", log: log, type: .info)
+            return
+        }
+        
         let userDefaults = UserDefaults.standard
         
         // Check if we have recent saved state (within last 10 minutes)
@@ -389,6 +411,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func attemptRadioStateRestoration() {
+        // CRITICAL: Don't interfere if podcast is actively playing
+        let podcastPlayer = PodcastPlayer.shared
+        if podcastPlayer.isPlaying || (podcastPlayer.currentEpisode != nil && PlaybackManager.shared.activePlayer == .podcast) {
+            os_log("🚗 CarPlay: Podcast is active - not restoring radio state", log: log, type: .info)
+            return
+        }
+        
         let userDefaults = UserDefaults.standard
         guard let stationId = userDefaults.string(forKey: "CarPlayLastRadioStationId"),
               let stationName = userDefaults.string(forKey: "CarPlayLastRadioStationName"),
@@ -428,6 +457,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     }
     
     private func attemptPodcastStateRestoration() {
+        // CRITICAL: Don't interfere if podcast is actively playing
+        let podcastPlayer = PodcastPlayer.shared
+        if podcastPlayer.isPlaying || (podcastPlayer.currentEpisode != nil && PlaybackManager.shared.activePlayer == .podcast) {
+            os_log("🚗 CarPlay: Podcast is already active - not restoring podcast state", log: log, type: .info)
+            return
+        }
+        
         let userDefaults = UserDefaults.standard
         guard let _ = userDefaults.string(forKey: "CarPlayLastEpisodeId"),
               let episodeTitle = userDefaults.string(forKey: "CarPlayLastEpisodeTitle"),
@@ -1246,13 +1282,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 return
             }
             
-            // Load ALL episodes at once - no artificial limits
-            os_log("🚗 CarPlay: Podcast '%@' has %d episodes, loading all", log: self.log, type: .info, podcast.title, totalEpisodes)
+            // PERFORMANCE OPTIMIZATION: Load only initial batch for fast CarPlay response
+            let initialBatchSize = min(50, totalEpisodes) // Load max 50 episodes initially
+            os_log("🚗 CarPlay: Podcast '%@' has %d episodes, loading initial batch of %d for fast response", log: self.log, type: .info, podcast.title, totalEpisodes, initialBatchSize)
             
-            self.loadEpisodesForPodcast(podcast) { episodes in
+            self.loadInitialEpisodesForPodcast(podcast, limit: initialBatchSize) { episodes in
                 var updatedPodcast = podcast
                 updatedPodcast.episodes = episodes
-                self.displayPodcastWithAllEpisodes(updatedPodcast, totalEpisodes: totalEpisodes, completion: completion)
+                self.displayPodcastWithPagination(updatedPodcast, totalEpisodes: totalEpisodes, loadedCount: episodes.count, completion: completion)
             }
         }
     }
@@ -1327,6 +1364,95 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
             completion()
         })
+    }
+    
+    /// PERFORMANCE OPTIMIZED: Display podcast with pagination for fast CarPlay response
+    private func displayPodcastWithPagination(_ podcast: PodcastFeed, totalEpisodes: Int, loadedCount: Int, completion: @escaping () -> Void) {
+        let carPlayManager = CarPlayManager.shared
+        var sections: [CPListSection] = []
+        
+        // Add filter section for Downloaded and Bookmarked episodes
+        let downloadedEpisodes = podcast.episodes.filter { $0.state.isDownloaded }
+        let bookmarkedEpisodes = podcast.episodes.filter { $0.state.isFavorite }
+        
+        var filterItems: [CPListItem] = []
+        
+        // Add "Downloaded Episodes" filter if there are any downloaded episodes
+        if !downloadedEpisodes.isEmpty {
+            let downloadedItem = CPListItem(text: "Downloaded Episodes",
+                                           detailText: "\(downloadedEpisodes.count) downloaded",
+                                           image: UIImage(systemName: "arrow.down.circle"))
+            downloadedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.showDownloadedEpisodesFromList(downloadedEpisodes, podcastTitle: podcast.title, completion: completion)
+            }
+            filterItems.append(downloadedItem)
+        }
+        
+        // Add "Bookmarked Episodes" filter if there are any bookmarked episodes
+        if !bookmarkedEpisodes.isEmpty {
+            let bookmarkedItem = CPListItem(text: "Bookmarked Episodes",
+                                           detailText: "\(bookmarkedEpisodes.count) bookmarked",
+                                           image: UIImage(systemName: "bookmark.fill"))
+            bookmarkedItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.showBookmarkedEpisodesFromList(bookmarkedEpisodes, podcastTitle: podcast.title, completion: completion)
+            }
+            filterItems.append(bookmarkedItem)
+        }
+        
+        // Add filter section if we have any filters
+        if !filterItems.isEmpty {
+            let filterSection = CPListSection(items: filterItems, header: "Filter", sectionIndexTitle: nil)
+            sections.append(filterSection)
+        }
+        
+        // Show loaded episodes
+        var episodeItems: [CPListItem] = []
+        
+        for episode in podcast.episodes {
+            let item = self.createEpisodeListItem(episode: episode, podcast: podcast, carPlayManager: carPlayManager)
+            episodeItems.append(item)
+        }
+        
+        // Add "Load More Episodes" option if there are more episodes to load
+        if loadedCount < totalEpisodes {
+            let remainingCount = totalEpisodes - loadedCount
+            let loadMoreItem = CPListItem(text: "Load More Episodes",
+                                         detailText: "\(remainingCount) more episodes available",
+                                         image: UIImage(systemName: "ellipsis.circle"))
+            loadMoreItem.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.loadAllRemainingEpisodes(podcast, completion: completion)
+            }
+            episodeItems.append(loadMoreItem)
+        }
+        
+        let episodesHeader = loadedCount < totalEpisodes ? "Recent Episodes (\(loadedCount) of \(totalEpisodes))" : "Episodes (\(totalEpisodes))"
+        let episodesSection = CPListSection(items: episodeItems, header: episodesHeader, sectionIndexTitle: nil)
+        sections.append(episodesSection)
+        
+        let listTemplate = CPListTemplate(title: podcast.title, sections: sections)
+        
+        currentPodcastTemplate = listTemplate
+        currentPodcastFeed = podcast
+        
+        interfaceController?.pushTemplate(listTemplate, animated: true, completion: { success, error in
+            completion()
+        })
+    }
+    
+    /// Load all remaining episodes when user taps "Load More Episodes"
+    private func loadAllRemainingEpisodes(_ podcast: PodcastFeed, completion: @escaping () -> Void) {
+        os_log("🚗 CarPlay: Loading all remaining episodes for podcast '%@'", log: log, type: .info, podcast.title)
+        
+        // Load all episodes now
+        loadEpisodesForPodcast(podcast) { [weak self] allEpisodes in
+            guard let self = self else { return }
+            
+            var updatedPodcast = podcast
+            updatedPodcast.episodes = allEpisodes
+            
+            // Replace current template with full episode list
+            self.displayPodcastWithAllEpisodes(updatedPodcast, totalEpisodes: allEpisodes.count, completion: completion)
+        }
     }
     
 
@@ -2638,7 +2764,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     /// Load episodes for a specific podcast feed from CoreData on-demand
     private func loadEpisodesForPodcast(_ podcastFeed: PodcastFeed, completion: @escaping ([PodcastEpisode]) -> Void) {
-        os_log("🚗 CarPlay: Loading episodes on-demand for podcast '%@'", log: log, type: .info, podcastFeed.title)
+        os_log("🚗 CarPlay: Loading ALL episodes for podcast '%@'", log: log, type: .info, podcastFeed.title)
         
         let context = CoreDataStack.shared.context
         
@@ -2667,6 +2793,46 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 
             } catch {
                 os_log("🚗 CarPlay: Error loading episodes for podcast '%@': %@", log: self.log, type: .error, podcastFeed.title, error.localizedDescription)
+                
+                DispatchQueue.main.async {
+                    completion([])
+                }
+            }
+        }
+    }
+    
+    /// PERFORMANCE OPTIMIZED: Load only initial batch of episodes for fast CarPlay response
+    private func loadInitialEpisodesForPodcast(_ podcastFeed: PodcastFeed, limit: Int, completion: @escaping ([PodcastEpisode]) -> Void) {
+        os_log("🚗 CarPlay: Loading initial %d episodes for fast response for podcast '%@'", log: log, type: .info, limit, podcastFeed.title)
+        
+        let context = CoreDataStack.shared.context
+        
+        context.perform {
+            do {
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@", podcastFeed.id)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                episodeRequest.fetchLimit = limit
+                
+                let managedEpisodes = try context.fetch(episodeRequest)
+                let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                    var episode = managedEpisode.toPodcastEpisode()
+                    episode.state.isPlayed = managedEpisode.isPlayed
+                    episode.state.progress = managedEpisode.progress
+                    episode.state.isFavorite = managedEpisode.isFavorite
+                    episode.state.isDownloaded = managedEpisode.isDownloaded
+                    
+                    return episode
+                }
+                
+                os_log("🚗 CarPlay: Successfully loaded initial %d episodes for podcast '%@'", log: self.log, type: .info, episodes.count, podcastFeed.title)
+                
+                DispatchQueue.main.async {
+                    completion(episodes)
+                }
+                
+            } catch {
+                os_log("🚗 CarPlay: Error loading initial episodes for podcast '%@': %@", log: self.log, type: .error, podcastFeed.title, error.localizedDescription)
                 
                 DispatchQueue.main.async {
                     completion([])

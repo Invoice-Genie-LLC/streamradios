@@ -595,6 +595,19 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func play() {
+        // CRITICAL: Only stop podcast if user explicitly wants radio or if no podcast is active
+        // This prevents CarPlay disconnection from accidentally stopping podcast playback
+        let podcastPlayer = PodcastPlayer.shared
+        let podcastIsActive = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+        let podcastIsActivePlayer = PlaybackManager.shared.activePlayer == .podcast
+        
+        // Don't stop podcast during CarPlay transitions unless user explicitly requested radio
+        if podcastIsActive && podcastIsActivePlayer {
+            print("🚗 RadioPlayer: Podcast is active - not starting radio to avoid interruption")
+            return
+        }
+        
+        // Only stop podcast playback if we're actually going to start radio
         stopPodcastPlayback()
         
         // CARPLAY COMPATIBILITY: Don't disrupt ongoing CarPlay if it's playing the same content
@@ -664,8 +677,10 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     private func stopPodcastPlayback() {
-            if let podcastPlayer = podcastPlayer, podcastPlayer.isPlaying {
-                podcastPlayer.pause()
+            if let podcastPlayer = podcastPlayer {
+                // Use stop() instead of pause() to clear user intent and properly dismiss podcast player
+                podcastPlayer.stop()
+                print("🛑 RadioPlayer: Stopped podcast playback and cleared user intent")
             }
         }
     
@@ -775,6 +790,9 @@ class RadioPlayer: NSObject, ObservableObject {
        }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
+        // CRITICAL: This is an explicit user action to play radio - stop podcast if active
+        stopPodcastPlayback()
+        
         // Ensure PlaybackManager knows radio is the active player
         PlaybackManager.shared.setActivePlayer(.radio)
         
@@ -836,7 +854,7 @@ class RadioPlayer: NSObject, ObservableObject {
     private func playStationImmediately() {
         print("🚀 Station Transition: Starting immediate playback")
         
-        // Stop any existing podcast playback
+        // Stop any existing podcast playback (this is an explicit station change)
         stopPodcastPlayback()
         
         // Set radio as the active player
@@ -3586,9 +3604,20 @@ extension RadioPlayer {
             print("🚗 RadioPlayer: CarPlay DISCONNECTED - ensuring seamless transition to main app")
             CarPlayManager.shared.isCarPlayConnected = false
             
-            // CRITICAL: Ensure seamless playback transition when CarPlay disconnects
-            if userWantsToPlay && player != nil {
-                print("🔄 CarPlay Disconnect: Ensuring seamless playback continuation in main app")
+            // CRITICAL: Only handle radio resumption if radio was actually playing and podcast isn't active
+            let podcastPlayer = PodcastPlayer.shared
+            let podcastIsActive = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+            let podcastIsActivePlayer = PlaybackManager.shared.activePlayer == .podcast
+            
+            // Don't interfere with podcast playback during CarPlay disconnection
+            if podcastIsActive && podcastIsActivePlayer {
+                print("🚗 RadioPlayer: Podcast is active during CarPlay disconnect - not interfering")
+                return
+            }
+            
+            // CRITICAL: Ensure seamless radio playback transition when CarPlay disconnects
+            if userWantsToPlay && player != nil && PlaybackManager.shared.activePlayer == .radio {
+                print("🔄 CarPlay Disconnect: Ensuring seamless radio playback continuation in main app")
                 
                 // Ensure audio session remains active for main app playback
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -3597,14 +3626,14 @@ extension RadioPlayer {
                     // Force audio session to remain active for main app
                     do {
                         try AVAudioSession.sharedInstance().setActive(true, options: [])
-                        print("✅ CarPlay Disconnect: Audio session kept active for main app")
+                        print("✅ CarPlay Disconnect: Audio session kept active for main app radio")
                     } catch {
                         print("⚠️ CarPlay Disconnect: Failed to maintain audio session: \(error)")
                     }
                     
                     // Ensure player continues if it was playing
-                    if self.userWantsToPlay && !self.isPlaying {
-                        print("🔄 CarPlay Disconnect: Resuming playback in main app")
+                    if self.userWantsToPlay && !self.isPlaying && PlaybackManager.shared.activePlayer == .radio {
+                        print("🔄 CarPlay Disconnect: Resuming radio playback in main app")
                         self.player?.play()
                     }
                     
@@ -3614,7 +3643,7 @@ extension RadioPlayer {
                     // Update widget for main app
                     self.updateWidget()
                     
-                    print("✅ CarPlay Disconnect: Seamless transition to main app completed")
+                    print("✅ CarPlay Disconnect: Seamless radio transition to main app completed")
                 }
             }
         }

@@ -81,8 +81,18 @@ class PlaybackManager {
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
             print("✅ PlaybackManager: Audio session activated for \(player)")
             
-            // Clear any existing Now Playing info when switching players
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            // CRITICAL: Only clear Now Playing info when explicitly switching between different players
+            // Don't clear during CarPlay transitions or when reactivating the same player
+            let currentRoute = audioSession.currentRoute
+            let hasCarPlayRoute = currentRoute.outputs.contains { $0.portType == .carAudio }
+            
+            // Only clear Now Playing if we're not in a CarPlay transition and the player actually changed
+            if !hasCarPlayRoute && !CarPlayManager.shared.isCarPlayConnected {
+                print("🔄 PlaybackManager: Clearing Now Playing info for player switch")
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            } else {
+                print("🚗 PlaybackManager: Preserving Now Playing info during CarPlay transition")
+            }
             
         } catch {
             print("❌ PlaybackManager: Failed to activate audio session for \(player): \(error)")
@@ -133,8 +143,22 @@ class PlaybackManager {
             
         case .ended:
             print("🔊 PlaybackManager: Audio interruption ended")
-            // Reactivate the audio session for the current active player
-            activateAudioSessionForPlayer(activePlayer)
+            
+            // CRITICAL: Don't interfere with CarPlay disconnection scenarios
+            // Check if this is a CarPlay-related interruption by looking at current route
+            let audioSession = AVAudioSession.sharedInstance()
+            let currentRoute = audioSession.currentRoute
+            let hasCarPlayRoute = currentRoute.outputs.contains { $0.portType == .carAudio }
+            
+            // If CarPlay is not in the route but we had it before, this might be a disconnection
+            if !hasCarPlayRoute && CarPlayManager.shared.isCarPlayConnected {
+                print("🚗 PlaybackManager: Detected potential CarPlay disconnection - letting players handle audio session")
+                // Don't reactivate audio session here, let individual players handle it
+                return
+            }
+            
+            // For non-CarPlay interruptions, reactivate normally but don't clear Now Playing
+            reactivateAudioSessionWithoutClearing()
             
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
@@ -146,6 +170,32 @@ class PlaybackManager {
             
         @unknown default:
             break
+        }
+    }
+    
+    private func reactivateAudioSessionWithoutClearing() {
+        guard audioSessionConfigured else {
+            setupCentralizedAudioSession()
+            return
+        }
+        
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            
+            // Ensure the category is correct for our use case
+            if audioSession.category != .playback {
+                try audioSession.setCategory(.playback, 
+                                           mode: .default, 
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                print("🔄 PlaybackManager: Corrected audio session category to playback")
+            }
+            
+            // Reactivate without clearing Now Playing info during CarPlay transitions
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            print("✅ PlaybackManager: Audio session reactivated without clearing Now Playing")
+            
+        } catch {
+            print("❌ PlaybackManager: Failed to reactivate audio session: \(error)")
         }
     }
     

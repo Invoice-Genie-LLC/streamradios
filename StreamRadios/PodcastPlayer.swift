@@ -15,6 +15,7 @@ import SwiftUI
 class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var currentEpisode: PodcastEpisode?
     @Published var isPlaying: Bool = false
+    @Published var userWantsToPlay: Bool = false  // CRITICAL: Persistent user intent flag like RadioPlayer
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0.01
     @Published var currentFeed: PodcastFeed?
@@ -62,8 +63,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         setupAudioSession()
                setupReachability()
                setupRemoteCommandCenter()
-               setupInterruptionHandling()
+               // setupInterruptionHandling() - REMOVED: Now handled in setupCarPlayRouteChangeHandling
                setupTerminationHandling()
+               setupCarPlayRouteChangeHandling()
        }
     
     private func setupAudioSession() {
@@ -84,12 +86,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            }
        }
     
-    private func setupInterruptionHandling() {
-            NotificationCenter.default.addObserver(self,
-                                                   selector: #selector(handleInterruption),
-                                                   name: AVAudioSession.interruptionNotification,
-                                                   object: nil)
-        }
+    // REMOVED: Old setupInterruptionHandling - now handled in setupCarPlayRouteChangeHandling with better CarPlay support
     
     private func setupTerminationHandling() {
         // Listen for app termination notifications
@@ -111,27 +108,27 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                                              object: nil)
     }
     
-    @objc private func handleInterruption(notification: Notification) {
-            guard let userInfo = notification.userInfo,
-                  let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
-                return
-            }
-            
-            switch type {
-            case .began:
-                pause()
-            case .ended:
-                // Let PlaybackManager handle audio session reactivation
-                guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
-                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                if options.contains(.shouldResume) && PlaybackManager.shared.activePlayer == .podcast {
-                    play()
-                }
-            @unknown default:
-                break
-            }
-        }
+    private func setupCarPlayRouteChangeHandling() {
+        // Listen for audio session route changes (CarPlay connect/disconnect)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioSessionRouteChanged(_:)),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+        
+        // CRITICAL: Handle audio interruptions to prevent CarPlay disconnection from pausing podcast
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioInterruption),
+            name: AVAudioSession.interruptionNotification,
+            object: nil
+        )
+        
+        print("🚗 PodcastPlayer: CarPlay route change and audio interruption monitoring setup complete")
+    }
+    
+    // REMOVED: Old handleInterruption method replaced with handleAudioInterruption for better CarPlay support
     
     @objc private func handleAppTermination(notification: Notification) {
         // Handle different app lifecycle events to ensure progress is saved
@@ -146,6 +143,110 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // Additional safety: Force save to UserDefaults
             UserDefaults.standard.synchronize()
+        }
+    }
+    
+    /// Handles audio session route changes to detect CarPlay connection/disconnection
+    @objc private func audioSessionRouteChanged(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let _ = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        
+        let session = AVAudioSession.sharedInstance()
+        let currentRoute = session.currentRoute
+        
+        // Check if CarPlay is in the current route
+        let isCarPlayCurrentlyConnected = currentRoute.outputs.contains { output in
+            output.portType == .carAudio
+        }
+        
+        let wasCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
+        
+        // CARPLAY CONNECTION DETECTION
+        if isCarPlayCurrentlyConnected && !wasCarPlayConnected {
+            print("🚗 PodcastPlayer: CarPlay CONNECTED - enhancing experience")
+            CarPlayManager.shared.isCarPlayConnected = true
+        }
+        
+        // CARPLAY DISCONNECTION DETECTION - CRITICAL FIX
+        else if !isCarPlayCurrentlyConnected && wasCarPlayConnected {
+            print("🚗 PodcastPlayer: CarPlay DISCONNECTED - ensuring seamless transition to main app")
+            CarPlayManager.shared.isCarPlayConnected = false
+            
+            // CRITICAL: Ensure seamless playback transition when CarPlay disconnects
+            if player != nil && currentEpisode != nil {
+                let wasPlayingBeforeDisconnect = isPlaying || player?.timeControlStatus == .playing
+                print("🔄 CarPlay Disconnect: Podcast was playing: \(wasPlayingBeforeDisconnect)")
+                
+                // AGGRESSIVE: Always try to maintain podcast playback during CarPlay disconnection
+                // Even if it wasn't playing, if there's a current episode, keep it visible
+                print("🔄 CarPlay Disconnect: Ensuring seamless podcast transition to main app")
+                
+                // IMMEDIATE: Force audio session to remain active and continue playback
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    
+                    // CRITICAL: Set podcast as active player FIRST to maintain UI visibility
+                    PlaybackManager.shared.setActivePlayer(.podcast)
+                    print("🚗 CarPlay Disconnect: Set podcast as active player immediately")
+                    
+                    // Aggressively maintain audio session for seamless transition
+                    do {
+                        try AVAudioSession.sharedInstance().setActive(true, options: [])
+                        print("✅ CarPlay Disconnect: Audio session kept active for main app podcast")
+                    } catch {
+                        print("⚠️ CarPlay Disconnect: Failed to maintain audio session: \(error)")
+                    }
+                    
+                    // CRITICAL: Force player to continue/resume playback if it was playing
+                    if wasPlayingBeforeDisconnect {
+                        if self.player?.timeControlStatus != .playing {
+                            print("🔄 CarPlay Disconnect: Force resuming podcast playback in main app")
+                            self.player?.play()
+                        }
+                        
+                        // AGGRESSIVE: Ensure isPlaying state is correct and maintained
+                        self.isPlaying = true
+                    }
+                    
+                    // Force update Now Playing info for main app immediately
+                    self.updateNowPlayingInfo()
+                    
+                    // Force UI refresh to show podcast player
+                    self.objectWillChange.send()
+                    
+                    print("✅ CarPlay Disconnect: Aggressive podcast transition to main app completed")
+                }
+                
+                // BACKUP: Multiple checks to ensure everything is maintained
+                for delay in [0.3, 0.8, 1.5] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                        guard let self = self else { return }
+                        
+                        // Ensure PlaybackManager still has podcast as active player
+                        if PlaybackManager.shared.activePlayer != .podcast && self.currentEpisode != nil {
+                            print("🔄 CarPlay Disconnect BACKUP (\(delay)s): Restoring podcast as active player")
+                            PlaybackManager.shared.setActivePlayer(.podcast)
+                        }
+                        
+                        // Resume playback if it was playing and got stopped
+                        if wasPlayingBeforeDisconnect && self.player?.timeControlStatus != .playing && self.currentEpisode != nil {
+                            print("🔄 CarPlay Disconnect BACKUP (\(delay)s): Force resuming podcast playback")
+                            self.player?.play()
+                            self.isPlaying = true
+                        }
+                        
+                        // Ensure UI state is maintained for current episode
+                        if self.currentEpisode != nil && PlaybackManager.shared.activePlayer == .podcast {
+                            if wasPlayingBeforeDisconnect && !self.isPlaying {
+                                print("🔄 CarPlay Disconnect BACKUP (\(delay)s): Restoring playing state")
+                                self.isPlaying = true
+                                self.objectWillChange.send()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -522,6 +623,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+        // CRITICAL: Set user intent to play podcast (like RadioPlayer)
+        userWantsToPlay = true
+        
         // Reset position restoration flag for the new episode
         hasRestoredPositionForCurrentEpisode = false
         currentEpisodeIdForRestoration = nil
@@ -892,6 +996,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func play() {
+        // CRITICAL: Set user intent when resuming playback
+        userWantsToPlay = true
+        
         stopRadioPlayback()
         
         guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else {
@@ -979,6 +1086,88 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Use centralized audio session management - only deactivate if no other audio is playing
         if !isPlaying && PlaybackManager.shared.activePlayer == .podcast {
             PlaybackManager.shared.deactivateAudioSession()
+        }
+    }
+    
+    /// Stops podcast and clears user intent (like RadioPlayer stop functionality)
+    func stop() {
+        guard let player = player else { return }
+        
+        // Save progress before stopping if we have a current episode
+        if let currentEpisode = currentEpisode {
+            let progress = duration > 0 ? currentTime / duration : 0
+            
+            // Save progress when stopping
+            saveProgressIfNeeded()
+            saveProgressToCloudKit(for: currentEpisode, progress: progress, reason: "user stopped episode")
+            
+            // Update StateManager
+            let actualCurrentTime = player.currentTime().seconds
+            stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
+        }
+        
+        player.pause()
+        isPlaying = false
+        userWantsToPlay = false  // Clear user intent
+        
+        // Clear current episode and feed
+        self.currentEpisode = nil
+        self.currentFeed = nil
+        
+        updateNowPlayingInfo()
+        print("⏹️ Podcast stopped and user intent cleared")
+    }
+    
+    /// Handles audio interruptions to prevent CarPlay disconnection from pausing podcast
+    @objc private func handleAudioInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+        
+        switch type {
+        case .began:
+            print("🔇 PodcastPlayer: Audio interruption began - checking if CarPlay related")
+            
+            // CRITICAL: Don't pause if this is a CarPlay transition and user wants to continue podcast
+            if userWantsToPlay && currentEpisode != nil {
+                print("🚗 PodcastPlayer: Resisting audio interruption - user wants podcast to continue")
+                
+                // Brief delay to let CarPlay transition complete, then aggressively resume
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self,
+                          let player = self.player,
+                          self.userWantsToPlay,
+                          self.currentEpisode != nil else { return }
+                    
+                    print("🔄 PodcastPlayer: Aggressively resuming after CarPlay interruption")
+                    
+                    // Reactivate audio session and resume playback
+                    do {
+                        try AVAudioSession.sharedInstance().setActive(true, options: [])
+                        player.play()
+                        self.isPlaying = true
+                        self.updateNowPlayingInfo()
+                        print("✅ PodcastPlayer: Successfully resumed after CarPlay interruption")
+                    } catch {
+                        print("⚠️ PodcastPlayer: Failed to resume after interruption: \(error)")
+                    }
+                }
+            }
+            
+        case .ended:
+            print("🔊 PodcastPlayer: Audio interruption ended")
+            
+            // Resume if user wants to continue and we have content
+            if userWantsToPlay && currentEpisode != nil && !isPlaying {
+                print("🔄 PodcastPlayer: Resuming podcast after interruption ended")
+                play()
+            }
+            
+        @unknown default:
+            break
         }
     }
     
