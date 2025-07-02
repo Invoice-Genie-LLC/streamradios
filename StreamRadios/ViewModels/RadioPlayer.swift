@@ -3550,7 +3550,7 @@ extension RadioPlayer {
         }
     }
     
-    /// Handles audio session route changes to detect CarPlay connection
+    /// Handles audio session route changes to detect CarPlay connection/disconnection
     @objc private func audioSessionRouteChanged(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
@@ -3560,17 +3560,61 @@ extension RadioPlayer {
         let currentRoute = session.currentRoute
         
         // Check if CarPlay is in the current route
-        let isCarPlayConnected = currentRoute.outputs.contains { output in
+        let isCarPlayCurrentlyConnected = currentRoute.outputs.contains { output in
             output.portType == .carAudio
         }
         
-        if isCarPlayConnected && isPlaying && iTunesAlbumArt == nil {
-            print("🚗 RadioPlayer: CarPlay connected during playback - triggering artwork fetch")
+        let wasCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
+        
+        // CARPLAY CONNECTION DETECTION
+        if isCarPlayCurrentlyConnected && !wasCarPlayConnected {
+            print("🚗 RadioPlayer: CarPlay CONNECTED - enhancing experience")
+            CarPlayManager.shared.isCarPlayConnected = true
             
-            if let metadata = self.metadata, !metadata.isEmpty {
-                // Use a delay to ensure CarPlay is fully initialized
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    self?.fetchCarPlayArtworkDuringPlayback(metadata: metadata)
+            if isPlaying && iTunesAlbumArt == nil {
+                if let metadata = self.metadata, !metadata.isEmpty {
+                    // Use a delay to ensure CarPlay is fully initialized
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                        self?.fetchCarPlayArtworkDuringPlayback(metadata: metadata)
+                    }
+                }
+            }
+        }
+        
+        // CARPLAY DISCONNECTION DETECTION - CRITICAL FIX
+        else if !isCarPlayCurrentlyConnected && wasCarPlayConnected {
+            print("🚗 RadioPlayer: CarPlay DISCONNECTED - ensuring seamless transition to main app")
+            CarPlayManager.shared.isCarPlayConnected = false
+            
+            // CRITICAL: Ensure seamless playback transition when CarPlay disconnects
+            if userWantsToPlay && player != nil {
+                print("🔄 CarPlay Disconnect: Ensuring seamless playback continuation in main app")
+                
+                // Ensure audio session remains active for main app playback
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    guard let self = self else { return }
+                    
+                    // Force audio session to remain active for main app
+                    do {
+                        try AVAudioSession.sharedInstance().setActive(true, options: [])
+                        print("✅ CarPlay Disconnect: Audio session kept active for main app")
+                    } catch {
+                        print("⚠️ CarPlay Disconnect: Failed to maintain audio session: \(error)")
+                    }
+                    
+                    // Ensure player continues if it was playing
+                    if self.userWantsToPlay && !self.isPlaying {
+                        print("🔄 CarPlay Disconnect: Resuming playback in main app")
+                        self.player?.play()
+                    }
+                    
+                    // Force update Now Playing info for main app
+                    self.forceUpdateNowPlayingInfo()
+                    
+                    // Update widget for main app
+                    self.updateWidget()
+                    
+                    print("✅ CarPlay Disconnect: Seamless transition to main app completed")
                 }
             }
         }
