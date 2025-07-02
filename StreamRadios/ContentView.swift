@@ -732,19 +732,21 @@ struct CompactPlayerView: View {
                 Image(systemName: "wifi.slash")
                     .font(.system(size: 8))
                     .foregroundColor(.red)
-            case .reconnecting:
+            case .buffering:
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 8))
                     .foregroundColor(.orange)
-                    .rotationEffect(.degrees(radioPlayer.isAttemptingReconnection ? 360 : 0))
+                    .rotationEffect(.degrees(360))
                     .animation(
-                        radioPlayer.isAttemptingReconnection ? 
-                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : 
-                        .default, 
-                        value: radioPlayer.isAttemptingReconnection
+                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false), 
+                        value: radioPlayer.connectionState
                     )
             case .connected:
                 EmptyView()
+            case .error:
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 8))
+                    .foregroundColor(.red)
             }
         }
     }

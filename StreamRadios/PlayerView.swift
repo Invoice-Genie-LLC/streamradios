@@ -72,7 +72,7 @@ struct PlayerView: View {
                 // Show connection state indicator when not connected
                 ReconnectingIndicatorView(
                     connectionState: radioPlayer.connectionState,
-                    isAttemptingReconnection: radioPlayer.isAttemptingReconnection
+                    isAttemptingReconnection: radioPlayer.connectionState == .buffering || radioPlayer.connectionState == .connecting
                 )
                 
                 // Bitrate information - compact and subtle

@@ -47,7 +47,7 @@ struct ReconnectingIndicatorView: View {
         switch connectionState {
         case .connected:
             return false // Don't show indicator when connected
-        case .connecting, .disconnected, .reconnecting:
+        case .connecting, .disconnected, .buffering, .error:
             return true
         }
     }
@@ -64,16 +64,17 @@ struct ReconnectingIndicatorView: View {
             case .disconnected:
                 Image(systemName: "wifi.slash")
                     .foregroundColor(.red)
-            case .reconnecting:
+            case .buffering:
                 Image(systemName: "arrow.clockwise")
                     .foregroundColor(.orange)
-                    .rotationEffect(.degrees(isAttemptingReconnection ? 360 : 0))
+                    .rotationEffect(.degrees(360))
                     .animation(
-                        isAttemptingReconnection ? 
-                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false) : 
-                        .default, 
-                        value: isAttemptingReconnection
+                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false), 
+                        value: connectionState
                     )
+            case .error:
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundColor(.red)
             }
         }
         .font(.system(size: 14, weight: .medium))
@@ -87,8 +88,10 @@ struct ReconnectingIndicatorView: View {
             return "Connecting..."
         case .disconnected:
             return "No connection"
-        case .reconnecting:
-            return "Reconnecting..."
+        case .buffering:
+            return "Buffering..."
+        case .error:
+            return "Connection error"
         }
     }
     
@@ -100,8 +103,10 @@ struct ReconnectingIndicatorView: View {
             return .orange
         case .disconnected:
             return .red
-        case .reconnecting:
+        case .buffering:
             return .orange
+        case .error:
+            return .red
         }
     }
     
@@ -111,9 +116,9 @@ struct ReconnectingIndicatorView: View {
     
     private var showLoadingIndicator: Bool {
         switch connectionState {
-        case .connecting, .reconnecting:
+        case .connecting, .buffering:
             return true
-        case .connected, .disconnected:
+        case .connected, .disconnected, .error:
             return false
         }
     }
