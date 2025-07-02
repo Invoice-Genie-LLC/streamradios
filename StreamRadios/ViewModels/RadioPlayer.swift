@@ -390,6 +390,21 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.connectionState = .connected
                         self?.wasPlayingBeforeNetworkLoss = false // Clear offline state when successfully playing
                         self?.stopReconnectionAttempts() // Stop any ongoing reconnection attempts
+                        
+                        // Start elapsed time tracking when player starts playing
+                        if self?.playbackStartTime == nil {
+                            self?.playbackStartTime = Date()
+                            self?.lastElapsedTimeUpdate = nil // Reset update timer
+                            print("⏱️ Status Observer: Started elapsed time tracking")
+                            
+                            // Immediate first elapsed time update for responsive display
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                                if self?.isPlaying == true {
+                                    self?.updateNowPlayingInfoElapsedTime()
+                                }
+                            }
+                        }
+                        
                         self?.updateNowPlayingInfo()
                         
                         print("▶️ Player is now playing - cleared offline state")
@@ -586,6 +601,19 @@ class RadioPlayer: NSObject, ObservableObject {
             // Network is available - start playback normally
             connectionState = .connecting
             player.play()
+            
+            // Start elapsed time tracking
+            playbackStartTime = Date()
+            lastElapsedTimeUpdate = nil // Reset update timer
+            print("⏱️ Play: Started elapsed time tracking")
+            
+            // Immediate first elapsed time update for responsive display
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                if self?.isPlaying == true {
+                    self?.updateNowPlayingInfoElapsedTime()
+                }
+            }
+            
             resetRetryCount()
             print("▶️ Play: Player started with network, isPlaying will be set by status observer")
         } else {
@@ -633,6 +661,14 @@ class RadioPlayer: NSObject, ObservableObject {
         player.pause()
         isPlaying = false
         connectionState = .disconnected
+        
+        // Track elapsed time when pausing
+        if let startTime = playbackStartTime {
+            pausedElapsedTime += Date().timeIntervalSince(startTime)
+            playbackStartTime = nil
+            lastElapsedTimeUpdate = nil
+            print("⏱️ Pause: Saved elapsed time: \(pausedElapsedTime) seconds")
+        }
         
         print("⏸️ User explicitly paused - cleared all reconnection state")
         
@@ -1145,6 +1181,12 @@ class RadioPlayer: NSObject, ObservableObject {
            artistName = ""
            lastMetadataSearched = ""
            
+           // Reset elapsed time tracking
+           playbackStartTime = nil
+           pausedElapsedTime = 0
+           lastElapsedTimeUpdate = nil
+           print("⏱️ Stop: Reset elapsed time tracking")
+           
            // Cancel any pending iTunes searches
            artworkSearchTimer?.invalidate()
            
@@ -1183,6 +1225,12 @@ class RadioPlayer: NSObject, ObservableObject {
         artistName = ""
         lastMetadataSearched = ""
         artworkSearchTimer?.invalidate()
+        
+        // Reset elapsed time when switching stations
+        playbackStartTime = nil
+        pausedElapsedTime = 0
+        lastElapsedTimeUpdate = nil
+        print("⏱️ PlayStation: Reset elapsed time for new station")
         
         guard let url = URL(string: station.url) else {
             print("Invalid URL for station: \(station.name)")
@@ -1355,6 +1403,14 @@ class RadioPlayer: NSObject, ObservableObject {
         nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
+        
+        // Add elapsed time for CarPlay display (only when playing)
+        // Note: Frequent updates are handled separately to avoid performance issues
+        if isPlaying {
+            let elapsedTime = getCurrentElapsedTime()
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
+            print("⏱️ Now Playing: Elapsed time set to \(String(format: "%.1f", elapsedTime)) seconds")
+        }
         
         // Add artwork if available (enhanced priority order)
         var artworkSet = false
@@ -1577,6 +1633,34 @@ class RadioPlayer: NSObject, ObservableObject {
     private var currentTrackArtwork: UIImage?
     private var currentTrackKey: String?
     private var previousStationID: String?
+    
+    // Elapsed time tracking for smooth CarPlay display
+    private var playbackStartTime: Date?
+    private var pausedElapsedTime: TimeInterval = 0
+    private var lastElapsedTimeUpdate: Date?
+    
+    // Calculate current elapsed time for radio playback
+    private func getCurrentElapsedTime() -> TimeInterval {
+        var elapsedTime = pausedElapsedTime
+        if let startTime = playbackStartTime {
+            elapsedTime += Date().timeIntervalSince(startTime)
+        }
+        return elapsedTime
+    }
+    
+    // Update only the elapsed time in Now Playing info (lightweight operation)
+    private func updateNowPlayingInfoElapsedTime() {
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        var nowPlayingInfo = nowPlayingCenter.nowPlayingInfo ?? [:]
+        
+        // Only update elapsed time if we're playing
+        if isPlaying {
+            let elapsedTime = getCurrentElapsedTime()
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
+            nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
+            print("⏱️ Updated elapsed time: \(String(format: "%.1f", elapsedTime)) seconds")
+        }
+    }
     
     private func clearPreviousStationArtwork(previousID: String) {
         guard let viewModel = viewModel else { return }
@@ -3729,12 +3813,18 @@ extension RadioPlayer {
         guard let player = self.player else { return }
         
         let timeScale = CMTimeScale(NSEC_PER_SEC)
-        let time = CMTime(seconds: 1.0, preferredTimescale: timeScale)
+        // Change observer interval to 5 seconds to match our update frequency
+        // This eliminates the performance overhead of firing every second
+        let time = CMTime(seconds: 5.0, preferredTimescale: timeScale)
         
         player.addPeriodicTimeObserver(forInterval: time, queue: .main) { [weak self] time in
-            // This can be used for any periodic updates during playback
-            // Currently just ensuring player state is maintained
             guard let self = self else { return }
+            
+            // Update elapsed time in Now Playing info (now aligned with observer interval)
+            if self.isPlaying {
+                self.updateNowPlayingInfoElapsedTime()
+                self.lastElapsedTimeUpdate = Date()
+            }
             
             // Trigger artwork fetch if we have metadata but no artwork during CarPlay
             if CarPlayManager.shared.isCarPlayConnected,

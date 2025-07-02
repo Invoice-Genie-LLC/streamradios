@@ -374,11 +374,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return
             }
             
-            // OPTIMIZE: Only update time values, avoid heavy operations
-            currentTime = max(0, player.currentTime().seconds)
-            duration = max(0.01, player.currentItem?.duration.seconds ?? 0.01)
-            currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
-            
+            // Heavy operations only (time updates are handled separately in updateCurrentTimeOnly())
             // OPTIMIZE: Only update progress every 10 seconds to minimize CPU usage
             updateProgressThrottled()
             
@@ -921,6 +917,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         updateNowPlayingInfo()
         setupTimeObserver()
         
+        // Reset heavy update timer when starting playback
+        lastHeavyUpdate = Date()
+        
         // Notify CarPlay of playback state change
         NotificationCenter.default.post(
             name: NSNotification.Name("PodcastPlaybackStateChanged"),
@@ -1109,12 +1108,43 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             player?.removeTimeObserver(existingObserver)
         }
         
-        // Optimize: Use 2s interval to drastically reduce CPU usage from 120%+ to minimal
-        // This eliminates CPU spikes while maintaining sufficient UI responsiveness
-        let interval = CMTime(seconds: 2.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        // Use 1 second interval for smooth timer display, but optimize heavy operations
+        // This provides smooth elapsed time updates while keeping CPU usage minimal
+        let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
-            // Only update playback info, let debounced method handle Now Playing updates
-            self?.updatePlaybackInfo()
+            // Lightweight update every second for smooth timer display
+            self?.updateCurrentTimeOnly()
+        }
+    }
+    
+    // Lightweight method that only updates time values without heavy operations
+    private func updateCurrentTimeOnly() {
+        guard let player = player else { return }
+        
+        // Only update the time values - no heavy operations
+        currentTime = max(0, player.currentTime().seconds)
+        
+        if let currentItem = player.currentItem {
+            let newDuration = currentItem.duration.seconds
+            if newDuration.isFinite && newDuration > 0 {
+                duration = newDuration
+            }
+        }
+        
+        // Calculate progress for display
+        currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
+        
+        // Trigger heavy operations less frequently (every 5 seconds) via separate timer
+        updatePlaybackInfoThrottled()
+    }
+    
+    // Throttled heavy operations to prevent CPU spikes
+    private var lastHeavyUpdate = Date()
+    private func updatePlaybackInfoThrottled() {
+        let now = Date()
+        if now.timeIntervalSince(lastHeavyUpdate) >= 5.0 {
+            lastHeavyUpdate = now
+            updatePlaybackInfo()
         }
     }
     
