@@ -26,6 +26,7 @@ struct RadioStationListView: View {
     @Binding var selectedSubTab: RadioSubTab
     @Binding var activeSheet: ActiveSheet?
     @Binding var isPlayerSheetPresented: Bool
+    @Binding var searchText: String
 
     @StateObject private var alertManager = AlertManager()
 
@@ -638,15 +639,10 @@ struct RadioStationListView: View {
         ZStack {
             Color.adaptiveBorder
             
-            if !station.name.isEmpty {
-                Text(String(station.name.prefix(2)).uppercased())
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.adaptivePrimaryText)
-            } else {
-                Image(systemName: "radio")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundColor(.adaptivePrimaryText)
-            }
+            // Always show radio icon instead of first 2 letters
+            Image(systemName: "radio")
+                .font(.system(size: 24, weight: .medium))
+                .foregroundColor(.adaptivePrimaryText)
         }
     }
     
@@ -660,6 +656,9 @@ struct RadioStationListView: View {
             print("⚠️ Ignoring tap because in editing mode")
             return 
         }
+        
+        // Dismiss keyboard when a station is tapped
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
         // Check if this is the exact same station that's currently playing
         let isSameStationPlaying = radioPlayer.currentStationIndex != nil &&
@@ -685,6 +684,9 @@ struct RadioStationListView: View {
     }
     
     private func handlePlayButtonTap(for station: RadioStation) {
+        // Dismiss keyboard when play button is tapped
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        
         if isStationPlaying(station) {
             radioPlayer.togglePlayPause()
         } else {
@@ -721,17 +723,29 @@ struct RadioStationListView: View {
             return []
         }
         
+        var stations: [RadioStation]
+        
         switch selectedSubTab {
         case .all:
             // All tab shows stations from the selected country only
-            return viewModel.stations.filter { $0.country == viewModel.selectedCountry }
+            stations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
         case .recent:
             // Recent tab shows recent stations from ALL countries
-            return viewModel.recentStations()
+            stations = viewModel.recentStations()
         case .favorites:
             // Favorites tab shows favorites from ALL countries
-            return viewModel.favoriteStations()
+            stations = viewModel.favoriteStations()
         }
+        
+        // Apply search filter if search text is not empty
+        if !searchText.isEmpty {
+            stations = stations.filter { station in
+                station.name.localizedCaseInsensitiveContains(searchText) ||
+                station.country.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+        
+        return stations
     }
     
     private func isCurrentStation(station: RadioStation) -> Bool {
@@ -898,12 +912,14 @@ struct RadioStationListView_Previews: PreviewProvider {
     @StateObject static var radioPlayer = RadioPlayer()
     @State static var activeSheet: ActiveSheet? = nil
     @State static var isPlayerSheetPresented = false
+    @State static var searchText = ""
     
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false),
                              selectedStationForEdit: .constant(nil), selectedTab: .constant(.radio),
                              selectedSubTab: .constant(.all), activeSheet: $activeSheet,
-                             isPlayerSheetPresented: $isPlayerSheetPresented)
+                             isPlayerSheetPresented: $isPlayerSheetPresented,
+                             searchText: $searchText)
         .environmentObject(viewModel)
         .environmentObject(radioPlayer)
         .preferredColorScheme(.dark)

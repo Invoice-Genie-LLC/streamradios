@@ -36,6 +36,8 @@ struct ContentView: View {
     @State private var showAllEpisodes = false
     @State private var scrollToEpisodeID: String?
 
+    @State private var searchText = ""
+
     init() {
         // Always start on the radio tab regardless of previous state
         let savedTab: Tab = .radio
@@ -219,6 +221,7 @@ struct ContentView: View {
                     }
                 }
                 .allowsHitTesting(true) // Allow interaction with player
+                .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
             )
             
             // Data Sync Progress Overlay
@@ -301,6 +304,9 @@ struct ContentView: View {
                         
                         // Sub-tabs: Recent, Favorites, All - moved below country selection
                         elegantTabBar
+                        
+                        // Search box for filtering stations
+                        searchBar
                     }
                     .padding(.top, topPadding)
                     .padding(.bottom, 10)
@@ -312,7 +318,8 @@ struct ContentView: View {
                                          selectedTab: $viewModel.selectedTab, 
                                          selectedSubTab: $viewModel.selectedSubTab,
                                          activeSheet: $activeSheet,
-                                         isPlayerSheetPresented: $isPlayerSheetPresented)
+                                         isPlayerSheetPresented: $isPlayerSheetPresented,
+                                         searchText: $searchText)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
                     
@@ -321,6 +328,13 @@ struct ContentView: View {
                     // No individual player needed here as GlobalPlayerView handles all cases
                 }
                 .padding(.bottom, 0)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    TapGesture().onEnded { _ in
+                        // Dismiss keyboard when tapping outside search box
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                )
                 
                 if alertManager.showCustomAlert {
                     CustomAlertContainer()
@@ -423,6 +437,38 @@ struct ContentView: View {
         .background(Color.adaptiveSectionBackground)
         .cornerRadius(10)
         .padding(.horizontal, 16)
+    }
+    
+    @ViewBuilder
+    private var searchBar: some View {
+        HStack {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .font(.system(size: 16))
+                
+                TextField("Search stations...", text: $searchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 16))
+                    .foregroundColor(.adaptivePrimaryText)
+                
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .font(.system(size: 16))
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.adaptiveSectionBackground)
+            .cornerRadius(10)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, -5)
     }
     
     @ViewBuilder
@@ -663,15 +709,10 @@ struct CompactPlayerView: View {
             ZStack {
                 Color.adaptiveBorder
                 
-                if !currentStation.name.isEmpty {
-                    Text(String(currentStation.name.prefix(2)).uppercased())
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.adaptivePrimaryText)
-                } else {
-                    Image(systemName: "radio")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(.adaptivePrimaryText)
-                }
+                // Always show radio icon instead of first 2 letters
+                Image(systemName: "radio")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.adaptivePrimaryText)
             }
         }
     }
@@ -1042,15 +1083,10 @@ struct CurrentlyPlayingView: View {
             ZStack {
                 Color.gray.opacity(0.3)
                 
-                if !currentStation.name.isEmpty {
-                                                Text(String(currentStation.name.prefix(2)).uppercased())
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundColor(.adaptivePrimaryText)
-                } else {
-                                            Image(systemName: "radio")
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundColor(.adaptivePrimaryText)
-                }
+                // Always show radio icon instead of first 2 letters
+                Image(systemName: "radio")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundColor(.adaptivePrimaryText)
             }
         }
     }

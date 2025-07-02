@@ -1132,9 +1132,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             player?.removeTimeObserver(existingObserver)
         }
         
-        // Further increase interval from 1.0s to 1.5s to reduce CPU load by 33% more
-        // This reduces the frequency of progress calculations and UI updates while maintaining good UX
-        let interval = CMTime(seconds: 1.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        // Use 0.5s interval for smooth time updates in UI while keeping other optimizations
+        // This provides smooth seconds display without major CPU overhead
+        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
             self?.updatePlaybackInfo()
             self?.updateNowPlayingInfoDebounced()
