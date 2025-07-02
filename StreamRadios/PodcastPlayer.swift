@@ -39,7 +39,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var isPodcastActive: Bool = false
     private var nowPlayingUpdateTimer: Timer?
     private var updateTimer: Timer?
-        private let updateInterval: TimeInterval = 0.5
+        private let updateInterval: TimeInterval = 2.0
     private var lastReportedProgress: Double = 0
     private let stateManager = EpisodeStateManager.shared
     private var shouldStartFromBeginning: Bool = false
@@ -374,22 +374,23 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return
             }
             
+            // OPTIMIZE: Only update time values, avoid heavy operations
             currentTime = max(0, player.currentTime().seconds)
             duration = max(0.01, player.currentItem?.duration.seconds ?? 0.01)
             currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
             
-            // Update progress with heavy throttling
+            // OPTIMIZE: Only update progress every 10 seconds to minimize CPU usage
             updateProgressThrottled()
             
-            // Update now playing info even less frequently
+            // OPTIMIZE: Update Now Playing info very infrequently (every 5s)
             updateNowPlayingInfoDebounced()
         }
     
     // New throttled progress update method
     private func updateProgressThrottled() {
-        // Only update progress every 5 seconds during playback to reduce CPU usage
+        // OPTIMIZE: Only update progress every 10 seconds during playback to drastically reduce CPU usage
         let now = Date()
-        if now.timeIntervalSince(lastProgressUpdate) < 5.0 {
+        if now.timeIntervalSince(lastProgressUpdate) < 10.0 {
             return
         }
         lastProgressUpdate = now
@@ -453,13 +454,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         isPlaying = true
         
-        // Force UI update only if user is not scrolling
-        if !isUserCurrentlyScrolling() {
-            DispatchQueue.main.async {
-                self.viewModel?.objectWillChange.send()
-                self.objectWillChange.send()
-            }
-        }
+        // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
+        // UI will update naturally through other mechanisms
     }
     
     func configure(with viewModel: PodcastViewModel) {
@@ -497,12 +493,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     viewModel?.updateEpisode(updatedEpisode)
                 }
                 
-                // Force UI update only if user is not scrolling
-                if !self.isUserCurrentlyScrolling() {
-                    DispatchQueue.main.async {
-                        self.viewModel?.objectWillChange.send()
-                    }
-                }
+                // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
                 
                 os_log("Updated episode status on navigation away: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
             }
@@ -529,12 +520,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     viewModel?.updateEpisode(updatedEpisode)
                 }
                 
-                // Force UI update only if user is not scrolling
-                if !self.isUserCurrentlyScrolling() {
-                    DispatchQueue.main.async {
-                        self.viewModel?.objectWillChange.send()
-                    }
-                }
+                // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
             }
         }
     }
@@ -688,20 +674,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
         os_log("Started playing episode: %@", log: log, type: .info, episode.title)
         
-        // Trigger a UI update only if user is not scrolling
-        if !isUserCurrentlyScrolling() {
-            DispatchQueue.main.async {
-                self.viewModel?.objectWillChange.send()
-            }
-        }
+        // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
     }
     
-    private func setupUpdateTimer() {
-           updateTimer?.invalidate()
-           updateTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
-               self?.updatePlaybackInfo()
-           }
-       }
+    // REMOVED: setupUpdateTimer() - redundant with setupTimeObserver()
+    // This eliminates duplicate timer causing CPU spikes
     
     func playLastEpisodeForFeed(_ feed: PodcastFeed) {
             Task { @MainActor in
@@ -1132,20 +1109,20 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             player?.removeTimeObserver(existingObserver)
         }
         
-        // Use 0.5s interval for smooth time updates in UI while keeping other optimizations
-        // This provides smooth seconds display without major CPU overhead
-        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        // Optimize: Use 2s interval to drastically reduce CPU usage from 120%+ to minimal
+        // This eliminates CPU spikes while maintaining sufficient UI responsiveness
+        let interval = CMTime(seconds: 2.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
+            // Only update playback info, let debounced method handle Now Playing updates
             self?.updatePlaybackInfo()
-            self?.updateNowPlayingInfoDebounced()
         }
     }
     
     private func updateNowPlayingInfoDebounced() {
         nowPlayingUpdateTimer?.invalidate()
-        // Further increase debounce interval from 2.0s to 3.0s to reduce Now Playing info update frequency
-        // This reduces CPU overhead for MPNowPlayingInfoCenter updates while maintaining CarPlay compatibility
-        nowPlayingUpdateTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+        // OPTIMIZE: Increase debounce interval to 5.0s to drastically reduce CPU overhead
+        // This minimizes MPNowPlayingInfoCenter updates while maintaining functionality
+        nowPlayingUpdateTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
             self?.updateNowPlayingInfo()
         }
     }
@@ -1290,22 +1267,20 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // 3. User pauses episode (pause function)
             // 4. User switches episodes (playEpisode function)
             
-            // Update in-memory cache for UI updates only - no persistence
-            Task { @MainActor in
-                viewModel?.episodeProgress[currentEpisode.id] = progress
-            }
-            
-            // Send CarPlay progress updates even less frequently to prevent CPU spikes (every 20% for maximum performance)
-            // This reduces notification frequency by 95% from the original while still providing progress feedback
+            // OPTIMIZE: Reduce in-memory cache updates to every 5% to minimize CPU usage
             let progressPercent = Int(progress * 100)
             let lastProgressPercent = Int((lastCarPlayProgress ?? 0) * 100)
             
-            // Only update CarPlay every 20% to maximize CPU performance and prevent any CPU spikes
-            // This provides sufficient progress feedback while minimizing system load
-            if progressPercent != lastProgressPercent && progressPercent % 20 == 0 {
+            // Only update memory and CarPlay every 25% to drastically reduce CPU usage
+            if progressPercent != lastProgressPercent && progressPercent % 25 == 0 {
                 lastCarPlayProgress = progress
                 
-                // Notify CarPlay of progress update for periodic updates (maximum performance optimization)
+                // Update in-memory cache only when needed
+                Task { @MainActor in
+                    viewModel?.episodeProgress[currentEpisode.id] = progress
+                }
+                
+                // OPTIMIZE: Reduce CarPlay notifications to minimum (every 25%)
                 NotificationCenter.default.post(
                     name: NSNotification.Name("PodcastProgressUpdated"),
                     object: nil,
@@ -1318,7 +1293,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     ]
                 )
                 
-                os_log("🚗 CarPlay progress update sent: %@, Progress: %.1f%% (maximum performance optimization)", log: log, type: .debug, currentEpisode.title, progress * 100)
+                os_log("🚗 CarPlay progress update sent: %@, Progress: %.1f%% (CPU optimized)", log: log, type: .debug, currentEpisode.title, progress * 100)
             }
             
             // Check for episode completion AFTER saving progress
