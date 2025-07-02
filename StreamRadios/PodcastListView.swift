@@ -1931,10 +1931,25 @@ struct PodcastPlayerView: View {
                                                     VStack(alignment: .leading, spacing: 12) {
                                 // Podcast description section
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text("ABOUT")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(.blue)
-                                        .tracking(1.2)
+                                    HStack {
+                                        Text("ABOUT")
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundColor(.blue)
+                                            .tracking(1.2)
+                                        
+                                        Spacer()
+                                        
+                                        // Scroll indicators - show arrows to indicate scrollable content
+                                        VStack(spacing: 2) {
+                                            Image(systemName: "chevron.up")
+                                                .font(.system(size: 8, weight: .medium))
+                                                .foregroundColor(.secondary)
+                                            Image(systemName: "chevron.down")
+                                                .font(.system(size: 8, weight: .medium))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .opacity(0.6)
+                                    }
                                     
                                     ScrollView(.vertical, showsIndicators: true) {
                                         Text(feed.descriptionText ?? "No description available")
