@@ -390,7 +390,6 @@ struct PlayerSheetView: View {
                     // Action button
                     Button(action: {
                         requestMusicAuthorization()
-                        showingConfirmationDialog = true
                     }) {
                         HStack(spacing: 12) {
                             Image(systemName: "apple.logo")
@@ -717,10 +716,10 @@ struct PlayerSheetView: View {
                 case .authorized:
                     self.showingConfirmationDialog = true
                 case .denied, .restricted:
-                    self.alertMessage = "Authorization failed. Please allow access to Apple Music in Settings."
+                    self.alertMessage = "Apple Music access is required to save songs. Please go to Settings > Privacy & Security > Apple Music and enable access for this app, then try again."
                     self.showAlert = true
                 case .notDetermined:
-                    self.alertMessage = "Please authorize access to Apple Music and try again."
+                    self.alertMessage = "Apple Music access is required to save songs. Please authorize access to Apple Music and try again."
                     self.showAlert = true
                 @unknown default:
                     self.alertMessage = "An unknown error occurred. Please try again."
@@ -827,13 +826,17 @@ struct PlayerSheetView: View {
                     
                     if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
                         Button(action: {
-                            shazamViewModel.startOrEndListening()
-                            isShazaming.toggle()
                             permissionManager.checkMicrophonePermission { granted in
-                                if granted {
-                                    print("Microphone permission granted.")
-                                } else {
-                                    print("Microphone permission denied or restricted.")
+                                DispatchQueue.main.async {
+                                    if granted {
+                                        shazamViewModel.startOrEndListening()
+                                        isShazaming.toggle()
+                                        print("Microphone permission granted.")
+                                    } else {
+                                        self.alertMessage = "Microphone access is required for Shazam. Please go to Settings > Privacy & Security > Microphone and enable access for this app, then try again."
+                                        self.showAlert = true
+                                        print("Microphone permission denied or restricted.")
+                                    }
                                 }
                             }
                         }) {
@@ -898,11 +901,12 @@ struct StationDetails: View {
                     
                     if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                         Text(metadata)
-                            .font(.headline)
+                            .font(.subheadline)
                             .fontWeight(.medium)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 16)
                     } else {
                         Text("No song information available")
@@ -1710,7 +1714,7 @@ struct EnhancedPlaylistPickerView: View {
                                     Text(songTitle)
                                         .font(.headline)
                                         .fontWeight(.semibold)
-                                        .lineLimit(1)
+                                        .lineLimit(2)
                                     Text("by \(artistName)")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
