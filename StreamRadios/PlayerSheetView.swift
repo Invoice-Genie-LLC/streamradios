@@ -93,29 +93,35 @@ struct PlayerSheetView: View {
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
-            ZStack {
+                ZStack {
                     backgroundView
                         .edgesIgnoringSafeArea(.all)
-                
+                    
                     VStack(spacing: 0) {
-                    backButton
-                            .padding(.top, geometry.safeAreaInsets.top + 10)
+                        // Back button with minimal padding
+                        backButton
+                            .padding(.top, geometry.safeAreaInsets.top + 5)
                         
-                    contentView
-                            .padding(.top, 20)
+                        // Content view in ScrollView to prevent cutoff
+                        ScrollView {
+                            contentView
+                                .padding(.top, 10)
+                                .padding(.horizontal, 16)
+                        }
+                        .scrollIndicators(.hidden)
                         
-                    Spacer()
-                        
-                    PlayerView()
-                        .environmentObject(radioPlayer)
-                        .environmentObject(viewModel)
-                        .padding(.top, 8)
-                        
-                    AirPlayButtonView()
-                        .frame(width: 50, height: 50)
-                            .padding(.bottom, geometry.safeAreaInsets.bottom + 10)
-                }
-                .navigationBarHidden(true)
+                        // Bottom controls with proper spacing
+                        VStack(spacing: 8) {
+                            PlayerView()
+                                .environmentObject(radioPlayer)
+                                .environmentObject(viewModel)
+                            
+                            AirPlayButtonView()
+                                .frame(width: 44, height: 44)
+                        }
+                        .padding(.bottom, geometry.safeAreaInsets.bottom + 8)
+                    }
+                    .navigationBarHidden(true)
                 }
             }
             .onAppear {
@@ -273,132 +279,149 @@ struct PlayerSheetView: View {
     }
     
     private var shazamContent: some View {
-        VStack(spacing: 30) {
-            // Current station info at top
-            if let currentStationIndex = radioPlayer.currentStationIndex,
-               let currentStation = viewModel.stations[safe: currentStationIndex] {
-                HStack(spacing: 12) {
-                    if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .frame(width: 40, height: 40)
-                            .cornerRadius(8)
-                    } else {
-                        Image(systemName: "radio")
-                            .resizable()
-                            .frame(width: 40, height: 40)
-                            .aspectRatio(contentMode: .fit)
-                            .foregroundColor(.secondary)
+        GeometryReader { geometry in
+            VStack {
+                Spacer()
+                
+                VStack(spacing: 20) {
+                    // Current station info at top - now centered
+                    if let currentStationIndex = radioPlayer.currentStationIndex,
+                       let currentStation = viewModel.stations[safe: currentStationIndex] {
+                        HStack(spacing: 12) {
+                            if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .frame(width: 32, height: 32)
+                                    .cornerRadius(6)
+                            } else {
+                                Image(systemName: "radio")
+                                    .resizable()
+                                    .frame(width: 32, height: 32)
+                                    .aspectRatio(contentMode: .fit)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Text(currentStation.name)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 20)
                     }
                     
-                    Text(currentStation.name)
-                        .font(.headline)
-                        .fontWeight(.medium)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
-                }
-                .padding(.top, 20)
-            }
-            
-            // Album artwork - larger and centered
-            if let url = shazamViewModel.shazamMedia.albumArtURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 280, height: 280)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
-                    default:
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                    // Shazam artwork - now properly centered
+                    if let url = shazamViewModel.shazamMedia.albumArtURL {
+                        HStack {
+                            Spacer()
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: min(geometry.size.width * 0.65, 240), height: min(geometry.size.width * 0.65, 240))
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                                default:
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: min(geometry.size.width * 0.65, 240), height: min(geometry.size.width * 0.65, 240))
+                                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                                        .overlay(
+                                            Image(systemName: "music.note")
+                                                .font(.system(size: min(geometry.size.width * 0.65, 240) * 0.25, weight: .light))
+                                                .foregroundColor(.white.opacity(0.8))
+                                        )
+                                }
+                            }
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        // Default artwork when no URL is available
+                        HStack {
+                            Spacer()
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
                                 )
-                            )
-                            .frame(width: 280, height: 280)
-                            .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
-                            .overlay(
-                                Image(systemName: "music.note")
-                                    .font(.system(size: 80, weight: .light))
-                                    .foregroundColor(.white.opacity(0.8))
-                            )
+                                .frame(width: min(geometry.size.width * 0.65, 240), height: min(geometry.size.width * 0.65, 240))
+                                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                                .overlay(
+                                    Image(systemName: "music.note")
+                                        .font(.system(size: min(geometry.size.width * 0.65, 240) * 0.25, weight: .light))
+                                        .foregroundColor(.white.opacity(0.8))
+                                )
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
                     }
-                }
-            } else {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                    
+                    // Song information - centered
+                    VStack(spacing: 6) {
+                        Text(shazamViewModel.shazamMedia.title ?? "Unknown Title")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .padding(.horizontal, 20)
+                    
+                        Text(shazamViewModel.shazamMedia.artistName ?? "Unknown Artist")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(1)
+                            .padding(.horizontal, 20)
+                    }
+                    
+                    // Action button
+                    Button(action: {
+                        requestMusicAuthorization()
+                        showingConfirmationDialog = true
+                    }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "apple.logo")
+                                .font(.title2)
+                                .fontWeight(.medium)
+                            Text("Save to Apple Music")
+                                .font(.headline)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 25)
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
                         )
-                    )
-                    .frame(width: 280, height: 280)
-                    .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 80, weight: .light))
-                            .foregroundColor(.white.opacity(0.8))
-                    )
-            }
-            
-            // Song information
-            VStack(spacing: 8) {
-                Text(shazamViewModel.shazamMedia.title ?? "Unknown Title")
-                    .font(.title2)
-                .fontWeight(.semibold)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                    .padding(.horizontal, 20)
-            
-                Text(shazamViewModel.shazamMedia.artistName ?? "Unknown Artist")
-                    .font(.title3)
-                .fontWeight(.medium)
-                    .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                    .lineLimit(1)
-                    .padding(.horizontal, 20)
-            }
-            
-            Spacer()
-            
-            // Action button - simplified to just Apple Music
-                Button(action: {
-                    requestMusicAuthorization()
-                    showingConfirmationDialog = true
-                }) {
-                HStack(spacing: 12) {
-                        Image(systemName: "apple.logo")
-                        .font(.title2)
-                        .fontWeight(.medium)
-                    Text("Save to Apple Music")
-                            .font(.headline)
-                        .fontWeight(.medium)
+                        .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                    }
+                    .padding(.top, 10)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 32)
-                .padding(.vertical, 16)
-                .background(
-                    RoundedRectangle(cornerRadius: 25)
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                )
-                .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                .frame(maxWidth: .infinity)
+                
+                Spacer()
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 30)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private func openInYouTubeMusic() {
@@ -795,51 +818,63 @@ struct PlayerSheetView: View {
     }
     
     private var stationContent: some View {
-        VStack(spacing: 40) {
-            StationDetails()
-            
-            if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
-                Button(action: {
-                    shazamViewModel.startOrEndListening()
-                    isShazaming.toggle()
-                    permissionManager.checkMicrophonePermission { granted in
-                        if granted {
-                            print("Microphone permission granted.")
-                        } else {
-                            print("Microphone permission denied or restricted.")
+        GeometryReader { geometry in
+            VStack {
+                Spacer()
+                
+                VStack(spacing: 20) {
+                    StationDetails()
+                    
+                    if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
+                        Button(action: {
+                            shazamViewModel.startOrEndListening()
+                            isShazaming.toggle()
+                            permissionManager.checkMicrophonePermission { granted in
+                                if granted {
+                                    print("Microphone permission granted.")
+                                } else {
+                                    print("Microphone permission denied or restricted.")
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "shazam.logo")
+                                    .font(.title2)
+                                    .fontWeight(.medium)
+                                Text("Tap to Shazam")
+                                    .font(.headline)
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 25)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                            )
+                            .scaleEffect(pulse ? 1.1 : 1.0)
+                            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+                            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                        }
+                        .onAppear {
+                            pulse = true
+                        }
+                        .onDisappear {
+                            pulse = false
                         }
                     }
-                    pulse.toggle()
-                }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "shazam.logo.fill")
-                            .font(.title2)
-                            .fontWeight(.medium)
-                        Text("Tap to Shazam")
-                            .font(.headline)
-                            .fontWeight(.medium)
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 25)
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                    )
-                    .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
-                    .scaleEffect(pulse ? 1.05 : 1.0)
-                    .animation(.easeInOut(duration: 0.3), value: pulse)
                 }
-                .buttonStyle(PlainButtonStyle())
+                .frame(maxWidth: .infinity)
+                
+                Spacer()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -850,31 +885,31 @@ struct StationDetails: View {
     var body: some View {
         if let currentStationIndex = radioPlayer.currentStationIndex,
            let currentStation = viewModel.stations[safe: currentStationIndex] {
-            VStack(spacing: 24) {
+            VStack(spacing: 16) {
                 StationImage(currentStation: currentStation)
                 
-                VStack(spacing: 12) {
-                Text(currentStation.name)
+                VStack(spacing: 8) {
+                    Text(currentStation.name)
                         .font(.title2)
                         .fontWeight(.semibold)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, 16)
                     
                     if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                    Text(metadata)
-                        .font(.headline)
+                        Text(metadata)
+                            .font(.headline)
                             .fontWeight(.medium)
-                        .foregroundColor(.secondary)
+                            .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
-                            .padding(.horizontal, 20)
-                } else {
+                            .padding(.horizontal, 16)
+                    } else {
                         Text("No song information available")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
-                            .padding(.horizontal, 20)
+                            .padding(.horizontal, 16)
                     }
                 }
             }
@@ -887,45 +922,70 @@ struct StationImage: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     
     var body: some View {
-        // Priority: iTunes album art > stream album art > station icon > default radio icon
-        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
-            Image(uiImage: iTunesAlbumArt)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 280, height: 280)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
-        } else if let albumArt = radioPlayer.albumArt {
-            Image(uiImage: albumArt)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 280, height: 280)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
-        } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 280, height: 280)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
-        } else {
-            RoundedRectangle(cornerRadius: 16)
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.4)]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 280, height: 280)
-                .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: 8)
-                .overlay(
-            Image(systemName: "radio")
-                        .font(.system(size: 80, weight: .light))
-                        .foregroundColor(.white.opacity(0.8))
-                )
+        GeometryReader { geometry in
+            let artworkSize = min(geometry.size.width * 0.65, 240)
+            
+            // Priority: iTunes album art > stream album art > station icon > default radio icon
+            if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+                HStack {
+                    Spacer()
+                    Image(uiImage: iTunesAlbumArt)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else if let albumArt = radioPlayer.albumArt {
+                HStack {
+                    Spacer()
+                    Image(uiImage: albumArt)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                HStack {
+                    Spacer()
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                HStack {
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.4)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: artworkSize, height: artworkSize)
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                        .overlay(
+                            Image(systemName: "radio")
+                                .font(.system(size: artworkSize * 0.25, weight: .light))
+                                .foregroundColor(.white.opacity(0.8))
+                        )
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            }
         }
+        .frame(height: min(UIScreen.main.bounds.width * 0.65, 240))
     }
 }
 
