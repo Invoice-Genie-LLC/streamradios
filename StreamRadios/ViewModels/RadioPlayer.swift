@@ -224,15 +224,22 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Monitor buffer health and adapt UI accordingly
+        // Monitor buffer health and adapt UI accordingly with improved logic
         streamQualityManager.$bufferHealth
             .removeDuplicates()
             .sink { [weak self] health in
-                if health < 0.2 {
-                    self?.connectionState = .buffering
-                } else if self?.isPlaying == true {
-                    self?.connectionState = .connected
+                guard let self = self else { return }
+                
+                // Only show buffering if buffer health is critically low AND player is actually having issues
+                // High-quality streams (like 320kbps) can have temporary buffer fluctuations that are normal
+                if health < 0.05 && (self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate || !self.isPlaying) {
+                    // Only set buffering state if player is actually waiting or not playing
+                    self.connectionState = .buffering
+                } else if self.isPlaying && self.player?.timeControlStatus == .playing {
+                    // Only set connected state if actively playing
+                    self.connectionState = .connected
                 }
+                // Ignore buffer health fluctuations when audio is playing smoothly
             }
             .store(in: &cancellables)
     }
