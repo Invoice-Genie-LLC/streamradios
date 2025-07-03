@@ -76,7 +76,7 @@ class StreamQualityManager: ObservableObject {
     
     // Buffer monitoring
     private weak var playerItem: AVPlayerItem?
-    private var bufferObserver: Timer?
+    private var bufferObserver: Any?
     private var loadedTimeRangesObserver: NSKeyValueObservation?
     
     // Quality transition smoothing
@@ -131,6 +131,61 @@ class StreamQualityManager: ObservableObject {
         return determineOptimalQuality()
     }
     
+    // Post-reconnection state management
+    private var isInPostReconnectionMode = false
+    private var postReconnectionStartTime: Date?
+    private let postReconnectionDuration: TimeInterval = 30.0 // 30 seconds of aggressive quality upgrading
+    
+    /// Reset network evaluation to re-assess conditions after reconnection
+    func resetNetworkEvaluation() {
+        print("🌐 StreamQualityManager: Resetting network evaluation after reconnection")
+        
+        // Enable post-reconnection mode for aggressive quality upgrading
+        isInPostReconnectionMode = true
+        postReconnectionStartTime = Date()
+        print("🌐 StreamQualityManager: Enabled post-reconnection mode for \(postReconnectionDuration) seconds")
+        
+        // Clear old network samples to force fresh assessment
+        networkSamples.removeAll()
+        
+        // Reset bandwidth estimator
+        bandwidthEstimator.reset()
+        
+        // Reset adaptation timing to allow immediate quality changes
+        lastAdaptationTime = .distantPast
+        
+        // Cancel any pending quality transitions
+        qualityTransitionTimer?.invalidate()
+        qualityTransitionTimer = nil
+        pendingQualityChange = nil
+        
+        // Start with optimal quality immediately
+        let optimalQuality = determineOptimalQuality()
+        print("🌐 StreamQualityManager: Post-reconnection optimal quality: \(optimalQuality.displayName)")
+        
+        // Apply optimal quality immediately without waiting
+        if let playerItem = playerItem {
+            applyQualitySettings(optimalQuality, to: playerItem, force: true) { [weak self] in
+                self?.currentQuality = optimalQuality
+                self?.qualityDisplayText = optimalQuality.displayName
+                print("🌐 StreamQualityManager: Applied post-reconnection quality: \(optimalQuality.displayName)")
+            }
+        }
+        
+        // Schedule follow-up quality checks
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.adaptQualityIfNeeded()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            self.adaptQualityIfNeeded()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+            self.adaptQualityIfNeeded()
+        }
+        
+        print("🌐 StreamQualityManager: Network evaluation reset completed")
+    }
+    
     // MARK: - Network Monitoring
     
     private func setupNetworkMonitoring() {
@@ -170,7 +225,19 @@ class StreamQualityManager: ObservableObject {
     // MARK: - Quality Adaptation
     
     private func adaptQualityIfNeeded() {
-        guard Date().timeIntervalSince(lastAdaptationTime) > adaptationThreshold else { return }
+        // Check if we should exit post-reconnection mode
+        if isInPostReconnectionMode,
+           let startTime = postReconnectionStartTime,
+           Date().timeIntervalSince(startTime) > postReconnectionDuration {
+            isInPostReconnectionMode = false
+            postReconnectionStartTime = nil
+            print("🌐 StreamQualityManager: Exited post-reconnection mode")
+        }
+        
+        // Use shorter adaptation threshold during post-reconnection mode
+        let currentAdaptationThreshold = isInPostReconnectionMode ? 1.0 : adaptationThreshold
+        
+        guard Date().timeIntervalSince(lastAdaptationTime) > currentAdaptationThreshold else { return }
         guard playerItem != nil else { return }
         
         let optimalQuality = determineOptimalQuality()
@@ -218,7 +285,13 @@ class StreamQualityManager: ObservableObject {
         // Don't adapt if already at target quality
         if currentQuality == quality { return false }
         
-        // Consider buffer health for adaptation decisions
+        // During post-reconnection mode, allow aggressive quality upgrades
+        if isInPostReconnectionMode {
+            print("🌐 StreamQualityManager: Post-reconnection mode - allowing quality change from \(currentQuality.displayName) to \(quality.displayName)")
+            return true
+        }
+        
+        // Consider buffer health for adaptation decisions in normal mode
         let bufferHealthThreshold: Double = 0.3
         
         // If buffer is healthy, we can adapt more aggressively
@@ -235,8 +308,11 @@ class StreamQualityManager: ObservableObject {
         qualityTransitionTimer?.invalidate()
         pendingQualityChange = quality
         
+        // Use shorter delay during post-reconnection mode for faster quality upgrades
+        let currentTransitionDelay = isInPostReconnectionMode ? 0.5 : transitionSmoothingDelay
+        
         // Smooth transition with delay to avoid rapid changes
-        qualityTransitionTimer = Timer.scheduledTimer(withTimeInterval: transitionSmoothingDelay, repeats: false) { [weak self] _ in
+        qualityTransitionTimer = Timer.scheduledTimer(withTimeInterval: currentTransitionDelay, repeats: false) { [weak self] _ in
             self?.executeQualityTransition()
         }
     }
@@ -260,11 +336,6 @@ class StreamQualityManager: ObservableObject {
     // MARK: - Player Configuration
     
     private func setupAdaptiveStreamingProperties(for playerItem: AVPlayerItem) {
-        // Configure for streaming optimization (iOS 10.0+)
-        if #available(iOS 10.0, *) {
-            playerItem.preferredForwardBufferDuration = currentQuality.bufferDuration
-        }
-        
         // Configure for live streaming optimization
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         
@@ -307,8 +378,8 @@ class StreamQualityManager: ObservableObject {
         // Adjust buffer duration based on quality and network conditions
         playerItem.preferredForwardBufferDuration = quality.bufferDuration
         
-        // Configure maximum buffer size to prevent excessive memory usage  
-        _ = min(quality.bufferDuration * 2, 60.0)
+        // Configure maximum buffer size to prevent excessive memory usage
+        let maxBufferDuration = min(quality.bufferDuration * 2, 60.0)
         playerItem.preferredMaximumResolution = CGSize(width: 1920, height: 1080) // Audio only, but good to set
     }
     
@@ -320,19 +391,20 @@ class StreamQualityManager: ObservableObject {
             self?.updateBufferHealth(for: item)
         }
         
-        // Periodic buffer health updates using Timer
-        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // Periodic buffer health updates using Timer instead of time observer
+        bufferObserver = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.updateBufferHealth(for: playerItem)
         }
-        bufferObserver = timer
     }
     
     private func stopBufferMonitoring() {
         loadedTimeRangesObserver?.invalidate()
         loadedTimeRangesObserver = nil
         
-        bufferObserver?.invalidate()
-        bufferObserver = nil
+        if let timer = bufferObserver as? Timer {
+            timer.invalidate()
+            bufferObserver = nil
+        }
     }
     
     private func updateBufferHealth(for playerItem: AVPlayerItem) {
@@ -425,17 +497,22 @@ private class BandwidthEstimator {
     
     private func estimateBandwidthFromPath(_ path: NWPath) -> Double {
         if path.usesInterfaceType(.wifi) {
-            return path.isConstrained ? 200_000 : 500_000
+            // Modern WiFi should support much higher bitrates for audio streaming
+            return path.isConstrained ? 1_000_000 : 2_000_000 // 1-2 Mbps for WiFi
         } else if path.usesInterfaceType(.cellular) {
             if path.isConstrained {
-                return 50_000
+                return 128_000  // Constrained cellular - keep conservative
             } else if path.isExpensive {
-                return 100_000
+                return 500_000  // 4G/5G should handle 500 kbps easily
             } else {
-                return 150_000
+                return 1_000_000 // Good cellular connection - 1 Mbps
             }
         }
-        return 100_000 // Default
+        return 500_000 // Default - assume decent connection
+    }
+    
+    func reset() {
+        samples.removeAll()
     }
 }
 

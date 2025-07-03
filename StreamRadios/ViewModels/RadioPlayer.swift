@@ -48,6 +48,13 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var alarmStation: RadioStation?
     weak var podcastPlayer: PodcastPlayer?
     
+    // MARK: - Network Reconnection Properties
+    private var reachability: Reachability?
+    private var isAttemptingReconnection = false
+    private var currentReconnectionAttempt = 0
+    private let maxReconnectionAttempts = 5
+    private var reconnectionTimer: Timer?
+    
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
     // Stream quality display
@@ -73,13 +80,16 @@ class RadioPlayer: NSObject, ObservableObject {
         setupRemoteCommandCenter()
         addInterruptionObserver()
         
+        // CRITICAL: Setup network reconnection logic
+        setupReachability()
+        
         // CRITICAL: Enhanced CarPlay artwork fetching using audio session events
         setupCarPlayArtworkObservation()
         
         // Bind stream quality manager updates
         setupStreamQualityBinding()
         
-        print("✅ RadioPlayer initialized with seamless streaming and CarPlay support")
+        print("✅ RadioPlayer initialized with seamless streaming, network reconnection, and CarPlay support")
         
         DispatchQueue.main.async {
             self.podcastPlayer = PodcastPlayer.shared
@@ -87,6 +97,120 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         
         autoPlayLastStationSetup()
+    }
+    
+    // MARK: - Network Reconnection Setup
+    private func setupReachability() {
+        do {
+            reachability = try Reachability()
+            reachability?.whenReachable = { [weak self] _ in
+                print("🌐 RadioPlayer: Network reconnected - attempting to restore playback")
+                self?.handleNetworkReconnection()
+            }
+            reachability?.whenUnreachable = { [weak self] _ in
+                print("🌐 RadioPlayer: Network disconnected - updating state")
+                self?.handleNetworkDisconnection()
+            }
+            try reachability?.startNotifier()
+            print("✅ RadioPlayer: Network monitoring started")
+        } catch {
+            print("❌ RadioPlayer: Unable to start reachability notifier: \(error.localizedDescription)")
+        }
+    }
+    
+    private func handleNetworkDisconnection() {
+        print("🌐 RadioPlayer: Network disconnected while user wants to play: \(userWantsToPlay)")
+        
+        // If user wants to play but network is gone, mark for reconnection
+        if userWantsToPlay {
+            connectionState = .disconnected
+            isBuffering = false
+            print("🌐 RadioPlayer: Network lost - will attempt reconnection when network returns")
+        }
+    }
+    
+    private func handleNetworkReconnection() {
+        // Attempt reconnection if user wants to play, regardless of current isPlaying state
+        // because isPlaying might be stale when network was disconnected
+        guard userWantsToPlay else {
+            print("🌐 RadioPlayer: Network reconnected but user doesn't want to play")
+            return
+        }
+        
+        // CRITICAL: Reset StreamQualityManager to re-evaluate network conditions
+        streamQualityManager.resetNetworkEvaluation()
+        
+        print("🌐 RadioPlayer: Network reconnected and user wants to play - starting reconnection attempts")
+        isAttemptingReconnection = true
+        currentReconnectionAttempt = 0
+        attemptReconnection()
+    }
+    
+    private func attemptReconnection() {
+        guard currentReconnectionAttempt < maxReconnectionAttempts else {
+            stopReconnectionAttempts()
+            return
+        }
+        
+        currentReconnectionAttempt += 1
+        print("🌐 RadioPlayer: Attempting to reconnect (attempt \(currentReconnectionAttempt) of \(maxReconnectionAttempts))")
+        
+        // Set connecting state
+        connectionState = .connecting
+        
+        // CRITICAL: Recreate the player item entirely to get fresh network connections
+        // and reset all quality evaluations
+        if let lastStationURL = userDefaults?.url(forKey: "lastStationURL") {
+            print("🌐 RadioPlayer: Recreating player item for fresh network connection")
+            
+            // Stop existing player completely
+            player?.pause()
+            player = nil
+            
+            // Set up fresh player with reset quality management
+            setStationURL(lastStationURL)
+            
+            // Ensure stream quality is reset
+            streamQualityManager.resetNetworkEvaluation()
+            
+            // Start playback after a brief delay to let everything settle
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.player?.play()
+                print("🌐 RadioPlayer: Started fresh playback after player recreation")
+            }
+        } else {
+            // Fallback: try to restart existing player
+            player?.play()
+        }
+        
+        // Check status after a delay
+        reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
+            self?.checkReconnectionStatus()
+        }
+    }
+    
+    private func checkReconnectionStatus() {
+        if player?.timeControlStatus == .playing && isPlaying {
+            print("✅ RadioPlayer: Network reconnection successful")
+            stopReconnectionAttempts()
+            connectionState = .connected
+        } else {
+            print("⚠️ RadioPlayer: Reconnection attempt failed, trying again...")
+            attemptReconnection()
+        }
+    }
+    
+    private func stopReconnectionAttempts() {
+        reconnectionTimer?.invalidate()
+        reconnectionTimer = nil
+        isAttemptingReconnection = false
+        currentReconnectionAttempt = 0
+        
+        if player?.timeControlStatus != .playing {
+            print("❌ RadioPlayer: Failed to reconnect after \(maxReconnectionAttempts) attempts")
+            connectionState = .error
+            // Don't clear userWantsToPlay so they can try again manually
+        }
     }
 
     
@@ -628,6 +752,10 @@ class RadioPlayer: NSObject, ObservableObject {
         // Track user intent - user wants to play
         userWantsToPlay = true
         
+        // CRITICAL: Reset network evaluation when user manually plays to ensure fresh quality assessment
+        streamQualityManager.resetNetworkEvaluation()
+        print("🌐 Play: Reset network evaluation for fresh quality assessment")
+        
         // Ensure we have a player
         guard let player = player else { 
             print("❌ Play: No player available")
@@ -803,6 +931,10 @@ class RadioPlayer: NSObject, ObservableObject {
         
         let station = stations[index]
         print("🔄 Station Transition: Playing \(station.name) at index \(index)")
+        
+        // CRITICAL: Reset network evaluation for fresh quality assessment on new station
+        streamQualityManager.resetNetworkEvaluation()
+        print("🌐 Station Transition: Reset network evaluation for fresh quality assessment")
         
         // CRITICAL: Clear playing state to ensure immediate transition
         isPlaying = false
@@ -2739,7 +2871,20 @@ class RadioPlayer: NSObject, ObservableObject {
     deinit {
         artworkSearchTimer?.invalidate()
         player?.pause()
-        // Cleanup is handled by StreamQualityManager
+        
+        // Stop network monitoring
+        reachability?.stopNotifier()
+        reachability = nil
+        
+        // Stop reconnection attempts
+        reconnectionTimer?.invalidate()
+        reconnectionTimer = nil
+        
+        // Cancel all observers
+        statusCancellable?.cancel()
+        cancellables.removeAll()
+        
+        print("✅ RadioPlayer: Cleanup completed")
     }
     
     // MARK: - Now Playing Debug Helper
