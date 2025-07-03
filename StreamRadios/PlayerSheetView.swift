@@ -240,30 +240,58 @@ struct PlayerSheetView: View {
     }
     
     private var backButton: some View {
-        HStack {
-            Button(action: {
-                presentationMode.wrappedValue.dismiss()
-                if isShazaming {
-                    shazamViewModel.stopListening()
-                    isShazaming = false
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: {
+                    presentationMode.wrappedValue.dismiss()
+                    if isShazaming {
+                        shazamViewModel.stopListening()
+                        isShazaming = false
+                    }
+                }) {
+                    Text("Cancel")
+                        .foregroundColor(.blue)
+                        .font(.body)
                 }
-            }) {
-                HStack {
-                    Image(systemName: "chevron.left")
-                    Text("Back")
-                }
-                .foregroundColor(Color.primary)
+                
+                Spacer()
+                
+                Text(isShazaming ? "Shazam" : "Now Playing")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                // Empty space to balance the layout (matching Cancel button width)
+                Text("Cancel")
+                    .foregroundColor(.clear)
+                    .font(.body)
             }
-            Spacer()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                Group {
+                    if colorScheme == .light {
+                        Color(.systemGray5)
+                    } else {
+                        Color(.systemGray6)
+                    }
+                }
+            )
+            
+            // Divider only for dark theme
+            if colorScheme == .dark {
+                Divider()
+                    .background(Color(.systemGray4))
+            }
         }
-        .padding()
-        .modifier(NeumorphicShadow())
     }
     
     @ViewBuilder
     private var backgroundView: some View {
         if colorScheme == .light {
-            Color(.systemGray4)
+            Color.white
         } else {
             Color.clear
         }
