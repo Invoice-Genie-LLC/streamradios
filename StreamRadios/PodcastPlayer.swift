@@ -12,6 +12,15 @@ import os
 import Reachability
 import SwiftUI
 
+// Connection state for podcast player
+enum PodcastConnectionState {
+    case connected
+    case connecting
+    case disconnected
+    case buffering
+    case error
+}
+
 class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var currentEpisode: PodcastEpisode?
     @Published var isPlaying: Bool = false
@@ -20,6 +29,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published private(set) var duration: Double = 0.01
     @Published var currentFeed: PodcastFeed?
     @Published var currentProgress: Double = 0
+    @Published var connectionState: PodcastConnectionState = .disconnected
     static let shared = PodcastPlayer()
     weak var radioPlayer: RadioPlayer?
     var player: AVPlayer?
@@ -32,15 +42,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var reachability: Reachability?
     @Published var isAttemptingReconnection: Bool = false
     private var reconnectionTimer: Timer?
-        private let maxReconnectionAttempts = 5
-        private var currentReconnectionAttempt = 0
+    private let maxReconnectionAttempts = 5
+    private var currentReconnectionAttempt = 0
     private var remoteCommandCenter: MPRemoteCommandCenter?
     @Published var currentEpisodeIndex: Int?
     private var allEpisodesInFeed: [PodcastEpisode] = []
     @Published var isPodcastActive: Bool = false
     private var nowPlayingUpdateTimer: Timer?
     private var updateTimer: Timer?
-        private let updateInterval: TimeInterval = 2.0
+    private let updateInterval: TimeInterval = 2.0
     private var lastReportedProgress: Double = 0
     private let stateManager = EpisodeStateManager.shared
     private var shouldStartFromBeginning: Bool = false
@@ -77,14 +87,53 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private func setupReachability() {
            do {
                reachability = try Reachability()
-               reachability?.whenReachable = { [weak self] _ in
+               reachability?.whenReachable = { [weak self] reachability in
+                   os_log("🌐 PodcastPlayer: Network became reachable", log: self?.log ?? OSLog.default, type: .info)
                    self?.handleNetworkReconnection()
+               }
+               reachability?.whenUnreachable = { [weak self] _ in
+                   os_log("🌐 PodcastPlayer: Network became unreachable", log: self?.log ?? OSLog.default, type: .info)
+                   self?.handleNetworkDisconnection()
                }
                try reachability?.startNotifier()
            } catch {
                os_log("Unable to start reachability notifier: %@", log: log, type: .error, error.localizedDescription)
            }
        }
+       
+           private func handleNetworkDisconnection() {
+        os_log("🌐 PodcastPlayer: Handling network disconnection", log: log, type: .info)
+        
+        // Stop any ongoing reconnection attempts
+        stopReconnectionAttempts()
+        
+        // Pause playback if we're playing from a remote URL (not local file)
+        if isPlaying && userWantsToPlay {
+            if let currentEpisode = currentEpisode {
+                // Check if we're playing from a local file (offline) or streaming
+                let isPlayingLocalFile = currentEpisode.localFilePath != nil && !currentEpisode.localFilePath!.isEmpty
+                if !isPlayingLocalFile {
+                    os_log("🌐 PodcastPlayer: Network lost during streaming, pausing playback", log: log, type: .info)
+                    player?.pause()
+                    isPlaying = false
+                    // Keep userWantsToPlay = true so we can resume when network returns
+                    // Show connecting state to indicate we're waiting to reconnect (spinning button)
+                    connectionState = .connecting
+                } else {
+                    os_log("🌐 PodcastPlayer: Network lost but playing local file, continuing playback", log: log, type: .info)
+                    // For local files, we can continue playing even without network
+                    connectionState = .connected
+                }
+            }
+        } else if userWantsToPlay && currentEpisode != nil {
+            // User wants to play but isn't currently playing - show connecting state (spinning button)
+            os_log("🌐 PodcastPlayer: Network lost while user wants to play, showing connecting state", log: log, type: .info)
+            connectionState = .connecting
+        } else {
+            // User doesn't want to play or no episode - show disconnected state
+            connectionState = .disconnected
+        }
+    }
     
     // REMOVED: Old setupInterruptionHandling - now handled in setupCarPlayRouteChangeHandling with better CarPlay support
     
@@ -251,48 +300,82 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func handleNetworkReconnection() {
-            guard isPlaying else { return }
-            
+        // Only attempt reconnection if the user wants to play and we have an episode
+        guard userWantsToPlay, let currentEpisode = currentEpisode else {
+            os_log("Network reconnection skipped - user doesn't want to play or no current episode", log: log, type: .info)
+            connectionState = .connected
+            return
+        }
+        
+        // Check if we're playing from a remote URL (not local file)
+        let isPlayingLocalFile = currentEpisode.localFilePath != nil && !currentEpisode.localFilePath!.isEmpty
+        
+        // If we're not currently playing and not playing a local file, attempt to resume
+        if !isPlaying && !isPlayingLocalFile {
+            os_log("🌐 PodcastPlayer: Network reconnected, attempting to resume streaming playback", log: log, type: .info)
+            connectionState = .connecting
             isAttemptingReconnection = true
             currentReconnectionAttempt = 0
             attemptReconnection()
+        } else if isPlayingLocalFile {
+            os_log("🌐 PodcastPlayer: Network reconnected, local file playback continuing", log: log, type: .info)
+            connectionState = .connected
+        } else {
+            // Already playing, just update state
+            connectionState = .connected
         }
+    }
     
     private func attemptReconnection() {
-            guard currentReconnectionAttempt < maxReconnectionAttempts else {
-                stopReconnectionAttempts()
-                return
-            }
-            
-            currentReconnectionAttempt += 1
-            os_log("Attempting to reconnect (attempt %d of %d)", log: log, type: .info, currentReconnectionAttempt, maxReconnectionAttempts)
-            
-            play()
-            
-            reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
-                self?.checkPlaybackStatus()
-            }
+        guard currentReconnectionAttempt < maxReconnectionAttempts else {
+            stopReconnectionAttempts()
+            return
         }
+        
+        guard let currentEpisode = currentEpisode else {
+            os_log("No current episode available for reconnection", log: log, type: .error)
+            stopReconnectionAttempts()
+            return
+        }
+        
+        currentReconnectionAttempt += 1
+        os_log("🔄 PodcastPlayer: Attempting reconnection %d of %d for episode: %@", 
+               log: log, type: .info, currentReconnectionAttempt, maxReconnectionAttempts, currentEpisode.title)
+        
+        // Try to resume playback
+        play()
+        
+        // Check if reconnection was successful after a delay
+        reconnectionTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+            self?.checkReconnectionStatus()
+        }
+    }
     
-    private func checkPlaybackStatus() {
-            if player?.timeControlStatus == .playing {
-                stopReconnectionAttempts()
-            } else {
-                attemptReconnection()
-            }
+    private func checkReconnectionStatus() {
+        if player?.timeControlStatus == .playing && isPlaying {
+            os_log("✅ PodcastPlayer: Network reconnection successful", log: log, type: .info)
+            connectionState = .connected
+            stopReconnectionAttempts()
+        } else {
+            os_log("⚠️ PodcastPlayer: Reconnection attempt failed, trying again...", log: log, type: .info)
+            attemptReconnection()
         }
+    }
     
     private func stopReconnectionAttempts() {
-           reconnectionTimer?.invalidate()
-           reconnectionTimer = nil
-           isAttemptingReconnection = false
-           currentReconnectionAttempt = 0
-           
-           if player?.timeControlStatus != .playing {
-               os_log("Failed to reconnect after %d attempts", log: log, type: .error, maxReconnectionAttempts)
-               pause()
-           }
-       }
+        reconnectionTimer?.invalidate()
+        reconnectionTimer = nil
+        isAttemptingReconnection = false
+        currentReconnectionAttempt = 0
+        
+        if player?.timeControlStatus != .playing {
+            os_log("❌ PodcastPlayer: Failed to reconnect after %d attempts", log: log, type: .error, maxReconnectionAttempts)
+            connectionState = .error
+            // Don't clear userWantsToPlay so they can try again manually
+        } else {
+            connectionState = .connected
+        }
+    }
     
     func setupRemoteCommandCenter() {
         let commandCenter = MPRemoteCommandCenter.shared()
@@ -629,6 +712,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Reset position restoration flag for the new episode
         hasRestoredPositionForCurrentEpisode = false
         currentEpisodeIdForRestoration = nil
+        
+        // Reset network state when loading a new episode
+        resetNetworkState()
         
         // Completely stop radio playback to prevent it from getting stuck in "connecting" state
         RadioPlayer.shared.stop()
@@ -1017,6 +1103,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.play()
                isPlaying = true
         
+        // Update connection state when starting playback
+        connectionState = .connected
+        
         // Update StateManager when starting playback
         stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true)
         stateManager.startPlaying(episodeId: currentEpisode.id)
@@ -1026,6 +1115,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Reset heavy update timer when starting playback
         lastHeavyUpdate = Date()
+        
+        // Reset network state on manual play (like radio player)
+        if !isAttemptingReconnection {
+            resetNetworkState()
+        }
         
         // Notify CarPlay of playback state change
         NotificationCenter.default.post(
@@ -1041,12 +1135,40 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // objectWillChange.send()
     }
     
+    /// Reset network state to prepare for fresh connection assessment
+    private func resetNetworkState() {
+        os_log("🌐 PodcastPlayer: Resetting network state for fresh connection", log: log, type: .info)
+        
+        // Clear any pending reconnection attempts
+        stopReconnectionAttempts()
+        
+        // Reset connection state based on current network availability
+        if let reachability = reachability {
+            connectionState = reachability.connection != .unavailable ? .connected : .disconnected
+        } else {
+            connectionState = .connected
+        }
+        
+        // Reset reachability state if needed
+        if let reachability = reachability {
+            do {
+                try reachability.startNotifier()
+                os_log("🌐 PodcastPlayer: Reachability monitoring restarted", log: log, type: .info)
+            } catch {
+                os_log("🌐 PodcastPlayer: Failed to restart reachability monitoring: %@", log: log, type: .error, error.localizedDescription)
+            }
+        }
+    }
+    
     
     func pause() {
         guard let player = player, let currentEpisode = currentEpisode else { return }
         
         player.pause()
         isPlaying = false
+        
+        // Connection state should reflect network availability, not playback state
+        // Don't change connection state when pausing
         
         // Calculate current progress
         let progress = duration > 0 ? currentTime / duration : 0
@@ -1110,6 +1232,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.pause()
         isPlaying = false
         userWantsToPlay = false  // Clear user intent
+        
+        // Connection state should reflect network availability, not playback state
+        // Don't change connection state when stopping
         
         // Clear current episode and feed
         self.currentEpisode = nil
@@ -1703,6 +1828,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
             os_log("Saved maximum progress on deinit for episode: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, maxProgress)
         }
+        
+        // Clean up network reconnection resources
+        stopReconnectionAttempts()
+        
+        // Stop reachability monitoring
+        reachability?.stopNotifier()
         
         playerItemObserver?.invalidate()
         updateTimer?.invalidate()

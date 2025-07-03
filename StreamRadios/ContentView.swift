@@ -233,10 +233,16 @@ struct ContentView: View {
     
     /// Determines if global player should be shown
     /// Shows global player when user intends to use audio:
-    /// - Podcast is playing, OR
+    /// - User wants to play podcast (regardless of network connectivity), OR
+    /// - Podcast is actively playing, OR
     /// - User wants to play radio (regardless of network connectivity)
     private var shouldShowGlobalPlayer: Bool {
-        // Show if podcast is playing
+        // Show if user wants to play podcast (regardless of network status or current playing state)
+        if podcastPlayer.userWantsToPlay && podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil {
+            return true
+        }
+        
+        // Show if podcast is actively playing
         if podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil {
             return true
         }
@@ -869,28 +875,38 @@ struct UnifiedPodcastPlayerView: View {
                                 .fill(Color.blue)
                                 .frame(width: 34, height: 34)
                             
-                            Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
+                            if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                // Show spinning indicator when reconnecting or buffering
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
                     
-                    // Skip forward 30s - smaller
-                    Button(action: podcastPlayer.skipForward) {
-                        Image(systemName: "goforward.30")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white)
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                                    // Skip forward 30s - smaller
+                Button(action: podcastPlayer.skipForward) {
+                    Image(systemName: "goforward.30")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 30, height: 30)
                 }
-                
-                // Time elapsed/total display
-                Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.adaptiveSecondaryText)
+                .buttonStyle(PlainButtonStyle())
             }
+            
+            // Connection status indicator for podcast player
+            podcastConnectionStatusView
+            
+            // Time elapsed/total display
+            Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.adaptiveSecondaryText)
+        }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -960,6 +976,50 @@ struct UnifiedPodcastPlayerView: View {
         let seconds = Int(time) % 60
         
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+    
+    @ViewBuilder
+    private var podcastConnectionStatusView: some View {
+        HStack(spacing: 2) {
+            switch podcastPlayer.connectionState {
+            case .connecting:
+                ProgressView()
+                    .scaleEffect(0.4)
+                    .tint(.orange)
+                Text("•")
+                    .foregroundColor(.orange)
+                    .font(.system(size: 6))
+            case .disconnected:
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 6))
+                    .foregroundColor(.red)
+                Text("Offline")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundColor(.red)
+            case .buffering:
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 6))
+                    .foregroundColor(.orange)
+                    .rotationEffect(.degrees(360))
+                    .animation(
+                        Animation.linear(duration: 1.0).repeatForever(autoreverses: false), 
+                        value: podcastPlayer.connectionState
+                    )
+                Text("Buffering")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundColor(.orange)
+            case .connected:
+                EmptyView()
+            case .error:
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 6))
+                    .foregroundColor(.red)
+                Text("Error")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundColor(.red)
+            }
+        }
+        .frame(height: 12)
     }
 }
 
