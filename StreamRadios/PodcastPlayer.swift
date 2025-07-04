@@ -25,6 +25,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var currentEpisode: PodcastEpisode?
     @Published var isPlaying: Bool = false
     @Published var userWantsToPlay: Bool = false  // CRITICAL: Persistent user intent flag like RadioPlayer
+    @Published var loadingEpisodeId: String? = nil  // Track which episode is currently loading
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0.01
     @Published var currentFeed: PodcastFeed?
@@ -588,6 +589,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func rewindAndPlay(episode: PodcastEpisode) {
+        // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps rewind and play
+        loadingEpisodeId = episode.id
+        
         // Find the correct feed for this episode
         Task { @MainActor in
             guard let feed = viewModel?.podcastFeeds.first(where: { $0.id == episode.feedId }) else {
@@ -706,6 +710,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+        // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps play
+        loadingEpisodeId = episode.id
+        
         // CRITICAL: Set user intent to play podcast (like RadioPlayer)
         userWantsToPlay = true
         
@@ -1103,6 +1110,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.play()
                isPlaying = true
         
+        // Clear loading state when playback successfully starts
+        loadingEpisodeId = nil
+        
         // Update connection state when starting playback
         connectionState = .connected
         
@@ -1166,6 +1176,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         player.pause()
         isPlaying = false
+        
+        // Clear loading state when pausing
+        loadingEpisodeId = nil
         
         // Connection state should reflect network availability, not playback state
         // Don't change connection state when pausing
@@ -1298,7 +1311,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func togglePlayPause() {
         if isPlaying {
-            pause()  // Saves progress when pausing
+            stop()  // Stops player and removes from UI when pausing
         } else {
             stopRadioPlayback()
             play()

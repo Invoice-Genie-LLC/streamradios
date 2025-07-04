@@ -648,6 +648,7 @@ struct PodcastRowView: View {
     
     private let iconSize: CGFloat = 88 // Adjusted to match 4 lines of text plus some padding
     private let arrowSize: CGFloat = 20 // New constant for arrow size
+    private let buttonSize: CGFloat = 20 // Size for play/loading buttons
     
     // Computed property to check if there are episodes in progress for this feed
     private var hasInProgressEpisodes: Bool {
@@ -727,8 +728,22 @@ struct PodcastRowView: View {
                                 playLastPlayedEpisode()
                             }) {
                                 HStack {
-                                    Image(systemName: "play.circle.fill")
-                                        .foregroundColor(.green)
+                                    Group {
+                                        if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id],
+                                           podcastPlayer.loadingEpisodeId == lastPlayedEpisodeId && !isPlaying {
+                                            // Show spinning loading state
+                                            Image(systemName: "arrow.2.circlepath.circle.fill")
+                                                .resizable()
+                                                .frame(width: buttonSize, height: buttonSize)
+                                                .foregroundColor(.blue)
+                                                .rotationEffect(.degrees(360))
+                                                .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
+                                        } else {
+                                            // Regular play button
+                                            Image(systemName: "play.circle.fill")
+                                                .foregroundColor(.green)
+                                        }
+                                    }
                                     Text(buttonText)
                                         .font(.footnote)
                                         .foregroundColor(.green)
@@ -789,6 +804,8 @@ struct PodcastRowView: View {
         if let currentEpisode = podcastPlayer.currentEpisode,
            currentEpisode.feedId == feed.id,
            !podcastPlayer.isPlaying {
+            // IMMEDIATE USER FEEDBACK: Set loading state for current episode
+            podcastPlayer.loadingEpisodeId = currentEpisode.id
             podcastPlayer.togglePlayPause()
             return
         }
@@ -831,6 +848,8 @@ struct PodcastRowView: View {
             print("🔍 Looking for last played episode ID: \(lastPlayedEpisodeId)")
             if let lastPlayedEpisode = feedEpisodes.first(where: { $0.id == lastPlayedEpisodeId }) {
                 print("🎯 Playing last played episode: \(lastPlayedEpisode.title)")
+                // IMMEDIATE USER FEEDBACK: Set loading state for last played episode
+                podcastPlayer.loadingEpisodeId = lastPlayedEpisode.id
                 podcastPlayer.playEpisode(lastPlayedEpisode, feed: feed)
                 return
             } else {
@@ -855,6 +874,8 @@ struct PodcastRowView: View {
             }
             if let mostProgressedEpisode = sortedByProgress.first {
                 print("🎯 Playing most progressed episode: \(mostProgressedEpisode.title) (progress: \(mostProgressedEpisode.state.progress))")
+                // IMMEDIATE USER FEEDBACK: Set loading state for most progressed episode
+                podcastPlayer.loadingEpisodeId = mostProgressedEpisode.id
                 podcastPlayer.playEpisode(mostProgressedEpisode, feed: feed)
                 return
             }
@@ -864,6 +885,8 @@ struct PodcastRowView: View {
         // Play the most recent episode (newest by publication date)
         if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
             print("🎯 Playing latest episode: \(latestEpisode.title)")
+            // IMMEDIATE USER FEEDBACK: Set loading state for latest episode
+            podcastPlayer.loadingEpisodeId = latestEpisode.id
             podcastPlayer.playEpisode(latestEpisode, feed: feed)
             return
         }
@@ -998,10 +1021,22 @@ struct EpisodeRowView: View {
                         onPlay()
                     }
                 }) {
-                    Image(systemName: episode.state.isPlayed || progress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
-                        .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
-                        .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
+                    Group {
+                        if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
+                            // Show spinning loading state
+                            Image(systemName: "arrow.2.circlepath")
+                                .font(.system(size: 28))
+                                .foregroundColor(.blue)
+                                .rotationEffect(.degrees(360))
+                                .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
+                        } else {
+                            // Regular play/pause/replay button
+                            Image(systemName: episode.state.isPlayed || progress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
+                                .resizable()
+                                .frame(width: buttonSize, height: buttonSize)
+                                .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
+                        }
+                    }
                 }
                 .frame(width: buttonSize, height: buttonSize)
                 
@@ -1556,11 +1591,23 @@ struct OptimizedEpisodeRowView: View, Equatable {
     
     private var episodeContent: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Play button - simplified
+            // Play button - simplified with loading state
             Button(action: isPlaying ? onStop : onPlay) {
-                Image(systemName: cachedPlayButtonIcon)
-                    .font(.system(size: 28))
-                    .foregroundColor(isPlaying ? .blue : EpisodeStateManager.shared.getState(for: episode.id).buttonColor)
+                Group {
+                    if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
+                        // Show spinning loading state
+                        Image(systemName: "arrow.2.circlepath")
+                            .font(.system(size: 28))
+                            .foregroundColor(.blue)
+                            .rotationEffect(.degrees(360))
+                            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
+                    } else {
+                        // Regular play/pause button
+                        Image(systemName: cachedPlayButtonIcon)
+                            .font(.system(size: 28))
+                            .foregroundColor(isPlaying ? .blue : EpisodeStateManager.shared.getState(for: episode.id).buttonColor)
+                    }
+                }
             }
             .frame(width: 40, height: 40)
             
@@ -2447,6 +2494,9 @@ struct PodcastPlayerView: View {
 
     
     private func playEpisode(_ episode: PodcastEpisode) {
+        // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps play
+        podcastPlayer.loadingEpisodeId = episode.id
+        
         if podcastPlayer.currentEpisode?.id == episode.id {
             // Check the specific episode's progress, not the current player's progress
             let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
