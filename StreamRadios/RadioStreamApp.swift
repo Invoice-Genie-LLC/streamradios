@@ -122,7 +122,7 @@ func updateWidget() {
     
     let currentStation = viewModel.stations[currentStationIndex]
     let metadata = radioPlayer.metadata ?? "No metadata"
-    
+      
     let sharedDefaults = UserDefaults(suiteName: "group.streamradios")
     sharedDefaults?.set(currentStation.name, forKey: "stationName")
     sharedDefaults?.set(currentStation.iconData, forKey: "stationIcon")

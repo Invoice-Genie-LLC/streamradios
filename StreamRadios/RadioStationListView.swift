@@ -36,6 +36,9 @@ struct RadioStationListView: View {
     @State private var showDeleteAlert = false
     @State private var stationToDelete: RadioStation?
     
+    // Track tapped station for immediate focus
+    @State private var tappedStationId: String?
+    
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
@@ -230,12 +233,16 @@ struct RadioStationListView: View {
                 )
                 .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
                     if !isEditing {
+                        // Only scroll when station index changes - indicates new station selection
                         scrollToCurrentStation(proxy: proxy)
                     }
                 }
                 .onReceive(radioPlayer.$isPlaying) { isPlaying in
-                    if isPlaying && !isEditing {
-                        scrollToCurrentStation(proxy: proxy)
+                    if !isEditing {
+                        // Only scroll when pausing (not when starting to play to avoid interference)
+                        if !isPlaying {
+                            scrollToCurrentStation(proxy: proxy)
+                        }
                     }
                 }
                 .onChange(of: selectedTab) { oldTab, newTab in
@@ -255,6 +262,27 @@ struct RadioStationListView: View {
                             if !isEditing {
                                 scrollToCurrentStation(proxy: proxy)
                             }
+                        }
+                    }
+                }
+                .onChange(of: tappedStationId) { oldId, newId in
+                    // Handle immediate focus on tapped station
+                    if let stationId = newId, !isEditing {
+                        // Check if the tapped station exists in the current filtered list
+                        if filteredStations.contains(where: { $0.id == stationId }) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(stationId, anchor: .center)
+                            }
+                            
+                            // Find station name for logging
+                            if let station = viewModel.stations.first(where: { $0.id == stationId }) {
+                                print("📱 Immediately scrolled to tapped station: \(station.name) in \(selectedSubTab.title) tab")
+                            }
+                        }
+                        
+                        // Clear the tapped station ID after handling with extended delay to prevent interference
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            tappedStationId = nil
                         }
                     }
                 }
@@ -696,6 +724,9 @@ struct RadioStationListView: View {
                 print("🔍 Found station at index: \(index)")
                 viewModel.updateLastPlayed(for: viewModel.stations[index])
                 radioPlayer.playStation(at: index, from: viewModel.stations)
+                
+                // Trigger immediate focus on the tapped station
+                tappedStationId = station.id
             } else {
                 print("❌ Station not found in viewModel.stations")
             }
@@ -820,17 +851,49 @@ struct RadioStationListView: View {
     }
     
     private func scrollToCurrentStation(proxy: ScrollViewProxy) {
-        guard let currentIndex = radioPlayer.currentStationIndex,
-              currentIndex < viewModel.stations.count else { return }
+        // Don't interfere with immediate focus on tapped stations
+        if tappedStationId != nil {
+            print("📱 Skipping scroll - tapped station focus is active")
+            return
+        }
         
-        let currentStationId = viewModel.stations[currentIndex].id
-        
-        // Check if the current station exists in the filtered list for the current tab
-        if filteredStations.contains(where: { $0.id == currentStationId }) {
-            withAnimation(.easeInOut(duration: 0.5)) {
-                proxy.scrollTo(currentStationId, anchor: .center)
+        // If there's a currently playing station, try to scroll to it
+        if let currentIndex = radioPlayer.currentStationIndex,
+           currentIndex < viewModel.stations.count {
+            
+            let currentStationId = viewModel.stations[currentIndex].id
+            let currentStationName = viewModel.stations[currentIndex].name
+            
+            // Check if the current station exists in the filtered list for the current tab
+            if filteredStations.contains(where: { $0.id == currentStationId }) {
+                // Only scroll to station if it's playing - maintain focus on playing station
+                if radioPlayer.isPlaying {
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        proxy.scrollTo(currentStationId, anchor: .center)
+                    }
+                    print("📱 Scrolled to currently playing station: \(currentStationName) in \(selectedSubTab.title) tab")
+                    return
+                } else {
+                    // Station is paused - scroll to top
+                    if let firstStation = filteredStations.first {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            proxy.scrollTo(firstStation.id, anchor: .top)
+                        }
+                        print("📱 Scrolled to top of \(selectedSubTab.title) tab - station paused")
+                    }
+                    return
+                }
+            } else {
+                print("📱 Currently playing station \(currentStationName) not available in \(selectedSubTab.title) tab")
             }
-            print("📱 Scrolled to current playing station: \(viewModel.stations[currentIndex].name) in \(selectedSubTab.title) tab")
+        }
+        
+        // No current station - scroll to top
+        if let firstStation = filteredStations.first {
+            withAnimation(.easeInOut(duration: 0.5)) {
+                proxy.scrollTo(firstStation.id, anchor: .top)
+            }
+            print("📱 Scrolled to top of \(selectedSubTab.title) tab - no current station")
         }
     }
 
