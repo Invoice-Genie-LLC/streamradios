@@ -147,6 +147,16 @@ struct RadioStationListView: View {
                 Text("Are you sure you want to delete \"\(station.name)\"? This action cannot be undone.")
             }
         }
+        .onChange(of: showFavoriteError) { oldValue, newValue in
+            if newValue == true {
+                // Auto-dismiss the error after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        showFavoriteError = false
+                    }
+                }
+            }
+        }
     }
     
     private var emptyStateView: some View {
@@ -275,7 +285,7 @@ struct RadioStationListView: View {
     private func modernStationRow(for station: RadioStation) -> some View {
         VStack(spacing: 0) {
             // Show inline error above currently playing station if favorite toggle was attempted
-            if showFavoriteError && isStationPlaying(station) && radioPlayer.isPlaying {
+            if showFavoriteError && viewModel.isStationCurrentlyPlaying(station) {
                 errorBanner
             }
             
@@ -325,13 +335,7 @@ struct RadioStationListView: View {
                 }
             }
         }
-        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
-            if showFavoriteError {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    showFavoriteError = false
-                }
-            }
-        }
+
     }
     
     @ViewBuilder
@@ -340,7 +344,7 @@ struct RadioStationListView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.orange)
                 .font(.footnote)
-            Text("Cannot favorite while playing")
+            Text("Cannot favorite while actively playing")
                 .font(.caption)
                 .foregroundColor(.orange)
             Spacer()
@@ -713,10 +717,10 @@ struct RadioStationListView: View {
     }
     
     private func handleFavoriteButtonTap(for station: RadioStation) {
-        print("🔄 Favorite button tapped for: \(station.name), isPlaying: \(isStationPlaying(station))")
+        print("🔄 Favorite button tapped for: \(station.name), isCurrentlyPlaying: \(viewModel.isStationCurrentlyPlaying(station))")
         
-        if isStationPlaying(station) && radioPlayer.isPlaying {
-            print("⚠️ Station is playing, showing error")
+        if viewModel.isStationCurrentlyPlaying(station) {
+            print("⚠️ Station is actively playing, showing error")
             withAnimation(.easeIn(duration: 0.3)) {
                 showFavoriteError = true
             }

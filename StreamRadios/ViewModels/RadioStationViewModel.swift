@@ -648,8 +648,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
         return true
     }
     
+    func isStationCurrentlyPlaying(_ station: RadioStation) -> Bool {
+        guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
+              currentStationIndex < stations.count,
+              stations[currentStationIndex].id == station.id else {
+            return false
+        }
+        return RadioPlayer.shared.isPlaying
+    }
+    
     func toggleFavorite(for station: RadioStation) {
-        if let index = stations.firstIndex(of: station), !isStationPlaying(stations[index]) {
+        if let index = stations.firstIndex(of: station), !isStationCurrentlyPlaying(stations[index]) {
             var updatedStation = stations[index]
             updatedStation.isFavorite.toggle()
             
