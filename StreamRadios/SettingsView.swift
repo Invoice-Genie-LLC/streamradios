@@ -61,15 +61,16 @@ struct SettingsView: View {
         NavigationView {
             VStack(spacing: 0) {
                 ScrollView {
-                                         LazyVStack(spacing: 24) {
-                         modernPlaybackSettings
-                         modernDisplaySettings
-                         modernAlarmSettings
-                         modernDataManagementLink
+                                                             LazyVStack(spacing: 24) {
+                        modernPlaybackSettings
+                        modernDisplaySettings
+                        modernAlarmSettings
+                        modernDataManagementLink
+                        modernAboutSettings
 #if DEBUG
-                         modernDebugSettings
+                        modernDebugSettings
 #endif
-                     }
+                    }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
                     .padding(.bottom, 80)
@@ -241,6 +242,43 @@ struct SettingsView: View {
                     }
                     
                     Text("Import/export stations and manage stored data")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+    }
+    
+    @ViewBuilder
+    private var modernAboutSettings: some View {
+        ModernSettingsCard(
+            title: "",
+            icon: ""
+        ) {
+            NavigationLink(destination: AboutView()) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.blue)
+                            .frame(width: 20)
+                        
+                        Text("About StreamRadios")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(colorScheme == .dark ? .white : .primary)
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Text("Terms, privacy policy, and app information")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
