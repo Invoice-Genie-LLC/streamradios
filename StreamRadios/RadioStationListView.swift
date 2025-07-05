@@ -246,9 +246,14 @@ struct RadioStationListView: View {
                 .onChange(of: selectedTab) { oldTab, newTab in
                     // Handle tab changes - scroll to current station if switching to radio tab
                     if newTab == .radio && !isEditing {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            if !isEditing {
-                                scrollToCurrentStation(proxy: proxy, isOnLoadOrTabSwitch: true)
+                        // Use a more robust approach to ensure the view is updated before scrolling
+                        DispatchQueue.main.async {
+                            // First dispatch ensures the view updates with the new tab
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                // Second dispatch with shorter delay to ensure filteredStations is computed
+                                if !isEditing {
+                                    self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
+                                }
                             }
                         }
                     }
@@ -256,9 +261,14 @@ struct RadioStationListView: View {
                 .onChange(of: selectedSubTab) { oldSubTab, newSubTab in
                     // Handle sub-tab changes - scroll to current station if it exists in new tab
                     if !isEditing {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            if !isEditing {
-                                scrollToCurrentStation(proxy: proxy, isOnLoadOrTabSwitch: true)
+                        // Use a more robust approach to ensure the view is updated before scrolling
+                        DispatchQueue.main.async {
+                            // First dispatch ensures the view updates with the new tab
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                // Second dispatch with shorter delay to ensure filteredStations is computed
+                                if !isEditing {
+                                    self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
+                                }
                             }
                         }
                     }
@@ -287,8 +297,15 @@ struct RadioStationListView: View {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     // Scroll to playing station when app comes to foreground
                     if !isEditing {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            scrollToCurrentStation(proxy: proxy, isOnLoadOrTabSwitch: true)
+                        // Use a more robust approach to ensure the view is updated before scrolling
+                        DispatchQueue.main.async {
+                            // First dispatch ensures the view updates
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                // Second dispatch with shorter delay to ensure filteredStations is computed
+                                if !isEditing {
+                                    self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
+                                }
+                            }
                         }
                     }
                 }
@@ -924,7 +941,59 @@ struct RadioStationListView: View {
             }
         }
     }
-
+    
+    private func scrollToCurrentStationWithRetry(proxy: ScrollViewProxy, isOnLoadOrTabSwitch: Bool = false, retryCount: Int, maxRetries: Int = 3) {
+        // Don't interfere with immediate focus on tapped stations
+        if tappedStationId != nil {
+            print("📱 Skipping scroll - tapped station focus is active")
+            return
+        }
+        
+        // Handle different tab behaviors when a station is playing
+        if radioPlayer.isPlaying {
+            if let currentIndex = radioPlayer.currentStationIndex,
+               currentIndex < viewModel.stations.count {
+                
+                let currentStationId = viewModel.stations[currentIndex].id
+                let currentStationName = viewModel.stations[currentIndex].name
+                
+                // Check if the station exists in the current filtered stations
+                if filteredStations.contains(where: { $0.id == currentStationId }) {
+                    // Station found - scroll to it
+                    withAnimation(.easeInOut(duration: 0.5)) {
+                        proxy.scrollTo(currentStationId, anchor: .center)
+                    }
+                    print("📱 [TAB SWITCH] Scrolled to currently playing station: \(currentStationName) in \(selectedSubTab.title) tab")
+                } else {
+                    // Station not found in current tab
+                    if retryCount < maxRetries {
+                        // Retry after a short delay to allow the view to update
+                        print("📱 [TAB SWITCH] Station \(currentStationName) not found in \(selectedSubTab.title) tab, retrying... (\(retryCount + 1)/\(maxRetries))")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: isOnLoadOrTabSwitch, retryCount: retryCount + 1, maxRetries: maxRetries)
+                        }
+                    } else {
+                        // Max retries reached - station is not in this tab
+                        print("📱 [TAB SWITCH] Playing station \(currentStationName) not available in \(selectedSubTab.title) tab after \(maxRetries) retries")
+                        
+                        // For favorites tab, this is expected if the station isn't favorited
+                        if selectedSubTab == .favorites {
+                            print("📱 [TAB SWITCH] This is expected for non-favorited stations in Favorites tab")
+                        }
+                    }
+                }
+                return
+            }
+        }
+        
+        // Scroll to top when station is paused or no station is selected
+        if let firstStation = filteredStations.first {
+            withAnimation(.easeInOut(duration: 0.5)) {
+                proxy.scrollTo(firstStation.id, anchor: .top)
+            }
+            print("📱 [TAB SWITCH] Scrolled to top of \(selectedSubTab.title) tab - no playing station")
+        }
+    }
     
     private func cleanup() {
         NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
