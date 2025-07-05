@@ -742,8 +742,9 @@ struct RadioStationListView: View {
         
         switch selectedSubTab {
         case .all:
-            // All tab shows stations from the selected country only
+            // All tab shows stations from the selected country only, sorted by order
             stations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
+                .sorted { $0.order < $1.order }
         case .recent:
             // Recent tab shows recent stations from ALL countries
             stations = viewModel.recentStations()
@@ -840,29 +841,18 @@ struct RadioStationListView: View {
         // Handle different subtab scenarios
         switch selectedSubTab {
         case .all:
-            // Get the current filtered stations (all stations for this country)
-            let countryStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
-            var reorderedStations = countryStations
-            reorderedStations.move(fromOffsets: source, toOffset: destination)
+            // Get the current filtered stations (all stations for this country) sorted by order
+            var countryStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
+                .sorted { $0.order < $1.order }
             
-            // Update the main stations array by replacing all stations for this country
-            // First, remove all existing stations for this country
-            viewModel.stations.removeAll { $0.country == viewModel.selectedCountry }
+            // Perform the move operation
+            countryStations.move(fromOffsets: source, toOffset: destination)
             
-            // Then add the reordered stations back in the correct positions
-            for (_, station) in reorderedStations.enumerated() {
-                viewModel.stations.append(station)
-            }
-            
-            // Sort the full array to maintain order consistency
-            viewModel.stations.sort { first, second in
-                if first.country != second.country {
-                    return first.country < second.country
+            // Update the order property for each station in the reordered country list
+            for (index, station) in countryStations.enumerated() {
+                if let stationIndex = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
+                    viewModel.stations[stationIndex].order = index
                 }
-                // Within the same country, maintain the order we just set
-                let firstIndex = reorderedStations.firstIndex { $0.id == first.id } ?? 0
-                let secondIndex = reorderedStations.firstIndex { $0.id == second.id } ?? 0
-                return firstIndex < secondIndex
             }
             
         case .favorites:

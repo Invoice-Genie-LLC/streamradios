@@ -16,6 +16,7 @@ struct RadioStation: Identifiable, Codable, Equatable {
     var isFavorite: Bool = false
     var favoritedAt: Date? // Timestamp when station was marked as favorite
     var favoriteOrder: Int? // Custom order for favorites list
+    var order: Int = 0 // Order for stations in the All tab
     var lastPlayed: Date?
     var isRecent: Bool? = false
     
@@ -27,6 +28,7 @@ struct RadioStation: Identifiable, Codable, Equatable {
         case isFavorite
         case favoritedAt
         case favoriteOrder
+        case order
         case iconData
         case iTunesArtworkData
         case lastPlayed

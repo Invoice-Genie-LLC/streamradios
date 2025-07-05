@@ -172,6 +172,8 @@ extension CoreDataStack {
                         } else {
                             existingStation.favoriteOrder = -1  // Use -1 to represent nil
                         }
+                        existingStation.order = Int16(station.order)
+                        existingStation.lastPlayed = station.lastPlayed
                     } else {
                         // Insert new station
                         let newStation = CDStation(context: context)
@@ -187,6 +189,8 @@ extension CoreDataStack {
                         } else {
                             newStation.favoriteOrder = -1  // Use -1 to represent nil
                         }
+                        newStation.order = Int16(station.order)
+                        newStation.lastPlayed = station.lastPlayed
                     }
                 } catch {
                     print("Failed to fetch or save station:", error.localizedDescription)

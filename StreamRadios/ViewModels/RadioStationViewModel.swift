@@ -773,9 +773,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func addStation(name: String, url: String, iconData: String?, country: String) {
-        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: false, favoriteOrder: nil)
+        // First, increment the order of all existing stations in the same country
+        for i in 0..<stations.count {
+            if stations[i].country == country {
+                stations[i].order += 1
+            }
+        }
+        
+        // Create new station with order = 0 to place it at the top
+        let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: false, favoriteOrder: nil, order: 0)
         stations.append(newStation)
-        print("Added new station: \(newStation)")
+        print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
         saveStationToCloudKit(station: newStation)
     }
@@ -964,7 +972,7 @@ extension RadioStationViewModel {
                     } else {
                         existingStation.favoriteOrder = -1  // Use -1 to represent nil
                     }
-                    existingStation.order = Int16(index)
+                    existingStation.order = Int16(station.order)
                     existingStation.lastPlayed = station.lastPlayed
                 } else {
                     // Create new station if it doesn't exist
@@ -981,7 +989,7 @@ extension RadioStationViewModel {
                     } else {
                         newStation.favoriteOrder = -1  // Use -1 to represent nil
                     }
-                    newStation.order = Int16(index)
+                    newStation.order = Int16(station.order)
                     newStation.lastPlayed = station.lastPlayed
                 }
             }
@@ -1028,10 +1036,14 @@ extension RadioStationViewModel {
                     isFavorite: cdStation.isFavorite,
                     favoritedAt: cdStation.favoritedAt,
                     favoriteOrder: cdStation.favoriteOrder >= 0 ? Int(cdStation.favoriteOrder) : nil,
+                    order: Int(cdStation.order),
                     lastPlayed: cdStation.lastPlayed
                 )
             }
             print("Loaded \(stations.count) stations from CoreData.")
+            
+            // Initialize proper order values for stations that might not have them
+            initializeOrderValues()
             
             // Post notification that stations have been loaded
             NotificationCenter.default.post(name: NSNotification.Name("StationsLoaded"), object: nil)
@@ -1040,6 +1052,47 @@ extension RadioStationViewModel {
             migrateFavoriteTimestamps()
         } catch {
             print("Failed to load stations from CoreData: \(error)")
+        }
+    }
+    
+    private func initializeOrderValues() {
+        // Group stations by country and ensure proper order values
+        let groupedStations = Dictionary(grouping: stations) { $0.country }
+        var hasChanges = false
+        
+        for (country, countryStations) in groupedStations {
+            // Sort stations for this country (maintain existing order if available)
+            let sortedStations = countryStations.sorted { station1, station2 in
+                if station1.order != station2.order {
+                    return station1.order < station2.order
+                }
+                return station1.name < station2.name // fallback to alphabetical
+            }
+            
+            // Check if order values need to be fixed
+            var needsReordering = false
+            for (index, station) in sortedStations.enumerated() {
+                if station.order != index {
+                    needsReordering = true
+                    break
+                }
+            }
+            
+            if needsReordering {
+                // Update order values
+                for (index, station) in sortedStations.enumerated() {
+                    if let stationIndex = stations.firstIndex(where: { $0.id == station.id }) {
+                        stations[stationIndex].order = index
+                        hasChanges = true
+                    }
+                }
+            }
+        }
+        
+        // Save changes if any were made
+        if hasChanges {
+            print("Initialized order values for stations")
+            saveStationsToCoreData()
         }
     }
 }
