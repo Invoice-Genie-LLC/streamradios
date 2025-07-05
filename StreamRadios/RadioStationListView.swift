@@ -139,9 +139,7 @@ struct RadioStationListView: View {
             }
             Button("Delete", role: .destructive) {
                 if let station = stationToDelete {
-                    withAnimation {
-                        deleteStation(station)
-                    }
+                    deleteStation(station)
                 }
                 stationToDelete = nil
             }
@@ -233,13 +231,13 @@ struct RadioStationListView: View {
                 )
                 .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
                     if !isEditing {
-                        // Only scroll when station index changes - indicates new station selection
+                        // Scroll when station index changes - indicates new station selection
                         scrollToCurrentStation(proxy: proxy)
                     }
                 }
                 .onReceive(radioPlayer.$isPlaying) { isPlaying in
                     if !isEditing {
-                        // Only scroll when pausing (not when starting to play to avoid interference)
+                        // ONLY scroll when pausing (stopping) - NEVER when starting to play
                         if !isPlaying {
                             scrollToCurrentStation(proxy: proxy)
                         }
@@ -250,7 +248,7 @@ struct RadioStationListView: View {
                     if newTab == .radio && !isEditing {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             if !isEditing {
-                                scrollToCurrentStation(proxy: proxy)
+                                scrollToCurrentStation(proxy: proxy, isOnLoadOrTabSwitch: true)
                             }
                         }
                     }
@@ -260,7 +258,7 @@ struct RadioStationListView: View {
                     if !isEditing {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             if !isEditing {
-                                scrollToCurrentStation(proxy: proxy)
+                                scrollToCurrentStation(proxy: proxy, isOnLoadOrTabSwitch: true)
                             }
                         }
                     }
@@ -280,9 +278,17 @@ struct RadioStationListView: View {
                             }
                         }
                         
-                        // Clear the tapped station ID after handling with extended delay to prevent interference
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        // Clear the tapped station ID after handling to allow automatic scrolling
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             tappedStationId = nil
+                        }
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                    // Scroll to playing station when app comes to foreground
+                    if !isEditing {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            scrollToCurrentStation(proxy: proxy, isOnLoadOrTabSwitch: true)
                         }
                     }
                 }
@@ -353,7 +359,7 @@ struct RadioStationListView: View {
                 .tint(.blue)
             }
         }
-        .swipeActions(edge: .trailing) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !isEditing {
                 Button(role: .destructive) {
                     stationToDelete = station
@@ -382,7 +388,6 @@ struct RadioStationListView: View {
         .background(Color.orange.opacity(0.2))
         .cornerRadius(8)
         .padding(.horizontal)
-        .transition(.opacity.combined(with: .move(edge: .top)))
     }
     
     @ViewBuilder
@@ -850,50 +855,73 @@ struct RadioStationListView: View {
                viewModel.stations[radioPlayer.currentStationIndex!].id == station.id
     }
     
-    private func scrollToCurrentStation(proxy: ScrollViewProxy) {
+    private func scrollToCurrentStation(proxy: ScrollViewProxy, isOnLoadOrTabSwitch: Bool = false) {
         // Don't interfere with immediate focus on tapped stations
         if tappedStationId != nil {
             print("📱 Skipping scroll - tapped station focus is active")
             return
         }
         
-        // If there's a currently playing station, try to scroll to it
-        if let currentIndex = radioPlayer.currentStationIndex,
-           currentIndex < viewModel.stations.count {
-            
-            let currentStationId = viewModel.stations[currentIndex].id
-            let currentStationName = viewModel.stations[currentIndex].name
-            
-            // Check if the current station exists in the filtered list for the current tab
-            if filteredStations.contains(where: { $0.id == currentStationId }) {
-                // Only scroll to station if it's playing - maintain focus on playing station
-                if radioPlayer.isPlaying {
-                    withAnimation(.easeInOut(duration: 0.5)) {
-                        proxy.scrollTo(currentStationId, anchor: .center)
+        // Handle different tab behaviors when a station is playing
+        if radioPlayer.isPlaying {
+            if let currentIndex = radioPlayer.currentStationIndex,
+               currentIndex < viewModel.stations.count {
+                
+                let currentStationId = viewModel.stations[currentIndex].id
+                let currentStationName = viewModel.stations[currentIndex].name
+                
+                // On load/tab switch: Always scroll to playing station in ALL tabs
+                if isOnLoadOrTabSwitch {
+                    if filteredStations.contains(where: { $0.id == currentStationId }) {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            proxy.scrollTo(currentStationId, anchor: .center)
+                        }
+                        print("📱 [ON LOAD] Scrolled to currently playing station: \(currentStationName) in \(selectedSubTab.title) tab")
+                    } else {
+                        print("📱 [ON LOAD] Playing station \(currentStationName) not in current \(selectedSubTab.title) tab")
                     }
-                    print("📱 Scrolled to currently playing station: \(currentStationName) in \(selectedSubTab.title) tab")
                     return
-                } else {
-                    // Station is paused - scroll to top
+                }
+                
+                // During playback: Different behavior based on current tab
+                switch selectedSubTab {
+                case .recent:
+                    // Recent tab: Always scroll to top when playing (during playback changes)
                     if let firstStation = filteredStations.first {
                         withAnimation(.easeInOut(duration: 0.5)) {
                             proxy.scrollTo(firstStation.id, anchor: .top)
                         }
-                        print("📱 Scrolled to top of \(selectedSubTab.title) tab - station paused")
+                        print("📱 Scrolled to top of Recent tab - station playing")
                     }
-                    return
+                    
+                case .favorites, .all:
+                    // Favorites and All tabs: Try to keep focus on playing station
+                    if filteredStations.contains(where: { $0.id == currentStationId }) {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            proxy.scrollTo(currentStationId, anchor: .center)
+                        }
+                        print("📱 Scrolled to currently playing station: \(currentStationName) in \(selectedSubTab.title) tab")
+                    } else {
+                        // Playing station not in current tab - maintain current position
+                        print("📱 Playing station \(currentStationName) not in current \(selectedSubTab.title) tab - maintaining current position")
+                    }
                 }
-            } else {
-                print("📱 Currently playing station \(currentStationName) not available in \(selectedSubTab.title) tab")
             }
+            return
         }
         
-        // No current station - scroll to top
+        // Scroll to top when station is paused or no station is selected
         if let firstStation = filteredStations.first {
             withAnimation(.easeInOut(duration: 0.5)) {
                 proxy.scrollTo(firstStation.id, anchor: .top)
             }
-            print("📱 Scrolled to top of \(selectedSubTab.title) tab - no current station")
+            
+            if let currentIndex = radioPlayer.currentStationIndex,
+               currentIndex < viewModel.stations.count {
+                print("📱 Scrolled to top of \(selectedSubTab.title) tab - station paused")
+            } else {
+                print("📱 Scrolled to top of \(selectedSubTab.title) tab - no station selected")
+            }
         }
     }
 
