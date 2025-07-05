@@ -133,6 +133,21 @@ class PodcastViewModel: ObservableObject {
     private var loadingTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     
+    // PERFORMANCE: UI update throttling to improve scrolling performance
+    private var lastUIUpdateTime = Date()
+    private var uiUpdateTimer: Timer?
+    private let uiUpdateThrottleInterval: TimeInterval = 1.0  // 1 second minimum between UI updates
+    private var hasPendingUIUpdate = false
+    private var isUserScrolling: Bool {
+        UserDefaults.standard.bool(forKey: "isUserScrolling")
+    }
+    
+    // PERFORMANCE: Deduplication flags to prevent redundant operations
+    private var isInitializingEpisodeTracking = false
+    private var hasInitializedEpisodeTracking = false
+    private var isLoadingFromCoreData = false
+    private var pendingInitializationTasks = Set<String>()
+    
     // Current state
     private var selectedFeedId: String?
     private var lastLoadTime: Date = Date()
@@ -157,7 +172,39 @@ class PodcastViewModel: ObservableObject {
         loadingTask?.cancel()
         refreshTask?.cancel()
         backgroundCheckTimer?.invalidate()
+        uiUpdateTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
+    }
+    
+    // PERFORMANCE: Throttled UI update method to improve scrolling performance
+    private func throttledUIUpdate() {
+        // Skip UI updates if user is scrolling
+        if isUserScrolling {
+            hasPendingUIUpdate = true
+            return
+        }
+        
+        let now = Date()
+        let timeSinceLastUpdate = now.timeIntervalSince(lastUIUpdateTime)
+        
+        if timeSinceLastUpdate >= uiUpdateThrottleInterval {
+            // Update immediately
+            lastUIUpdateTime = now
+            hasPendingUIUpdate = false
+            objectWillChange.send()
+        } else {
+            // Schedule delayed update
+            hasPendingUIUpdate = true
+            uiUpdateTimer?.invalidate()
+            uiUpdateTimer = Timer.scheduledTimer(withTimeInterval: uiUpdateThrottleInterval - timeSinceLastUpdate, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                if self.hasPendingUIUpdate && !self.isUserScrolling {
+                    self.lastUIUpdateTime = Date()
+                    self.hasPendingUIUpdate = false
+                    self.objectWillChange.send()
+                }
+            }
+        }
     }
     
     // MARK: - Background Notification Setup
@@ -288,18 +335,29 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Initialize episode tracking for existing feeds
+    /// Initialize episode tracking for existing feeds with deduplication
     private func initializeEpisodeTracking() async {
+        // PERFORMANCE: Prevent redundant initialization
+        guard !isInitializingEpisodeTracking && !hasInitializedEpisodeTracking else {
+            print("🔄 Episode tracking initialization already in progress or completed - skipping")
+            return
+        }
+        
+        isInitializingEpisodeTracking = true
         print("📊 Initializing episode tracking for \(podcastFeeds.count) feeds...")
         
         // Load previously saved tracking data
         loadEpisodeTrackingData()
+        
+        // PERFORMANCE: Batch process to reduce UserDefaults operations
+        var hasChanges = false
         
         for feed in podcastFeeds {
             // Only set initial values if we don't have saved data
             if lastKnownEpisodeCounts[feed.id] == nil {
                 let episodeCount = feed.episodes.count
                 lastKnownEpisodeCounts[feed.id] = episodeCount
+                hasChanges = true
                 
                 if let latestEpisode = feed.episodes.max(by: { $0.publicationDate < $1.publicationDate }) {
                     lastKnownLatestEpisodeDates[feed.id] = latestEpisode.publicationDate
@@ -307,9 +365,13 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        // Save the initial tracking data
-        saveEpisodeTrackingData()
+        // PERFORMANCE: Only save if there were actual changes
+        if hasChanges {
+            saveEpisodeTrackingData()
+        }
         
+        isInitializingEpisodeTracking = false
+        hasInitializedEpisodeTracking = true
         print("✅ Episode tracking initialized")
     }
     
@@ -439,7 +501,7 @@ class PodcastViewModel: ObservableObject {
             await MainActor.run {
                 self.podcastFeeds.append(feed)
                 self.podcastFeedOrder.append(feed.id)
-                self.objectWillChange.send()
+                self.throttledUIUpdate()
                 print("✅ Feed immediately added to UI: \(feed.title)")
             }
             
@@ -476,8 +538,20 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Load episodes for a specific feed with efficient pagination
+    /// Load episodes for a specific feed with efficient pagination and deduplication
     func loadEpisodesForFeed(_ feedId: String, isInitialLoad: Bool = false) async {
+        // PERFORMANCE: Prevent redundant episode loading for the same feed
+        let taskKey = "\(feedId)-\(isInitialLoad)"
+        guard !pendingInitializationTasks.contains(taskKey) else {
+            // Reduce logging during scrolling for better performance
+            if !isUserScrolling {
+                print("🔄 Episode loading already in progress for feed: \(feedId) - skipping redundant call")
+            }
+            return
+        }
+        
+        pendingInitializationTasks.insert(taskKey)
+        
         // Cancel any existing loading task
         loadingTask?.cancel()
         
@@ -498,7 +572,10 @@ class PodcastViewModel: ObservableObject {
         // First check if episodes are already loaded in the feed object
         if let feed = podcastFeeds.first(where: { $0.id == feedId }),
            !feed.episodes.isEmpty {
-            print("🔍 DEBUG: Found \(feed.episodes.count) episodes already loaded in feed: \(feed.title)")
+            // Reduce logging during scrolling for better performance
+            if !isUserScrolling {
+                print("🔍 DEBUG: Found \(feed.episodes.count) episodes already loaded in feed: \(feed.title)")
+            }
             
             // Refresh episode states from EpisodeStateManager to ensure they're current
             let episodesWithUpdatedStates = feed.episodes.map { episode in
@@ -523,14 +600,23 @@ class PodcastViewModel: ObservableObject {
                 filteredEpisodes = episodesWithUpdatedStates.filter { $0.state.isDownloaded }
             }
             
-            print("🔍 DEBUG: Applied filter \(filter) - showing \(filteredEpisodes.count) of \(episodesWithUpdatedStates.count) episodes")
+            // Reduce logging during scrolling for better performance
+            if !isUserScrolling {
+                print("🔍 DEBUG: Applied filter \(filter) - showing \(filteredEpisodes.count) of \(episodesWithUpdatedStates.count) episodes")
+            }
             
             await MainActor.run {
                 self.currentEpisodes = filteredEpisodes
                 self.isLoadingEpisodes = false
                 self.hasMoreEpisodes = false
-                print("📊 Using pre-loaded episodes with filter: \(self.currentEpisodes.count) episodes displayed")
+                // Reduce logging during scrolling for better performance
+                if !self.isUserScrolling {
+                    print("📊 Using pre-loaded episodes with filter: \(self.currentEpisodes.count) episodes displayed")
+                }
             }
+            
+            // PERFORMANCE: Clean up pending task before early return
+            pendingInitializationTasks.remove(taskKey)
             return
         }
         
@@ -541,6 +627,9 @@ class PodcastViewModel: ObservableObject {
         }
         
         await loadingTask?.value
+        
+        // PERFORMANCE: Clean up pending task
+        pendingInitializationTasks.remove(taskKey)
     }
     
     /// Load more episodes (pagination)
@@ -794,7 +883,7 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 // Trigger immediate UI update
-                self.objectWillChange.send()
+                self.throttledUIUpdate()
             }
             
             // Step 3: Background cleanup - all data associated with the feed
@@ -1057,7 +1146,10 @@ class PodcastViewModel: ObservableObject {
     /// Refresh episode states from local storage only - no CloudKit sync
     /// This provides immediate display of any locally available states
     private func refreshLocalEpisodeStates() async {
-        print("🔄 Refreshing local episode states for immediate display...")
+        // Reduce logging during scrolling for better performance
+        if !isUserScrolling {
+            print("🔄 Refreshing local episode states for immediate display...")
+        }
         
         // Check if we have any episode progress data in EpisodeStateManager
         let progressCount = EpisodeStateManager.shared.episodeProgress.count
@@ -1132,7 +1224,7 @@ class PodcastViewModel: ObservableObject {
                         
                         // CRITICAL: Explicit UI refresh for CloudKit sync completion
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            self.objectWillChange.send()
+                            self.throttledUIUpdate()
                             print("🎯 CLOUDKIT SYNC: Triggered explicit UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
                         }
                     }
@@ -1147,7 +1239,7 @@ class PodcastViewModel: ObservableObject {
                     
                     // Still trigger UI refresh for consistency
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.objectWillChange.send()
+                        self.throttledUIUpdate()
                         print("🎯 LOCAL SYNC: Triggered UI refresh from local data - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
                     }
                 }
@@ -1328,7 +1420,7 @@ class PodcastViewModel: ObservableObject {
         
         // Explicit UI refresh with a slight delay to ensure Core Data operations complete
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            self.objectWillChange.send()
+            self.throttledUIUpdate()
             print("🎯 FRESH INSTALL: Triggered explicit UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
         }
         
@@ -1437,17 +1529,17 @@ class PodcastViewModel: ObservableObject {
                     print("🎯 Core Data now has \(results.count) feeds - refreshing UI")
                     self.loadFeedsFromCoreData()
                     
-                                         // Multiple UI refresh triggers
-                     self.objectWillChange.send()
-                     print("🔄 Triggered UI refresh after Core Data confirmation")
+                                         // PERFORMANCE: Use throttled UI refresh triggers
+                     self.throttledUIUpdate()
+                     print("🔄 Triggered throttled UI refresh after Core Data confirmation")
                      
                      // Post notification for any views that might be listening
                      NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
                      print("📢 Posted FreshInstallDataAvailable notification")
                      
                      DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                         self.objectWillChange.send()
-                         print("🔄 SECONDARY: Triggered delayed UI refresh after Core Data confirmation")
+                         self.throttledUIUpdate()
+                         print("🔄 SECONDARY: Triggered delayed throttled UI refresh after Core Data confirmation")
                      }
                      
                      // Single delayed notification to avoid excessive refreshes
@@ -1471,7 +1563,7 @@ class PodcastViewModel: ObservableObject {
             } else {
                 print("⚠️ Timeout waiting for Core Data to contain feeds - proceeding with UI refresh anyway")
                 self.loadFeedsFromCoreData()
-                self.objectWillChange.send()
+                self.throttledUIUpdate()
             }
         }
         
@@ -1743,7 +1835,7 @@ class PodcastViewModel: ObservableObject {
                 
                 // Force UI update for any view controllers observing this environment object
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    self.objectWillChange.send()
+                    self.throttledUIUpdate()
                     print("🎯 FINAL: Triggered final UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
                 }
             }
@@ -2099,7 +2191,7 @@ extension PodcastViewModel {
         print("🎯 DEBUG: lastPlayedEpisodes after update: \(self.lastPlayedEpisodes)")
         
         // Force UI update by triggering objectWillChange
-        self.objectWillChange.send()
+        self.throttledUIUpdate()
         
         print("🎯 Updated last played episode for feed \(episode.feedId): \(episode.title)")
         
@@ -2123,7 +2215,7 @@ extension PodcastViewModel {
         // Update the main actor state asynchronously
         Task { @MainActor in
             self.lastPlayedEpisodes[episode.feedId] = episode.id
-            self.objectWillChange.send()
+            self.throttledUIUpdate()
             print("🎯 DEBUG: Updated MainActor state for feed \(episode.feedId): \(episode.title)")
         }
     }
@@ -2393,7 +2485,7 @@ extension PodcastViewModel {
         
         // Trigger immediate UI update
         DispatchQueue.main.async {
-            self.objectWillChange.send()
+            self.throttledUIUpdate()
         }
         
         // Save to Core Data
@@ -2669,8 +2761,15 @@ extension PodcastViewModel {
         }
     }
     
-    /// Load podcast feeds from Core Data using the same pattern as radio stations
+    /// Load podcast feeds from Core Data using the same pattern as radio stations with deduplication
     func loadFeedsFromCoreData() {
+        // PERFORMANCE: Prevent redundant Core Data operations
+        guard !isLoadingFromCoreData else {
+            print("🔄 Core Data loading already in progress - skipping redundant call")
+            return
+        }
+        
+        isLoadingFromCoreData = true
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
         
@@ -2687,9 +2786,11 @@ extension PodcastViewModel {
                     self.podcastFeeds.removeAll()
                     self.podcastFeedOrder.removeAll()
                     self.currentEpisodes.removeAll()
-                    self.objectWillChange.send()
+                    self.throttledUIUpdate()
                     print("📡 ✅ MAIN THREAD: Cleared all in-memory podcast data due to empty Core Data")
                 }
+                // PERFORMANCE: Reset flag before early return
+                isLoadingFromCoreData = false
                 return
             }
             
@@ -2729,7 +2830,7 @@ extension PodcastViewModel {
                 print("📡 ✅ MAIN THREAD: Updated podcastFeedOrder with \(self.podcastFeedOrder.count) items")
                 
                 // Single UI refresh after all properties are updated
-                self.objectWillChange.send()
+                self.throttledUIUpdate()
                 print("📡 ✅ MAIN THREAD: Triggered objectWillChange for UI refresh")
             }
             
@@ -2772,6 +2873,9 @@ extension PodcastViewModel {
         } catch {
             print("❌ Failed to load podcast feeds from CoreData: \(error)")
         }
+        
+        // PERFORMANCE: Reset flag after operation completes
+        isLoadingFromCoreData = false
     }
     
 
@@ -2784,14 +2888,14 @@ extension PodcastViewModel {
             self.podcastFeedOrder.removeAll()
             self.currentEpisodes.removeAll()
             self.episodeCounts = (all: 0, favorites: 0, downloads: 0)
-            self.objectWillChange.send()
+            self.throttledUIUpdate()
             print("📡 ✅ Immediately cleared podcast feeds from UI")
             print("🔍 DEBUG: After immediate clearing - podcastFeeds count: \(self.podcastFeeds.count)")
             print("🔍 DEBUG: After immediate clearing - podcastFeedOrder count: \(self.podcastFeedOrder.count)")
             
             // Force UI refresh by triggering objectWillChange again with slight delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                self.objectWillChange.send()
+                self.throttledUIUpdate()
                 print("📡 ✅ Forced additional UI refresh after clearing")
             }
         }
@@ -2897,7 +3001,7 @@ extension PodcastViewModel {
                     self.podcastFeedOrder.removeAll()
                     self.currentEpisodes.removeAll()
                     self.episodeCounts = (all: 0, favorites: 0, downloads: 0)
-                    self.objectWillChange.send()
+                    self.throttledUIUpdate()
                     print("📡 ✅ Cleared in-memory data after Core Data deletion")
                     print("🔍 DEBUG: After clearing - podcastFeeds count: \(self.podcastFeeds.count)")
                     print("🔍 DEBUG: After clearing - podcastFeedOrder count: \(self.podcastFeedOrder.count)")

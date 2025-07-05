@@ -203,6 +203,21 @@ struct RadioStationListView: View {
                 .background(Color.adaptiveBackground)
                 .scrollContentBackground(.hidden)
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+                .simultaneousGesture(
+                    DragGesture()
+                        .onChanged { _ in
+                            UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                            // Post notification for PodcastPlayer scroll detection
+                            NotificationCenter.default.post(name: .userIsScrolling, object: nil)
+                        }
+                        .onEnded { _ in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                                // Post notification for PodcastPlayer scroll detection
+                                NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                            }
+                        }
+                )
                 .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
                     if !isEditing {
                         scrollToCurrentStation(proxy: proxy)
@@ -926,26 +941,8 @@ struct RadioStationListView_Previews: PreviewProvider {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// MARK: - Notification Extensions
+extension Notification.Name {
+    static let userIsScrolling = Notification.Name("userIsScrolling")
+    static let userStoppedScrolling = Notification.Name("userStoppedScrolling")
+}

@@ -386,10 +386,14 @@ struct PodcastListView: View {
                 DragGesture()
                     .onChanged { _ in
                         UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                        // Post notification for PodcastPlayer scroll detection
+                        NotificationCenter.default.post(name: .userIsScrolling, object: nil)
                     }
                     .onEnded { _ in
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                            // Post notification for PodcastPlayer scroll detection
+                            NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
                         }
                     }
             )
@@ -650,13 +654,7 @@ struct PodcastRowView: View {
     private let arrowSize: CGFloat = 20 // New constant for arrow size
     private let buttonSize: CGFloat = 20 // Size for play/loading buttons
     
-    // Computed property to check if there are episodes in progress for this feed
-    private var hasInProgressEpisodes: Bool {
-        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-        return feedEpisodes.contains { $0.state.progress > 0 && $0.state.progress < 1 }
-    }
-    
-    // Optimized button text with minimal computation and no logging for performance
+    // PERFORMANCE: Cached button text to avoid expensive computations during scrolling
     private var buttonText: String {
         // Quick check for last played episode (most efficient)
         if viewModel.lastPlayedEpisodes[feed.id] != nil {
@@ -786,14 +784,9 @@ struct PodcastRowView: View {
     }
     
     private func checkAndPlayEpisode() {
-        let feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
-        let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
-        
-        if episodesInProgress.isEmpty {
-            viewModel.showNoEpisodesInProgressAlert(for: feed)
-            if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
-                podcastPlayer.playEpisode(latestEpisode, feed: feed)
-            }
+        // PERFORMANCE: Use optimized method from viewModel to avoid expensive operations
+        if let episode = viewModel.getLastPlayedOrLatestEpisode(for: feed) {
+            podcastPlayer.playEpisode(episode, feed: feed)
         } else {
             onPlay()
         }
@@ -810,96 +803,16 @@ struct PodcastRowView: View {
             return
         }
         
-        print("🎯 DEBUG: Starting playLastPlayedEpisode for feed: \(feed.title)")
-        print("🎯 DEBUG: lastPlayedEpisodes dictionary: \(viewModel.lastPlayedEpisodes)")
-        
-        // First try to get episodes from the feed object
-        var feedEpisodes = feed.episodes
-        
-        // If the feed object doesn't have episodes loaded, try to get them from viewModel
-        if feedEpisodes.isEmpty {
-            print("⚠️ Feed object has no episodes, trying viewModel.allEpisodes...")
-            feedEpisodes = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+        // PERFORMANCE: Use optimized method from viewModel to avoid expensive operations during UI interactions
+        if let episode = viewModel.getLastPlayedOrLatestEpisode(for: feed) {
+            podcastPlayer.loadingEpisodeId = episode.id
+            podcastPlayer.playEpisode(episode, feed: feed)
+        } else {
+            // Fallback: Use the existing logic if no episodes found
+            podcastPlayer.playLastEpisodeForFeed(feed)
         }
-        
-        // If still no episodes, try loading from Core Data
-        if feedEpisodes.isEmpty {
-            print("⚠️ No episodes found anywhere, loading from Core Data...")
-            Task {
-                await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
-                await MainActor.run {
-                    self.attemptPlayback()
-                }
-            }
-            return
-        }
-        
-        print("🔍 Found \(feedEpisodes.count) episodes in feed: \(feed.title)")
-        
-        // Update episode states with EpisodeStateManager data for accuracy
-        feedEpisodes = feedEpisodes.map { episode in
-            var updatedEpisode = episode
-            updatedEpisode.state.progress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            return updatedEpisode
-        }
-        
-        // Case 1: Resume Episode - when there's a specific last played episode
-        if let lastPlayedEpisodeId = viewModel.lastPlayedEpisodes[feed.id] {
-            print("🔍 Looking for last played episode ID: \(lastPlayedEpisodeId)")
-            if let lastPlayedEpisode = feedEpisodes.first(where: { $0.id == lastPlayedEpisodeId }) {
-                print("🎯 Playing last played episode: \(lastPlayedEpisode.title)")
-                // IMMEDIATE USER FEEDBACK: Set loading state for last played episode
-                podcastPlayer.loadingEpisodeId = lastPlayedEpisode.id
-                podcastPlayer.playEpisode(lastPlayedEpisode, feed: feed)
-                return
-            } else {
-                print("⚠️ Last played episode ID '\(lastPlayedEpisodeId)' not found in episodes list")
-                print("🔍 Available episode IDs: \(feedEpisodes.map { $0.id })")
-            }
-        }
-        
-        // Case 2: Resume Episode - when there are episodes with any progress but no specific last played
-        let episodesWithProgress = feedEpisodes.filter { $0.state.progress > 0 }
-        if !episodesWithProgress.isEmpty {
-            print("🔍 Found \(episodesWithProgress.count) episodes with progress")
-            for episode in episodesWithProgress {
-                print("  - \(episode.title): progress \(episode.state.progress)")
-            }
-            // Play the episode with the highest progress, or most recently started if tied
-            let sortedByProgress = episodesWithProgress.sorted { episode1, episode2 in
-                if episode1.state.progress != episode2.state.progress {
-                    return episode1.state.progress > episode2.state.progress
-                }
-                return episode1.publicationDate > episode2.publicationDate
-            }
-            if let mostProgressedEpisode = sortedByProgress.first {
-                print("🎯 Playing most progressed episode: \(mostProgressedEpisode.title) (progress: \(mostProgressedEpisode.state.progress))")
-                // IMMEDIATE USER FEEDBACK: Set loading state for most progressed episode
-                podcastPlayer.loadingEpisodeId = mostProgressedEpisode.id
-                podcastPlayer.playEpisode(mostProgressedEpisode, feed: feed)
-                return
-            }
-        }
-        
-        // Case 3: Play Latest - no episodes have been previously played
-        // Play the most recent episode (newest by publication date)
-        if let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first {
-            print("🎯 Playing latest episode: \(latestEpisode.title)")
-            // IMMEDIATE USER FEEDBACK: Set loading state for latest episode
-            podcastPlayer.loadingEpisodeId = latestEpisode.id
-            podcastPlayer.playEpisode(latestEpisode, feed: feed)
-            return
-        }
-        
-        // Fallback: Use the existing logic if no episodes found
-        print("⚠️ No episodes found, using fallback")
-        podcastPlayer.playLastEpisodeForFeed(feed)
     }
-    
-    private func attemptPlayback() {
-        // Retry the playback after episodes are loaded
-        playLastPlayedEpisode()
-    }
+
 }
 
 struct PodcastIconView: View {
@@ -2666,6 +2579,21 @@ struct PodcastList: View {
             }
         }
         .listStyle(PlainListStyle())
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { _ in
+                    UserDefaults.standard.set(true, forKey: "isUserScrolling")
+                    // Post notification for PodcastPlayer scroll detection
+                    NotificationCenter.default.post(name: .userIsScrolling, object: nil)
+                }
+                .onEnded { _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        UserDefaults.standard.set(false, forKey: "isUserScrolling")
+                        // Post notification for PodcastPlayer scroll detection
+                        NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                    }
+                }
+        )
     }
     
     private var orderedFeeds: [PodcastFeed] {
@@ -2705,5 +2633,8 @@ struct DebouncedAction: ViewModifier {
             }
     }
 }
+
+// MARK: - Notification Extensions
+// Note: Notification names are declared in RadioStationListView.swift to avoid duplication
 
 

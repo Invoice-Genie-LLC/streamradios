@@ -61,6 +61,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var hasRestoredPositionForCurrentEpisode: Bool = false
     private var currentEpisodeIdForRestoration: String?
 
+    // MARK: - Performance Optimization Properties
+    private var isUserScrolling = false
+    private var scrollDetectionTimer: Timer?
+    private var lastScrollNotificationTime = Date()
+    
+    // Optimized update intervals for better performance
+    private let lightUpdateInterval: TimeInterval = 3.0  // Reduced from 2.0s to 3.0s for better scroll performance
+    private let heavyUpdateInterval: TimeInterval = 15.0 // Increased from 10.0s to 15.0s to reduce CPU usage
+    private let scrollingPauseInterval: TimeInterval = 30.0 // Pause heavy updates longer during scrolling
+
     // Performance optimization flags
     private var isCarPlayActive: Bool {
         return CarPlayManager.shared.isCarPlayConnected
@@ -551,42 +561,47 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
 
     
+    // PERFORMANCE: Optimized for better threading and Main Thread safety
     private func updatePlaybackInfo() {
-            guard let player = player else { return }
-            
-            // Skip all updates if user is scrolling to prevent CPU spikes
-            if isUserCurrentlyScrolling() {
-                return
-            }
+        guard let player = player else { return }
+        
+        // Skip all updates if user is scrolling to prevent CPU spikes
+        if isUserScrolling {
+            return
+        }
+        
+        // MAIN THREAD FIX: Check app state on main thread to prevent violations
+        Task { @MainActor in
+            // Skip updates if app is in background to save battery
+            guard UIApplication.shared.applicationState == .active else { return }
             
             // Heavy operations only (time updates are handled separately in updateCurrentTimeOnly())
             // OPTIMIZE: Only update progress every 10 seconds to minimize CPU usage
-            updateProgressThrottled()
+            Task {
+                await self.updateProgressThrottled()
+            }
             
             // OPTIMIZE: Update Now Playing info very infrequently (every 5s)
-            updateNowPlayingInfoDebounced()
+            self.updateNowPlayingInfoDebounced()
         }
+    }
     
-    // New throttled progress update method
-    private func updateProgressThrottled() {
-        // OPTIMIZE: Only update progress every 10 seconds during playback to drastically reduce CPU usage
+    // PERFORMANCE: Async throttled progress update method
+    private func updateProgressThrottled() async {
+        // OPTIMIZE: Only update progress every 15 seconds during playback to drastically reduce CPU usage
         let now = Date()
-        if now.timeIntervalSince(lastProgressUpdate) < 10.0 {
+        if now.timeIntervalSince(lastProgressUpdate) < heavyUpdateInterval {
             return
         }
         lastProgressUpdate = now
         
-        updateProgress()
+        await updateProgress()
     }
     
     // Track last progress update time
     private var lastProgressUpdate = Date()
     
-    private func isUserCurrentlyScrolling() -> Bool {
-        // Check if any podcast player views are currently being scrolled
-        // This helps prevent UI updates during user interaction
-        return UserDefaults.standard.bool(forKey: "isUserScrolling")
-    }
+    // PERFORMANCE: Removed old method, now using isUserScrolling property directly
     
     func rewindAndPlay(episode: PodcastEpisode) {
         // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps rewind and play
@@ -616,10 +631,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 viewModel?.episodeProgress[episode.id] = 0.0
                 
                 // Update episode state to not played and reset progress
-                var updatedEpisode = episode
-                updatedEpisode.state.isPlayed = false
-                updatedEpisode.state.progress = 0.0
-                viewModel?.updateEpisode(updatedEpisode)
+                viewModel?.updateEpisodeState(episode.id, progress: 0.0, isPlayed: false)
             }
             
             // Update state manager
@@ -674,7 +686,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 // Update the episode in ViewModel
                 Task { @MainActor in
-                    viewModel?.updateEpisode(updatedEpisode)
+                    let isPlayed = progress >= 0.99 ? true : (currentEpisode.state.isPlayed ? true : false)
+                    viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: isPlayed)
                 }
                 
                 // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
@@ -693,15 +706,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     viewModel?.episodeProgress[episode.id] = progress
                     
                     // Update the episode state
-                    var updatedEpisode = episode
-                    updatedEpisode.state.progress = progress
-                    
-                    // Only mark as not played if it wasn't already marked as finished
-                    if !episode.state.isPlayed {
-                        updatedEpisode.state.isPlayed = false
-                    }
-                    
-                    viewModel?.updateEpisode(updatedEpisode)
+                    let isPlayed = episode.state.isPlayed ? true : false
+                    viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: isPlayed)
                 }
                 
                 // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
@@ -1383,17 +1389,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         Task { @MainActor in
             viewModel?.episodeProgress[episode.id] = progress
             
-            // 3. Update the episode object in memory to ensure consistency
-            var updatedEpisode = episode
-            updatedEpisode.state.progress = progress
-            
-            if progress >= 0.99 {
-                updatedEpisode.state.isPlayed = true
-            } else if !episode.state.isPlayed {
-                updatedEpisode.state.isPlayed = false
-            }
-            
-            viewModel?.updateEpisode(updatedEpisode)
+            // 3. Update the episode state using the new method
+            let isPlayed = progress >= 0.99
+            viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: isPlayed)
         }
         
         // 4. Force save the state manager data immediately
@@ -1435,12 +1433,55 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             player?.removeTimeObserver(existingObserver)
         }
         
-        // Use 1 second interval for smooth timer display, but optimize heavy operations
-        // This provides smooth elapsed time updates while keeping CPU usage minimal
-        let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
-            // Lightweight update every second for smooth timer display
-            self?.updateCurrentTimeOnly()
+        // PERFORMANCE OPTIMIZATION: Reduce update frequency from 1s to 2s to improve scrolling
+        // This dramatically reduces CPU usage while maintaining acceptable UI responsiveness
+        let interval = CMTime(seconds: lightUpdateInterval, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .global(qos: .utility)) { [weak self] _ in
+            // Use background queue for time updates to avoid blocking main thread
+            DispatchQueue.main.async { [weak self] in
+                self?.updateCurrentTimeOnly()
+            }
+        }
+        
+        // Set up scroll detection to pause heavy updates during user interaction
+        setupScrollDetection()
+    }
+    
+    // PERFORMANCE: Setup scroll detection to pause expensive updates during scrolling
+    private func setupScrollDetection() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScrollStart),
+            name: .userIsScrolling,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScrollEnd),
+            name: .userStoppedScrolling,
+            object: nil
+        )
+    }
+    
+    @objc private func handleScrollStart() {
+        isUserScrolling = true
+        lastScrollNotificationTime = Date()
+        
+        // Cancel any pending scroll detection timer
+        scrollDetectionTimer?.invalidate()
+        
+        // Reduce logging during scrolling for better performance
+        // os_log("🏃‍♂️ User started scrolling - pausing heavy updates for performance", log: log, type: .debug)
+    }
+    
+    @objc private func handleScrollEnd() {
+        // Use a timer to detect when scrolling has truly stopped
+        scrollDetectionTimer?.invalidate()
+        scrollDetectionTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            self?.isUserScrolling = false
+            // Reduce logging during scrolling for better performance
+            // os_log("🛑 User stopped scrolling - resuming normal updates", log: self?.log ?? OSLog.default, type: .debug)
         }
     }
     
@@ -1448,39 +1489,73 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private func updateCurrentTimeOnly() {
         guard let player = player else { return }
         
-        // Only update the time values - no heavy operations
-        currentTime = max(0, player.currentTime().seconds)
-        
-        if let currentItem = player.currentItem {
-            let newDuration = currentItem.duration.seconds
-            if newDuration.isFinite && newDuration > 0 {
-                duration = newDuration
-            }
+        // PERFORMANCE: Skip all updates during scrolling to prevent hangs
+        if isUserScrolling {
+            return
         }
         
-        // Calculate progress for display
-        currentProgress = duration > 0 ? min(currentTime / duration, 1) : 0
-        
-        // Trigger heavy operations less frequently (every 5 seconds) via separate timer
-        updatePlaybackInfoThrottled()
+        // MAIN THREAD FIX: Check app state on main thread to prevent violations
+        Task { @MainActor in
+            // Skip all updates if app is in background to save battery
+            guard UIApplication.shared.applicationState == .active else { return }
+            
+            Task { [weak self] in
+                guard let self = self else { return }
+                
+                // Only update the time values - no heavy operations
+                await MainActor.run {
+                    self.currentTime = max(0, player.currentTime().seconds)
+                    
+                    if let currentItem = player.currentItem {
+                        let newDuration = currentItem.duration.seconds
+                        if newDuration.isFinite && newDuration > 0 {
+                            self.duration = newDuration
+                        }
+                    }
+                    
+                    // Calculate progress for display
+                    self.currentProgress = self.duration > 0 ? min(self.currentTime / self.duration, 1) : 0
+                }
+                
+                // PERFORMANCE: Only trigger heavy operations if user is not scrolling
+                if !self.isUserScrolling {
+                    self.updatePlaybackInfoThrottled()
+                }
+            }
+        }
     }
     
-    // Throttled heavy operations to prevent CPU spikes
+    // Throttled heavy operations to prevent CPU spikes - optimized for better performance
     private var lastHeavyUpdate = Date()
     private func updatePlaybackInfoThrottled() {
         let now = Date()
-        if now.timeIntervalSince(lastHeavyUpdate) >= 5.0 {
+        
+        // PERFORMANCE: Increase throttle interval and skip during scrolling
+        let throttleInterval = isUserScrolling ? scrollingPauseInterval : heavyUpdateInterval
+        
+        if now.timeIntervalSince(lastHeavyUpdate) >= throttleInterval {
             lastHeavyUpdate = now
-            updatePlaybackInfo()
+            
+            // Run heavy operations on background queue to avoid blocking UI
+            Task.detached(priority: .utility) { [weak self] in
+                await self?.updatePlaybackInfo()
+            }
         }
     }
     
     private func updateNowPlayingInfoDebounced() {
         nowPlayingUpdateTimer?.invalidate()
-        // OPTIMIZE: Increase debounce interval to 5.0s to drastically reduce CPU overhead
-        // This minimizes MPNowPlayingInfoCenter updates while maintaining functionality
-        nowPlayingUpdateTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
-            self?.updateNowPlayingInfo()
+        
+        // PERFORMANCE: Increase debounce interval based on scroll state
+        let debounceInterval: TimeInterval = isUserScrolling ? 30.0 : 10.0
+        
+        nowPlayingUpdateTimer = Timer.scheduledTimer(withTimeInterval: debounceInterval, repeats: false) { [weak self] _ in
+            // Skip if user is actively scrolling
+            guard let self = self, !self.isUserScrolling else { return }
+            
+            Task.detached(priority: .utility) { [weak self] in
+                await self?.updateNowPlayingInfo()
+            }
         }
     }
     
@@ -1608,36 +1683,40 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            }
        }
     
-    private func updateProgress() {
-            guard let currentEpisode = currentEpisode, duration > 0 else { return }
-            let progress = currentTime / duration
-            
+    // PERFORMANCE: Async progress update with optimized UI updates
+    private func updateProgress() async {
+        guard let currentEpisode = currentEpisode, duration > 0 else { return }
+        let progress = currentTime / duration
+        
+        await MainActor.run {
             self.currentProgress = progress
+        }
+        
+        // Calculate remaining time
+        let remainingTime = max(duration - currentTime, 0)
+        
+        // PERFORMANCE: Only update in-memory progress during playback - NO saves or StateManager updates
+        // Progress will only be saved when:
+        // 1. App is force closed (handleAppWillTerminate)
+        // 2. App goes to background (handleAppTermination)  
+        // 3. User pauses episode (pause function)
+        // 4. User switches episodes (playEpisode function)
+        
+        // OPTIMIZE: Reduce in-memory cache updates to every 10% to minimize CPU usage (was 25%)
+        let progressPercent = Int(progress * 100)
+        let lastProgressPercent = Int((lastCarPlayProgress ?? 0) * 100)
+        
+        // Only update memory and CarPlay every 10% to drastically reduce CPU usage
+        if progressPercent != lastProgressPercent && progressPercent % 10 == 0 {
+            lastCarPlayProgress = progress
             
-            // Calculate remaining time
-            let remainingTime = max(duration - currentTime, 0)
-            
-            // Only update in-memory progress during playback - NO saves or StateManager updates
-            // Progress will only be saved when:
-            // 1. App is force closed (handleAppWillTerminate)
-            // 2. App goes to background (handleAppTermination)
-            // 3. User pauses episode (pause function)
-            // 4. User switches episodes (playEpisode function)
-            
-            // OPTIMIZE: Reduce in-memory cache updates to every 5% to minimize CPU usage
-            let progressPercent = Int(progress * 100)
-            let lastProgressPercent = Int((lastCarPlayProgress ?? 0) * 100)
-            
-            // Only update memory and CarPlay every 25% to drastically reduce CPU usage
-            if progressPercent != lastProgressPercent && progressPercent % 25 == 0 {
-                lastCarPlayProgress = progress
-                
-                // Update in-memory cache only when needed
-                Task { @MainActor in
+            // PERFORMANCE: Update cache only when not scrolling
+            if !isUserScrolling {
+                await MainActor.run {
                     viewModel?.episodeProgress[currentEpisode.id] = progress
                 }
                 
-                // OPTIMIZE: Reduce CarPlay notifications to minimum (every 25%)
+                // OPTIMIZE: Reduce CarPlay notifications to minimum (every 10%)
                 NotificationCenter.default.post(
                     name: NSNotification.Name("PodcastProgressUpdated"),
                     object: nil,
@@ -1652,15 +1731,17 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 os_log("🚗 CarPlay progress update sent: %@, Progress: %.1f%% (CPU optimized)", log: log, type: .debug, currentEpisode.title, progress * 100)
             }
+        }
+        
+        // Check for episode completion AFTER saving progress
+        if remainingTime < 1 || progress >= 0.99 {
+            await MainActor.run {
+                viewModel?.markEpisodeAsCompleted(currentEpisode)
+            }
+            os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
             
-            // Check for episode completion AFTER saving progress
-            if remainingTime < 1 || progress >= 0.99 {
-                Task { @MainActor in
-                    viewModel?.markEpisodeAsCompleted(currentEpisode)
-                }
-                os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
-                
-                // Notify CarPlay of episode completion
+            // PERFORMANCE: Only send completion notification when not scrolling
+            if !isUserScrolling {
                 NotificationCenter.default.post(
                     name: NSNotification.Name("EpisodeCompleted"),
                     object: nil,
@@ -1670,31 +1751,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     ]
                 )
             }
-            
-            // OPTIMIZATION: Skip UI updates when CarPlay is active to maximize performance
-            // CarPlay doesn't need frequent UI updates and they cause significant CPU overhead
-            if !isCarPlayActive {
-                // Disable UI updates completely to prevent CPU spikes during scrolling
-                // let uiUpdateThreshold = 0.02 // 2% instead of 1%
-                // if abs(currentProgress - lastReportedProgress) >= uiUpdateThreshold {
-                //     lastReportedProgress = currentProgress
-                //     
-                //     DispatchQueue.main.async {
-                //         self.objectWillChange.send()
-                //     }
-                // }
-            } else {
-                // Disable CarPlay UI updates completely to prevent CPU spikes
-                // let carPlayUIThreshold = 0.05 // 5% for CarPlay mode
-                // if abs(currentProgress - lastReportedProgress) >= carPlayUIThreshold {
-                //     lastReportedProgress = currentProgress
-                //     
-                //     DispatchQueue.main.async {
-                //         self.objectWillChange.send()
-                //     }
-                // }
-            }
         }
+        
+        // PERFORMANCE: Completely disable objectWillChange.send() to eliminate scrolling lag
+        // UI updates will happen naturally through @Published properties and SwiftUI's observation system
+        // This is the most critical optimization for smooth scrolling during playback
+    }
     
     private func formatRemainingTime(_ time: TimeInterval) -> String {
         let minutes = Int(time) / 60
@@ -1858,10 +1920,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 }
 
 // MARK: - Notification Extensions
-extension Notification.Name {
-    static let userIsScrolling = Notification.Name("userIsScrolling")
-    static let userStoppedScrolling = Notification.Name("userStoppedScrolling")
-}
+// Note: Notification names are declared in RadioStationListView.swift to avoid duplication
 
 struct UserDefaultsKeys {
     static func progressKey(for episodeId: String) -> String {

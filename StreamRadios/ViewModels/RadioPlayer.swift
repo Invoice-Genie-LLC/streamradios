@@ -3610,12 +3610,18 @@ extension RadioPlayer {
         guard let player = self.player else { return }
         
         let timeScale = CMTimeScale(NSEC_PER_SEC)
-        // Change observer interval to 5 seconds to match our update frequency
-        // This eliminates the performance overhead of firing every second
-        let time = CMTime(seconds: 5.0, preferredTimescale: timeScale)
+        // PERFORMANCE: Increased interval to 8 seconds and use main queue to avoid Main Thread Checker violations
+        let time = CMTime(seconds: 8.0, preferredTimescale: timeScale)
         
         player.addPeriodicTimeObserver(forInterval: time, queue: .main) { [weak self] time in
             guard let self = self else { return }
+            
+            // PERFORMANCE: Skip updates if app is in background to save battery
+            guard UIApplication.shared.applicationState == .active else { return }
+            
+            // PERFORMANCE: Skip updates if user is scrolling to improve performance
+            let isUserScrolling = UserDefaults.standard.bool(forKey: "isUserScrolling")
+            if isUserScrolling { return }
             
             // Update elapsed time in Now Playing info (now aligned with observer interval)
             if self.isPlaying {
