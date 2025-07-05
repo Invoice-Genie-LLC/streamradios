@@ -769,7 +769,6 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -790,7 +789,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 2.0.0;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -809,7 +808,6 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadiosRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -830,7 +828,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 2.0.0;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
