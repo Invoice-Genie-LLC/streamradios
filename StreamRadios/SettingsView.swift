@@ -255,39 +255,36 @@ struct SettingsView: View {
     
     @ViewBuilder
     private var modernAboutSettings: some View {
-        ModernSettingsCard(
-            title: "",
-            icon: ""
-        ) {
-            NavigationLink(destination: AboutView()) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "info.circle.fill")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.blue)
-                            .frame(width: 20)
-                        
-                        Text("About StreamRadios")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(colorScheme == .dark ? .white : .primary)
-                        
-                        Spacer()
-                        
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.gray)
-                    }
+        NavigationLink(destination: AboutView()) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.blue)
+                        .frame(width: 20)
                     
-                    Text("Terms, privacy policy, and app information")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                    Text("About StreamRadios")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 4)
-                .contentShape(Rectangle())
+                
+                Text("Terms, privacy policy, and app information")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
             }
-            .buttonStyle(PlainButtonStyle())
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .background(cardBackgroundColor)
+            .cornerRadius(16)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(PlainButtonStyle())
     }
     
 #if DEBUG
