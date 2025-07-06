@@ -91,6 +91,13 @@ struct AlarmConfigurationView: View {
                 // This ensures consistent player display across all tabs
             }
             .background(backgroundColor)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                TapGesture().onEnded { _ in
+                    // Dismiss keyboard when tapping outside input fields
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            )
         }
         .navigationTitle("Set Program Alert")
         .navigationBarTitleDisplayMode(.inline)

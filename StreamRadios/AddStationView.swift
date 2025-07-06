@@ -78,6 +78,13 @@ struct AddStationView: View {
                     }
                 }
                 .background(Color.adaptiveBackground.ignoresSafeArea())
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    TapGesture().onEnded { _ in
+                        // Dismiss keyboard when tapping outside input fields
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                )
             }
             .navigationTitle("")
             .navigationBarHidden(true)

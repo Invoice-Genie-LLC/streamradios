@@ -151,6 +151,13 @@ struct ElegantCountryPicker: View {
                 .background(Color.adaptiveBackground)
             }
             .background(Color.adaptiveBackground)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                TapGesture().onEnded { _ in
+                    // Dismiss keyboard when tapping outside search field
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            )
             .navigationTitle("Select Country")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
