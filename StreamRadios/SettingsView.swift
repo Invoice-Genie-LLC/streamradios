@@ -70,7 +70,7 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
-                    .padding(.bottom, 80)
+                    .padding(.bottom, 140)
                 }
                 
                 // Global Player is now handled by ContentView overlay
