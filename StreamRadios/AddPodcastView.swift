@@ -315,6 +315,13 @@ struct AddPodcastView: View {
                     // Global Player now handles all playback display
                 }
                 .background(Color.adaptiveBackground)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    TapGesture().onEnded { _ in
+                        // Dismiss keyboard when tapping outside search box
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                )
             }
             .navigationBarHidden(true)
             .onAppear {

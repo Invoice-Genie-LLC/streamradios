@@ -78,6 +78,13 @@ struct PodcastListView: View {
                            searchBar
                            podcastList
                        }
+                       .contentShape(Rectangle())
+                       .simultaneousGesture(
+                           TapGesture().onEnded { _ in
+                               // Dismiss keyboard when tapping outside search box
+                               UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                           }
+                       )
                    }
                    
                    // Global Player is now handled by ContentView overlay
