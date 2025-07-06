@@ -316,12 +316,12 @@ class PodcastFeedManager {
     }
     
     private func getExistingEpisodeIds(for feedId: String, in context: NSManagedObjectContext) throws -> Set<String> {
-        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = NSFetchRequest(entityName: "PodcastModel")
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
         fetchRequest.propertiesToFetch = ["id"]
         fetchRequest.resultType = .dictionaryResultType
         
-        let results = try context.fetch(fetchRequest) as? [[String: Any]] ?? []
+        let results = try context.fetch(fetchRequest) as! [[String: Any]]
         return Set(results.compactMap { $0["id"] as? String })
     }
     

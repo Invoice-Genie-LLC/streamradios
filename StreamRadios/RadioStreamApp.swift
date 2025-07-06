@@ -76,12 +76,6 @@ struct RadioStreamApp: App {
         
         // Initialize podcast system with CloudKit support
         podcastViewModel.initializeWithCloudKitSupport()
-        
-        // Start background checking for new podcast episodes
-        podcastViewModel.startBackgroundEpisodeChecking()
-        
-        // Also start fallback timer-based checking as backup
-        podcastViewModel.startPeriodicEpisodeChecking(interval: 3600) // 1 hour
     }
 
     private func fetchStationsFromCloudKit() {

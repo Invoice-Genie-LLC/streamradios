@@ -9,6 +9,27 @@ import Combine
 import CoreData
 import UniformTypeIdentifiers
 
+// MARK: - Import Error Types
+enum ImportError: Error {
+    case invalidJSON(String)
+    case invalidJSONStructure(String)
+    case missingRequiredFields([String])
+    case fileReadError(String)
+    
+    var userFriendlyMessage: String {
+        switch self {
+        case .invalidJSON(let details):
+            return "The selected file contains invalid JSON format. Please check the file structure. Details: \(details)"
+        case .invalidJSONStructure(let details):
+            return "The JSON structure is not compatible. Expected an array of station objects. Details: \(details)"
+        case .missingRequiredFields(let fields):
+            return "Required fields are missing from the station data: \(fields.joined(separator: ", ")). Each station must have 'id', 'name', and 'url' fields."
+        case .fileReadError(let details):
+            return "Could not read the selected file. Details: \(details)"
+        }
+    }
+}
+
 // Sub-tab enum for radio filtering
 enum RadioSubTab: Int, CaseIterable {
     case recent = 0
@@ -387,8 +408,46 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         do {
             let data = try Data(contentsOf: url)
+            
+            // Debug: Print file contents for troubleshooting
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("📄 JSON file contents preview (first 500 chars):")
+                print(String(jsonString.prefix(500)))
+                print("📏 Total file size: \(data.count) bytes")
+            }
+            
             let jsonDecoder = JSONDecoder()
+            
+            // First, try to decode the JSON to see if it's valid JSON at all
+            do {
+                let jsonObject = try JSONSerialization.jsonObject(with: data, options: [])
+                print("✅ JSON is valid. Structure type: \(type(of: jsonObject))")
+                
+                if let jsonArray = jsonObject as? [[String: Any]] {
+                    print("📊 Found \(jsonArray.count) objects in JSON array")
+                    
+                    // Check the structure of the first object
+                    if let firstObject = jsonArray.first {
+                        print("🔍 First object keys: \(Array(firstObject.keys).sorted())")
+                        
+                        // Check for required fields
+                        let requiredFields = ["id", "name", "url"]
+                        let missingFields = requiredFields.filter { !firstObject.keys.contains($0) }
+                        if !missingFields.isEmpty {
+                            throw ImportError.missingRequiredFields(missingFields)
+                        }
+                    }
+                } else {
+                    throw ImportError.invalidJSONStructure("Expected array of objects, got \(type(of: jsonObject))")
+                }
+            } catch let jsonError {
+                print("❌ JSON parsing error: \(jsonError)")
+                throw ImportError.invalidJSON(jsonError.localizedDescription)
+            }
+            
+            // Now try to decode to RadioStation objects
             let stationsFromJson = try jsonDecoder.decode([RadioStation].self, from: data)
+            print("✅ Successfully decoded \(stationsFromJson.count) stations")
 
             // Get existing URLs to check for duplicates
             let existingURLs = Set(stations.map { $0.url })
@@ -433,13 +492,75 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     }
                 }
             }
+        } catch let importError as ImportError {
+            DispatchQueue.main.async {
+                self.isImportInProgress = false
+            }
+            let errorMessage = importError.userFriendlyMessage
+            NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: errorMessage)
+            print("Import failed with specific error: \(errorMessage)")
+            completion()
         } catch {
             DispatchQueue.main.async {
                 self.isImportInProgress = false
             }
-            NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import stations: \(error.localizedDescription)")
+            
+            var errorMessage = "Unknown error occurred"
+            
+            if let decodingError = error as? DecodingError {
+                errorMessage = self.parseDecodingError(decodingError)
+            } else {
+                errorMessage = error.localizedDescription
+            }
+            
+            NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: errorMessage)
             print("Failed to import stations: \(error)")
-            completion() // Call the completion handler even in case of failure
+            completion()
+        }
+    }
+    
+    // MARK: - Sample JSON Generation
+    
+    func generateSampleImportJSON() -> String {
+        let sampleStations = [
+            [
+                "id": "sample-1",
+                "name": "Sample Radio Station 1",
+                "url": "https://example.com/stream1.mp3",
+                "country": "United States",
+                "isFavorite": false
+            ],
+            [
+                "id": "sample-2", 
+                "name": "Sample Radio Station 2",
+                "url": "https://example.com/stream2.mp3",
+                "country": "Canada",
+                "isFavorite": true
+            ]
+        ]
+        
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: sampleStations, options: .prettyPrinted)
+            return String(data: jsonData, encoding: .utf8) ?? "Error generating sample JSON"
+        } catch {
+            return "Error generating sample JSON: \(error.localizedDescription)"
+        }
+    }
+    
+    // MARK: - Import Error Handling
+    
+    private func parseDecodingError(_ error: DecodingError) -> String {
+        switch error {
+        case .typeMismatch(let type, let context):
+            return "Expected \(type) but found different type at \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))"
+        case .valueNotFound(let type, let context):
+            return "Required field '\(context.codingPath.last?.stringValue ?? "unknown")' of type \(type) is missing"
+        case .keyNotFound(let key, let context):
+            return "Required field '\(key.stringValue)' is missing from the JSON"
+        case .dataCorrupted(let context):
+            return "Data is corrupted at \(context.codingPath.map { $0.stringValue }.joined(separator: " -> ")): \(context.debugDescription)"
+        @unknown default:
+            return "Unknown decoding error: \(error.localizedDescription)"
         }
     }
     

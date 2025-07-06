@@ -13,7 +13,6 @@ import CoreData
 import AVKit
 import CloudKit
 import UserNotifications
-import BackgroundTasks
 
 struct PodcastFeed: Identifiable, Codable, Equatable {
     var id: String
@@ -112,20 +111,12 @@ class PodcastViewModel: ObservableObject {
     // Store progress observations to prevent deallocation
     private var progressObservations: [String: NSKeyValueObservation] = [:]
     
-    // MARK: - New Episode Notification Properties
-    private var lastKnownEpisodeCounts: [String: Int] = [:]
-    private var lastKnownLatestEpisodeDates: [String: Date] = [:]
-    private var backgroundCheckTimer: Timer?
-    
     // MARK: - Private Properties
     private let log = OSLog(subsystem: "StreamRadios", category: "PodcastViewModel")
     private let feedManager = PodcastFeedManager()
     private let episodeManager = PodcastEpisodeManager()
     private let cloudKitManager = PodcastCloudKitManager.shared
     private var cancellables = Set<AnyCancellable>()
-    
-    // Notification support for testing
-    var notificationCenter: NotificationCenterProtocol?
     
     // Performance optimizations
     private let episodesPerPage = 100
@@ -154,7 +145,6 @@ class PodcastViewModel: ObservableObject {
     
     init() {
         setupObservers()
-        setupBackgroundNotificationObserver()
         
         // Load feeds from Core Data (radio station pattern)
         // Note: For fresh installs, this will initially find no feeds, but once RSS processing
@@ -171,7 +161,6 @@ class PodcastViewModel: ObservableObject {
     deinit {
         loadingTask?.cancel()
         refreshTask?.cancel()
-        backgroundCheckTimer?.invalidate()
         uiUpdateTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
@@ -207,252 +196,10 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Background Notification Setup
+    // MARK: - Public Interface
     
-    /// Set up observer for background episode checks
-    private func setupBackgroundNotificationObserver() {
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("BackgroundPodcastCheck"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task {
-                await self?.checkForNewEpisodes()
-            }
-        }
-    }
-    
-    // MARK: - New Episode Notification Methods
-    
-    /// Send notification for new episodes
-    func sendNotification(for feed: PodcastFeed, newEpisodes: [PodcastEpisode]) {
-        let episodeCount = newEpisodes.count
-        let title = "New Episodes Available"
-        let message = "\(episodeCount) new episode(s) available for \(feed.title)"
-        
-        if let notificationCenter = notificationCenter {
-            // Use injected notification center (for testing)
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = message
-            content.sound = UNNotificationSound.default
-            
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
-            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
-            
-            notificationCenter.add(request, withCompletionHandler: nil)
-        } else {
-            // Use real notification manager
-            NotificationManager.shared.notifyUser(title: title, message: message)
-        }
-        
-        print("📱 Sent notification for \(episodeCount) new episodes in feed: \(feed.title)")
-    }
-    
-    /// Check for new episodes across all feeds
-    func checkForNewEpisodes() async {
-        print("🔍 [DEBUG] Checking for new episodes across all feeds...")
-        print("🔍 [DEBUG] Current time: \(Date())")
-        print("🔍 [DEBUG] Number of feeds to check: \(podcastFeeds.count)")
-        
-        for feed in podcastFeeds {
-            await checkForNewEpisodes(in: feed)
-        }
-        
-        // Save the updated tracking data
-        saveEpisodeTrackingData()
-        print("🔍 [DEBUG] Completed checking all feeds")
-    }
-    
-    /// Manually trigger new episode check (for UI buttons)
-    @MainActor
-    func manuallyCheckForNewEpisodes() {
-        Task {
-            await checkForNewEpisodes()
-        }
-    }
-    
-    /// Test method to simulate background notification (for debugging)
-    @MainActor
-    func testBackgroundNotification() {
-        print("🧪 [TEST] Simulating background notification...")
-        NotificationCenter.default.post(name: NSNotification.Name("BackgroundPodcastCheck"), object: nil)
-    }
-    
-    /// Check for new episodes in a specific feed
-    private func checkForNewEpisodes(in feed: PodcastFeed) async {
-        do {
-            // Refresh the feed to get latest episodes
-            let (updatedFeed, allEpisodes) = try await feedManager.refreshFeed(feed.id)
-            
-            // Compare with last known state
-            let currentEpisodeCount = allEpisodes.count
-            let lastKnownCount = lastKnownEpisodeCounts[feed.id] ?? 0
-            
-            // Check if we have new episodes by count
-            if currentEpisodeCount > lastKnownCount {
-                let newEpisodeCount = currentEpisodeCount - lastKnownCount
-                print("📱 Found \(newEpisodeCount) new episodes in feed: \(feed.title)")
-                
-                // Get the newest episodes
-                let sortedEpisodes = allEpisodes.sorted { $0.publicationDate > $1.publicationDate }
-                let newEpisodes = Array(sortedEpisodes.prefix(newEpisodeCount))
-                
-                // Send notification
-                sendNotification(for: feed, newEpisodes: newEpisodes)
-                
-                // Update our tracking
-                lastKnownEpisodeCounts[feed.id] = currentEpisodeCount
-                if let latestEpisode = sortedEpisodes.first {
-                    lastKnownLatestEpisodeDates[feed.id] = latestEpisode.publicationDate
-                }
-                
-                // Update the feed in our local array
-                await MainActor.run {
-                    if let index = self.podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
-                        self.podcastFeeds[index] = updatedFeed
-                    }
-                }
-            } else {
-                // Also check by date in case episodes were updated
-                let sortedEpisodes = allEpisodes.sorted { $0.publicationDate > $1.publicationDate }
-                if let latestEpisode = sortedEpisodes.first {
-                    let lastKnownDate = lastKnownLatestEpisodeDates[feed.id] ?? Date.distantPast
-                    
-                    if latestEpisode.publicationDate > lastKnownDate {
-                        print("📱 Found newer episode by date in feed: \(feed.title)")
-                        sendNotification(for: feed, newEpisodes: [latestEpisode])
-                        
-                        // Update tracking
-                        lastKnownLatestEpisodeDates[feed.id] = latestEpisode.publicationDate
-                        lastKnownEpisodeCounts[feed.id] = currentEpisodeCount
-                    }
-                }
-            }
-            
-        } catch {
-            print("❌ Failed to check for new episodes in feed \(feed.title): \(error)")
-        }
-    }
-    
-    /// Initialize episode tracking for existing feeds with deduplication
-    private func initializeEpisodeTracking() async {
-        // PERFORMANCE: Prevent redundant initialization
-        guard !isInitializingEpisodeTracking && !hasInitializedEpisodeTracking else {
-            print("🔄 Episode tracking initialization already in progress or completed - skipping")
-            return
-        }
-        
-        isInitializingEpisodeTracking = true
-        print("📊 Initializing episode tracking for \(podcastFeeds.count) feeds...")
-        
-        // Load previously saved tracking data
-        loadEpisodeTrackingData()
-        
-        // PERFORMANCE: Batch process to reduce UserDefaults operations
-        var hasChanges = false
-        
-        for feed in podcastFeeds {
-            // Only set initial values if we don't have saved data
-            if lastKnownEpisodeCounts[feed.id] == nil {
-                let episodeCount = feed.episodes.count
-                lastKnownEpisodeCounts[feed.id] = episodeCount
-                hasChanges = true
-                
-                if let latestEpisode = feed.episodes.max(by: { $0.publicationDate < $1.publicationDate }) {
-                    lastKnownLatestEpisodeDates[feed.id] = latestEpisode.publicationDate
-                }
-            }
-        }
-        
-        // PERFORMANCE: Only save if there were actual changes
-        if hasChanges {
-            saveEpisodeTrackingData()
-        }
-        
-        isInitializingEpisodeTracking = false
-        hasInitializedEpisodeTracking = true
-        print("✅ Episode tracking initialized")
-    }
-    
-    /// Save episode tracking data to UserDefaults
-    private func saveEpisodeTrackingData() {
-        let defaults = UserDefaults.standard
-        
-        // Save episode counts
-        let countsData = try? JSONEncoder().encode(lastKnownEpisodeCounts)
-        defaults.set(countsData, forKey: "lastKnownEpisodeCounts")
-        
-        // Save latest episode dates
-        let datesDict = lastKnownLatestEpisodeDates.mapValues { $0.timeIntervalSince1970 }
-        let datesData = try? JSONEncoder().encode(datesDict)
-        defaults.set(datesData, forKey: "lastKnownLatestEpisodeDates")
-        
-        print("💾 Saved episode tracking data for \(lastKnownEpisodeCounts.count) feeds")
-    }
-    
-    /// Load episode tracking data from UserDefaults
-    private func loadEpisodeTrackingData() {
-        let defaults = UserDefaults.standard
-        
-        // Load episode counts
-        if let countsData = defaults.data(forKey: "lastKnownEpisodeCounts"),
-           let counts = try? JSONDecoder().decode([String: Int].self, from: countsData) {
-            lastKnownEpisodeCounts = counts
-            print("📁 Loaded episode counts for \(counts.count) feeds")
-        }
-        
-        // Load latest episode dates
-        if let datesData = defaults.data(forKey: "lastKnownLatestEpisodeDates"),
-           let datesDict = try? JSONDecoder().decode([String: TimeInterval].self, from: datesData) {
-            lastKnownLatestEpisodeDates = datesDict.mapValues { Date(timeIntervalSince1970: $0) }
-            print("📁 Loaded episode dates for \(datesDict.count) feeds")
-        }
-    }
-    
-    /// Start background episode checking using BGTaskScheduler
-    func startBackgroundEpisodeChecking() {
-        // Initialize tracking first
-        Task {
-            await initializeEpisodeTracking()
-        }
-        
-        // Schedule the first background task
-        BackgroundTaskManager.shared.schedulePodcastEpisodeCheck()
-        print("🕐 Started background episode checking using BGTaskScheduler")
-    }
-    
-    /// Stop background checking
-    func stopBackgroundEpisodeChecking() {
-        // Cancel any pending background tasks
-        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: "com.streamradios.podcast.episodecheck")
-        print("⏹️ Stopped background episode checking")
-    }
-    
-    /// Legacy timer-based checking (for fallback when background tasks aren't available)
-    func startPeriodicEpisodeChecking(interval: TimeInterval = 3600) { // Default: 1 hour
-        backgroundCheckTimer?.invalidate()
-        
-        // Initialize tracking first
-        Task {
-            await initializeEpisodeTracking()
-        }
-        
-        backgroundCheckTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task {
-                await self?.checkForNewEpisodes()
-            }
-        }
-        
-        print("🕐 Started fallback timer-based episode checking every \(interval) seconds")
-    }
-    
-    /// Stop periodic checking
-    func stopPeriodicEpisodeChecking() {
-        backgroundCheckTimer?.invalidate()
-        backgroundCheckTimer = nil
-        print("⏹️ Stopped periodic episode checking")
-    }
+
+
     
     // MARK: - Public Interface
     
@@ -660,11 +407,6 @@ class PodcastViewModel: ObservableObject {
         refreshTask = Task {
             do {
                 os_log("🔄 Refreshing feed: %@", log: log, type: .info, feedId)
-                
-                // Check for new episodes in this specific feed
-                if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
-                    await checkForNewEpisodes(in: feed)
-                }
                 
                 // Reload episodes to show new ones
                 await loadEpisodesForFeed(feedId)
@@ -2443,9 +2185,6 @@ extension PodcastViewModel {
     @available(*, deprecated, message: "Use new feed management")
     func refreshAllFeeds() {
         Task {
-            // Check for new episodes when refreshing all feeds
-            await checkForNewEpisodes()
-            
             for feed in podcastFeeds {
                 await loadEpisodesForFeed(feed.id, isInitialLoad: false)
             }
@@ -2855,10 +2594,7 @@ extension PodcastViewModel {
                 print("❌ Failed to count episodes: \(error)")
             }
             
-            // Initialize episode tracking for newly loaded feeds
-            Task {
-                await initializeEpisodeTracking()
-            }
+
             
             // Load episodes for the first feed if available
             if let firstFeed = loadedFeeds.first {

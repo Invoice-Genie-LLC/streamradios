@@ -34,6 +34,45 @@ struct RadioStation: Identifiable, Codable, Equatable {
         case lastPlayed
         case isRecent
     }
+    
+    // Standard memberwise initializer
+    init(id: String, name: String, url: String, iconData: String? = nil, iTunesArtworkData: String? = nil, country: String = "Unknown Region", isFavorite: Bool = false, favoritedAt: Date? = nil, favoriteOrder: Int? = nil, order: Int = 0, lastPlayed: Date? = nil, isRecent: Bool? = false) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.iconData = iconData
+        self.iTunesArtworkData = iTunesArtworkData
+        self.country = country
+        self.isFavorite = isFavorite
+        self.favoritedAt = favoritedAt
+        self.favoriteOrder = favoriteOrder
+        self.order = order
+        self.lastPlayed = lastPlayed
+        self.isRecent = isRecent
+    }
+    
+    // Custom decoder to handle missing optional fields with defaults
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Required fields
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        url = try container.decode(String.self, forKey: .url)
+        
+        // Optional fields with defaults
+        country = try container.decodeIfPresent(String.self, forKey: .country) ?? "Unknown Region"
+        isFavorite = try container.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
+        isRecent = try container.decodeIfPresent(Bool.self, forKey: .isRecent) ?? false
+        
+        // Fully optional fields
+        iconData = try container.decodeIfPresent(String.self, forKey: .iconData)
+        iTunesArtworkData = try container.decodeIfPresent(String.self, forKey: .iTunesArtworkData)
+        favoritedAt = try container.decodeIfPresent(Date.self, forKey: .favoritedAt)
+        favoriteOrder = try container.decodeIfPresent(Int.self, forKey: .favoriteOrder)
+        lastPlayed = try container.decodeIfPresent(Date.self, forKey: .lastPlayed)
+    }
 }
 
 
