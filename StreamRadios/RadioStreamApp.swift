@@ -37,6 +37,9 @@ struct RadioStreamApp: App {
                     setupApp()
                     PodcastPlayer.shared.configure(with: podcastViewModel)
                     // CarPlay is now configured via CarPlaySceneDelegate
+                    
+                    // Clear notifications and badge when app launches
+                    NotificationManager.shared.clearAllNotificationsAndBadge()
                 }
                 .onDisappear {
                             appDelegate.updatePodcastStateAndSave()

@@ -160,6 +160,40 @@ class NotificationManager: NSObject, ObservableObject {
     func cancelNotification(withIdentifier identifier: String) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
     }
+    
+    // MARK: - Badge and Delivered Notification Management
+    
+    /// Clears all delivered notifications and resets the app badge count
+    func clearAllNotificationsAndBadge() {
+        print("🧹 Clearing all notifications and resetting badge count")
+        
+        // Remove all delivered notifications from notification center
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        
+        // Remove all pending notifications
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        
+        // Reset app badge count to 0
+        DispatchQueue.main.async {
+            UIApplication.shared.applicationIconBadgeNumber = 0
+        }
+        
+        print("✅ All notifications cleared and badge reset")
+    }
+    
+    /// Resets only the app badge count without removing notifications
+    func resetBadgeCount() {
+        DispatchQueue.main.async {
+            UIApplication.shared.applicationIconBadgeNumber = 0
+            print("🔢 Badge count reset to 0")
+        }
+    }
+    
+    /// Clears only delivered notifications without affecting badge or pending notifications
+    func clearDeliveredNotifications() {
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        print("📱 Delivered notifications cleared")
+    }
 }
 
 extension NotificationManager: UNUserNotificationCenterDelegate {

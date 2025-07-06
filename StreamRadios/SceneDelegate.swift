@@ -70,9 +70,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
-        // ToDo
         // Called when the scene has moved from an inactive state to an active state.
         // Use this method to restart any tasks that were paused (or not yet started) when the scene was inactive.
+        
+        // Clear all notifications and reset badge count when app becomes active
+        NotificationManager.shared.clearAllNotificationsAndBadge()
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
