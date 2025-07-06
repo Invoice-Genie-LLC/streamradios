@@ -150,14 +150,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                         
                         if fileExists {
                             // File exists, ensure EpisodeStateManager knows about it
-                            EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: true)
+                            EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, reason: "force_close_sync")
                             print("✅ Synced download state for episode: \(managedEpisode.title ?? "Unknown")")
                         } else {
-                            // File doesn't exist, remove from Core Data
-                            managedEpisode.isDownloaded = false
-                            managedEpisode.localFilePath = nil
-                            EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
-                            print("🧹 Cleaned up missing download for episode: \(managedEpisode.title ?? "Unknown")")
+                            // UPGRADE PROTECTION: Be more conservative about cleaning up missing files
+                            let isUpgradeScenario = EpisodeStateManager.shared.isUpgradeScenario()
+                            if isUpgradeScenario {
+                                print("⚠️ Force close sync: File missing during upgrade - preserving download state for: \(managedEpisode.title ?? "Unknown")")
+                                // Keep the download state in EpisodeStateManager but clean up file path
+                                managedEpisode.localFilePath = nil
+                                // Don't change isDownloaded in Core Data during upgrades
+                            } else {
+                                // Normal operation: File missing - safe to clean up
+                                managedEpisode.isDownloaded = false
+                                managedEpisode.localFilePath = nil
+                                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                                print("🧹 Cleaned up missing download for episode: \(managedEpisode.title ?? "Unknown")")
+                            }
                         }
                     }
                     

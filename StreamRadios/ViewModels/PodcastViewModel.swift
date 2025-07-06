@@ -543,6 +543,7 @@ class PodcastViewModel: ObservableObject {
                 print("💾 DEBUG: - finalIsPlayed: \(finalIsPlayed)")
                 
                 Task.detached(priority: .userInitiated) {
+                    print("💾 DEBUG: About to call PodcastCloudKitManager.saveEpisodeState")
                     await PodcastCloudKitManager.shared.saveEpisodeState(
                         episodeId: episodeId,
                         feedId: validFeedId,
@@ -551,11 +552,33 @@ class PodcastViewModel: ObservableObject {
                         isDownloaded: currentDownloaded,
                         isPlayed: finalIsPlayed
                     )
+                    print("💾 DEBUG: CloudKit save call completed for episode \(episodeId)")
                 }
             } else {
-                print("⚠️ Skipping CloudKit sync for episode \(episodeId) - no valid feedId found")
-                print("⚠️ Debug: selectedFeedId=\(self.selectedFeedId ?? "nil"), currentEpisodes.count=\(self.currentEpisodes.count)")
+                print("⚠️ CRITICAL: Skipping CloudKit sync for episode \(episodeId) - no valid feedId found")
+                print("⚠️ Debug: episodeFeedId=\(episodeFeedId ?? "nil")")
+                print("⚠️ Debug: selectedFeedId=\(self.selectedFeedId ?? "nil")")
+                print("⚠️ Debug: currentEpisodes.count=\(self.currentEpisodes.count)")
                 print("⚠️ Debug: currentEpisodes contain this episode? \(self.currentEpisodes.contains { $0.id == episodeId })")
+                
+                // CRITICAL: This might be the issue - try alternative approaches
+                if let currentEpisode = self.currentEpisodes.first(where: { $0.id == episodeId }) {
+                    print("⚠️ Found episode in currentEpisodes with feedId: \(currentEpisode.feedId)")
+                    if !currentEpisode.feedId.isEmpty {
+                        print("💾 RETRY: Attempting CloudKit sync with episode's own feedId")
+                        Task.detached(priority: .userInitiated) {
+                            await PodcastCloudKitManager.shared.saveEpisodeState(
+                                episodeId: episodeId,
+                                feedId: currentEpisode.feedId,
+                                progress: finalProgress,
+                                isFavorite: currentFavorite,
+                                isDownloaded: currentDownloaded,
+                                isPlayed: finalIsPlayed
+                            )
+                            print("💾 RETRY: CloudKit retry completed for episode \(episodeId)")
+                        }
+                    }
+                }
             }
             
             // CRITICAL: Save to Core Data immediately for persistence and fast app restart
@@ -752,7 +775,7 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Delete downloaded episode files from device storage
+    /// Delete downloaded episode files from device storage using enhanced deletion strategies
     private func deleteDownloadedEpisodeFiles(_ episodeIds: [String]) async {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let episodesFolder = documentsPath.appendingPathComponent("DownloadedEpisodes")
@@ -760,7 +783,9 @@ class PodcastViewModel: ObservableObject {
         var deletedCount = 0
         
         for episodeId in episodeIds {
-            // Try multiple file extensions as episodes might have different formats
+            var fileDeleted = false
+            
+            // Strategy 1: Try multiple file extensions with sanitized ID
             let extensions = ["mp3", "m4a", "wav", "aac"]
             let sanitizedId = sanitizeFilename(episodeId)
             
@@ -773,15 +798,44 @@ class PodcastViewModel: ObservableObject {
                         try FileManager.default.removeItem(at: fileURL)
                         deletedCount += 1
                         print("🗑️ Deleted downloaded file: \(fileName)")
+                        fileDeleted = true
                         break // Found and deleted the file, no need to check other extensions
                     } catch {
                         print("❌ Failed to delete file \(fileName): \(error)")
                     }
                 }
             }
+            
+            // Strategy 2: If no file found with standard naming, search all files for matches
+            if !fileDeleted {
+                do {
+                    let fileURLs = try FileManager.default.contentsOfDirectory(at: episodesFolder, includingPropertiesForKeys: nil)
+                    
+                    for fileURL in fileURLs {
+                        let fileName = fileURL.lastPathComponent
+                        if fileName.contains(episodeId) || fileName.contains(sanitizedId) {
+                            do {
+                                try FileManager.default.removeItem(at: fileURL)
+                                deletedCount += 1
+                                print("🗑️ Deleted file found by search: \(fileName)")
+                                fileDeleted = true
+                                break
+                            } catch {
+                                print("❌ Failed to delete file found by search \(fileName): \(error)")
+                            }
+                        }
+                    }
+                } catch {
+                    print("❌ Error searching DownloadedEpisodes folder for \(episodeId): \(error)")
+                }
+            }
+            
+            if !fileDeleted {
+                print("⚠️ Could not find or delete physical file for episode ID: \(episodeId)")
+            }
         }
         
-        print("📁 Deleted \(deletedCount) downloaded episode files")
+        print("📁 Enhanced deletion completed: \(deletedCount) files deleted from \(episodeIds.count) episode IDs")
     }
     
     private func performEpisodeLoad(feedId: String, page: Int, isInitialLoad: Bool = false, isAppending: Bool = false) async {
@@ -1382,16 +1436,22 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        // PERFORMANCE FIX: Only sync episode states for new feeds that were actually added
-        // Don't sync episode states for existing installations - load from local storage instead
+        // UPGRADE PROTECTION: Use enhanced upgrade detection for episode state sync
+        // Only sync episode states when truly needed
         if !cloudKitFeeds.isEmpty {
             let existingFeedCount = await countExistingFeeds()
-            let isFreshInstall = existingFeedCount == 0
+            let legacyFreshInstallCheck = existingFeedCount == 0
+            let isDefiniteUpgrade = EpisodeStateManager.shared.isUpgradeScenario()
+            let isFreshInstall = legacyFreshInstallCheck && !isDefiniteUpgrade
+            
+            print("🔍 Merge episode state sync - Existing feeds: \(existingFeedCount), Legacy fresh: \(legacyFreshInstallCheck), Definite upgrade: \(isDefiniteUpgrade), Final fresh install: \(isFreshInstall)")
             
             if isFreshInstall {
                 print("🔄 Fresh install - syncing episode states for new feeds...")
-                print("🔍 Fresh install determination in merge: existingFeedCount=\(existingFeedCount), isFreshInstall=\(isFreshInstall)")
                 await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+            } else if isDefiniteUpgrade {
+                print("🔄 App upgrade - syncing episode states with download protection...")
+                await syncEpisodeStatesFromCloudKit(isFreshInstall: false)
             } else {
                 print("⚡ Existing installation - skipping CloudKit episode state sync for better performance")
                 // Just refresh local episode states from EpisodeStateManager
@@ -1552,10 +1612,14 @@ class PodcastViewModel: ObservableObject {
             // After CloudKit sync, check if any feeds need episode refreshing
             await refreshFeedsWithoutEpisodes()
             
-            // PERFORMANCE FIX: Only sync episode states from CloudKit on fresh installs
-            // On subsequent launches, load episode states from local storage only
+            // UPGRADE PROTECTION: Use EpisodeStateManager's robust upgrade detection
+            // Only sync episode states from CloudKit on fresh installs or when needed
             let hasEpisodeStatesSynced = UserDefaults.standard.bool(forKey: "HasEpisodeStatesSynced")
-            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let legacyFreshInstallCheck = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let isDefiniteUpgrade = EpisodeStateManager.shared.isUpgradeScenario()
+            let isFreshInstall = legacyFreshInstallCheck && !isDefiniteUpgrade
+            
+            print("🔍 Episode state sync check - Legacy fresh: \(legacyFreshInstallCheck), Definite upgrade: \(isDefiniteUpgrade), Final fresh install: \(isFreshInstall)")
             
             if isFreshInstall || !hasEpisodeStatesSynced {
                 print("🔄 Episode state sync needed - fresh install: \(isFreshInstall), states synced: \(hasEpisodeStatesSynced)")
@@ -1590,12 +1654,18 @@ class PodcastViewModel: ObservableObject {
         print("🔄 Initializing episode state sync...")
         
         Task {
-            // Determine if this is a fresh install
+            // UPGRADE PROTECTION: Use EpisodeStateManager's robust upgrade detection
             let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-            let isFreshInstall = !hasLaunchedBefore
+            let legacyFreshInstallCheck = !hasLaunchedBefore
+            let isDefiniteUpgrade = EpisodeStateManager.shared.isUpgradeScenario()
+            let isFreshInstall = legacyFreshInstallCheck && !isDefiniteUpgrade
+            
+            print("🔍 Episode state sync - Legacy fresh: \(legacyFreshInstallCheck), Definite upgrade: \(isDefiniteUpgrade), Final fresh install: \(isFreshInstall)")
             
             if isFreshInstall {
                 print("🆕 Fresh install detected - syncing episode states (excluding downloads)")
+            } else if isDefiniteUpgrade {
+                print("🔄 App upgrade detected - syncing all episode states with download protection")
             } else {
                 print("📱 Existing installation - syncing all episode states including downloads")
             }
@@ -1757,19 +1827,73 @@ class PodcastViewModel: ObservableObject {
         print("🗑️ Deleting downloaded episode: \(episode.title)")
         
         do {
-            // Delete the local file if it exists
+            // Enhanced file deletion logic - try multiple strategies to find and delete the file
+            var fileDeleted = false
+            
+            // Strategy 1: Try to delete using the stored localFilePath
             if let localFilePath = episode.localFilePath, !localFilePath.isEmpty {
                 let localURL = URL(fileURLWithPath: localFilePath)
                 if FileManager.default.fileExists(atPath: localFilePath) {
                     try FileManager.default.removeItem(at: localURL)
                     print("📁 Successfully deleted local file: \(localFilePath)")
+                    fileDeleted = true
                 } else {
                     print("⚠️ Local file doesn't exist at path: \(localFilePath)")
                 }
             }
             
+            // Strategy 2: If no stored path or deletion failed, try to find and delete using recovery logic
+            if !fileDeleted {
+                print("🔍 Attempting to find and delete file using recovery strategies...")
+                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let episodesFolder = documentsPath.appendingPathComponent("DownloadedEpisodes")
+                
+                // Sanitize episode ID for filename search
+                let sanitizedId = sanitizeFilename(episode.id)
+                let commonExtensions = ["mp3", "m4a", "wav", "aac"]
+                
+                // Try to find file using sanitized ID with common extensions
+                for ext in commonExtensions {
+                    let fileName = "\(sanitizedId).\(ext)"
+                    let fileURL = episodesFolder.appendingPathComponent(fileName)
+                    
+                    if FileManager.default.fileExists(atPath: fileURL.path) {
+                        try FileManager.default.removeItem(at: fileURL)
+                        print("📁 Successfully deleted recovered file: \(fileName)")
+                        fileDeleted = true
+                        break
+                    }
+                }
+                
+                // Strategy 3: Search all files in DownloadedEpisodes folder for matches
+                if !fileDeleted {
+                    do {
+                        let fileURLs = try FileManager.default.contentsOfDirectory(at: episodesFolder, includingPropertiesForKeys: nil)
+                        
+                        for fileURL in fileURLs {
+                            let fileName = fileURL.lastPathComponent
+                            if fileName.contains(episode.id) || fileName.contains(sanitizedId) {
+                                try FileManager.default.removeItem(at: fileURL)
+                                print("📁 Successfully deleted file found by search: \(fileName)")
+                                fileDeleted = true
+                                break
+                            }
+                        }
+                    } catch {
+                        print("❌ Error searching DownloadedEpisodes folder: \(error)")
+                    }
+                }
+            }
+            
+            if !fileDeleted {
+                print("⚠️ Could not find or delete physical file for episode: \(episode.title)")
+            }
+            
             // CRITICAL: Update EpisodeStateManager first (source of truth for download state)
             EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
+            
+            // CRITICAL: Clear individual backup files to prevent recovery on restart
+            EpisodeStateManager.shared.clearEpisodeBackup(episode.id)
             
             // Clear local file path from Core Data
             await episodeManager.updateEpisodeLocalPath(episode.id, localPath: nil)
@@ -1778,6 +1902,33 @@ class PodcastViewModel: ObservableObject {
             try await episodeManager.updateEpisodeStates([
                 EpisodeStateUpdate(episodeId: episode.id, isDownloaded: false)
             ])
+            
+            // CRITICAL: Sync the download state change to CloudKit with enhanced debugging
+            print("🔍 DEBUG: About to trigger CloudKit sync for episode: \(episode.id)")
+            print("🔍 DEBUG: Episode feedId: \(episode.feedId)")
+            print("🔍 DEBUG: Selected feedId: \(selectedFeedId ?? "nil")")
+            
+            updateEpisodeState(episode.id, isDownloaded: false)
+            print("☁️ Triggered CloudKit sync for deleted download: \(episode.title)")
+            
+            // BACKUP: Also directly call CloudKit if feedId is available
+            if !episode.feedId.isEmpty {
+                Task.detached(priority: .userInitiated) {
+                    let currentProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                    let currentFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                    await PodcastCloudKitManager.shared.saveEpisodeState(
+                        episodeId: episode.id,
+                        feedId: episode.feedId,
+                        progress: currentProgress,
+                        isFavorite: currentFavorite,
+                        isDownloaded: false,
+                        isPlayed: currentProgress >= 0.99
+                    )
+                    print("☁️ BACKUP: Direct CloudKit sync completed for deleted download: \(episode.title)")
+                }
+            } else {
+                print("⚠️ WARNING: No feedId available for direct CloudKit sync backup")
+            }
             
             // Clear cache to force fresh load
             await episodeManager.clearCacheForFeed(episode.feedId)

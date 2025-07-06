@@ -89,11 +89,17 @@ class EpisodeStateManager: ObservableObject {
     
     // MARK: - Private Properties
     private let userDefaults: UserDefaults
+    private let isUsingAppGroup: Bool // Track if we're using app group UserDefaults
     private let statesKey = "EpisodeStates"
     private let progressKey = "EpisodeProgress"
     private let favoritesKey = "EpisodeFavorites" // New: Favorites storage key
     private let downloadsKey = "EpisodeDownloads" // New: Downloads storage key
     private let currentlyPlayingKey = "CurrentlyPlayingEpisode"
+    
+    // UPGRADE PROTECTION: Keys for tracking app version and preventing data loss
+    private let appVersionKey = "EpisodeStateManagerAppVersion"
+    private let downloadStateBackupKey = "DownloadStateBackup"
+    private let lastSuccessfulInitKey = "LastSuccessfulEpisodeStateInit"
     
     private var currentlyPlayingEpisodeId: String?
     private var episodeCurrentTime: [String: Double] = [:]
@@ -106,11 +112,16 @@ class EpisodeStateManager: ObservableObject {
         // Try to use app group UserDefaults, fallback to standard if not available
         if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
             self.userDefaults = appGroupDefaults
+            self.isUsingAppGroup = true
             print("✅ EpisodeStateManager: Using app group UserDefaults")
         } else {
             self.userDefaults = UserDefaults.standard
+            self.isUsingAppGroup = false
             print("⚠️ EpisodeStateManager: App group not available, using standard UserDefaults")
         }
+        
+        // UPGRADE PROTECTION: Check for app version changes and migrate data if needed
+        handleAppVersionUpgrade()
         
         loadSavedStates()
         
@@ -118,6 +129,184 @@ class EpisodeStateManager: ObservableObject {
         syncDownloadStatesFromCoreData()
         
         setupDebugLogging()
+        
+        // Mark successful initialization
+        userDefaults.set(Date(), forKey: lastSuccessfulInitKey)
+    }
+    
+    // MARK: - Upgrade Protection Methods
+    
+    /// Handle app version upgrades and migrate data to prevent loss
+    private func handleAppVersionUpgrade() {
+        guard let infoDictionary = Bundle.main.infoDictionary,
+              let currentVersion = infoDictionary["CFBundleShortVersionString"] as? String else {
+            print("⚠️ EpisodeStateManager: Could not get app version")
+            return
+        }
+        
+        let storedVersion = userDefaults.string(forKey: appVersionKey)
+        
+        if storedVersion == nil {
+            // First time running this version or fresh install
+            print("🆕 EpisodeStateManager: First run - version \(currentVersion)")
+            
+            // Check if this is actually an upgrade (has existing episode data)
+            if hasExistingEpisodeData() {
+                print("🔄 EpisodeStateManager: Detected upgrade scenario - preserving existing data")
+                performUpgradeMigration(from: storedVersion, to: currentVersion)
+            } else {
+                print("🆕 EpisodeStateManager: Fresh install detected")
+            }
+        } else if storedVersion != currentVersion {
+            // App version changed - this is an upgrade
+            print("🔄 EpisodeStateManager: App upgraded from \(storedVersion ?? "unknown") to \(currentVersion)")
+            performUpgradeMigration(from: storedVersion, to: currentVersion)
+        } else {
+            print("✅ EpisodeStateManager: Same version (\(currentVersion)) - no migration needed")
+        }
+        
+        // Always update the stored version
+        userDefaults.set(currentVersion, forKey: appVersionKey)
+    }
+    
+    /// Check if there's existing episode data to help determine if this is an upgrade
+    private func hasExistingEpisodeData() -> Bool {
+        // Check multiple sources for existing data
+        let hasProgressData = userDefaults.data(forKey: progressKey) != nil
+        let hasFavoritesData = userDefaults.data(forKey: favoritesKey) != nil
+        let hasDownloadsData = userDefaults.data(forKey: downloadsKey) != nil
+        let hasStatesData = userDefaults.data(forKey: statesKey) != nil
+        
+        // Also check for any legacy keys that might indicate existing data
+        let hasLegacyData = userDefaults.dictionaryRepresentation().keys.contains { key in
+            key.lowercased().contains("episode") || key.lowercased().contains("podcast")
+        }
+        
+        let hasAnyData = hasProgressData || hasFavoritesData || hasDownloadsData || hasStatesData || hasLegacyData
+        
+        print("📊 EpisodeStateManager: Existing data check - Progress: \(hasProgressData), Favorites: \(hasFavoritesData), Downloads: \(hasDownloadsData), States: \(hasStatesData), Legacy: \(hasLegacyData)")
+        
+        return hasAnyData
+    }
+    
+    /// Perform upgrade migration to preserve download states
+    private func performUpgradeMigration(from oldVersion: String?, to newVersion: String) {
+        print("🔄 EpisodeStateManager: Performing upgrade migration")
+        
+        // CRITICAL: Create backup of current download states before any migration
+        backupDownloadStates()
+        
+        // Migrate from different UserDefaults if needed
+        migrateFromStandardUserDefaults()
+        
+        // Restore download states from backup if main data is missing
+        restoreDownloadStatesFromBackup()
+        
+        print("✅ EpisodeStateManager: Upgrade migration completed")
+    }
+    
+    /// Backup current download states to prevent loss
+    private func backupDownloadStates() {
+        var backupData: [String: Any] = [:]
+        
+        // Backup all episode-related data
+        if let progressData = userDefaults.data(forKey: progressKey) {
+            backupData["progress"] = progressData
+        }
+        
+        if let favoritesData = userDefaults.data(forKey: favoritesKey) {
+            backupData["favorites"] = favoritesData
+        }
+        
+        if let downloadsData = userDefaults.data(forKey: downloadsKey) {
+            backupData["downloads"] = downloadsData
+        }
+        
+        if let statesData = userDefaults.data(forKey: statesKey) {
+            backupData["states"] = statesData
+        }
+        
+        // Store backup with timestamp
+        backupData["timestamp"] = Date().timeIntervalSince1970  // Convert Date to TimeInterval for JSON serialization
+        backupData["version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        
+        if let backupDataEncoded = try? JSONSerialization.data(withJSONObject: backupData) {
+            userDefaults.set(backupDataEncoded, forKey: downloadStateBackupKey)
+            print("💾 EpisodeStateManager: Created backup of episode states")
+        }
+    }
+    
+    /// Migrate data from standard UserDefaults to app group UserDefaults if needed
+    private func migrateFromStandardUserDefaults() {
+        // Only migrate if we're using app group UserDefaults but data might be in standard
+        guard isUsingAppGroup else { return }
+        
+        let standardDefaults = UserDefaults.standard
+        var migratedCount = 0
+        
+        // Check each key and migrate if data exists in standard but not in app group
+        let keysToMigrate = [progressKey, favoritesKey, downloadsKey, statesKey, currentlyPlayingKey]
+        
+        for key in keysToMigrate {
+            if userDefaults.data(forKey: key) == nil, let data = standardDefaults.data(forKey: key) {
+                userDefaults.set(data, forKey: key)
+                migratedCount += 1
+                print("🔄 EpisodeStateManager: Migrated \(key) from standard to app group UserDefaults")
+            }
+        }
+        
+        if migratedCount > 0 {
+            print("✅ EpisodeStateManager: Migrated \(migratedCount) keys from standard UserDefaults")
+        }
+    }
+    
+    /// Restore download states from backup if main data is missing
+    private func restoreDownloadStatesFromBackup() {
+        // Check if current download data is missing but backup exists
+        guard userDefaults.data(forKey: downloadsKey) == nil,
+              let backupData = userDefaults.data(forKey: downloadStateBackupKey),
+              let backup = try? JSONSerialization.jsonObject(with: backupData) as? [String: Any] else {
+            return
+        }
+        
+        print("🔄 EpisodeStateManager: Restoring download states from backup")
+        
+        // Restore each data type from backup
+        if let progressData = backup["progress"] as? Data {
+            userDefaults.set(progressData, forKey: progressKey)
+        }
+        
+        if let favoritesData = backup["favorites"] as? Data {
+            userDefaults.set(favoritesData, forKey: favoritesKey)
+        }
+        
+        if let downloadsData = backup["downloads"] as? Data {
+            userDefaults.set(downloadsData, forKey: downloadsKey)
+            print("✅ EpisodeStateManager: Restored download states from backup")
+        }
+        
+        if let statesData = backup["states"] as? Data {
+            userDefaults.set(statesData, forKey: statesKey)
+        }
+    }
+    
+    /// Check if this is a definite upgrade scenario (not fresh install)
+    func isUpgradeScenario() -> Bool {
+        // Multiple indicators that this is an upgrade:
+        // 1. Has existing episode data
+        // 2. Has app version stored (ran before)
+        // 3. Has successful initialization timestamp
+        // 4. Has Core Data with episodes
+        
+        let hasStoredVersion = userDefaults.string(forKey: appVersionKey) != nil
+        let hasInitTimestamp = userDefaults.object(forKey: lastSuccessfulInitKey) != nil
+        let hasEpisodeData = hasExistingEpisodeData()
+        
+        let isUpgrade = hasStoredVersion || hasInitTimestamp || hasEpisodeData
+        
+        print("📊 EpisodeStateManager: Upgrade check - HasVersion: \(hasStoredVersion), HasInit: \(hasInitTimestamp), HasData: \(hasEpisodeData) = \(isUpgrade)")
+        
+        return isUpgrade
     }
     
     // MARK: - Public Methods
@@ -149,6 +338,13 @@ class EpisodeStateManager: ObservableObject {
            let decodedDownloads = try? JSONDecoder().decode([String: Bool].self, from: downloadsData) {
             self.episodeDownloads = decodedDownloads
             print("✅ EpisodeStateManager: Loaded \(episodeDownloads.count) episode downloads")
+        }
+        
+        // UPGRADE PROTECTION: Recover any missing download states from backups
+        if episodeDownloads.isEmpty || isUpgradeScenario() {
+            print("🔄 EpisodeStateManager: Attempting to recover download states from backups")
+            restoreDownloadStatesFromBackup()
+            recoverDownloadStatesFromIndividualBackups()
         }
         
         // Load currently playing episode
@@ -432,6 +628,80 @@ class EpisodeStateManager: ObservableObject {
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded)")
     }
     
+    /// UPGRADE PROTECTION: Enhanced download state setting with backup
+    func setDownloadedWithProtection(_ episodeId: String, isDownloaded: Bool, reason: String = "normal") {
+        let previousState = episodeDownloads[episodeId] ?? false
+        
+        // If we're setting to false but it was true, check if this is during an upgrade
+        if previousState && !isDownloaded && isUpgradeScenario() {
+            print("⚠️ EpisodeStateManager: Preventing download state reset during upgrade for \(episodeId) (reason: \(reason))")
+            // Don't change the state during upgrades unless explicitly forced
+            return
+        }
+        
+        episodeDownloads[episodeId] = isDownloaded
+        saveCurrentStates()
+        userDefaults.synchronize() // Force immediate sync
+        sendThrottledUpdate()
+        print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded) (reason: \(reason))")
+        
+        // Create additional backup if setting to true
+        if isDownloaded {
+            backupSingleDownloadState(episodeId: episodeId)
+        }
+    }
+    
+    /// Backup a single download state for recovery
+    private func backupSingleDownloadState(episodeId: String) {
+        let backupKey = "DownloadBackup_\(episodeId)"
+        let backupData: [String: Any] = [
+            "isDownloaded": true,
+            "timestamp": Date().timeIntervalSince1970,  // Convert Date to TimeInterval for JSON serialization
+            "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        ]
+        
+        if let encoded = try? JSONSerialization.data(withJSONObject: backupData) {
+            userDefaults.set(encoded, forKey: backupKey)
+        }
+    }
+    
+    /// Recover download states from individual backups
+    private func recoverDownloadStatesFromIndividualBackups() {
+        let allKeys = userDefaults.dictionaryRepresentation().keys
+        let backupKeys = allKeys.filter { $0.hasPrefix("DownloadBackup_") }
+        
+        var recoveredCount = 0
+        
+        for backupKey in backupKeys {
+            let episodeId = String(backupKey.dropFirst("DownloadBackup_".count))
+            
+            // Only recover if current state is false but backup exists
+            if !(episodeDownloads[episodeId] ?? false),
+               let backupData = userDefaults.data(forKey: backupKey),
+               let backup = try? JSONSerialization.jsonObject(with: backupData) as? [String: Any],
+               let wasDownloaded = backup["isDownloaded"] as? Bool,
+               wasDownloaded {
+                
+                episodeDownloads[episodeId] = true
+                recoveredCount += 1
+                print("🔄 EpisodeStateManager: Recovered download state for \(episodeId)")
+            }
+        }
+        
+        if recoveredCount > 0 {
+            print("✅ EpisodeStateManager: Recovered \(recoveredCount) download states from individual backups")
+            saveCurrentStates()
+        }
+    }
+    
+    /// Clear individual backup file for a specific episode (used when deleting downloads)
+    func clearEpisodeBackup(_ episodeId: String) {
+        let backupKey = "DownloadBackup_\(episodeId)"
+        userDefaults.removeObject(forKey: backupKey)
+        userDefaults.synchronize()
+        print("🗑️ EpisodeStateManager: Cleared backup for episode \(episodeId)")
+    }
+    
     /// Clear all data for a specific episode (used when deleting podcasts)
     func clearEpisodeData(_ episodeId: String) {
         episodeStates.removeValue(forKey: episodeId)
@@ -444,6 +714,9 @@ class EpisodeStateManager: ObservableObject {
         if currentlyPlayingEpisodeId == episodeId {
             currentlyPlayingEpisodeId = nil
         }
+        
+        // Clear individual backup file
+        clearEpisodeBackup(episodeId)
         
         saveCurrentStates()
         sendThrottledUpdate()
@@ -467,6 +740,7 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Synchronize download states from Core Data on startup to recover from force close scenarios
+    /// UPGRADE PROTECTION: Enhanced to prevent download state loss during upgrades
     private func syncDownloadStatesFromCoreData() {
         DispatchQueue.global(qos: .utility).async {
             let context = CoreDataStack.shared.context
@@ -480,6 +754,9 @@ class EpisodeStateManager: ObservableObject {
                     
                     var syncedCount = 0
                     var cleanedCount = 0
+                    let isUpgrade = EpisodeStateManager.shared.isUpgradeScenario()
+                    
+                    print("🔄 EpisodeStateManager: Syncing \(downloadedEpisodes.count) downloaded episodes from Core Data (upgrade: \(isUpgrade))")
                     
                     for managedEpisode in downloadedEpisodes {
                         guard let episodeId = managedEpisode.id else { continue }
@@ -493,17 +770,43 @@ class EpisodeStateManager: ObservableObject {
                         if fileExists {
                             // File exists, ensure EpisodeStateManager knows about it
                             DispatchQueue.main.async {
-                                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: true)
+                                EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, reason: "core_data_sync")
                             }
                             syncedCount += 1
                         } else {
-                            // File doesn't exist, clean up Core Data
-                            managedEpisode.isDownloaded = false
-                            managedEpisode.localFilePath = nil
-                            DispatchQueue.main.async {
-                                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                            // UPGRADE PROTECTION: During upgrades, be more conservative about cleaning up missing files
+                            if isUpgrade {
+                                print("⚠️ EpisodeStateManager: File missing during upgrade - preserving download state for \(episodeId)")
+                                // Keep the download state in EpisodeStateManager but clean up Core Data
+                                managedEpisode.localFilePath = nil
+                                // Don't change the isDownloaded flag in Core Data during upgrades
+                            } else {
+                                // Not an upgrade, safe to clean up normally
+                                managedEpisode.isDownloaded = false
+                                managedEpisode.localFilePath = nil
+                                DispatchQueue.main.async {
+                                    EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
+                                    EpisodeStateManager.shared.clearEpisodeBackup(episodeId)  // Clear backup to prevent recovery
+                                    
+                                    // CRITICAL: Sync the download state change to CloudKit
+                                    if let feedId = managedEpisode.feedId, !feedId.isEmpty {
+                                        Task.detached(priority: .utility) {
+                                            let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
+                                            let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+                                            await PodcastCloudKitManager.shared.saveEpisodeState(
+                                                episodeId: episodeId,
+                                                feedId: feedId,
+                                                progress: currentProgress,
+                                                isFavorite: currentFavorite,
+                                                isDownloaded: false,
+                                                isPlayed: currentProgress >= 0.99
+                                            )
+                                            print("☁️ Synced download state cleanup to CloudKit from EpisodeStateManager: \(episodeId)")
+                                        }
+                                    }
+                                }
+                                cleanedCount += 1
                             }
-                            cleanedCount += 1
                         }
                     }
                     
