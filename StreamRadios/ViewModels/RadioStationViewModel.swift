@@ -615,12 +615,19 @@ class RadioStationViewModel: NSObject, ObservableObject {
             self.isDeletionInProgress = true
         }
         
-        // Set up background task
+        // Set up background task with proper timeout handling
         var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        var isTaskCompleted = false
+        
         backgroundTaskID = UIApplication.shared.beginBackgroundTask {
-            // Task expired
-            UIApplication.shared.endBackgroundTask(backgroundTaskID)
-            backgroundTaskID = .invalid
+            // Task expired - clean up properly
+            print("⚠️ Background task expired during data deletion")
+            if !isTaskCompleted {
+                isTaskCompleted = true
+                DispatchQueue.main.async {
+                    self.cleanupAfterDeletion(success: false, error: NSError(domain: "BackgroundTaskExpired", code: -1, userInfo: [NSLocalizedDescriptionKey: "Background task expired before completion"]), backgroundTaskID: backgroundTaskID, completion: completion)
+                }
+            }
         }
         
         // Set up observer for app entering background
@@ -628,25 +635,46 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         // Fetch all record IDs for 'streamingRadios' from CloudKit
         DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { [weak self] recordIDs, error in
-            guard let self = self, let recordIDs = recordIDs else {
-                DispatchQueue.main.async {
-                    self?.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
+            guard let self = self, !isTaskCompleted else {
+                if !isTaskCompleted {
+                    isTaskCompleted = true
+                    DispatchQueue.main.async {
+                        self?.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
+                    }
+                }
+                return
+            }
+            
+            guard let recordIDs = recordIDs else {
+                if !isTaskCompleted {
+                    isTaskCompleted = true
+                    DispatchQueue.main.async {
+                        self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
+                    }
                 }
                 return
             }
             
             // Proceed with batch deletion of records
             DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
+                guard !isTaskCompleted else { return }
+                
                 DispatchQueue.main.async {
                     if success {
                         self.clearCoreData { coreDataSuccess, coreDataError in
-                            if coreDataSuccess {
-                                self.stations.removeAll()
+                            if !isTaskCompleted {
+                                isTaskCompleted = true
+                                if coreDataSuccess {
+                                    self.stations.removeAll()
+                                }
+                                self.cleanupAfterDeletion(success: coreDataSuccess, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
                             }
-                            self.cleanupAfterDeletion(success: coreDataSuccess, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
                         }
                     } else {
-                        self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
+                        if !isTaskCompleted {
+                            isTaskCompleted = true
+                            self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
+                        }
                     }
                 }
             }
@@ -663,11 +691,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Remove the background observer
             self.removeBackgroundObserver()
             
-            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            // End background task if it's still valid
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            }
+            
             completion(success, error)
             
             if success {
+                print("✅ Data deletion completed successfully")
             } else if let error = error {
+                print("❌ Data deletion failed: \(error.localizedDescription)")
                 NotificationManager.shared.notifyUser(title: "Deletion Failed", message: "An error occurred: \(error.localizedDescription)")
             }
         }
@@ -1132,8 +1166,13 @@ extension RadioStationViewModel {
             }
             
             // Save changes
+            let hasChanges = context.hasChanges
             try context.save()
-            print("CoreData stations updated successfully.")
+            
+            // Only log if there were actual changes
+            if hasChanges {
+                print("CoreData stations updated successfully.")
+            }
         } catch {
             print("Failed to update stations in CoreData: \(error)")
         }

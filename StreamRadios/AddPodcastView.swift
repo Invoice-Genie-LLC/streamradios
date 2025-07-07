@@ -386,7 +386,7 @@ struct AddPodcastView: View {
                 }
                 
                 if isAddingPodcast {
-                    Color.black.opacity(0.6).edgesIgnoringSafeArea(.all)
+                    Color.black.opacity(0.75).edgesIgnoringSafeArea(.all)
                     PodcastAddingProgressView(
                         progress: addingProgress,
                         stageText: addingStageText
@@ -970,7 +970,16 @@ struct PodcastAddingProgressView: View {
     @Environment(\.colorScheme) var colorScheme
     
     private var cardBackgroundColor: Color {
-        Color.adaptiveCardBackground
+        // Use solid, opaque background instead of adaptive transparent one
+        colorScheme == .dark ? Color.black : Color.white
+    }
+    
+    private var titleColor: Color {
+        colorScheme == .dark ? Color.white : Color.black
+    }
+    
+    private var secondaryTextColor: Color {
+        colorScheme == .dark ? Color.gray : Color.secondary
     }
     
     var body: some View {
@@ -978,7 +987,7 @@ struct PodcastAddingProgressView: View {
             // Title
             Text("Adding Podcast")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundColor(.adaptivePrimaryText)
+                .foregroundColor(titleColor)
             
             // Animated podcast icon
             ZStack {
@@ -993,7 +1002,7 @@ struct PodcastAddingProgressView: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.easeInOut(duration: 0.5), value: progress)
                 
-                Image(systemName: "podcast")
+                Image(systemName: "microphone")
                     .font(.system(size: 30, weight: .medium))
                     .foregroundColor(.blue)
             }
@@ -1001,13 +1010,13 @@ struct PodcastAddingProgressView: View {
             // Progress percentage
             Text("\(Int(progress * 100))%")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.adaptiveSecondaryText)
+                .foregroundColor(secondaryTextColor)
                 .animation(.easeInOut(duration: 0.3), value: progress)
             
             // Stage text
             Text(stageText)
                 .font(.system(size: 16))
-                .foregroundColor(.adaptivePrimaryText)
+                .foregroundColor(titleColor)
                 .multilineTextAlignment(.center)
                 .animation(.easeInOut(duration: 0.3), value: stageText)
             
@@ -1016,7 +1025,7 @@ struct PodcastAddingProgressView: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Rectangle()
-                            .fill(Color.adaptiveBorder)
+                            .fill(Color.gray.opacity(0.3))
                             .frame(height: 6)
                             .cornerRadius(3)
                         
@@ -1037,7 +1046,11 @@ struct PodcastAddingProgressView: View {
         .padding(32)
         .background(cardBackgroundColor)
         .cornerRadius(16)
-        .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+        )
         .scaleEffect(0.9)
         .animation(.spring(response: 0.6, dampingFraction: 0.8), value: progress)
     }

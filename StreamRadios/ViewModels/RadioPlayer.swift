@@ -55,6 +55,15 @@ class RadioPlayer: NSObject, ObservableObject {
     private let maxReconnectionAttempts = 5
     private var reconnectionTimer: Timer?
     
+    // MARK: - Remote Command Center Properties
+    private var isRemoteCommandCenterConfigured = false
+    
+    // MARK: - Logging Optimization Properties
+    private var lastLoggedStationIndex: Int?
+    private var lastLoggedPlayingState: Bool?
+    private var lastLoggedArtworkState: Bool = false
+    private var lastLoggedDefaultInfo: Date?
+    
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     
     // Stream quality display
@@ -69,6 +78,17 @@ class RadioPlayer: NSObject, ObservableObject {
     
     // Cache for storing last iTunes artwork per station
     private var stationArtworkCache: [String: (artwork: UIImage, metadata: String)] = [:]
+    
+    // Buffering timeout spam prevention
+    private var bufferingAttempts: Int = 0
+    private var lastBufferingLog: Date?
+    
+    // Widget update spam prevention
+    private var lastWidgetStation: String?
+    private var lastWidgetMetadata: String?
+    
+    // Time update spam prevention
+    private var lastTimeUpdateLog: Date?
     
     override init() {
         streamQualityManager = StreamQualityManager()
@@ -592,6 +612,10 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.connectionState = .connected
                         print("✅ Station Transition: Player now PLAYING")
                         
+                        // Reset buffering attempts counter when successfully playing
+                        self?.bufferingAttempts = 0
+                        self?.lastBufferingLog = nil
+                        
                         // Start elapsed time tracking when player starts playing
                         if self?.playbackStartTime == nil {
                             self?.playbackStartTime = Date()
@@ -624,11 +648,23 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.connectionState = .buffering
                         print("⏳ Station Transition: Player BUFFERING (normal for new streams)")
                         
-                        // Add timeout protection for buffering state
+                        // Add timeout protection for buffering state with rate limiting
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                            if self?.connectionState == .buffering {
-                                print("⚠️ Station Transition: Still buffering after 3s - triggering play again")
-                                self?.player?.play()
+                            guard let self = self else { return }
+                            if self.connectionState == .buffering {
+                                let now = Date()
+                                
+                                // Rate limit buffering logs - only log first 3 attempts, then once every 10 seconds
+                                let shouldLog = self.bufferingAttempts < 3 || 
+                                               (self.lastBufferingLog == nil || now.timeIntervalSince(self.lastBufferingLog!) > 10.0)
+                                
+                                if shouldLog {
+                                    print("⚠️ Station Transition: Still buffering after 3s - triggering play again (attempt \(self.bufferingAttempts + 1))")
+                                    self.lastBufferingLog = now
+                                }
+                                
+                                self.bufferingAttempts += 1
+                                self.player?.play()
                             }
                         }
                         
@@ -1139,7 +1175,11 @@ class RadioPlayer: NSObject, ObservableObject {
                 print("⚠️ Now Playing: Radio is playing but not active player - forcing active state")
                 PlaybackManager.shared.activePlayer = .radio
             } else {
-                print("❌ Now Playing: Radio is not the active player and not playing")
+                // Rate limit this log message to prevent spam
+                if lastLoggedPlayingState != false {
+                    print("❌ Now Playing: Radio is not the active player and not playing")
+                    lastLoggedPlayingState = false
+                }
                 return
             }
         }
@@ -1155,14 +1195,30 @@ class RadioPlayer: NSObject, ObservableObject {
         let currentStation: RadioStation?
         if isHandlingAlarm {
             currentStation = alarmStation
-            print("🎵 Now Playing: Using alarm station")
+            // Only log if state changed
+            if lastLoggedStationIndex != -1 {
+                print("🎵 Now Playing: Using alarm station")
+                lastLoggedStationIndex = -1
+            }
         } else if let currentStationIndex = currentStationIndex,
                   currentStationIndex < viewModel.stations.count {
             currentStation = viewModel.stations[currentStationIndex]
-            print("🎵 Now Playing: Using station at index \(currentStationIndex)")
+            // Only log if station changed
+            if lastLoggedStationIndex != currentStationIndex {
+                print("🎵 Now Playing: Using station at index \(currentStationIndex)")
+                lastLoggedStationIndex = currentStationIndex
+            }
         } else {
             currentStation = nil
-            print("❌ Now Playing: No current station available")
+            // Rate limit this log message to prevent spam - only log once per minute
+            if lastLoggedStationIndex != nil {
+                let now = Date()
+                if lastLoggedDefaultInfo == nil || now.timeIntervalSince(lastLoggedDefaultInfo!) > 60 {
+                    print("❌ Now Playing: No current station available")
+                    lastLoggedDefaultInfo = now
+                }
+                lastLoggedStationIndex = nil
+            }
         }
         
         // Set basic metadata
@@ -1175,12 +1231,21 @@ class RadioPlayer: NSObject, ObservableObject {
             nowPlayingInfo[MPMediaItemPropertyArtist] = artistInfo
             nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = stationName
             
-            print("🎵 Now Playing Info - Title: '\(trackTitle)', Artist: '\(artistInfo)', Station: '\(stationName)'")
+            // Only log if station changed
+            if lastLoggedStationIndex != currentStationIndex {
+                print("🎵 Now Playing Info - Title: '\(trackTitle)', Artist: '\(artistInfo)', Station: '\(stationName)'")
+            }
         } else {
             nowPlayingInfo[MPMediaItemPropertyTitle] = "StreamRadios"
             nowPlayingInfo[MPMediaItemPropertyArtist] = "No Station Playing"
             nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "StreamRadios"
-            print("⚠️ Now Playing: Using default info as no station is available")
+            
+            // Rate limit this log message to prevent spam - only log once per minute
+            let now = Date()
+            if lastLoggedDefaultInfo == nil || now.timeIntervalSince(lastLoggedDefaultInfo!) > 60 {
+                print("⚠️ Now Playing: Using default info as no station is available")
+                lastLoggedDefaultInfo = now
+            }
         }
         
         // Set stream properties
@@ -1193,7 +1258,7 @@ class RadioPlayer: NSObject, ObservableObject {
         if isPlaying {
             let elapsedTime = getCurrentElapsedTime()
             nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
-            print("⏱️ Now Playing: Elapsed time set to \(String(format: "%.1f", elapsedTime)) seconds")
+            // Don't log elapsed time updates as they're frequent
         }
         
         // Add artwork if available (enhanced priority order)
@@ -1211,7 +1276,11 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                 artworkSet = true
-                print("🎨 Now Playing: Using station icon only (paused state)")
+                // Only log when artwork state changes
+                if !lastLoggedArtworkState {
+                    print("🎨 Now Playing: Using station icon only (paused state)")
+                    lastLoggedArtworkState = true
+                }
             }
         } else {
             // When playing, use full priority system
@@ -1222,7 +1291,11 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                 artworkSet = true
-                print("🎨 Now Playing: Using live iTunes artwork")
+                // Only log when artwork state changes
+                if !lastLoggedArtworkState {
+                    print("🎨 Now Playing: Using live iTunes artwork")
+                    lastLoggedArtworkState = true
+                }
             }
             // PRIORITY 2: Current track artwork from metadata
             else if let currentTrackArtwork = currentTrackArtwork {
@@ -1231,7 +1304,11 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                 artworkSet = true
-                print("🎨 Now Playing: Using current track artwork")
+                // Only log when artwork state changes
+                if !lastLoggedArtworkState {
+                    print("🎨 Now Playing: Using current track artwork")
+                    lastLoggedArtworkState = true
+                }
             }
             // PRIORITY 3: Station's saved iTunes artwork (from previous tracks)
             else if let station = currentStation,
@@ -1244,7 +1321,11 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                 artworkSet = true
-                print("🎨 Now Playing: Using station's saved iTunes artwork")
+                // Only log when artwork state changes
+                if !lastLoggedArtworkState {
+                    print("🎨 Now Playing: Using station's saved iTunes artwork")
+                    lastLoggedArtworkState = true
+                }
             }
             // PRIORITY 4: Station icon (fallback)
             else if let station = currentStation,
@@ -1256,24 +1337,32 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                 artworkSet = true
-                print("🎨 Now Playing: Using station icon artwork")
+                // Only log when artwork state changes
+                if !lastLoggedArtworkState {
+                    print("🎨 Now Playing: Using station icon artwork")
+                    lastLoggedArtworkState = true
+                }
             }
         }
         
-        if !artworkSet {
+        // Only log artwork unavailable message when artwork state changes from available to unavailable
+        if !artworkSet && lastLoggedArtworkState {
             print("⚠️ Now Playing: No artwork available")
+            lastLoggedArtworkState = false
         }
         
         // Set the now playing info
         let nowPlayingCenter = MPNowPlayingInfoCenter.default()
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
         
-        print("✅ Now Playing: Successfully updated info center with \(nowPlayingInfo.count) items")
-        print("🎵 Now Playing State - isPlaying: \(isPlaying), playback rate: \(nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0.0)")
+        // Only log when playing state changes
+        if lastLoggedPlayingState != isPlaying {
+            print("✅ Now Playing: Successfully updated info center with \(nowPlayingInfo.count) items")
+            print("🎵 Now Playing State - isPlaying: \(isPlaying), playback rate: \(nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0.0)")
+            lastLoggedPlayingState = isPlaying
+        }
         
-        // CRITICAL: Ensure remote command center is set up after updating Now Playing info
-        // This is especially important after app force close scenarios
-        setupRemoteCommandCenter()
+        // Remote command center setup is handled once in init and when needed, not every time
     }
     
     // Force update Now Playing info regardless of active player state (for CarPlay restoration)
@@ -1303,15 +1392,27 @@ class RadioPlayer: NSObject, ObservableObject {
         let currentStation = viewModel.stations[currentStationIndex]
         let metadata = self.metadata ?? "No song or album title available"
         
-        userDefaults?.set(currentStation.name, forKey: "stationName")
-        userDefaults?.set(currentStation.iconData, forKey: "stationIcon")
-        userDefaults?.set(metadata, forKey: "stationMetadata")
-        
-        WidgetCenter.shared.reloadAllTimelines()
-        print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
+        // Only update widget if station or metadata actually changed
+        if lastWidgetStation != currentStation.name || lastWidgetMetadata != metadata {
+            userDefaults?.set(currentStation.name, forKey: "stationName")
+            userDefaults?.set(currentStation.iconData, forKey: "stationIcon")
+            userDefaults?.set(metadata, forKey: "stationMetadata")
+            
+            WidgetCenter.shared.reloadAllTimelines()
+            print("Widget updated with station: \(currentStation.name), metadata: \(metadata)")
+            
+            // Update state tracking
+            lastWidgetStation = currentStation.name
+            lastWidgetMetadata = metadata
+        }
     }
     
     func setupRemoteCommandCenter() {
+        // Only configure once to avoid excessive logging
+        guard !isRemoteCommandCenterConfigured else {
+            return
+        }
+        
         let commandCenter = MPRemoteCommandCenter.shared()
         
         // Clear any existing targets first
@@ -1394,6 +1495,7 @@ class RadioPlayer: NSObject, ObservableObject {
         commandCenter.seekForwardCommand.isEnabled = false
         commandCenter.seekBackwardCommand.isEnabled = false
         
+        isRemoteCommandCenterConfigured = true
         print("✅ Remote Command Center configured for Now Playing")
     }
     
@@ -1442,7 +1544,15 @@ class RadioPlayer: NSObject, ObservableObject {
             let elapsedTime = getCurrentElapsedTime()
             nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
             nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
-            print("⏱️ Updated elapsed time: \(String(format: "%.1f", elapsedTime)) seconds")
+            
+            // Rate limit time update logs - only log every 10 seconds
+            let now = Date()
+            let shouldLog = lastTimeUpdateLog == nil || now.timeIntervalSince(lastTimeUpdateLog!) > 10.0
+            
+            if shouldLog {
+                print("⏱️ Updated elapsed time: \(String(format: "%.1f", elapsedTime)) seconds")
+                lastTimeUpdateLog = now
+            }
         }
     }
     

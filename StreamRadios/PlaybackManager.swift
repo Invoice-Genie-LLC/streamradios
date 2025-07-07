@@ -14,11 +14,15 @@ enum ActivePlayer {
     case podcast
 }
 
-class PlaybackManager {
+class PlaybackManager: ObservableObject {
     static let shared = PlaybackManager()
     
     @Published var activePlayer: ActivePlayer = .radio
     private var audioSessionConfigured = false
+    
+    // State tracking for logging optimization
+    private var lastLoggedActivePlayer: ActivePlayer?
+    private var lastAudioSessionActivation: (ActivePlayer, Date)?
     
     private init() {
         setupCentralizedAudioSession()
@@ -27,7 +31,12 @@ class PlaybackManager {
     
     func setActivePlayer(_ player: ActivePlayer) {
         activePlayer = player
-        print("🎵 PlaybackManager: Active player set to \(player)")
+        
+        // Only log if the active player actually changed
+        if lastLoggedActivePlayer != player {
+            print("🎵 PlaybackManager: Active player set to \(player)")
+            lastLoggedActivePlayer = player
+        }
         
         // Ensure audio session is properly configured for the active player
         activateAudioSessionForPlayer(player)
@@ -66,6 +75,12 @@ class PlaybackManager {
             return
         }
         
+        // Rate limit audio session activation logging - only log once per 3 seconds per player
+        let now = Date()
+        let shouldLog = lastAudioSessionActivation == nil || 
+                       lastAudioSessionActivation!.0 != player || 
+                       now.timeIntervalSince(lastAudioSessionActivation!.1) > 3.0
+        
         do {
             let audioSession = AVAudioSession.sharedInstance()
             
@@ -79,7 +94,12 @@ class PlaybackManager {
             
             // Always activate with notifyOthersOnDeactivation to ensure proper handoff
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            print("✅ PlaybackManager: Audio session activated for \(player)")
+            
+            // Only log if enough time has passed or player changed
+            if shouldLog {
+                print("✅ PlaybackManager: Audio session activated for \(player)")
+                lastAudioSessionActivation = (player, now)
+            }
             
             // CRITICAL: Only clear Now Playing info when explicitly switching between different players
             // Don't clear during CarPlay transitions or when reactivating the same player

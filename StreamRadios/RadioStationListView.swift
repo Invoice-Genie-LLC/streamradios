@@ -39,6 +39,9 @@ struct RadioStationListView: View {
     // Track tapped station for immediate focus
     @State private var tappedStationId: String?
     
+    // State tracking for logging optimization
+    @State private var lastScrollSkipLog: Date?
+    
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
@@ -875,7 +878,12 @@ struct RadioStationListView: View {
     private func scrollToCurrentStation(proxy: ScrollViewProxy, isOnLoadOrTabSwitch: Bool = false) {
         // Don't interfere with immediate focus on tapped stations
         if tappedStationId != nil {
-            print("📱 Skipping scroll - tapped station focus is active")
+            // Rate limit this log message - only log once every 5 seconds
+            let now = Date()
+            if lastScrollSkipLog == nil || now.timeIntervalSince(lastScrollSkipLog!) > 5.0 {
+                print("📱 Skipping scroll - tapped station focus is active")
+                lastScrollSkipLog = now
+            }
             return
         }
         
@@ -945,7 +953,12 @@ struct RadioStationListView: View {
     private func scrollToCurrentStationWithRetry(proxy: ScrollViewProxy, isOnLoadOrTabSwitch: Bool = false, retryCount: Int, maxRetries: Int = 3) {
         // Don't interfere with immediate focus on tapped stations
         if tappedStationId != nil {
-            print("📱 Skipping scroll - tapped station focus is active")
+            // Rate limit this log message - only log once every 5 seconds
+            let now = Date()
+            if lastScrollSkipLog == nil || now.timeIntervalSince(lastScrollSkipLog!) > 5.0 {
+                print("📱 Skipping scroll - tapped station focus is active")
+                lastScrollSkipLog = now
+            }
             return
         }
         

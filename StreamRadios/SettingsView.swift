@@ -1008,31 +1008,37 @@ struct InternalDataManagementView: View {
             group.leave()
         }
         
-        // Delete all station records from CloudKit
+        // Delete all station records from CloudKit with improved error handling
         group.enter()
         DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
             if let error = error {
                 allSuccess = false
-                lastError = error.localizedDescription
+                lastError = "Failed to fetch station records: \(error.localizedDescription)"
+                print("❌ App Data Deletion: Failed to fetch station records - \(error.localizedDescription)")
                 group.leave()
                 return
             }
             
             guard let recordIDs = recordIDs, !recordIDs.isEmpty else {
+                print("✅ App Data Deletion: No station records to delete")
                 group.leave()
                 return
             }
             
+            print("🔄 App Data Deletion: Starting deletion of \(recordIDs.count) station records")
             DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
                 if !success {
                     allSuccess = false
                     lastError = error?.localizedDescription ?? "CloudKit station deletion failed"
+                    print("❌ App Data Deletion: Station records deletion failed - \(lastError ?? "Unknown error")")
+                } else {
+                    print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) station records")
                 }
                 group.leave()
             }
         }
         
-        // Delete all podcast-related records from CloudKit
+        // Delete all podcast-related records from CloudKit sequentially to reduce load
         let podcastRecordTypes = ["PodcastFeed", "EpisodeState"]
         
         for recordType in podcastRecordTypes {
@@ -1040,20 +1046,26 @@ struct InternalDataManagementView: View {
             DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
                 if let error = error {
                     allSuccess = false
-                    lastError = error.localizedDescription
+                    lastError = "Failed to fetch \(recordType) records: \(error.localizedDescription)"
+                    print("❌ App Data Deletion: Failed to fetch \(recordType) records - \(error.localizedDescription)")
                     group.leave()
                     return
                 }
                 
                 guard let recordIDs = recordIDs, !recordIDs.isEmpty else {
+                    print("✅ App Data Deletion: No \(recordType) records to delete")
                     group.leave()
                     return
                 }
                 
+                print("🔄 App Data Deletion: Starting deletion of \(recordIDs.count) \(recordType) records")
                 DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
                     if !success {
                         allSuccess = false
                         lastError = error?.localizedDescription ?? "CloudKit \(recordType) deletion failed"
+                        print("❌ App Data Deletion: \(recordType) records deletion failed - \(lastError ?? "Unknown error")")
+                    } else {
+                        print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records")
                     }
                     group.leave()
                 }
@@ -1061,10 +1073,15 @@ struct InternalDataManagementView: View {
         }
         
         group.notify(queue: .main) {
+            print("🔄 App Data Deletion: All operations completed - Success: \(allSuccess)")
+            
             // Clear UserDefaults only if all other operations succeeded
             if allSuccess {
                 UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
                 UserDefaults.standard.synchronize()
+                print("✅ App Data Deletion: UserDefaults cleared")
+            } else {
+                print("⚠️ App Data Deletion: Skipping UserDefaults cleanup due to errors")
             }
             
             // Update UI states immediately
@@ -1074,15 +1091,18 @@ struct InternalDataManagementView: View {
             // Refresh view models to update UI immediately  
             if allSuccess {
                 self.viewModel.loadStationsFromCoreData()
+                print("✅ App Data Deletion: View models refreshed")
                 // Note: podcastViewModel already clears its data in clearPodcastCoreData completion
             }
             
             // Force UI refresh and show notification
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if allSuccess {
+                    print("✅ App Data Deletion: All operations completed successfully")
                     self.notificationManager.notifyUser(title: "Deletion Complete", message: "All app data has been successfully deleted.")
                 } else {
                     let errorMessage = lastError ?? "An unknown error occurred"
+                    print("❌ App Data Deletion: Operations failed - \(errorMessage)")
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "App data deletion failed: \(errorMessage)")
                 }
                 

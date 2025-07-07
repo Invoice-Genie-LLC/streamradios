@@ -58,11 +58,10 @@ extension PodcastModel {
             var isDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
             let isPlayed = progress >= 0.99
             
-            // DEBUG: Log the Core Data values before any processing
-            print("🔍 CONVERT DEBUG: Episode '\(self.title ?? "Unknown")' (ID: \(episodeId))")
-            print("🔍 CONVERT DEBUG: Core Data localFilePath: '\(self.localFilePath ?? "nil")'")
-            print("🔍 CONVERT DEBUG: Core Data isDownloaded: \(self.isDownloaded)")
-            print("🔍 CONVERT DEBUG: EpisodeStateManager isDownloaded: \(isDownloaded)")
+            // DEBUG: Only log episodes with potential issues (downloaded or with paths)
+            if isDownloaded || self.localFilePath != nil {
+                print("🔍 CONVERT: Episode '\(self.title ?? "Unknown")' - Downloaded: \(isDownloaded), Path: \(self.localFilePath != nil ? "present" : "nil")")
+            }
             
             // ROBUST PATH RESOLUTION: Handle iOS sandbox changes
             var resolvedLocalFilePath: String? = self.localFilePath
@@ -73,8 +72,10 @@ extension PodcastModel {
                 let fileExists = FileManager.default.fileExists(atPath: localPath)
                 let isUpgradeScenario = EpisodeStateManager.shared.isUpgradeScenario()
                 
-                print("🔍 CONVERT DEBUG: File exists at '\(localPath)': \(fileExists)")
-                print("🔍 CONVERT DEBUG: Is upgrade scenario: \(isUpgradeScenario)")
+                // Only log if file is missing (potential issue)
+                if !fileExists {
+                    print("🔍 CONVERT: File missing at '\(localPath)' for episode '\(self.title ?? "Unknown")'")
+                }
                 
                 if !fileExists {
                     // File doesn't exist at stored path - try to recover it
@@ -137,7 +138,10 @@ extension PodcastModel {
             } else if isDownloaded {
                 // No local path but EpisodeStateManager says it's downloaded
                 let isUpgradeScenario = EpisodeStateManager.shared.isUpgradeScenario()
-                print("🔍 CONVERT DEBUG: No localFilePath but EpisodeStateManager says downloaded")
+                // Only log significant download state issues
+                if isDownloaded {
+                    print("🔍 CONVERT: No path but marked as downloaded - '\(self.title ?? "Unknown")'")
+                }
                 
                 // Try to recover file without a stored path
                 if let recoveredPath = attemptFileRecovery(for: episodeId, originalPath: nil) {
@@ -194,9 +198,10 @@ extension PodcastModel {
                 fileSize: self.fileSize
             )
             
-            // DEBUG: Log the final episode before returning
-            print("🔍 CONVERT DEBUG: Final episode localFilePath: '\(finalEpisode.localFilePath ?? "nil")'")
-            print("🔍 CONVERT DEBUG: Final episode isDownloaded: \(finalEpisode.state.isDownloaded)")
+            // Only log final state for episodes with downloads or issues
+            if finalEpisode.state.isDownloaded || finalEpisode.localFilePath != nil {
+                print("🔍 CONVERT: Final - '\(finalEpisode.title)' Downloaded: \(finalEpisode.state.isDownloaded)")
+            }
             
             return finalEpisode
         }

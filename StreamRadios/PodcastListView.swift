@@ -678,6 +678,7 @@ struct PodcastRowView: View {
                     .font(.headline)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 16)
                 
                 HStack(alignment: .top, spacing: 12) {
                     // Use PodcastIconView for immediate loading from Core Data
@@ -687,6 +688,7 @@ struct PodcastRowView: View {
                         artworkUrl: feed.artworkUrl
                     )
                     .frame(width: iconSize, height: iconSize)
+                    .padding(.leading, 16)
                     .onTapGesture {
                         onTap()
                     }
@@ -788,6 +790,7 @@ struct PodcastRowView: View {
                 )
         )
         .cornerRadius(8)
+        .padding(.trailing, 16)
     }
     
     private func checkAndPlayEpisode() {
