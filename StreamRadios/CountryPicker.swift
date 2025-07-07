@@ -209,7 +209,7 @@ struct CountryPicker: View {
     }
     
     private var popularCountries: [Country] {
-        let popularNames = ["United States", "USA", "Canada", "United Kingdom", "UK", "Germany", "France", "Australia", "Japan", "Brazil"]
+        let popularNames = ["USA", "Canada", "United Kingdom", "UK", "Germany", "France", "Australia", "Japan", "Brazil"]
         return popularNames.compactMap { name in
             countries.first { $0.name == name }
         }
@@ -351,7 +351,7 @@ enum CountryRegion: String, CaseIterable, Hashable {
     }
     
     static func region(for countryName: String) -> CountryRegion {
-        let northAmericaCountries = ["United States", "USA", "Canada", "Mexico", "Greenland"]
+        let northAmericaCountries = ["USA", "Canada", "Mexico", "Greenland"]
         let southAmericaCountries = ["Brazil", "Argentina", "Chile", "Peru", "Colombia", "Venezuela", "Ecuador", "Bolivia", "Paraguay", "Uruguay", "Guyana", "Suriname", "French Guiana"]
         let europeCountries = ["United Kingdom", "UK", "England", "Scotland", "Wales", "Northern Ireland", "Germany", "France", "Italy", "Spain", "Netherlands", "Belgium", "Switzerland", "Austria", "Sweden", "Norway", "Denmark", "Finland", "Poland", "Czech Republic", "Slovakia", "Hungary", "Romania", "Bulgaria", "Croatia", "Slovenia", "Serbia", "Bosnia & Herzegovina", "Montenegro", "Albania", "Macedonia", "Greece", "Portugal", "Ireland", "Iceland", "Lithuania", "Latvia", "Estonia", "Belarus", "Ukraine", "Moldova", "Russia", "Luxembourg", "Malta", "Cyprus", "Liechtenstein", "Monaco", "San Marino", "Vatican City", "Andorra"]
         let africaCountries = ["Nigeria", "South Africa", "Kenya", "Egypt", "Morocco", "Ghana", "Ethiopia", "Algeria", "Tunisia", "Libya", "Sudan", "South Sudan", "Uganda", "Tanzania", "Rwanda", "Burundi", "Democratic Republic of Congo", "Congo - Kinshasa", "Congo - Brazzaville", "Central African Republic", "Chad", "Niger", "Mali", "Burkina Faso", "Senegal", "Guinea", "Guinea-Bissau", "Sierra Leone", "Liberia", "Ivory Coast", "Côte d'Ivoire", "Togo", "Benin", "Cameroon", "Equatorial Guinea", "Gabon", "São Tomé & Príncipe", "Angola", "Namibia", "Botswana", "Zimbabwe", "Zambia", "Malawi", "Mozambique", "Madagascar", "Mauritius", "Seychelles", "Comoros", "Djibouti", "Eritrea", "Somalia", "Lesotho", "Swaziland", "Gambia", "Cape Verde"]
@@ -441,7 +441,6 @@ struct CountryPicker_Previews: PreviewProvider {
             selectedCountry: .constant("Select Country"),
             countries: [
                 Country(name: "Select Country", flag: ""),
-                Country(name: "United States", flag: "US"),
                 Country(name: "Canada", flag: "CA"),
                 Country(name: "Mexico", flag: "MX"),
                 Country(name: "Germany", flag: "DE"),

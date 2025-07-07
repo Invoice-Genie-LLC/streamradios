@@ -289,7 +289,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
         Country(name: "UK", flag: "GB"),
         Country(name: "Ukraine", flag: "UA"),
         Country(name: "United Arab Emirates", flag: "AE"),
-        Country(name: "United States", flag: "US"),
         Country(name: "Uruguay", flag: "UY"),
         Country(name: "USA", flag: "US"),
         Country(name: "U.S. Virgin Islands", flag: "VI"),
