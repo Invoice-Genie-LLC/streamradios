@@ -767,7 +767,7 @@ struct InternalDataManagementView: View {
                             Spacer()
                         }
                        
-                       ElegantCountryPickerButton(
+                       CountryPickerButton(
                            selectedCountry: $viewModel.selectedCountry,
                            countries: viewModel.countries
                        )

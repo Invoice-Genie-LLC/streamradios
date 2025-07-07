@@ -342,7 +342,7 @@ struct SimpleCountryPicker: View {
             }
             
             HStack {
-                ElegantCountryPickerButton(
+                CountryPickerButton(
                     selectedCountry: $selectedCountry,
                     countries: countries
                 )

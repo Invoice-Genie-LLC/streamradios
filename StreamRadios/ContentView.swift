@@ -292,7 +292,7 @@ struct ContentView: View {
                             
                             // Country picker - now more prominent
                             HStack {
-                                ElegantCountryPickerButton(
+                                CountryPickerButton(
                                     selectedCountry: $viewModel.selectedCountry,
                                     countries: viewModel.countries
                                 )

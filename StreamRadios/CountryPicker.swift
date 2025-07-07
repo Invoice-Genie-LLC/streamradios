@@ -1,5 +1,5 @@
 //
-//  ElegantCountryPicker.swift
+//  CountryPicker.swift
 //  StreamRadios
 //
 //  Created by AI Assistant on 1/2/25.
@@ -8,7 +8,7 @@
 import SwiftUI
 import FlagKit
 
-struct ElegantCountryPicker: View {
+struct CountryPicker: View {
     @Binding var selectedCountry: String
     var countries: [Country]
     @Environment(\.presentationMode) var presentationMode
@@ -18,7 +18,7 @@ struct ElegantCountryPicker: View {
     
     // Group countries by regions
     private var groupedCountries: [CountryRegion: [Country]] {
-        let filtered = searchText.isEmpty ? countries.filter { $0.name != "Select Country" } : 
+        let filtered = searchText.isEmpty ? countries.filter { $0.name != "Select Country" } :
             countries.filter { $0.name.localizedCaseInsensitiveContains(searchText) && $0.name != "Select Country" }
         
         return Dictionary(grouping: filtered) { country in
@@ -38,33 +38,37 @@ struct ElegantCountryPicker: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Search bar
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.adaptiveSecondaryText)
-                        .font(.system(size: 16, weight: .medium))
-                    
-                    TextField("Search countries...", text: $searchText)
-                        .font(.system(size: 16))
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .foregroundColor(.adaptivePrimaryText)
-                    
-                    if !searchText.isEmpty {
-                        Button(action: {
-                            searchText = ""
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .font(.system(size: 16))
+                // Search bar with safe area consideration
+                VStack(spacing: 0) {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .font(.system(size: 16, weight: .medium))
+                        
+                        TextField("Search countries...", text: $searchText)
+                            .font(.system(size: 16))
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .foregroundColor(.adaptivePrimaryText)
+                        
+                        if !searchText.isEmpty {
+                            Button(action: {
+                                searchText = ""
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                    .font(.system(size: 16))
+                            }
                         }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.adaptiveFieldBackground)
+                    .cornerRadius(12)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 60) // Increased padding to account for custom header
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Color.adaptiveFieldBackground)
-                .cornerRadius(12)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.bottom, 16)
+                .background(Color.adaptiveBackground)
                 
                 List {
                     // Recent selections section
@@ -158,16 +162,45 @@ struct ElegantCountryPicker: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             )
-            .navigationTitle("Select Country")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
-                        presentationMode.wrappedValue.dismiss()
+            .navigationBarHidden(true)
+            .overlay(
+                // Custom header to exactly match Add Station style
+                VStack(spacing: 0) {
+                    HStack {
+                        Button("Cancel") {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                        .foregroundColor(.blue)
+                        .font(.system(size: 17))
+                        
+                        Spacer()
+                        
+                        Text("Select Country")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        
+                        Spacer()
+                        
+                        // Invisible button for balance (same width as Cancel)
+                        Button("Cancel") { }
+                            .foregroundColor(.clear)
+                            .font(.system(size: 17))
+                            .disabled(true)
                     }
-                    .foregroundColor(.adaptivePrimaryText)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.black)
+                    
+                    // Separator line to match Add Station
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(height: 0.5)
+                    
+                    Spacer()
                 }
-            }
+                , alignment: .top
+            )
         }
         .background(Color.adaptiveBackground)
         .onAppear {
@@ -276,7 +309,7 @@ struct CountryRow: View {
 
 enum CountryRegion: String, CaseIterable, Hashable {
     case northAmerica = "North America"
-    case southAmerica = "South America" 
+    case southAmerica = "South America"
     case europe = "Europe"
     case africa = "Africa"
     case asia = "Asia"
@@ -349,7 +382,7 @@ enum CountryRegion: String, CaseIterable, Hashable {
     }
 }
 
-struct ElegantCountryPickerButton: View {
+struct CountryPickerButton: View {
     @Binding var selectedCountry: String
     var countries: [Country]
     @State private var showingPicker = false
@@ -397,14 +430,14 @@ struct ElegantCountryPickerButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .sheet(isPresented: $showingPicker) {
-            ElegantCountryPicker(selectedCountry: $selectedCountry, countries: countries)
+            CountryPicker(selectedCountry: $selectedCountry, countries: countries)
         }
     }
 }
 
-struct ElegantCountryPicker_Previews: PreviewProvider {
+struct CountryPicker_Previews: PreviewProvider {
     static var previews: some View {
-        ElegantCountryPickerButton(
+        CountryPickerButton(
             selectedCountry: .constant("Select Country"),
             countries: [
                 Country(name: "Select Country", flag: ""),
@@ -419,4 +452,4 @@ struct ElegantCountryPicker_Previews: PreviewProvider {
         .padding()
         .background(Color.black)
     }
-} 
+}
