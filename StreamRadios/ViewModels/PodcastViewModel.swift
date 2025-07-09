@@ -2132,11 +2132,48 @@ extension PodcastViewModel {
         }
     }
     
+    /// Helper method to get all episodes for a specific feed
+    private func getAllEpisodesForFeed(_ feedId: String) -> [PodcastEpisode] {
+        // First try to get episodes from the feed object
+        if let feed = podcastFeeds.first(where: { $0.id == feedId }),
+           !feed.episodes.isEmpty {
+            return feed.episodes
+        }
+        
+        // Fallback to current episodes if they're for this feed
+        if selectedFeedId == feedId {
+            return currentEpisodes
+        }
+        
+        // Final fallback: filter current episodes by feed ID
+        return currentEpisodes.filter { $0.feedId == feedId }
+    }
+    
     /// For backward compatibility with PodcastPlayer
     @available(*, deprecated, message: "Use podcastFeeds directly")
     func getLastPlayedOrLatestEpisode(for feed: PodcastFeed) -> PodcastEpisode? {
-        // Return the first episode from current episodes if any
-        return currentEpisodes.first
+        // Get all episodes for this feed
+        let feedEpisodes = getAllEpisodesForFeed(feed.id)
+        
+        // Check for last played episode
+        if let lastPlayedEpisodeId = lastPlayedEpisodes[feed.id],
+           let lastPlayedEpisode = feedEpisodes.first(where: { $0.id == lastPlayedEpisodeId }) {
+            print("🎯 DEBUG: Found last played episode for feed \(feed.title): \(lastPlayedEpisode.title)")
+            return lastPlayedEpisode
+        }
+        
+        // Check for episodes in progress
+        let episodesInProgress = feedEpisodes.filter { $0.state.progress > 0 && $0.state.progress < 1 }
+        
+        if let firstInProgressEpisode = episodesInProgress.first {
+            print("🎯 DEBUG: Found episode in progress for feed \(feed.title): \(firstInProgressEpisode.title)")
+            return firstInProgressEpisode
+        }
+        
+        // If no episodes in progress, return the latest episode
+        let latestEpisode = feedEpisodes.sorted(by: { $0.publicationDate > $1.publicationDate }).first
+        print("🎯 DEBUG: Returning latest episode for feed \(feed.title): \(latestEpisode?.title ?? "none")")
+        return latestEpisode
     }
     
     /// For backward compatibility with PodcastPlayer
