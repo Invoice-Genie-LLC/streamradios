@@ -34,13 +34,7 @@ class PodcastCloudKitManager {
     
     /// Save episode state to CloudKit with proper conflict resolution
     func saveEpisodeState(episodeId: String, feedId: String, progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool) async {
-        os_log("💾 DEBUG: Attempting to save episode state to CloudKit", log: log, type: .debug)
-        os_log("💾 DEBUG: - episodeId: %@", log: log, type: .debug, episodeId)
-        os_log("💾 DEBUG: - feedId: %@", log: log, type: .debug, feedId)
-        os_log("💾 DEBUG: - progress: %.2f", log: log, type: .debug, progress)
-        os_log("💾 DEBUG: - isFavorite: %@", log: log, type: .debug, isFavorite ? "true" : "false")
-        os_log("💾 DEBUG: - isDownloaded: %@", log: log, type: .debug, isDownloaded ? "true" : "false")
-        os_log("💾 DEBUG: - isPlayed: %@", log: log, type: .debug, isPlayed ? "true" : "false")
+
         
         do {
             try await saveEpisodeStateToCloudKit(episodeId, feedId: feedId, progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded, isPlayed: isPlayed)
@@ -146,27 +140,29 @@ class PodcastCloudKitManager {
         var syncedCount = 0
         var coreDataUpdates: [EpisodeStateUpdate] = []
         
-        // Group episode IDs by feed for debugging
         let episodeIdSet = Set(episodeIds)
-        os_log("📊 DEBUG: Processing %d unique episode IDs for sync", log: log, type: .debug, episodeIdSet.count)
         
         do {
             // Use bulk fetch for better performance
             let allCloudStates = try await fetchAllEpisodeStatesFromCloudKit()
             
-            // Track processing by feed for debugging
-            var processedByFeed: [String: Int] = [:]
+            
             
             for (episodeId, cloudState) in allCloudStates {
                 // Only process if this episode exists locally
                 guard episodeIdSet.contains(episodeId) else { continue }
                 
-                // Track which feed this episode belongs to
-                let feedId = cloudState.feedId ?? "unknown"
-                processedByFeed[feedId, default: 0] += 1
+
                 
                 // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager
-                EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                // BUT: Don't override NEW episodes with accumulated progress from CloudKit
+                let currentEpisodeState = EpisodeStateManager.shared.getState(for: episodeId)
+                
+                if currentEpisodeState == .new && cloudState.progress > 0 {
+                    // Keep the episode as new, don't apply CloudKit progress
+                } else {
+                    EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                }
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
                 
                 // Handle isDownloaded - ENHANCED with upgrade protection
@@ -207,27 +203,19 @@ class PodcastCloudKitManager {
                     }
                 }
                 
-                // Prepare Core Data update
+                // Prepare Core Data update - respect new episode state for progress
+                let finalProgress = (currentEpisodeState == .new && cloudState.progress > 0) ? 0.0 : cloudState.progress
+                let finalIsPlayed = (currentEpisodeState == .new && cloudState.progress > 0) ? false : cloudState.isPlayed
+                
                 coreDataUpdates.append(EpisodeStateUpdate(
                     episodeId: episodeId,
-                    progress: cloudState.progress,
+                    progress: finalProgress,
                     isFavorite: cloudState.isFavorite,
                     isDownloaded: finalIsDownloaded,
-                    isPlayed: cloudState.isPlayed
+                    isPlayed: finalIsPlayed
                 ))
                 
                 syncedCount += 1
-                
-                // Log progress sync for debugging
-                if cloudState.progress > 0 {
-                    os_log("📊 Synced progress for episode %@: %.3f", log: log, type: .debug, episodeId, cloudState.progress)
-                }
-            }
-            
-            // Debug: Show final processing results by feed
-            os_log("📊 DEBUG: Final sync results by feed:", log: log, type: .info)
-            for (feedId, count) in processedByFeed {
-                os_log("📊 DEBUG: Processed %d episodes from feed '%@'", log: log, type: .info, count, feedId)
             }
 
         } catch {
@@ -239,13 +227,19 @@ class PodcastCloudKitManager {
             let batches = episodeIds.chunked(into: batchSize)
             
             for (batchIndex, batch) in batches.enumerated() {
-                os_log("📦 Processing batch %d/%d (%d episodes)", log: log, type: .debug, batchIndex + 1, batches.count, batch.count)
                 
                 for episodeId in batch {
                     do {
                         if let cloudState = try await fetchEpisodeStateFromCloudKit(episodeId) {
-                            // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager
-                            EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                            // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager  
+                            // BUT: Don't override NEW episodes with accumulated progress from CloudKit
+                            let currentEpisodeState = EpisodeStateManager.shared.getState(for: episodeId)
+                            
+                            if currentEpisodeState == .new && cloudState.progress > 0 {
+                                // Keep the episode as new, don't apply CloudKit progress
+                            } else {
+                                EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                            }
                             EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
                             
                             let finalIsDownloaded: Bool
@@ -275,22 +269,24 @@ class PodcastCloudKitManager {
                                 }
                             }
                             
+                            // Prepare Core Data update - respect new episode state for progress
+                            let finalProgress = (currentEpisodeState == .new && cloudState.progress > 0) ? 0.0 : cloudState.progress
+                            let finalIsPlayed = (currentEpisodeState == .new && cloudState.progress > 0) ? false : cloudState.isPlayed
+                            
                             coreDataUpdates.append(EpisodeStateUpdate(
                                 episodeId: episodeId,
-                                progress: cloudState.progress,
+                                progress: finalProgress,
                                 isFavorite: cloudState.isFavorite,
                                 isDownloaded: finalIsDownloaded,
-                                isPlayed: cloudState.isPlayed
+                                isPlayed: finalIsPlayed
                             ))
                             
                             syncedCount += 1
                         } else {
                             // Episode has no CloudKit state yet - this is normal for new episodes
-                            os_log("📊 No CloudKit state found for episode %@ (episode has no saved state)", log: log, type: .debug, episodeId)
                         }
                     } catch CKError.unknownItem {
                         // Episode doesn't exist in CloudKit - this is normal, not an error
-                        os_log("📊 Episode %@ has no CloudKit state (normal for episodes without saved state)", log: log, type: .debug, episodeId)
                     } catch {
                         // Only log actual errors (network issues, permissions, etc.)
                         os_log("❌ Failed to sync episode state for %@: %@", log: log, type: .error, episodeId, error.localizedDescription)

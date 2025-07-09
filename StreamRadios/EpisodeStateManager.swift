@@ -527,21 +527,14 @@ class EpisodeStateManager: ObservableObject {
         } else if !isPlaying && existingState == .inProgress && progress == 0.0 {
             // CRITICAL: Don't overwrite in-progress episodes with 0.0 during loading
             shouldUpdateProgress = false
-            print("🔍 EpisodeStateManager: Protecting in-progress episode \(episodeId) from 0.0 reset (existing: \(existingProgress))")
         } else {
             // Don't overwrite existing progress with 0.0
             shouldUpdateProgress = false
-            print("🔍 EpisodeStateManager: Skipping 0.0 progress update for episode \(episodeId) (existing: \(existingProgress))")
         }
         
         // Store current time if provided
         if let currentTime = currentTime {
             episodeCurrentTime[episodeId] = currentTime
-            print("🔍 EpisodeStateManager: Storing currentTime \(currentTime)s for episode \(episodeId)")
-        }
-        
-        if shouldUpdateProgress && progress > 0 {
-            print("🔍 EpisodeStateManager: Updating progress \(String(format: "%.3f", progress)) for episode \(episodeId)")
         }
         
         // Use the actual progress value for state determination
@@ -564,13 +557,7 @@ class EpisodeStateManager: ObservableObject {
         }
         
         if episodeStates[episodeId] != newState || shouldUpdateProgress || currentTime != nil {
-            let oldState = episodeStates[episodeId] ?? .new
             episodeStates[episodeId] = newState
-            
-            if oldState != newState {
-                print("🔄 EpisodeStateManager: State changed for \(episodeId): \(oldState) -> \(newState) (progress: \(String(format: "%.4f", effectiveProgress)))")
-            }
-            
             saveCurrentStates()
             sendThrottledUpdate()
         }

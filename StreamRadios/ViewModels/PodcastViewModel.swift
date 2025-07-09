@@ -468,13 +468,35 @@ class PodcastViewModel: ObservableObject {
     /// Update episode state efficiently with immediate CloudKit and Core Data sync
     func updateEpisodeState(_ episodeId: String, progress: Double? = nil, isFavorite: Bool? = nil, isDownloaded: Bool? = nil, isPlayed: Bool? = nil) {
         Task {
+            // CRITICAL SAFEGUARD: Prevent race condition corruption of currently playing episode
+            let isCurrentlyPlaying = PodcastPlayer.shared.currentEpisode?.id == episodeId && PodcastPlayer.shared.isPlaying
+            let playerProgress = PodcastPlayer.shared.currentProgress
+            
             // Get current state to preserve values not being updated
             let currentProgress = progress ?? EpisodeStateManager.shared.getProgress(for: episodeId)
             let currentFavorite = isFavorite ?? EpisodeStateManager.shared.isFavorite(episodeId)
             let currentDownloaded = isDownloaded ?? EpisodeStateManager.shared.isDownloaded(episodeId)
             
-            // Determine the correct EpisodePlaybackState based on progress and isPlayed
-            let finalProgress = progress ?? currentProgress
+            // CRITICAL FIX: For currently playing episodes, prioritize player's progress over stale data
+            // AND: Protect episodes from being corrupted with accumulated progress during playback
+            let finalProgress: Double
+            if let explicitProgress = progress {
+                // CORRUPTION PROTECTION: If episode is currently playing at 0.0 but we're being asked 
+                // to set accumulated progress > 0, this is corruption - use player's actual progress
+                if isCurrentlyPlaying && playerProgress == 0.0 && explicitProgress > 0 {
+                    finalProgress = playerProgress
+                } else {
+                    // Explicit progress provided and not a corruption case - use it
+                    finalProgress = explicitProgress
+                }
+            } else if isCurrentlyPlaying {
+                // Currently playing - use player's progress to prevent corruption from stale data
+                finalProgress = playerProgress
+            } else {
+                // Not playing - use stored progress
+                finalProgress = currentProgress
+            }
+            
             let finalIsPlayed = isPlayed ?? (finalProgress >= 0.99)
             
             let episodeState: EpisodePlaybackState
@@ -487,9 +509,16 @@ class PodcastViewModel: ObservableObject {
             }
             
             // Update EpisodeStateManager first (source of truth)
-            if let progress = progress {
-                EpisodeStateManager.shared.setProgress(for: episodeId, progress: progress)
+            // CRITICAL: Only update progress if it's explicitly provided OR if we're using player progress
+            if let _ = progress {
+                // Use our carefully calculated finalProgress (which may have rejected corrupted explicit progress)
+                EpisodeStateManager.shared.setProgress(for: episodeId, progress: finalProgress)
+            } else if isCurrentlyPlaying {
+                // For currently playing episodes, sync the player's progress
+                EpisodeStateManager.shared.setProgress(for: episodeId, progress: playerProgress)
             }
+            // IMPORTANT: If no explicit progress and not currently playing, DON'T modify stored progress
+            
             if let isFavorite = isFavorite {
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
             }
@@ -521,29 +550,18 @@ class PodcastViewModel: ObservableObject {
             let episodeFeedId: String?
             if let currentEpisode = self.currentEpisodes.first(where: { $0.id == episodeId }) {
                 episodeFeedId = currentEpisode.feedId
-                print("💾 DEBUG: Found feedId from currentEpisodes: \(episodeFeedId ?? "nil")")
             } else if let selectedId = self.selectedFeedId, !selectedId.isEmpty {
                 // Fallback: use currently selected feed
                 episodeFeedId = selectedId
-                print("💾 DEBUG: Using selectedFeedId as fallback: \(episodeFeedId ?? "nil")")
             } else {
                 // Last resort: query Core Data for the episode's feedId
                 episodeFeedId = await self.getFeedIdForEpisode(episodeId)
-                print("💾 DEBUG: Core Data lookup returned feedId: \(episodeFeedId ?? "nil")")
             }
             
             // Sync to CloudKit (single call, non-blocking) with feed relationship
             // Only sync if we have a valid feedId to prevent crashes
             if let validFeedId = episodeFeedId, !validFeedId.isEmpty {
-                print("💾 DEBUG: Starting CloudKit save for episode \(episodeId)")
-                print("💾 DEBUG: - feedId: \(validFeedId)")
-                print("💾 DEBUG: - finalProgress: \(finalProgress)")
-                print("💾 DEBUG: - currentFavorite: \(currentFavorite)")
-                print("💾 DEBUG: - currentDownloaded: \(currentDownloaded)")
-                print("💾 DEBUG: - finalIsPlayed: \(finalIsPlayed)")
-                
                 Task.detached(priority: .userInitiated) {
-                    print("💾 DEBUG: About to call PodcastCloudKitManager.saveEpisodeState")
                     await PodcastCloudKitManager.shared.saveEpisodeState(
                         episodeId: episodeId,
                         feedId: validFeedId,
@@ -552,20 +570,11 @@ class PodcastViewModel: ObservableObject {
                         isDownloaded: currentDownloaded,
                         isPlayed: finalIsPlayed
                     )
-                    print("💾 DEBUG: CloudKit save call completed for episode \(episodeId)")
                 }
             } else {
-                print("⚠️ CRITICAL: Skipping CloudKit sync for episode \(episodeId) - no valid feedId found")
-                print("⚠️ Debug: episodeFeedId=\(episodeFeedId ?? "nil")")
-                print("⚠️ Debug: selectedFeedId=\(self.selectedFeedId ?? "nil")")
-                print("⚠️ Debug: currentEpisodes.count=\(self.currentEpisodes.count)")
-                print("⚠️ Debug: currentEpisodes contain this episode? \(self.currentEpisodes.contains { $0.id == episodeId })")
-                
                 // CRITICAL: This might be the issue - try alternative approaches
                 if let currentEpisode = self.currentEpisodes.first(where: { $0.id == episodeId }) {
-                    print("⚠️ Found episode in currentEpisodes with feedId: \(currentEpisode.feedId)")
                     if !currentEpisode.feedId.isEmpty {
-                        print("💾 RETRY: Attempting CloudKit sync with episode's own feedId")
                         Task.detached(priority: .userInitiated) {
                             await PodcastCloudKitManager.shared.saveEpisodeState(
                                 episodeId: episodeId,
@@ -575,7 +584,6 @@ class PodcastViewModel: ObservableObject {
                                 isDownloaded: currentDownloaded,
                                 isPlayed: finalIsPlayed
                             )
-                            print("💾 RETRY: CloudKit retry completed for episode \(episodeId)")
                         }
                     }
                 }
@@ -592,7 +600,6 @@ class PodcastViewModel: ObservableObject {
             
             do {
                 try await episodeManager.updateEpisodeStates([coreDataUpdate])
-                print("💾 Saved episode state to Core Data immediately: \(episodeId)")
             } catch {
                 print("❌ Failed to save episode state to Core Data: \(error)")
             }

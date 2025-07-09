@@ -425,18 +425,36 @@ class PodcastEpisodeManager {
             
             // Sync with EpisodeStateManager for latest state (source of truth)
             let stateManagerProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            let stateManagerState = EpisodeStateManager.shared.getState(for: episode.id)
             let stateManagerFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
             let stateManagerDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
             
-            // Use EpisodeStateManager as the source of truth for all states
-            episode.state.progress = stateManagerProgress
+            // 🔍 DEBUG LOGGING: Track episode loading
+            print("🔍 EPISODE LOADING: \(episode.title)")
+            print("🔍   EpisodeStateManager state: \(stateManagerState.rawValue)")
+            print("🔍   EpisodeStateManager progress: \(String(format: "%.4f", stateManagerProgress))")
+            print("🔍   Core Data progress: \(String(format: "%.4f", episode.state.progress))")
+            
+            // CRITICAL FIX: Only use EpisodeStateManager progress for episodes that have been played locally
+            // For NEW episodes, preserve their 0.0 progress to ensure they start from beginning
+            let finalProgress: Double
+            if stateManagerState == .new && episode.state.progress == 0.0 {
+                // Episode is new and has no local progress - keep it at 0.0 regardless of CloudKit sync
+                finalProgress = 0.0
+                print("🔍 🆕 Preserving NEW episode state - keeping progress at 0.0 despite EpisodeStateManager having \(String(format: "%.4f", stateManagerProgress))")
+            } else {
+                // Episode has been played locally or has local progress - use EpisodeStateManager
+                finalProgress = stateManagerProgress
+                print("🔍 🎯 Using EpisodeStateManager progress: \(String(format: "%.4f", stateManagerProgress))")
+            }
+            
+            // Use EpisodeStateManager as the source of truth for all states except new episode progress
+            episode.state.progress = finalProgress
             episode.state.isFavorite = stateManagerFavorite
             episode.state.isDownloaded = stateManagerDownloaded
             
-            // Determine isPlayed based on progress
-            episode.state.isPlayed = stateManagerProgress >= 0.99
-            
-
+            // Determine isPlayed based on final progress
+            episode.state.isPlayed = finalProgress >= 0.99
             
             return episode
         }

@@ -836,12 +836,15 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Initialize time and duration - preserve existing progress for episodes that were partially played
         duration = episode.duration
         
-        // Initialize progress from saved state instead of always resetting to 0
+        // Initialize progress from saved state, but only for episodes that have been played before
         if !shouldStartFromBeginning {
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
             let savedProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            if savedProgress > 0 {
+            
+            // Only restore progress if the episode is not new (has been played before)
+            if episodeState != .new && savedProgress > 0 {
                 currentProgress = savedProgress
-                os_log("🎯 Preserving existing progress: %.2f%% for episode: %@", log: log, type: .info, savedProgress * 100, episode.title)
+                os_log("🎯 Preserving existing progress: %.2f%% for episode: %@ (state: %@)", log: log, type: .info, savedProgress * 100, episode.title, episodeState.rawValue)
             } else {
                 currentProgress = 0
             }
@@ -979,7 +982,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // If this is a replay action, always start from the beginning
         if shouldStartFromBeginning {
-            os_log("Replay requested - starting from the beginning", log: log, type: .info)
+            os_log("🔄 Replay requested - starting from the beginning", log: log, type: .info)
             player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             currentTime = 0
             currentProgress = 0
@@ -987,6 +990,19 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             hasRestoredPositionForCurrentEpisode = true
             currentEpisodeIdForRestoration = currentEpisode.id
             // Update Now Playing info immediately with correct elapsed time
+            updateNowPlayingInfo()
+            return
+        }
+        
+        // CRITICAL: Check if this is a new episode - if so, always start from beginning
+        let episodeState = EpisodeStateManager.shared.getState(for: currentEpisode.id)
+        
+        if episodeState == .new {
+            player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            currentTime = 0
+            currentProgress = 0
+            hasRestoredPositionForCurrentEpisode = true
+            currentEpisodeIdForRestoration = currentEpisode.id
             updateNowPlayingInfo()
             return
         }
@@ -999,16 +1015,10 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let stateManagerProgress = stateManager.getProgress(for: currentEpisode.id)
         let stateManagerCurrentTime = stateManager.getCurrentTime(for: currentEpisode.id)
         
-        os_log("🔍 DEBUG: StateManager Progress: %.4f, CurrentTime: %.1fs for episode: %@", 
-               log: log, type: .info, stateManagerProgress, stateManagerCurrentTime, currentEpisode.id)
-        
         // PRIORITIZE CURRENT TIME OVER PROGRESS for accuracy
         if stateManagerCurrentTime > 0 && duration > 0 {
             let targetTime = stateManagerCurrentTime
             let targetProgress = targetTime / duration
-            
-            os_log("🎯 Using saved current time for perfect accuracy: %.1fs (%.2f%%) vs progress: %.4f", 
-                   log: log, type: .info, targetTime, targetProgress * 100, stateManagerProgress)
             
             currentTime = targetTime
             currentProgress = targetProgress
@@ -1023,7 +1033,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         self?.updateNowPlayingInfo()
                         self?.hasRestoredPositionForCurrentEpisode = true
                         self?.currentEpisodeIdForRestoration = currentEpisode.id
-                        os_log("✅ Perfectly restored playback position to %.1f seconds", log: self?.log ?? OSLog.default, type: .info, targetTime)
+                        os_log("🔍 ✅ RESTORED position to %.1f seconds (%.2f%%)", log: self?.log ?? OSLog.default, type: .info, targetTime, targetProgress * 100)
                     }
                 }
             }
@@ -1043,7 +1053,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         if savedProgress > 0 && savedProgress < 1.0 {
             let targetTime = savedProgress * duration
-            os_log("Seeking to saved progress: %.2f%% (%.1f seconds) from %@", log: log, type: .info, savedProgress * 100, targetTime, progressSource)
             
             // Update currentTime immediately BEFORE seeking to fix progress bar
             currentTime = targetTime
@@ -1061,10 +1070,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         self?.updateNowPlayingInfo()
                         self?.hasRestoredPositionForCurrentEpisode = true
                         self?.currentEpisodeIdForRestoration = currentEpisode.id
-                        os_log("Successfully restored playback position to %.1f seconds", log: self?.log ?? OSLog.default, type: .info, targetTime)
+                        os_log("🔍 ✅ RESTORED position to %.1f seconds (%.2f%%)", log: self?.log ?? OSLog.default, type: .info, targetTime, savedProgress * 100)
                     }
                 } else {
-                    os_log("Failed to seek to saved progress", log: self?.log ?? OSLog.default, type: .error)
                     // Even if seeking fails, update Now Playing info
                     DispatchQueue.main.async {
                         self?.updateNowPlayingInfo()
@@ -1076,14 +1084,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         } else {
             // Don't reset progress if it was already set from playEpisode - only reset if truly no progress exists
             if currentProgress == 0 && currentTime == 0 {
-                os_log("❌ No valid saved progress found, starting from the beginning (stateManager progress: %.4f, currentTime: %.1fs)", 
-                       log: log, type: .info, stateManagerProgress, stateManagerCurrentTime)
                 player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
                 currentTime = 0
                 currentProgress = 0
-            } else {
-                os_log("🎯 Preserving progress already set in playEpisode: %.2f%% (%.1fs)", 
-                       log: log, type: .info, currentProgress * 100, currentTime)
             }
             // Update Now Playing info immediately
             updateNowPlayingInfo()
