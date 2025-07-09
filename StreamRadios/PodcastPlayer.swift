@@ -67,7 +67,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var lastScrollNotificationTime = Date()
     
     // Optimized update intervals for better performance
-    private let lightUpdateInterval: TimeInterval = 3.0  // Reduced from 2.0s to 3.0s for better scroll performance
+    private let lightUpdateInterval: TimeInterval = 1.0  // Set to 1.0s for smooth elapsed time display
     private let heavyUpdateInterval: TimeInterval = 15.0 // Increased from 10.0s to 15.0s to reduce CPU usage
     private let scrollingPauseInterval: TimeInterval = 30.0 // Pause heavy updates longer during scrolling
 
