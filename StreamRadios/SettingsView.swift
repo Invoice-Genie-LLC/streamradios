@@ -385,13 +385,13 @@ struct ModernSettingsCard<Content: View>: View {
             HStack(spacing: 12) {
                 if !icon.isEmpty {
                     Image(systemName: icon)
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.adaptiveCustom(size: 20, weight: .medium))
                         .foregroundColor(isDestructive ? .red : .blue)
                         .frame(width: 24, height: 24)
                 }
                 
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.adaptiveSettingsTitle)
                     .foregroundColor(titleColor)
                 
                 Spacer()
@@ -429,12 +429,12 @@ struct ModernToggleRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.adaptiveCustom(size: 16, weight: .medium))
                     .foregroundColor(.blue)
                     .frame(width: 20)
                 
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.adaptiveButtonTitle)
                     .foregroundColor(colorScheme == .dark ? .white : .primary)
                 
                 Spacer()
@@ -445,7 +445,7 @@ struct ModernToggleRow: View {
             
             if let subtitle = subtitle {
                 Text(subtitle)
-                    .font(.system(size: 13, weight: .regular))
+                    .font(.adaptiveButtonSubtitle)
                     .foregroundColor(colorScheme == .dark ? .gray : .secondary)
             }
         }
@@ -465,24 +465,24 @@ struct ModernActionButton: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.adaptiveCustom(size: 18, weight: .medium))
                         .foregroundColor(.blue)
                         .frame(width: 20)
                     
                     Text(title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.adaptiveButtonTitle)
                         .foregroundColor(colorScheme == .dark ? .white : .primary)
                     
                     Spacer()
                     
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.adaptiveCustom(size: 14, weight: .medium))
                         .foregroundColor(.gray)
                 }
                 
                 if let subtitle = subtitle {
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.adaptiveButtonSubtitle)
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
             }
@@ -507,12 +507,12 @@ struct ModernDestructiveButton: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.adaptiveCustom(size: 18, weight: .medium))
                         .foregroundColor(.red)
                         .frame(width: 20)
                     
                     Text(title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.adaptiveButtonTitle)
                         .foregroundColor(.red)
                     
                     Spacer()
@@ -605,16 +605,16 @@ struct ModernWarningText: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.adaptiveCustom(size: 16, weight: .medium))
                     .foregroundColor(.red)
                 
                 Text("Important")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.adaptiveWarningText)
                     .foregroundColor(.red)
             }
             
             Text(text)
-                .font(.system(size: 13, weight: .regular))
+                .font(.adaptiveButtonSubtitle)
                 .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 .lineLimit(nil)
         }

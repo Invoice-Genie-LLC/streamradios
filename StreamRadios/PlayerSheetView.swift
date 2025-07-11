@@ -921,16 +921,14 @@ struct StationDetails: View {
                 
                 VStack(spacing: 8) {
                     Text(currentStation.name)
-                        .font(.title2)
-                        .fontWeight(.semibold)
+                        .font(.adaptivePlayerTitle)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .padding(.horizontal, 16)
                     
                     if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                         Text(metadata)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
+                            .font(.adaptivePlayerMetadata)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
@@ -938,7 +936,7 @@ struct StationDetails: View {
                             .padding(.horizontal, 16)
                     } else {
                         Text("No song information available")
-                            .font(.subheadline)
+                            .font(.adaptivePlayerMetadata)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 16)

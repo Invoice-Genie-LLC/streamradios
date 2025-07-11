@@ -57,6 +57,47 @@ struct ContentView: View {
         self._selectedPodcast = State(initialValue: nil)
         self._showPodcastListView = State(initialValue: false)
         self._seekPosition = State(initialValue: 0)
+        
+        // Configure tab bar for consistent appearance on all devices
+        setupTabBarAppearance()
+    }
+    
+    private func setupTabBarAppearance() {
+        // Force tab bar to always show as bottom tab bar on all devices
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor.systemBackground
+        
+        // iPad-aware font sizing for tab bar
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad
+        let normalFontSize: CGFloat = isIPad ? 13 : 10  // 1.3x scaling for iPad
+        let selectedFontSize: CGFloat = isIPad ? 13 : 10  // 1.3x scaling for iPad
+        
+        // Configure normal state
+        appearance.stackedLayoutAppearance.normal.iconColor = UIColor.secondaryLabel
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [
+            .foregroundColor: UIColor.secondaryLabel,
+            .font: UIFont.systemFont(ofSize: normalFontSize, weight: .medium)
+        ]
+        
+        // Configure selected state
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor.systemBlue
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
+            .foregroundColor: UIColor.systemBlue,
+            .font: UIFont.systemFont(ofSize: selectedFontSize, weight: .semibold)
+        ]
+        
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+        
+        // Force bottom tab bar style on all devices including iPad
+        UITabBar.appearance().isHidden = false
+        
+        // Ensure TabView displays as traditional tab bar on iPad
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // Force traditional tab bar behavior on iPad
+            UITabBar.appearance().barStyle = .default
+        }
     }
     
     @Environment(\.horizontalSizeClass) var sizeClass
@@ -189,6 +230,7 @@ struct ContentView: View {
                 }
                 .tag(Tab.settings)
             }
+            .environment(\.horizontalSizeClass, .compact)
             .accentColor(.blue)
             .onAppear {
                 setupTabView()
@@ -516,13 +558,8 @@ struct ContentView: View {
     // MARK: - Helper Functions
     
     private func setupTabView() {
-        // Configure tab bar appearance
-        let appearance = UITabBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor.systemBackground
-        
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
+        // Additional tab view configuration if needed
+        // Tab bar appearance is already configured in init
     }
     
     private func checkAndStartDataSync() {
@@ -835,7 +872,8 @@ struct UnifiedPodcastPlayerView: View {
             Button(action: navigateToCurrentEpisode) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(currentEpisode.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.adaptiveFootnote)
+                        .fontWeight(.semibold)
                         .foregroundColor(.adaptivePrimaryText)
                         .lineLimit(nil) // Remove line limit to allow unlimited lines
                         .multilineTextAlignment(.leading)
@@ -843,7 +881,7 @@ struct UnifiedPodcastPlayerView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     
                     Text(currentFeed.title)
-                        .font(.system(size: 11, weight: .regular))
+                        .font(.adaptiveCaption2)
                         .foregroundColor(.adaptiveSecondaryText)
                         .lineLimit(1) // Keep podcast name to 1 line
                         .truncationMode(.tail)
@@ -902,7 +940,8 @@ struct UnifiedPodcastPlayerView: View {
             
             // Time elapsed/total display
             Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                .font(.system(size: 10, weight: .medium))
+                .font(.adaptiveCaption2)
+                .fontWeight(.medium)
                 .foregroundColor(.adaptiveSecondaryText)
         }
         }

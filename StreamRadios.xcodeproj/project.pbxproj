@@ -789,16 +789,17 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
-				NEW_SETTING = "";
-				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
+				                        MARKETING_VERSION = 2.0.0;
+                        CURRENT_PROJECT_VERSION = 1;
+                        NEW_SETTING = "";
+                        PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
+                        PRODUCT_NAME = "$(TARGET_NAME)";
+                        PROVISIONING_PROFILE_SPECIFIER = "";
+                        SWIFT_EMIT_LOC_STRINGS = YES;
+                        SWIFT_VERSION = 5.0;
+                        TARGETED_DEVICE_FAMILY = "1,2";
+                };
+                name = Debug;
 		};
 		7707DA452C152EF5006D5EBB /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -828,16 +829,17 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
-				NEW_SETTING = "";
-				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
+				                        MARKETING_VERSION = 2.0.0;
+                        CURRENT_PROJECT_VERSION = 1;
+                        NEW_SETTING = "";
+                        PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
+                        PRODUCT_NAME = "$(TARGET_NAME)";
+                        PROVISIONING_PROFILE_SPECIFIER = "";
+                        SWIFT_EMIT_LOC_STRINGS = YES;
+                        SWIFT_VERSION = 5.0;
+                        TARGETED_DEVICE_FAMILY = "1,2";
+                };
+                name = Release;
 		};
 		774617952C17411E00F442B3 /* Debug */ = {
 			isa = XCBuildConfiguration;

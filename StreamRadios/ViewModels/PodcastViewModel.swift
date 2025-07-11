@@ -2610,7 +2610,6 @@ extension PodcastViewModel {
         let observation = downloadTask.progress.observe(\.fractionCompleted) { [weak self] (progress: Progress, _: NSKeyValueObservedChange<Double>) in
             DispatchQueue.main.async {
                 self?.downloadProgress[episode.id] = progress.fractionCompleted
-                print("📥 Download progress for \(episode.title): \(Int(progress.fractionCompleted * 100))%")
             }
         }
         
