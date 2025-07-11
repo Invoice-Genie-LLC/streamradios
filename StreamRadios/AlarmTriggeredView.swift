@@ -122,7 +122,7 @@ struct AlarmTriggeredView: View {
                     .frame(width: 30, height: 30)
                 
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.caption)
                     .foregroundColor(.primary)
             }
         }

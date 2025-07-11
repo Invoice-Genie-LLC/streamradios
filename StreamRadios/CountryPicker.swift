@@ -43,10 +43,10 @@ struct CountryPicker: View {
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundColor(.adaptiveSecondaryText)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body)
                         
                         TextField("Search countries...", text: $searchText)
-                            .font(.system(size: 16))
+                            .font(.body)
                             .textFieldStyle(PlainTextFieldStyle())
                             .foregroundColor(.adaptivePrimaryText)
                         
@@ -56,7 +56,7 @@ struct CountryPicker: View {
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(.adaptiveSecondaryText)
-                                    .font(.system(size: 16))
+                                    .font(.body)
                             }
                         }
                     }
@@ -88,9 +88,9 @@ struct CountryPicker: View {
                             HStack {
                                 Image(systemName: "clock.arrow.circlepath")
                                     .foregroundColor(.cyan)
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.subheadline)
                                 Text("Recent")
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.subheadline)
                                     .foregroundColor(.cyan)
                             }
                         }
@@ -113,9 +113,9 @@ struct CountryPicker: View {
                             HStack {
                                 Image(systemName: "star.fill")
                                     .foregroundColor(.yellow)
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.subheadline)
                                 Text("Popular")
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.subheadline)
                                     .foregroundColor(.yellow)
                             }
                         }
@@ -140,9 +140,9 @@ struct CountryPicker: View {
                                     HStack {
                                         Image(systemName: region.icon)
                                             .foregroundColor(.adaptiveSecondaryText)
-                                            .font(.system(size: 14, weight: .medium))
+                                            .font(.subheadline)
                                         Text(region.displayName)
-                                            .font(.system(size: 14, weight: .medium))
+                                            .font(.subheadline)
                                             .foregroundColor(.adaptiveSecondaryText)
                                     }
                                 }
@@ -171,12 +171,12 @@ struct CountryPicker: View {
                             presentationMode.wrappedValue.dismiss()
                         }
                         .foregroundColor(.blue)
-                        .font(.system(size: 17))
+                        .font(.body)
                         
                         Spacer()
                         
                         Text("Select Country")
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.body)
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity, alignment: .center)
                         
@@ -185,7 +185,7 @@ struct CountryPicker: View {
                         // Invisible button for balance (same width as Cancel)
                         Button("Cancel") { }
                             .foregroundColor(.clear)
-                            .font(.system(size: 17))
+                            .font(.body)
                             .disabled(true)
                     }
                     .padding(.horizontal, 16)
@@ -256,7 +256,7 @@ struct CountryRow: View {
                     if country.flag.isEmpty {
                         Image(systemName: "flag.slash")
                             .foregroundColor(.adaptiveSecondaryText)
-                            .font(.system(size: 20))
+                            .font(.body)
                             .frame(width: 32, height: 24)
                     } else {
                         if let flag = Flag(countryCode: country.flag) {
@@ -272,7 +272,7 @@ struct CountryRow: View {
                         } else {
                             Image(systemName: "flag.slash")
                                 .foregroundColor(.adaptiveSecondaryText)
-                                .font(.system(size: 20))
+                                .font(.body)
                                 .frame(width: 32, height: 24)
                         }
                     }
@@ -280,13 +280,13 @@ struct CountryRow: View {
                 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(country.name)
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.body)
                         .foregroundColor(.adaptivePrimaryText)
                         .multilineTextAlignment(.leading)
                     
                     if showRegion {
                         Text(CountryRegion.region(for: country.name).displayName)
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
@@ -296,7 +296,7 @@ struct CountryRow: View {
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.blue)
-                        .font(.system(size: 20))
+                        .font(.body)
                 }
             }
             .padding(.vertical, 8)
@@ -409,19 +409,19 @@ struct CountryPickerButton: View {
                     } else {
                         Image(systemName: "flag.slash")
                             .foregroundColor(.adaptiveSecondaryText)
-                            .font(.system(size: 16))
+                            .font(.body)
                             .frame(width: 24, height: 16)
                     }
                 }
                 
                 Text(selectedCountry.isEmpty || selectedCountry == "Select Country" ? "Select Country" : selectedCountry)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.adaptiveSecondaryText)
             }
             .padding(.horizontal, 12)

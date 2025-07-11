@@ -33,13 +33,13 @@ struct AboutView: View {
                 }) {
                     HStack {
                         Text("Terms and Conditions")
-                            .font(.system(size: 17, weight: .regular))
+                            .font(.body)
                             .foregroundColor(colorScheme == .dark ? .white : .primary)
                         
                         Spacer()
                         
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.subheadline)
                             .foregroundColor(.gray)
                     }
                     .padding(.horizontal, 16)
@@ -61,13 +61,13 @@ struct AboutView: View {
                 }) {
                     HStack {
                         Text("Privacy policy")
-                            .font(.system(size: 17, weight: .regular))
+                            .font(.body)
                             .foregroundColor(colorScheme == .dark ? .white : .primary)
                         
                         Spacer()
                         
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.subheadline)
                             .foregroundColor(.gray)
                     }
                     .padding(.horizontal, 16)
@@ -86,13 +86,13 @@ struct AboutView: View {
                 // Version Row
                 HStack {
                     Text("Version")
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.body)
                         .foregroundColor(colorScheme == .dark ? .white : .primary)
                     
                     Spacer()
                     
                     Text(appVersion)
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.body)
                         .foregroundColor(.gray)
                 }
                 .padding(.horizontal, 16)

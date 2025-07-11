@@ -190,7 +190,7 @@ struct SettingsView: View {
                             .frame(width: 20)
                         
                         Text("Configure Alarms")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.body)
                             .foregroundColor(colorScheme == .dark ? .white : .primary)
                         
                         Spacer()
@@ -201,7 +201,7 @@ struct SettingsView: View {
                     }
                     
                     Text("Set up wake-up alarms with your favorite stations")
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.caption)
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
                 .padding(.vertical, 8)
@@ -230,7 +230,7 @@ struct SettingsView: View {
                             .frame(width: 20)
                         
                         Text("Manage App Data")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.body)
                             .foregroundColor(colorScheme == .dark ? .white : .primary)
                         
                         Spacer()
@@ -241,7 +241,7 @@ struct SettingsView: View {
                     }
                     
                     Text("Import/export stations and manage stored data")
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.caption)
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
                 .padding(.vertical, 8)
@@ -406,7 +406,7 @@ struct ModernSettingsCard<Content: View>: View {
                 }
                 
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundColor(titleColor)
                 
                 Spacer()
@@ -449,7 +449,7 @@ struct ModernToggleRow: View {
                     .frame(width: 20)
                 
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(colorScheme == .dark ? .white : .primary)
                 
                 Spacer()
@@ -460,7 +460,7 @@ struct ModernToggleRow: View {
             
             if let subtitle = subtitle {
                 Text(subtitle)
-                    .font(.system(size: 13, weight: .regular))
+                    .font(.caption)
                     .foregroundColor(colorScheme == .dark ? .gray : .secondary)
             }
         }
@@ -485,7 +485,7 @@ struct ModernActionButton: View {
                         .frame(width: 20)
                     
                     Text(title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.body)
                         .foregroundColor(colorScheme == .dark ? .white : .primary)
                     
                     Spacer()
@@ -497,7 +497,7 @@ struct ModernActionButton: View {
                 
                 if let subtitle = subtitle {
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.caption)
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
             }
@@ -527,7 +527,7 @@ struct ModernDestructiveButton: View {
                         .frame(width: 20)
                     
                     Text(title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.body)
                         .foregroundColor(.red)
                     
                     Spacer()
@@ -539,7 +539,7 @@ struct ModernDestructiveButton: View {
                 
                 if let subtitle = subtitle {
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.caption)
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
             }
@@ -567,7 +567,7 @@ struct ModernProgressView: View {
             if let progress = progress {
                 ProgressView(value: progress, total: 1.0) {
                     Text(title)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline)
                         .foregroundColor(colorScheme == .dark ? .white : .primary)
                 }
                 .progressViewStyle(LinearProgressViewStyle(tint: .blue))
@@ -578,7 +578,7 @@ struct ModernProgressView: View {
                         .tint(.blue)
                     
                     Text(title)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline)
                         .foregroundColor(colorScheme == .dark ? .white : .primary)
                 }
             }
@@ -602,7 +602,7 @@ struct ModernStatusMessage: View {
                 .foregroundColor(isSuccess ? .green : .orange)
             
             Text(text)
-                .font(.system(size: 14, weight: .medium))
+                .font(.subheadline)
                 .foregroundColor(colorScheme == .dark ? .white : .primary)
         }
         .padding(12)
@@ -624,12 +624,12 @@ struct ModernWarningText: View {
                     .foregroundColor(.red)
                 
                 Text("Important")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline)
                     .foregroundColor(.red)
             }
             
             Text(text)
-                .font(.system(size: 13, weight: .regular))
+                .font(.caption)
                 .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 .lineLimit(nil)
         }
@@ -776,7 +776,7 @@ struct InternalDataManagementView: View {
                                 .frame(width: 20)
                             
                             Text("Country Selection")
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.body)
                                 .foregroundColor(colorScheme == .dark ? .white : .primary)
                             
                             Spacer()

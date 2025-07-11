@@ -21,7 +21,7 @@ struct PlayerView: View {
                     radioPlayer.previousStation(from: viewModel.stations)
                 }) {
                     Image(systemName: "backward.fill")
-                        .font(.system(size: 28, weight: .medium))
+                        .font(.title2)
                         .foregroundColor(.white)
                 }
                 .frame(width: 44, height: 44)
@@ -42,7 +42,7 @@ struct PlayerView: View {
                             // Show pause if user wants to play (regardless of actual playback state)
                             // Show play if user doesn't want to play
                             Image(systemName: radioPlayer.userWantsToPlay ? "pause.fill" : "play.fill")
-                                .font(.system(size: 32, weight: .medium))
+                                .font(.largeTitle)
                                 .foregroundColor(.white)
                         }
                     }
@@ -58,7 +58,7 @@ struct PlayerView: View {
                     radioPlayer.nextStation(from: viewModel.stations)
                 }) {
                     Image(systemName: "forward.fill")
-                        .font(.system(size: 28, weight: .medium))
+                        .font(.title2)
                         .foregroundColor(.white)
                 }
                 .frame(width: 44, height: 44)
@@ -77,7 +77,7 @@ struct PlayerView: View {
                 
                 // Bitrate information - compact and subtle
                 Text(bitrateMessage)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption)
                     .foregroundColor(.gray)
                     .lineLimit(1)
                     .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in

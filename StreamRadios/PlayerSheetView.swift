@@ -365,7 +365,7 @@ struct PlayerSheetView: View {
                                         .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
                                         .overlay(
                                             Image(systemName: "music.note")
-                                                .font(.system(size: min(geometry.size.width * 0.65, 240) * 0.25, weight: .light))
+                                                .font(.largeTitle)
                                                 .foregroundColor(.white.opacity(0.8))
                                         )
                                 }
@@ -389,7 +389,7 @@ struct PlayerSheetView: View {
                                 .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
                                 .overlay(
                                     Image(systemName: "music.note")
-                                        .font(.system(size: min(geometry.size.width * 0.65, 240) * 0.25, weight: .light))
+                                        .font(.largeTitle)
                                         .foregroundColor(.white.opacity(0.8))
                                 )
                             Spacer()
@@ -1009,7 +1009,7 @@ struct StationImage: View {
                         .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
                         .overlay(
                             Image(systemName: "radio")
-                                .font(.system(size: artworkSize * 0.25, weight: .light))
+                                .font(.largeTitle)
                                 .foregroundColor(.white.opacity(0.8))
                         )
                     Spacer()
@@ -1195,7 +1195,7 @@ struct PlaylistPickerView: View {
                     if filteredPlaylists.isEmpty {
                         VStack(spacing: 16) {
                             Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
-                                .font(.system(size: 48))
+                                .font(.largeTitle)
                                 .foregroundColor(.secondary)
                             Text(searchText.isEmpty ? "No active playlists found" : "No active playlists match your search")
                                 .font(.headline)
@@ -1521,7 +1521,7 @@ struct SpotifyPlaylistPickerView: View {
                     if filteredPlaylists.isEmpty {
                         VStack(spacing: 16) {
                             Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
-                                .font(.system(size: 48))
+                                .font(.largeTitle)
                                 .foregroundColor(.secondary)
                             Text(searchText.isEmpty ? "No playlists found" : "No playlists match your search")
                                 .font(.headline)
@@ -1787,7 +1787,7 @@ struct EnhancedPlaylistPickerView: View {
                         Spacer()
                         VStack(spacing: 16) {
                             Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 48))
+                                .font(.largeTitle)
                                 .foregroundColor(.orange)
                             Text("Error Loading Playlists")
                                 .font(.headline)
@@ -1807,7 +1807,7 @@ struct EnhancedPlaylistPickerView: View {
                         Spacer()
                         VStack(spacing: 16) {
                             Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
-                                .font(.system(size: 48))
+                                .font(.largeTitle)
                                 .foregroundColor(.secondary)
                             Text(searchText.isEmpty ? "No editable playlists found" : "No editable playlists match your search")
                                 .font(.headline)

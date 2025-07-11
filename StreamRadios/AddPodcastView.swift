@@ -444,11 +444,11 @@ struct AddPodcastView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.blue)
                 
                 Text("Search Podcasts")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
@@ -495,7 +495,7 @@ struct AddPodcastView: View {
             ProgressView()
                 .scaleEffect(0.8)
             Text("Searching podcasts...")
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundColor(.secondary)
         }
         .padding()
@@ -528,15 +528,15 @@ struct AddPodcastView: View {
     private var noResultsView: some View {
         VStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 32))
+                .font(.largeTitle)
                 .foregroundColor(.adaptiveSecondaryText)
             
             Text("No podcasts found")
-                .font(.system(size: 16, weight: .medium))
+                .font(.body)
                 .foregroundColor(.primary)
             
             Text("Try adjusting your search terms")
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundColor(.secondary)
         }
         .padding()
@@ -551,7 +551,7 @@ struct AddPodcastView: View {
                 .foregroundColor(.orange)
             
             Text(error)
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundColor(.primary)
         }
         .padding()
@@ -563,19 +563,19 @@ struct AddPodcastView: View {
     private var creditSection: some View {
         HStack(spacing: 4) {
             Text("Powered by")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundColor(.secondary)
             
             Text("Apple iTunes")
-                .font(.system(size: 12, weight: .medium))
+                .font(.caption)
                 .foregroundColor(.adaptiveSecondaryText)
             
             Text("&")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundColor(.secondary)
             
             Text("PodcastIndex.org")
-                .font(.system(size: 12, weight: .medium))
+                .font(.caption)
                 .foregroundColor(.adaptiveSecondaryText)
         }
         .padding(.horizontal)
@@ -759,14 +759,14 @@ struct AddPodcastView: View {
                         isPresented = false
                     }
                 }
-                .font(.system(size: 17))
+                .font(.body)
                 .foregroundColor(isAddingPodcast ? .gray : .blue)
                 .disabled(isAddingPodcast)
                 
                 Spacer()
                 
                 Text(navigationTitle)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
@@ -774,7 +774,7 @@ struct AddPodcastView: View {
                 Button(actionButtonText) {
                     validateAndSavePodcast()
                 }
-                .font(.system(size: 17, weight: .medium))
+                .font(.body)
                 .foregroundColor(isAddingPodcast ? .gray : .blue)
                 .disabled(isAddingPodcast)
             }
@@ -806,7 +806,7 @@ struct ModernFormCard<Content: View>: View {
             // Header
             HStack {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
@@ -848,12 +848,12 @@ struct ModernTextField: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.blue)
                     .frame(width: 20)
                 
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
@@ -920,25 +920,25 @@ struct PodcastSearchResultRow: View {
                 // Podcast Info
                 VStack(alignment: .leading, spacing: 4) {
                     Text(result.title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.body)
                         .foregroundColor(.adaptivePrimaryText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     
                     if let author = result.author {
                         Text(author)
-                            .font(.system(size: 14))
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
                     
                     HStack(spacing: 6) {
                         Image(systemName: result.source == .podcastIndex ? "radio" : "applelogo")
-                            .font(.system(size: 10))
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                         
                         Text(result.source == .podcastIndex ? "PodcastIndex" : "iTunes")
-                            .font(.system(size: 12))
+                            .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -946,7 +946,7 @@ struct PodcastSearchResultRow: View {
                 Spacer()
                 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption)
                     .foregroundColor(.secondary)
             }
             .padding(16)
@@ -986,7 +986,7 @@ struct PodcastAddingProgressView: View {
         VStack(spacing: 24) {
             // Title
             Text("Adding Podcast")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.title3)
                 .foregroundColor(titleColor)
             
             // Animated podcast icon
@@ -1003,19 +1003,19 @@ struct PodcastAddingProgressView: View {
                     .animation(.easeInOut(duration: 0.5), value: progress)
                 
                 Image(systemName: "microphone")
-                    .font(.system(size: 30, weight: .medium))
+                    .font(.largeTitle)
                     .foregroundColor(.blue)
             }
             
             // Progress percentage
             Text("\(Int(progress * 100))%")
-                .font(.system(size: 16, weight: .medium))
+                .font(.body)
                 .foregroundColor(secondaryTextColor)
                 .animation(.easeInOut(duration: 0.3), value: progress)
             
             // Stage text
             Text(stageText)
-                .font(.system(size: 16))
+                .font(.body)
                 .foregroundColor(titleColor)
                 .multilineTextAlignment(.center)
                 .animation(.easeInOut(duration: 0.3), value: stageText)

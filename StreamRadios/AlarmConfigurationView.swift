@@ -711,7 +711,7 @@ struct ModernAlarmCard<Content: View>: View {
             // Header
             HStack {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundColor(titleColor)
                 
                 Spacer()
@@ -742,17 +742,17 @@ struct ModernAlarmToggleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(.body)
                 .foregroundColor(isEnabled ? .blue : .gray)
                 .frame(width: 20)
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(colorScheme == .dark ? .white : .primary)
                 
                 Text(subtitle)
-                    .font(.system(size: 13, weight: .regular))
+                    .font(.caption)
                     .foregroundColor(isEnabled ? (colorScheme == .dark ? .gray : .secondary) : .red)
             }
             
@@ -775,12 +775,12 @@ struct ModernStationPicker: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "radio")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.blue)
                     .frame(width: 20)
                 
                 Text("Selected Station")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(colorScheme == .dark ? .white : .primary)
                 
                 Spacer()
@@ -811,7 +811,7 @@ struct ModernSegmentedControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.subheadline)
                 .foregroundColor(colorScheme == .dark ? .gray : .secondary)
             
             Picker(title, selection: $selection) {
@@ -836,12 +836,12 @@ struct ModernTimePicker: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "clock")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.blue)
                     .frame(width: 20)
                 
                 Text("Alert Time")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(colorScheme == .dark ? .white : .primary)
                 
                 Spacer()
@@ -871,12 +871,12 @@ struct ModernDaySelector: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.blue)
                     .frame(width: 20)
                 
                 Text("Repeat on these days")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(colorScheme == .dark ? .white : .primary)
                 
                 Spacer()
@@ -886,11 +886,11 @@ struct ModernDaySelector: View {
                 ForEach(0..<7, id: \.self) { index in
                     HStack(spacing: 12) {
                         Image(systemName: selectedDays[index] ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 18, weight: .medium))
+                            .font(.headline)
                             .foregroundColor(selectedDays[index] ? .blue : .gray)
                         
                         Text(daysOfWeek[index])
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body)
                             .foregroundColor(colorScheme == .dark ? .white : .primary)
                         
                         Spacer()
@@ -924,12 +924,12 @@ struct ModernShowNameField: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "text.bubble")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.blue)
                     .frame(width: 20)
                 
                 Text("Show Name")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(colorScheme == .dark ? .white : .primary)
                 
                 Spacer()
@@ -966,11 +966,11 @@ struct ModernErrorMessage: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(.body)
                 .foregroundColor(.red)
             
             Text(text)
-                .font(.system(size: 14, weight: .medium))
+                .font(.body)
                 .foregroundColor(.red)
         }
         .padding(12)
@@ -988,11 +988,11 @@ struct ModernDisabledMessage: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(.body)
                 .foregroundColor(.gray)
             
             Text(text)
-                .font(.system(size: 14, weight: .medium))
+                .font(.body)
                 .foregroundColor(.gray)
         }
         .padding(12)
@@ -1010,25 +1010,25 @@ struct ModernNoStationsMessage: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.orange)
                 
                 Text("No Favorite Stations")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(.orange)
             }
             
             Text("No favorite stations have been configured. Please add a station to your favorites in the 'Favorites' tab before scheduling an alert.")
-                .font(.system(size: 14, weight: .regular))
+                .font(.body)
                 .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 .lineLimit(nil)
             
             Button(action: onNavigateToStations) {
                 HStack(spacing: 8) {
                     Image(systemName: "list.bullet")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.body)
                     Text("Go to All Stations")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.body)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -1053,11 +1053,11 @@ struct ModernSavedIndicator: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 16, weight: .medium))
+                .font(.body)
                 .foregroundColor(.green)
             
             Text("Changes saved")
-                .font(.system(size: 14, weight: .medium))
+                .font(.body)
                 .foregroundColor(colorScheme == .dark ? .white : .primary)
         }
         .padding(12)

@@ -17,7 +17,7 @@ struct DataSyncProgressView: View {
                 VStack(spacing: 24) {
                     // App icon or logo
                     Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                        .font(.system(size: 60))
+                        .font(.largeTitle)
                         .foregroundColor(.blue)
                         .rotationEffect(.degrees(animateProgress ? 360 : 0))
                         .animation(
@@ -132,7 +132,7 @@ struct SyncStatusItem: View {
         HStack(spacing: 12) {
             // Status icon
             statusIcon
-                .font(.system(size: 16))
+                .font(.body)
                 .frame(width: 20)
             
             // Title

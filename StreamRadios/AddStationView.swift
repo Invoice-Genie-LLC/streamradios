@@ -143,13 +143,13 @@ struct AddStationView: View {
                 Button("Cancel") {
                     presentedSheet = nil
                 }
-                .font(.system(size: 17))
+                .font(.body)
                 .foregroundColor(.blue)
                 
                 Spacer()
                 
                 Text("Add Station")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundColor(.adaptivePrimaryText)
                 
                 Spacer()
@@ -157,7 +157,7 @@ struct AddStationView: View {
                 Button("Add") {
                     saveStation()
                 }
-                .font(.system(size: 17, weight: .medium))
+                .font(.body)
                 .foregroundColor(.blue)
             }
             .padding(.horizontal, 20)
@@ -194,7 +194,7 @@ struct AddStationView: View {
                         .frame(width: 100, height: 100)
                         .overlay(
                             Text("Add Photo")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.subheadline)
                                 .foregroundColor(.adaptiveSecondaryText)
                         )
                         .overlay(
@@ -206,7 +206,7 @@ struct AddStationView: View {
             .buttonStyle(PlainButtonStyle())
             
             Text(iconImage != nil ? "Tap to change station icon" : "Station Icon")
-                .font(.system(size: 16, weight: .medium))
+                .font(.body)
                 .foregroundColor(.adaptiveSecondaryText)
         }
     }
@@ -306,17 +306,17 @@ struct AddSimpleTextField: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 16))
+                    .font(.body)
                     .foregroundColor(.blue)
                 
                 Text(title)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
             }
             
             HStack {
                 TextField(placeholder, text: $text)
-                    .font(.system(size: 16))
+                    .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
                     .keyboardType(keyboardType)
                     .autocapitalization(.none)
@@ -330,7 +330,7 @@ struct AddSimpleTextField: View {
                 if !text.isEmpty {
                     Button(action: { text = "" }) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
+                            .font(.body)
                             .foregroundColor(.adaptiveSecondaryText)
                     }
                 }
@@ -352,11 +352,11 @@ struct AddSimpleCountryPicker: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "flag")
-                    .font(.system(size: 16))
+                    .font(.body)
                     .foregroundColor(.blue)
                 
                 Text(title)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
             }
             
@@ -381,11 +381,11 @@ struct AddSimpleAlertView: View {
         VStack(spacing: 20) {
             VStack(spacing: 8) {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundColor(.adaptivePrimaryText)
                 
                 Text(message)
-                    .font(.system(size: 16))
+                    .font(.body)
                     .foregroundColor(.adaptiveSecondaryText)
                     .multilineTextAlignment(.center)
             }
@@ -393,7 +393,7 @@ struct AddSimpleAlertView: View {
             Button("OK") {
                 action()
             }
-            .font(.system(size: 17, weight: .medium))
+            .font(.body)
             .foregroundColor(.adaptivePrimaryText)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)

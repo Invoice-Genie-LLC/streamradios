@@ -19,7 +19,7 @@ struct ReconnectingIndicatorView: View {
                 
                 // Status text
                 Text(statusText)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption)
                     .foregroundColor(statusColor)
                 
                 // Loading indicator for connecting states
@@ -77,7 +77,7 @@ struct ReconnectingIndicatorView: View {
                     .foregroundColor(.red)
             }
         }
-        .font(.system(size: 14, weight: .medium))
+        .font(.subheadline)
     }
     
     private var statusText: String {

@@ -107,7 +107,7 @@ struct RadioStationListView: View {
                     VStack {
                         HStack {
                             Text("Drag to Reorder Stations")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.subheadline)
                                 .foregroundColor(.adaptiveSecondaryText)
                                 .allowsHitTesting(false) // Prevent text from blocking gestures
                             
@@ -117,7 +117,7 @@ struct RadioStationListView: View {
                             Button("Done") {
                                 isEditing = false
                             }
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body)
                             .foregroundColor(.blue)
                         }
                         .padding(.horizontal, 16)
@@ -429,7 +429,7 @@ struct RadioStationListView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         // Station name - adaptive text
                         Text(station.name)
-                            .font(.system(size: 17, weight: .medium))
+                            .font(.body)
                             .foregroundColor(.adaptivePrimaryText)
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
@@ -449,7 +449,7 @@ struct RadioStationListView: View {
                             
                             // Country text - blue text as per screenshot
                             Text(station.country)
-                                .font(.system(size: 14, weight: .regular))
+                                .font(.subheadline)
                                 .foregroundColor(.blue)
                                 .lineLimit(1)
                         }
@@ -458,7 +458,7 @@ struct RadioStationListView: View {
                         if isCurrentlyPlaying {
                             if let metadata = radioPlayer.metadata, !metadata.isEmpty {
                                 Text(metadata)
-                                    .font(.system(size: 12, weight: .regular))
+                                    .font(.caption)
                                     .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(nil)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -650,7 +650,7 @@ struct RadioStationListView: View {
             handleFavoriteButtonTap(for: station)
         }) {
             Image(systemName: station.isFavorite ? "heart.fill" : "heart")
-                .font(.system(size: 20, weight: .medium))
+                .font(.title3)
                 .foregroundColor(station.isFavorite ? .red : .adaptiveSecondaryText)
                 .scaleEffect(station.isFavorite ? 1.1 : 1.0)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: station.isFavorite)
@@ -713,7 +713,7 @@ struct RadioStationListView: View {
             
             // Always show radio icon instead of first 2 letters
             Image(systemName: "radio")
-                .font(.system(size: 24, weight: .medium))
+                .font(.title2)
                 .foregroundColor(.adaptivePrimaryText)
         }
     }

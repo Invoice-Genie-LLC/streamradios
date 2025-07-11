@@ -250,7 +250,7 @@ struct PodcastListView: View {
             if isEditing {
                 HStack {
                     Text("Drag to Reorder Podcasts")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.subheadline)
                         .foregroundColor(.adaptiveSecondaryText)
                         .allowsHitTesting(false)
                     
@@ -262,7 +262,7 @@ struct PodcastListView: View {
                         viewModel.saveFeedOrder()
                         refreshID = UUID()
                     }
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(.blue)
                 }
                 .padding(.horizontal, 16)
@@ -766,7 +766,7 @@ struct PodcastRowView: View {
                 
                 if !isEditMode {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: arrowSize))
+                        .font(.title3)
                         .foregroundColor(.adaptiveSecondaryText)
                         .frame(width: arrowSize, height: iconSize)
                         .onTapGesture {
@@ -926,14 +926,17 @@ struct EpisodeRowView: View {
             if showingBannerAlert {
                 Text(bannerAlertMessage)
                     .font(.caption)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                     .foregroundColor(.white)
                     .padding(4)
                     .frame(maxWidth: .infinity)
                     .background(Color.red)
             }
             
-            HStack(alignment: .center, spacing: 10) {
-                // Play/Pause button
+            // Responsive Layout: Play Button | Episode Info | Action Buttons
+            HStack(alignment: .top, spacing: 12) {
+                
+                // COLUMN 1: Play/Pause button (Fixed width)
                 Button(action: {
                     let progress = podcastPlayer.getCurrentProgress(for: episode)
                     if episode.state.isPlayed || progress >= 0.99 {
@@ -948,7 +951,8 @@ struct EpisodeRowView: View {
                         if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
                             // Show spinning loading state
                             Image(systemName: "arrow.2.circlepath")
-                                .font(.system(size: 28))
+                                .font(.title2)
+                                .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
                                 .foregroundColor(.blue)
                                 .rotationEffect(.degrees(360))
                                 .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
@@ -961,56 +965,64 @@ struct EpisodeRowView: View {
                         }
                     }
                 }
-                .frame(width: buttonSize, height: buttonSize)
+                .frame(width: 44, height: 44) // Fixed play button area
+                .padding(.top, 2) // Align with first line of text
                 
-                // Episode info
-                VStack(alignment: .leading, spacing: 2) {
-                    // Episode title (2 lines)
+                // COLUMN 2: Episode info (Flexible width with intelligent truncation)
+                VStack(alignment: .leading, spacing: 4) {
+                    // Episode title (responsive to available space)
                     Text(episode.title)
                         .font(.subheadline)
                         .fontWeight(.medium)
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                         .lineLimit(2)
                         .foregroundColor(.primary)
+                        .multilineTextAlignment(.leading)
+                        .layoutPriority(1) // Give title priority in layout
                     
-                    // Episode info and status
-                    HStack(spacing: 8) {
-                        // Status indicator
+                    // Progress bar for currently playing episode (embedded in content)
+                    if isPlaying {
+                        ProgressView(value: podcastPlayer.currentProgress)
+                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                            .frame(height: 3)
+                            .background(Color.adaptiveBorder)
+                            .cornerRadius(1.5)
+                            .animation(.easeInOut(duration: 0.3), value: podcastPlayer.currentProgress)
+                    }
+                    
+                    // Compact metadata row (priority-based truncation)
+                    HStack(spacing: 4) {
+                        // Status indicator (highest priority - always visible)
                         episodeStatusChip
+                            .layoutPriority(3) // Highest priority
                         
-                        // Date
+                        // Date (medium priority - truncate if needed)
                         Text(Self.dateFormatter.string(from: episode.publicationDate))
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.caption)
+                            .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                             .foregroundColor(.blue)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1)
+                            .layoutPriority(2) // Medium priority
                         
-                        // Duration/remaining time
+                        // Duration/time info (lowest priority - first to disappear)
                         if let timeInfo = formatTimeInfo() {
-                            Text("•")
-                                .font(.caption2)
+                            Text("• \(timeInfo)")
+                                .font(.caption)
+                                .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                                 .foregroundColor(.adaptiveSecondaryText)
-                            
-                            Text(timeInfo)
-                                .font(.system(size: 12))
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .lineLimit(1)
+                                .layoutPriority(1) // Lowest priority - will be truncated first
                         }
                         
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1) // Give middle column flexibility
                 
-                // Right column: File size, Bookmark button, Download button
-                VStack(alignment: .trailing, spacing: 4) {
-                    // File size
-                    if let fileSize = episode.fileSize, fileSize > 0 {
-                        Text(formatFileSize(fileSize))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    
+                // COLUMN 3: Action buttons (Fixed width - always visible)
+                VStack(alignment: .center, spacing: 8) {
                     // Bookmark button
                     Button(action: {
                         if isPlaying {
@@ -1024,7 +1036,7 @@ struct EpisodeRowView: View {
                             .frame(width: buttonSize, height: buttonSize)
                     }
                     
-                    // Download button - simplified
+                    // Download button
                     Group {
                         if viewModel.currentTab == 2 && episode.state.isDownloaded {
                             // Downloads tab: Show trash can for downloaded episodes
@@ -1047,24 +1059,24 @@ struct EpisodeRowView: View {
                     }
                     .frame(width: buttonSize, height: buttonSize)
                 }
+                .frame(width: 50, alignment: .center) // Compact fixed width
+                .layoutPriority(2) // High priority - always visible
+                .padding(.top, 2) // Align with content
             }
-            .frame(height: rowHeight)
-            .padding(.horizontal, 10)
-            
-            // Progress bar (only for playing episode)
-            if isPlaying {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color.adaptiveSeparator)
-                            .frame(height: 3)
-                        
-                        Rectangle()
-                            .fill(Color.blue)
-                            .frame(width: geometry.size.width * CGFloat(progress), height: 3)
-                    }
-                }
-                .frame(height: 3)
+            .frame(minHeight: 64) // Minimum height for touch targets
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onPlay()
+            }
+            .onReceive(podcastPlayer.$currentProgress) { _ in
+                // Force view refresh when progress changes for playing episodes
+                // This will update the currentTimeInfo computed property
+            }
+            .onReceive(podcastPlayer.$currentTime) { _ in
+                // Force view refresh when current time changes for playing episodes
+                // This ensures real-time time left updates
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1108,54 +1120,34 @@ struct EpisodeRowView: View {
             if episode.state.isPlayed || episode.state.progress >= 0.99 {
                 Text("Played")
                     .foregroundColor(.adaptivePrimaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.adaptiveBorder)) // Adaptive gray for played
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.adaptiveBorder)) // Adaptive gray for played
             } else if isPlaying {
                 Text("Playing")
                     .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue))
             } else if episode.state.progress > 0 || podcastPlayer.getCurrentProgress(for: episode) > 0 {
                 Text("IN PROGRESS")
                     .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange))
                     .fixedSize()
             } else {
-                Text("New")
+                Text("NEW")
                     .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue)) // Changed from green to blue for consistency
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue)) // Changed from green to blue for consistency
             }
         }
-        .font(.system(size: 10, weight: .bold))
+        .font(.caption2)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
         .fixedSize() // Ensure full text is displayed without truncation
     }
-
-    private var episodeStatusIndicator: some View {
-            Group {
-                if episode.state.isPlayed || episode.state.progress >= 0.99 {
-                    Text("Played")
-                        .foregroundColor(.adaptiveSecondaryText)
-                } else if isPlaying {
-                    Text("Playing")
-                        .foregroundColor(.blue)
-                } else if episode.state.progress > 0 || podcastPlayer.getCurrentProgress(for: episode) > 0 {
-                    Text("IN PROGRESS")
-                        .foregroundColor(.orange)
-                        .fixedSize()
-                } else {
-                    Text("New")
-                        .foregroundColor(.blue) // Changed from green to blue for consistency
-                }
-            }
-            .font(.caption2)
-            .fontWeight(.semibold)
-        }
     
     private var simplifiedDownloadButton: some View {
         Button(action: {
@@ -1194,11 +1186,11 @@ struct EpisodeRowView: View {
                         // Percentage text or download icon
                         if progress > 0.05 { // Show percentage after 5% to avoid cramped text
                             Text("\(Int(progress * 100))%")
-                                .font(.system(size: 7, weight: .bold))
+                                .font(.caption2)
                                 .foregroundColor(.blue)
                         } else {
                             Image(systemName: "arrow.down")
-                                .font(.system(size: buttonSize * 0.4))
+                                .font(.caption2)
                                 .foregroundColor(.blue)
                         }
                     }
@@ -1513,52 +1505,59 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }
     
     private var episodeContent: some View {
+        // Responsive Layout: Play Button | Episode Info | Action Buttons
         HStack(alignment: .top, spacing: 12) {
-            // Play button - simplified with loading state
+            
+            // COLUMN 1: Play button (Fixed width)
             Button(action: isPlaying ? onStop : onPlay) {
                 Group {
                     if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
                         // Show spinning loading state
                         Image(systemName: "arrow.2.circlepath")
-                            .font(.system(size: 28))
+                            .font(.title2)
+                            .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
                             .foregroundColor(.blue)
                             .rotationEffect(.degrees(360))
                             .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
                     } else {
                         // Regular play/pause button
                         Image(systemName: cachedPlayButtonIcon)
-                            .font(.system(size: 28))
+                            .font(.title2)
+                            .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
                             .foregroundColor(isPlaying ? .blue : EpisodeStateManager.shared.getState(for: episode.id).buttonColor)
                     }
                 }
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 44, height: 44) // Fixed play button area
+            .padding(.top, 2) // Align with first line of text
             
-            // Episode content
+            // COLUMN 2: Episode content (Flexible width with intelligent truncation)
             VStack(alignment: .leading, spacing: 4) {
-                // Episode title - limit lines for better performance
+                // Episode title (responsive to available space)
                 Text(episode.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                     .foregroundColor(.primary)
                     .lineLimit(2) // Limit lines for better scrolling performance
                     .multilineTextAlignment(.leading)
+                    .layoutPriority(1) // Give title priority in layout
                 
-                // Progress bar for currently playing episode
+                // Progress bar for currently playing episode (embedded in content)
                 if isPlaying {
                     ProgressView(value: podcastPlayer.currentProgress)
                         .progressViewStyle(LinearProgressViewStyle(tint: .blue))
                         .frame(height: 3)
                         .background(Color.adaptiveBorder)
                         .cornerRadius(1.5)
-                        .padding(.vertical, 2)
                         .animation(.easeInOut(duration: 0.3), value: podcastPlayer.currentProgress)
                 }
                 
-                // Metadata row - with real-time updates and proper layout
+                // Compact metadata row (priority-based truncation)
                 HStack(spacing: 4) {
-                    // Status indicator - using real-time values for playing episodes
+                    // Status indicator (highest priority - always visible)
                     Text(currentStatusText)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.caption2)
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                         .foregroundColor(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -1567,41 +1566,36 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .fill(currentStatusColor)
                         )
                         .fixedSize()
+                        .layoutPriority(3) // Highest priority
                     
-                    // Date - using cached string
+                    // Date (medium priority - truncate if needed)
                     Text(cachedDateString)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.caption)
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                         .foregroundColor(.blue)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.blue.opacity(0.1))
-                        )
-                        .fixedSize()
+                        .lineLimit(1)
+                        .layoutPriority(2) // Medium priority
                     
-                    // Duration - using real-time time info for playing episodes
+                    // Duration (lowest priority - first to disappear)
                     if let timeInfo = currentTimeInfo {
-                        Text(timeInfo)
-                            .font(.system(size: 11, weight: .medium))
+                        Text("• \(timeInfo)")
+                            .font(.caption)
+                            .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap text size
                             .foregroundColor(.gray)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.adaptiveSectionBackground)
-                            )
-                            .fixedSize()
+                            .lineLimit(1)
+                            .layoutPriority(1) // Lowest priority - will be truncated first
                     }
                     
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1) // Give middle column flexibility
             
-            // Action buttons - simplified
-            VStack(alignment: .center, spacing: 4) {
-                // Bookmark button - simplified
+            // COLUMN 3: Action buttons (Fixed width - always visible)
+            VStack(alignment: .center, spacing: 8) {
+                // Bookmark button
                 Button(action: {
                     if isPlaying {
                         showBannerAlert(message: "You can't add or remove favorites while the episode is playing.")
@@ -1610,11 +1604,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     }
                 }) {
                     Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                        .foregroundColor(episode.state.isFavorite ? .blue : .gray)
+                        .foregroundColor(episode.state.isFavorite ? .blue : .adaptiveSecondaryText)
                         .frame(width: buttonSize, height: buttonSize)
                 }
                 
-                // Download button - simplified
+                // Download button
                 Group {
                     if viewModel.currentTab == 2 && episode.state.isDownloaded {
                         // Downloads tab: Show trash can for downloaded episodes
@@ -1637,10 +1631,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 }
                 .frame(width: buttonSize, height: buttonSize)
             }
-            .frame(width: 50)
+            .frame(width: 50, alignment: .center) // Compact fixed width
+            .layoutPriority(2) // High priority - always visible
+            .padding(.top, 2) // Align with content
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .frame(minHeight: 64) // Minimum height for touch targets
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onTapGesture {
             onPlay()
@@ -1706,11 +1703,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         // Percentage text or download icon
                         if downloadProgress > 0.05 { // Show percentage after 5% to avoid cramped text
                             Text("\(Int(downloadProgress * 100))%")
-                                .font(.system(size: 7, weight: .bold))
+                                .font(.caption2)
                                 .foregroundColor(.blue)
                         } else {
                             Image(systemName: "arrow.down")
-                                .font(.system(size: buttonSize * 0.4))
+                                .font(.caption2)
                                 .foregroundColor(.blue)
                         }
                     }
@@ -1841,9 +1838,9 @@ struct PodcastPlayerView: View {
                 }) {
                     HStack(spacing: 8) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.body)
                         Text("Back")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body)
                     }
                     .foregroundColor(.blue)
                 }
@@ -1852,7 +1849,7 @@ struct PodcastPlayerView: View {
                 Spacer()
                 
                 Text(feed.title)
-                    .font(.system(size: 18, weight: .bold))
+                    .font(.headline)
                     .lineLimit(1)
                     .foregroundColor(.primary)
                 
@@ -1903,7 +1900,7 @@ struct PodcastPlayerView: View {
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack {
                                         Text("ABOUT")
-                                            .font(.system(size: 11, weight: .bold))
+                                            .font(.caption)
                                             .foregroundColor(.blue)
                                             .tracking(1.2)
                                         
@@ -1912,10 +1909,10 @@ struct PodcastPlayerView: View {
                                         // Scroll indicators - show arrows to indicate scrollable content
                                         VStack(spacing: 2) {
                                             Image(systemName: "chevron.up")
-                                                .font(.system(size: 8, weight: .medium))
+                                                .font(.caption2)
                                                 .foregroundColor(.secondary)
                                             Image(systemName: "chevron.down")
-                                                .font(.system(size: 8, weight: .medium))
+                                                .font(.caption2)
                                                 .foregroundColor(.secondary)
                                         }
                                         .opacity(0.6)
@@ -1923,7 +1920,7 @@ struct PodcastPlayerView: View {
                                     
                                     ScrollView(.vertical, showsIndicators: true) {
                                         Text(feed.descriptionText ?? "No description available")
-                                            .font(.system(size: 13))
+                                            .font(.caption)
                                             .foregroundColor(.secondary)
                                             .multilineTextAlignment(.leading)
                                             .padding(.trailing, 8) // Add right padding to prevent text cutoff
@@ -1959,7 +1956,7 @@ struct PodcastPlayerView: View {
             // Section header
             HStack {
                 Text("EPISODES")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.caption)
                     .foregroundColor(.primary)
                     .tracking(1.0)
                 
@@ -1967,16 +1964,16 @@ struct PodcastPlayerView: View {
                 
                 HStack(spacing: 4) {
                     Text("\(viewModel.currentEpisodes.count)")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.caption)
                         .foregroundColor(.blue)
                     
                     Text("episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.caption)
                         .foregroundColor(.blue)
                     
                     if viewModel.hasMoreEpisodes {
                         Text("• More available")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.caption2)
                             .foregroundColor(.orange)
                     }
                 }
@@ -2081,7 +2078,7 @@ struct PodcastPlayerView: View {
                                     .scaleEffect(1.2)
                                 
                                 Text("Loading more episodes...")
-                                    .font(.system(size: 15, weight: .semibold))
+                                    .font(.subheadline)
                                     .foregroundColor(.blue)
                             }
                             .padding(.vertical, 20)
@@ -2091,7 +2088,7 @@ struct PodcastPlayerView: View {
                             VStack(spacing: 12) {
                                 // Animated up arrow
                                 Image(systemName: "arrow.up")
-                                    .font(.system(size: 24, weight: .medium))
+                                    .font(.title2)
                                     .foregroundColor(.blue)
                                     .scaleEffect(endIndicatorScale)
                                     .animation(
@@ -2102,7 +2099,7 @@ struct PodcastPlayerView: View {
                                 
                                 // Instructional text
                                 Text("Swipe up for more episodes")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.body)
                                     .foregroundColor(.primary)
                             }
                             .padding(.vertical, 24)
@@ -2208,10 +2205,10 @@ struct PodcastPlayerView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.white)
-                            .font(.system(size: 20))
+                            .font(.title3)
                         
                         Text(successMessage)
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.subheadline)
                             .foregroundColor(.white)
                     }
                     .padding(.horizontal, 20)

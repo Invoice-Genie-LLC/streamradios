@@ -144,7 +144,7 @@ struct YouTubeMusicPlaylistPickerView: View {
                 // Fallback header
                 HStack {
                     Image(systemName: "play.circle")
-                        .font(.title2)
+                        .font(.largeTitle)
                         .foregroundColor(.red)
                     
                     VStack(alignment: .leading, spacing: 2) {
@@ -196,7 +196,7 @@ struct YouTubeMusicPlaylistPickerView: View {
             } else if let error = errorMessage {
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 48))
+                        .font(.largeTitle)
                         .foregroundColor(.red)
                     Text("Error")
                         .font(.headline)
@@ -240,7 +240,7 @@ struct YouTubeMusicPlaylistPickerView: View {
                     if filteredPlaylists.isEmpty {
                         VStack(spacing: 16) {
                             Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
-                                .font(.system(size: 48))
+                                .font(.largeTitle)
                                 .foregroundColor(.secondary)
                             Text(searchText.isEmpty ? "No playlists found" : "No playlists match your search")
                                 .font(.headline)

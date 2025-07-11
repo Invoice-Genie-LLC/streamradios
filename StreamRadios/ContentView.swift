@@ -72,14 +72,14 @@ struct ContentView: View {
         appearance.stackedLayoutAppearance.normal.iconColor = UIColor.secondaryLabel
         appearance.stackedLayoutAppearance.normal.titleTextAttributes = [
             .foregroundColor: UIColor.secondaryLabel,
-            .font: UIFont.systemFont(ofSize: 10, weight: .medium)
+            .font: UIFont.preferredFont(forTextStyle: .caption2)
         ]
         
         // Configure selected state
         appearance.stackedLayoutAppearance.selected.iconColor = UIColor.systemBlue
         appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
             .foregroundColor: UIColor.systemBlue,
-            .font: UIFont.systemFont(ofSize: 10, weight: .semibold)
+            .font: UIFont.preferredFont(forTextStyle: .caption2)
         ]
         
         UITabBar.appearance().standardAppearance = appearance
@@ -302,11 +302,11 @@ struct ContentView: View {
                             // Section header
                             HStack {
                                 Image(systemName: "globe")
-                                    .font(.system(size: 18, weight: .medium))
+                                    .font(.headline)
                                     .foregroundColor(.blue)
                                 
                                 Text("Browse by Country")
-                                    .font(.system(size: 18, weight: .semibold))
+                                    .font(.headline)
                                     .foregroundColor(.adaptivePrimaryText)
                                 
                                 Spacer()
@@ -320,7 +320,7 @@ struct ContentView: View {
                                     }
                                 }) {
                                     Image(systemName: "plus")
-                                        .font(.system(size: 20, weight: .medium))
+                                        .font(.title3)
                                         .foregroundColor(.blue)
                                         .frame(width: 36, height: 36)
                                 }
@@ -403,11 +403,11 @@ struct ContentView: View {
                             
                             VStack(spacing: 8) {
                                 Text("Loading Station...")
-                                    .font(.system(size: 18, weight: .semibold))
+                                    .font(.headline)
                                     .foregroundColor(.white)
                                 
                                 Text("Please wait while we prepare the edit screen")
-                                    .font(.system(size: 14, weight: .regular))
+                                    .font(.subheadline)
                                     .foregroundColor(.gray)
                                     .multilineTextAlignment(.center)
                             }
@@ -415,7 +415,7 @@ struct ContentView: View {
                             Button("Cancel") {
                                 activeSheet = nil
                             }
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.body)
                             .foregroundColor(.blue)
                             .padding(.horizontal, 32)
                             .padding(.vertical, 12)
@@ -486,11 +486,11 @@ struct ContentView: View {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.adaptiveSecondaryText)
-                    .font(.system(size: 16))
+                    .font(.body)
                 
                 TextField("Search stations...", text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
-                    .font(.system(size: 16))
+                    .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
                 
                 if !searchText.isEmpty {
@@ -499,7 +499,7 @@ struct ContentView: View {
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.adaptiveSecondaryText)
-                            .font(.system(size: 16))
+                            .font(.body)
                     }
                 }
             }
@@ -524,11 +524,11 @@ struct ContentView: View {
         }) {
             VStack(spacing: 6) {
                 Image(systemName: subTab.iconName)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.body)
                     .foregroundColor(isSelected ? .blue : .adaptiveSecondaryText)
                 
                 Text(subTab.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.subheadline)
                     .foregroundColor(isSelected ? .blue : .adaptiveSecondaryText)
             }
             .frame(maxWidth: .infinity)
@@ -657,7 +657,7 @@ struct CompactPlayerView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         // Station name
                         Text(currentStation.name)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.subheadline)
                             .foregroundColor(.adaptivePrimaryText)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -666,13 +666,13 @@ struct CompactPlayerView: View {
                         HStack(spacing: 4) {
                             if let metadata = metadata, !metadata.isEmpty {
                                 Text(metadata)
-                                    .font(.system(size: 12, weight: .regular))
+                                    .font(.caption)
                                     .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                             } else {
                                 Text("Live Radio")
-                                    .font(.system(size: 12, weight: .regular))
+                                    .font(.caption)
                                     .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(1)
                             }
@@ -687,32 +687,29 @@ struct CompactPlayerView: View {
                 Spacer()
                 
                 // Essential controls only - just play/pause button
-                HStack(spacing: 8) {
-                    // Main play/pause button
-                    Button(action: {
-                        print("⏯️ Play/pause button action - NOT opening sheet")
-                        radioPlayer.playPause()
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.blue)
-                                .frame(width: 36, height: 36)
-                            
-                            if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                    .tint(.white)
-                            } else {
-                                // Show pause if user wants to play (regardless of actual playback state)
-                                // Show play if user doesn't want to play
-                                Image(systemName: radioPlayer.userWantsToPlay ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
+                Button(action: {
+                    print("⏯️ Play/pause button action - NOT opening sheet")
+                    radioPlayer.playPause()
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 36, height: 36)
+                        
+                        if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(.white)
+                        } else {
+                            // Show pause if user wants to play (regardless of actual playback state)
+                            // Show play if user doesn't want to play
+                            Image(systemName: radioPlayer.userWantsToPlay ? "pause.fill" : "play.fill")
+                                .font(.headline)
+                                .foregroundColor(.white)
                         }
                     }
-                    .buttonStyle(PlainButtonStyle())
                 }
+                .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -747,7 +744,7 @@ struct CompactPlayerView: View {
                 
                 // Always show radio icon instead of first 2 letters
                 Image(systemName: "radio")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.title3)
                     .foregroundColor(.adaptivePrimaryText)
             }
         }
@@ -763,14 +760,14 @@ struct CompactPlayerView: View {
                     .tint(.orange)
                 Text("•")
                     .foregroundColor(.orange)
-                    .font(.system(size: 8))
+                    .font(.caption2)
             case .disconnected:
                 Image(systemName: "wifi.slash")
-                    .font(.system(size: 8))
+                    .font(.caption2)
                     .foregroundColor(.red)
             case .buffering:
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 8))
+                    .font(.caption2)
                     .foregroundColor(.orange)
                     .rotationEffect(.degrees(360))
                     .animation(
@@ -781,7 +778,7 @@ struct CompactPlayerView: View {
                 EmptyView()
             case .error:
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 8))
+                    .font(.caption2)
                     .foregroundColor(.red)
             }
         }
@@ -802,7 +799,7 @@ struct UnifiedPodcastPlayerView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.horizontalSizeClass) var sizeClass
     
-    // Responsive sizing
+    // Responsive sizing that scales with Dynamic Type
     private var artworkSize: CGFloat {
         sizeClass == .compact ? 50 : 60
     }
@@ -847,104 +844,104 @@ struct UnifiedPodcastPlayerView: View {
                 .fill(Color.clear)
                 .frame(height: 1)
             
-            // Compact single-row layout with top-aligned artwork
-                    HStack(alignment: .top, spacing: 10) {
-            // Tappable artwork area - top aligned
-            Button(action: navigateToCurrentEpisode) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.adaptiveBorder)
-                        .frame(width: 50, height: 50)
-                    
-                    feedArtworkView
-                        .frame(width: 50, height: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-            }
-            .buttonStyle(PlainButtonStyle())
-            
-                            // Tappable text area - give it maximum available space with dynamic height
-            Button(action: navigateToCurrentEpisode) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(currentEpisode.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.adaptivePrimaryText)
-                        .lineLimit(nil) // Remove line limit to allow unlimited lines
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    Text(currentFeed.title)
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundColor(.adaptiveSecondaryText)
-                        .lineLimit(1) // Keep podcast name to 1 line
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(PlainButtonStyle())
-            
-            // Player controls with time elapsed below
-            VStack(spacing: 4) {
-                // Essential controls only - more compact
-                HStack(spacing: 6) {
-                    // Skip backward 15s - smaller
-                    Button(action: podcastPlayer.skipBackward) {
-                        Image(systemName: "gobackward.15")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white)
-                            .frame(width: 30, height: 30)
+            // Compact single-row layout with center alignment for Dynamic Type support
+            HStack(alignment: .center, spacing: 10) {
+                // Tappable artwork area - center aligned
+                Button(action: navigateToCurrentEpisode) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.adaptiveBorder)
+                            .frame(width: artworkSize, height: artworkSize)
+                        
+                        feedArtworkView
+                            .frame(width: artworkSize, height: artworkSize)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Main play/pause button - compact
-                    Button(action: podcastPlayer.togglePlayPause) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.blue)
-                                .frame(width: 34, height: 34)
-                            
-                            if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
-                                // Show spinning indicator when reconnecting or buffering
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                                    // Skip forward 30s - smaller
-                Button(action: podcastPlayer.skipForward) {
-                    Image(systemName: "goforward.30")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(PlainButtonStyle())
+                
+                // Tappable text area - give it maximum available space with dynamic height
+                Button(action: navigateToCurrentEpisode) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(currentEpisode.title)
+                            .font(.caption)
+                            .foregroundColor(.adaptivePrimaryText)
+                            .lineLimit(nil) // Remove line limit to allow unlimited lines
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        Text(currentFeed.title)
+                            .font(.caption2)
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .lineLimit(1) // Keep podcast name to 1 line
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Player controls with time elapsed below - centered and responsive
+                VStack(spacing: 4) {
+                    // Essential controls only - using responsive sizing
+                    HStack(spacing: buttonSpacing) {
+                        // Skip backward 15s - responsive size
+                        Button(action: podcastPlayer.skipBackward) {
+                            Image(systemName: "gobackward.15")
+                                .font(.system(size: iconSize))
+                                .foregroundColor(.white)
+                                .frame(width: buttonSize, height: buttonSize)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        // Main play/pause button - responsive size
+                        Button(action: podcastPlayer.togglePlayPause) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: playButtonSize, height: playButtonSize)
+                                
+                                if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                    // Show spinning indicator when reconnecting or buffering
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                        .font(.system(size: playIconSize))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        // Skip forward 30s - responsive size
+                        Button(action: podcastPlayer.skipForward) {
+                            Image(systemName: "goforward.30")
+                                .font(.system(size: iconSize))
+                                .foregroundColor(.white)
+                                .frame(width: buttonSize, height: buttonSize)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    
+                    // Connection status indicator for podcast player
+                    podcastConnectionStatusView
+                    
+                    // Time elapsed/total display
+                    Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
+                        .font(.caption2)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
             }
-            
-            // Connection status indicator for podcast player
-            podcastConnectionStatusView
-            
-            // Time elapsed/total display
-            Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.adaptiveSecondaryText)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, 12)
         }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-    .background(
-        Color.adaptiveSecondaryBackground
-    )
-    .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
+        .background(
+            Color.adaptiveSecondaryBackground
+        )
+        .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
     }
 
     
@@ -980,7 +977,7 @@ struct UnifiedPodcastPlayerView: View {
             Color.adaptiveBorder
             
                                 Image(systemName: "microphone")
-                .font(.system(size: 20, weight: .medium))
+                .font(.title3)
                 .foregroundColor(.adaptivePrimaryText)
         }
     }
@@ -1018,17 +1015,17 @@ struct UnifiedPodcastPlayerView: View {
                     .tint(.orange)
                 Text("•")
                     .foregroundColor(.orange)
-                    .font(.system(size: 6))
+                    .font(.caption2)
             case .disconnected:
                 Image(systemName: "wifi.slash")
-                    .font(.system(size: 6))
+                    .font(.caption2)
                     .foregroundColor(.red)
                 Text("Offline")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.caption2)
                     .foregroundColor(.red)
             case .buffering:
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 6))
+                    .font(.caption2)
                     .foregroundColor(.orange)
                     .rotationEffect(.degrees(360))
                     .animation(
@@ -1036,16 +1033,16 @@ struct UnifiedPodcastPlayerView: View {
                         value: podcastPlayer.connectionState
                     )
                 Text("Buffering")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.caption2)
                     .foregroundColor(.orange)
             case .connected:
                 EmptyView()
             case .error:
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 6))
+                    .font(.caption2)
                     .foregroundColor(.red)
                 Text("Error")
-                    .font(.system(size: 8, weight: .medium))
+                    .font(.caption2)
                     .foregroundColor(.red)
             }
         }
@@ -1103,20 +1100,20 @@ struct CurrentlyPlayingView: View {
             // Station and song info
             VStack(alignment: .leading, spacing: 2) {
                 Text(currentStation.name)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body)
                     .foregroundColor(.adaptivePrimaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 
                 if let metadata = metadata, !metadata.isEmpty {
                     Text(metadata)
-                        .font(.system(size: 14, weight: .regular))
+                        .font(.subheadline)
                         .foregroundColor(.adaptiveSecondaryText)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 } else {
                     Text("Live Radio")
-                        .font(.system(size: 14, weight: .regular))
+                        .font(.subheadline)
                         .foregroundColor(.adaptiveSecondaryText)
                         .lineLimit(1)
                 }
@@ -1135,7 +1132,7 @@ struct CurrentlyPlayingView: View {
                             .tint(.white)
                     } else {
                         Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 24, weight: .medium))
+                            .font(.title2)
                             .foregroundColor(.white)
                     }
                 }
@@ -1177,7 +1174,7 @@ struct CurrentlyPlayingView: View {
                 
                 // Always show radio icon instead of first 2 letters
                 Image(systemName: "radio")
-                    .font(.system(size: 24, weight: .medium))
+                    .font(.title2)
                     .foregroundColor(.adaptivePrimaryText)
             }
         }
