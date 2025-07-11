@@ -28,7 +28,7 @@ enum Tab: Int, CaseIterable {
         case .radio:
             return "radio"
         case .podcast:
-            return "microphone"
+            return "mic.circle"
         case .settings:
             return "gearshape"
         }
