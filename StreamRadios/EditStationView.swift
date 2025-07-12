@@ -74,7 +74,8 @@ struct EditStationView: View {
         .overlay(
             Group {
                 if showAlert {
-                    Color.black.opacity(0.5).ignoresSafeArea()
+                    Color.black.opacity(0.4)
+                        .edgesIgnoringSafeArea(.all)
                         .onTapGesture { showAlert = false }
                     
                     SimpleAlertView(
@@ -82,6 +83,7 @@ struct EditStationView: View {
                         message: alertMessage,
                         action: { showAlert = false }
                     )
+                    .transition(.opacity)
                 }
             }
         )
@@ -358,6 +360,8 @@ struct SimpleAlertView: View {
     let message: String
     let action: () -> Void
     
+    @Environment(\.colorScheme) var colorScheme
+    
     var body: some View {
         VStack(spacing: 20) {
             VStack(spacing: 8) {
@@ -371,19 +375,25 @@ struct SimpleAlertView: View {
                     .multilineTextAlignment(.center)
             }
             
-            Button("OK") {
-                action()
+            Button(action: action) {
+                Text("OK")
+                    .font(.body)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .font(.body)
-            .foregroundColor(.adaptivePrimaryText)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
             .background(Color.blue)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .cornerRadius(8)
+            .contentShape(Rectangle())
         }
         .padding(24)
-        .background(Color.adaptiveCardBackground)
+        .background(Color(UIColor.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
+        )
         .padding(.horizontal, 40)
     }
 }

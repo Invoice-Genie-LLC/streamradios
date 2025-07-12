@@ -15,6 +15,8 @@ struct CustomAlertView: View {
     var secondaryButtonText: String?
     var secondaryButtonAction: (() -> Void)?
     
+    @Environment(\.colorScheme) var colorScheme
+    
     var body: some View {
         VStack {
             Text(title)
@@ -31,37 +33,37 @@ struct CustomAlertView: View {
             Button(action: buttonAction) {
                 Text(buttonText)
                     .fontWeight(.bold)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.accentColor)
                     .foregroundColor(.white)
-                    .cornerRadius(10)
-                    .padding([.leading, .trailing], 20)
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
+            .background(Color.accentColor)
+            .cornerRadius(10)
+            .contentShape(Rectangle())
+            .padding([.leading, .trailing], 20)
             
             if let secondaryButtonText = secondaryButtonText,
                let secondaryButtonAction = secondaryButtonAction {
                 Button(action: secondaryButtonAction) {
                     Text(secondaryButtonText)
                         .fontWeight(.medium)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.secondary.opacity(0.1))
                         .foregroundColor(.primary)
-                        .cornerRadius(10)
-                        .padding([.leading, .trailing], 20)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(10)
+                .contentShape(Rectangle())
+                .padding([.leading, .trailing], 20)
             }
             
             Spacer().frame(height: 20)
         }
         .frame(width: 300)
-        .background(Color(UIColor.systemBackground))
+        .background(Color(UIColor.systemGray6))
         .cornerRadius(15)
         .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 10)
         .overlay(
             RoundedRectangle(cornerRadius: 15)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)
         )
         .padding(.horizontal, 40)
     }
