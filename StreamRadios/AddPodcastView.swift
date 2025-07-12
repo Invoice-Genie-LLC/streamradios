@@ -287,7 +287,7 @@ struct AddPodcastView: View {
     
 
     
-    // Modern color system for adaptive theming - using shared adaptive colors
+    // Color system for adaptive theming - using shared adaptive colors
     
     // Computed properties for UI
     private var navigationTitle: String {
@@ -305,7 +305,7 @@ struct AddPodcastView: View {
                     ScrollView {
                         LazyVStack(spacing: 24) {
                             podcastSearchCard
-                            modernPodcastDetailsCard
+                            podcastDetailsCard
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 80) // Add padding for custom navigation bar
@@ -412,7 +412,7 @@ struct AddPodcastView: View {
         }
     }
     
-    // MARK: - Modern UI Components
+    // MARK: - UI Components
     
     @ViewBuilder
     private var podcastSearchCard: some View {
@@ -607,7 +607,7 @@ struct AddPodcastView: View {
     }
     
     @ViewBuilder
-    private var modernPodcastDetailsCard: some View {
+    private var podcastDetailsCard: some View {
         AddSimpleCard {
             VStack(spacing: 24) {
                 AddSimpleTextField(
@@ -627,27 +627,6 @@ struct AddPodcastView: View {
                 )
             }
         }
-    }
-    
-    @ViewBuilder
-    private var modernCancelButton: some View {
-        Button("Cancel") {
-            if !isAddingPodcast {
-                isPresented = false
-            }
-        }
-        .foregroundColor(isAddingPodcast ? .gray : .blue)
-        .disabled(isAddingPodcast)
-    }
-    
-    @ViewBuilder
-    private var modernSaveButton: some View {
-        Button(actionButtonText) {
-            validateAndSavePodcast()
-        }
-        .foregroundColor(isAddingPodcast ? .gray : .blue)
-        .fontWeight(.semibold)
-        .disabled(isAddingPodcast)
     }
     
     // MARK: - Helper Methods (Preserved from original)

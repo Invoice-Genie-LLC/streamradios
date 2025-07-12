@@ -295,7 +295,7 @@ struct ContentView: View {
                     .edgesIgnoringSafeArea(.all)
                 
                 VStack(spacing: 0) {
-                    // Modern top navigation area - Browse by Country section prominently at top
+                    // Top navigation area - Browse by Country section prominently at top
                     VStack(spacing: 16) {
                         // Browse by Country section - now prominently at the top
                         VStack(spacing: 12) {
@@ -1086,7 +1086,7 @@ struct CurrentlyPlayingView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Album artwork - modern 64x64 design matching station list
+            // Album artwork - 64x64 design matching station list
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.gray.opacity(0.2))

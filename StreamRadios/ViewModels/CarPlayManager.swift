@@ -4,7 +4,7 @@ import UIKit
 import os.log
 import CoreData
 
-/// Modern CarPlay Manager for iOS 14+ using CPTemplateApplicationScene
+/// CarPlay Manager for iOS 14+ using CPTemplateApplicationScene
 /// Removed deprecated MPPlayableContentDataSource/Delegate extensions
 class CarPlayManager: ObservableObject {
     

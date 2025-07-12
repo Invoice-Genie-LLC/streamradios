@@ -198,7 +198,7 @@ struct RadioStationListView: View {
             ScrollViewReader { proxy in
                 List {
                     ForEach(filteredStations) { station in
-                        modernStationRow(for: station)
+                        stationRow(for: station)
                             .id(station.id)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -336,15 +336,15 @@ struct RadioStationListView: View {
     }
     
     @ViewBuilder
-    private func modernStationRow(for station: RadioStation) -> some View {
+    private func stationRow(for station: RadioStation) -> some View {
         VStack(spacing: 0) {
             // Show inline error above currently playing station if favorite toggle was attempted
             if showFavoriteError && viewModel.isStationCurrentlyPlaying(station) {
                 errorBanner
             }
             
-            // Main modern station card with gesture handling
-            modernStationCard(for: station)
+            // Main station card with gesture handling
+            stationCard(for: station)
         }
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.5)
@@ -411,7 +411,7 @@ struct RadioStationListView: View {
     }
     
     @ViewBuilder
-    private func modernStationCard(for station: RadioStation) -> some View {
+    private func stationCard(for station: RadioStation) -> some View {
         let isCurrentlyPlaying = isCurrentStation(station: station) && radioPlayer.isPlaying
         
         HStack(spacing: 12) {
@@ -423,7 +423,7 @@ struct RadioStationListView: View {
             }) {
                 HStack(spacing: 12) {
                     // Station logo - 64x64 as per screenshot
-                    modernStationLogo(for: station)
+                    stationLogo(for: station)
                     
                     // Station info - give maximum available space
                     VStack(alignment: .leading, spacing: 4) {
@@ -529,7 +529,7 @@ struct RadioStationListView: View {
     }
     
     @ViewBuilder
-    private func modernStationLogo(for station: RadioStation) -> some View {
+    private func stationLogo(for station: RadioStation) -> some View {
         ZStack {
             // Background for logo
             RoundedRectangle(cornerRadius: 8)

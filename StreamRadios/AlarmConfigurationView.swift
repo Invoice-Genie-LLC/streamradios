@@ -41,7 +41,7 @@ struct AlarmConfigurationView: View {
     
     let daysOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     
-    // Modern color system for adaptive theming
+    // Color system for adaptive theming
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
     }
@@ -74,13 +74,13 @@ struct AlarmConfigurationView: View {
             VStack(spacing: 0) {
                 ScrollView {
                     LazyVStack(spacing: 24) {
-                        modernAlarmToggleSection
-                        modernStationSelectionSection
-                        modernAlarmTypeSection
-                        modernTimeSection
-                        modernDaysSection
-                        modernShowNameSection
-                        modernSavedIndicator
+                        alarmToggleSection
+                        stationSelectionSection
+                        alarmTypeSection
+                        timeSection
+                        daysSection
+                        showNameSection
+                        savedIndicator
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -126,15 +126,15 @@ struct AlarmConfigurationView: View {
         }
     }
     
-    // MARK: - Modern UI Sections
+    // MARK: - UI Sections
     
     @ViewBuilder
-    private var modernAlarmToggleSection: some View {
-        ModernAlarmCard(
+    private var alarmToggleSection: some View {
+        AlarmCard(
             title: "Alert Configuration",
             icon: ""
         ) {
-            ModernAlarmToggleRow(
+            AlarmToggleRow(
                 title: "Enable Alert",
                 subtitle: hasFavoriteStations ? "Turn on to receive radio program alerts" : "Add favorite stations first to enable alerts",
                 isOn: $isAlarmEnabled,
@@ -156,16 +156,16 @@ struct AlarmConfigurationView: View {
     }
     
     @ViewBuilder
-    private var modernStationSelectionSection: some View {
+    private var stationSelectionSection: some View {
         if hasFavoriteStations {
-            ModernAlarmCard(
+            AlarmCard(
                 title: "Station Selection",
                 icon: ""
             ) {
                 if isAlarmEnabled {
                     let favoriteStations = viewModel.stations.filter { $0.isFavorite }
                     if favoriteStations.indices.contains(selectedStationIndex) {
-                        ModernStationPicker(
+                        StationPicker(
                             stations: favoriteStations,
                             selectedIndex: $selectedStationIndex
                         )
@@ -173,25 +173,25 @@ struct AlarmConfigurationView: View {
                             saveAlarm()
                         }
                     } else {
-                        ModernErrorMessage(
+                        ErrorMessage(
                             text: "Please select a favorite station",
                             icon: "exclamationmark.triangle.fill"
                         )
                     }
                 } else {
-                    ModernDisabledMessage(
+                    DisabledMessage(
                         text: "Enable alert to select a station",
                         icon: "radio"
                     )
                 }
             }
         } else {
-            ModernAlarmCard(
+            AlarmCard(
                 title: "Station Selection",
                 icon: "",
                 isWarning: true
             ) {
-                ModernNoStationsMessage(
+                NoStationsMessage(
                     onNavigateToStations: {
                         presentationMode.wrappedValue.dismiss()
                         DispatchQueue.main.async {
@@ -204,12 +204,12 @@ struct AlarmConfigurationView: View {
     }
     
     @ViewBuilder
-    private var modernAlarmTypeSection: some View {
-        ModernAlarmCard(
+    private var alarmTypeSection: some View {
+        AlarmCard(
             title: "Alert Type",
             icon: ""
         ) {
-            ModernSegmentedControl(
+            SegmentedControl(
                 title: "Choose alert frequency",
                 options: ["Repeating", "Single Time"],
                 selection: Binding(
@@ -225,12 +225,12 @@ struct AlarmConfigurationView: View {
     }
     
     @ViewBuilder
-    private var modernTimeSection: some View {
-        ModernAlarmCard(
+    private var timeSection: some View {
+        AlarmCard(
             title: "Alert Time",
             icon: ""
         ) {
-            ModernTimePicker(
+            TimePicker(
                 time: $alarmTime,
                 isEnabled: isAlarmEnabled && hasFavoriteStations
             )
@@ -241,13 +241,13 @@ struct AlarmConfigurationView: View {
     }
     
     @ViewBuilder
-    private var modernDaysSection: some View {
+    private var daysSection: some View {
         if !isSingleTimeAlert {
-            ModernAlarmCard(
+            AlarmCard(
                 title: "Repeat Days",
                 icon: ""
             ) {
-                ModernDaySelector(
+                DaySelector(
                     selectedDays: $selectedDays,
                     daysOfWeek: daysOfWeek,
                     isEnabled: isAlarmEnabled && hasFavoriteStations
@@ -260,13 +260,13 @@ struct AlarmConfigurationView: View {
     }
     
     @ViewBuilder
-    private var modernShowNameSection: some View {
-        ModernAlarmCard(
+    private var showNameSection: some View {
+        AlarmCard(
             title: "Show Name",
             icon: ""
         ) {
             if isAlarmEnabled && hasFavoriteStations {
-                ModernShowNameField(
+                ShowNameField(
                     showName: $showName,
                     placeholder: "Enter Show Name (Optional)"
                 )
@@ -292,7 +292,7 @@ struct AlarmConfigurationView: View {
                     }
                 }
             } else {
-                ModernDisabledMessage(
+                DisabledMessage(
                     text: "Enable alert to enter show name",
                     icon: "text.bubble"
                 )
@@ -301,9 +301,9 @@ struct AlarmConfigurationView: View {
     }
     
     @ViewBuilder
-    private var modernSavedIndicator: some View {
+    private var savedIndicator: some View {
         if showSavedIndicator {
-            ModernSavedIndicator()
+            SavedIndicator()
         }
     }
     
@@ -678,9 +678,9 @@ struct AlarmConfigurationView: View {
     }
 }
 
-// MARK: - Modern UI Components for Alarm Configuration
+// MARK: - UI Components for Alarm Configuration
 
-struct ModernAlarmCard<Content: View>: View {
+struct AlarmCard<Content: View>: View {
     let title: String
     let icon: String
     let isWarning: Bool
@@ -730,7 +730,7 @@ struct ModernAlarmCard<Content: View>: View {
     }
 }
 
-struct ModernAlarmToggleRow: View {
+struct AlarmToggleRow: View {
     let title: String
     let subtitle: String
     @Binding var isOn: Bool
@@ -765,7 +765,7 @@ struct ModernAlarmToggleRow: View {
     }
 }
 
-struct ModernStationPicker: View {
+struct StationPicker: View {
     let stations: [RadioStation]
     @Binding var selectedIndex: Int
     
@@ -800,7 +800,7 @@ struct ModernStationPicker: View {
     }
 }
 
-struct ModernSegmentedControl: View {
+struct SegmentedControl: View {
     let title: String
     let options: [String]
     @Binding var selection: Int
@@ -826,7 +826,7 @@ struct ModernSegmentedControl: View {
     }
 }
 
-struct ModernTimePicker: View {
+struct TimePicker: View {
     @Binding var time: Date
     let isEnabled: Bool
     
@@ -860,7 +860,7 @@ struct ModernTimePicker: View {
     }
 }
 
-struct ModernDaySelector: View {
+struct DaySelector: View {
     @Binding var selectedDays: [Bool]
     let daysOfWeek: [String]
     let isEnabled: Bool
@@ -914,7 +914,7 @@ struct ModernDaySelector: View {
     }
 }
 
-struct ModernShowNameField: View {
+struct ShowNameField: View {
     @Binding var showName: String
     let placeholder: String
     
@@ -957,7 +957,7 @@ struct ModernShowNameField: View {
     }
 }
 
-struct ModernErrorMessage: View {
+struct ErrorMessage: View {
     let text: String
     let icon: String
     
@@ -979,7 +979,7 @@ struct ModernErrorMessage: View {
     }
 }
 
-struct ModernDisabledMessage: View {
+struct DisabledMessage: View {
     let text: String
     let icon: String
     
@@ -1001,7 +1001,7 @@ struct ModernDisabledMessage: View {
     }
 }
 
-struct ModernNoStationsMessage: View {
+struct NoStationsMessage: View {
     let onNavigateToStations: () -> Void
     
     @Environment(\.colorScheme) var colorScheme
@@ -1047,7 +1047,7 @@ struct ModernNoStationsMessage: View {
     }
 }
 
-struct ModernSavedIndicator: View {
+struct SavedIndicator: View {
     @Environment(\.colorScheme) var colorScheme
     
     var body: some View {

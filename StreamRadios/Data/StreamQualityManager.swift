@@ -497,7 +497,7 @@ private class BandwidthEstimator {
     
     private func estimateBandwidthFromPath(_ path: NWPath) -> Double {
         if path.usesInterfaceType(.wifi) {
-            // Modern WiFi should support much higher bitrates for audio streaming
+            // WiFi should support much higher bitrates for audio streaming
             return path.isConstrained ? 1_000_000 : 2_000_000 // 1-2 Mbps for WiFi
         } else if path.usesInterfaceType(.cellular) {
             if path.isConstrained {

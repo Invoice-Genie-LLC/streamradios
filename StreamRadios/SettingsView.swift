@@ -38,7 +38,7 @@ struct SettingsView: View {
     @State private var selectedTab: Tab = .settings
     @State private var isPlayerSheetPresented = false
     
-    // Modern color system for adaptive theming
+    // Color system for adaptive theming
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
     }
@@ -62,11 +62,11 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 ScrollView {
                                                              LazyVStack(spacing: 24) {
-                        modernPlaybackSettings
-                        modernDisplaySettings
-                        modernAlarmSettings
-                        modernDataManagementLink
-                        modernAboutSettings
+                        playbackSettings
+                        displaySettings
+                        alarmSettings
+                        dataManagementLink
+                        aboutSettings
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -141,15 +141,15 @@ struct SettingsView: View {
         )
     }
     
-    // MARK: - Modern Settings Sections
+    // MARK: - Settings Sections
     
     @ViewBuilder
-    private var modernPlaybackSettings: some View {
-        ModernSettingsCard(
+    private var playbackSettings: some View {
+        SettingsCard(
             title: "Playback Settings",
             icon: ""
         ) {
-            ModernToggleRow(
+            ToggleRow(
                 title: "Auto-Play Last Station",
                 subtitle: "Automatically resume the last played station when opening the app",
                 isOn: $autoPlayLastStation,
@@ -159,12 +159,12 @@ struct SettingsView: View {
     }
     
              @ViewBuilder 
-    private var modernDisplaySettings: some View {
-        ModernSettingsCard(
-            title: "Display Settings", 
+    private var displaySettings: some View {
+        SettingsCard(
+            title: "Display Settings",
             icon: ""
         ) {
-             ModernToggleRow(
+            ToggleRow(
                  title: "Dark Mode",
                  subtitle: "Use dark appearance throughout the app",
                  isOn: $isDarkMode,
@@ -174,8 +174,8 @@ struct SettingsView: View {
      }
      
      @ViewBuilder
-     private var modernAlarmSettings: some View {
-         ModernSettingsCard(
+     private var alarmSettings: some View {
+         SettingsCard(
              title: "Alarm Settings",
              icon: ""
          ) {
@@ -211,8 +211,8 @@ struct SettingsView: View {
      }
  
     @ViewBuilder
-    private var modernDataManagementLink: some View {
-        ModernSettingsCard(
+    private var dataManagementLink: some View {
+        SettingsCard(
             title: "Data Management",
             icon: "externaldrive.fill"
         ) {
@@ -251,7 +251,7 @@ struct SettingsView: View {
     }
     
     @ViewBuilder
-    private var modernAboutSettings: some View {
+    private var aboutSettings: some View {
         NavigationLink(destination: AboutView()) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -351,9 +351,9 @@ struct SettingsView: View {
 
 }
 
-// MARK: - Modern UI Components
+// MARK: - UI Components
 
-struct ModernSettingsCard<Content: View>: View {
+struct SettingsCard<Content: View>: View {
     let title: String
     let icon: String
     let isDestructive: Bool
@@ -410,7 +410,7 @@ struct ModernSettingsCard<Content: View>: View {
     }
 }
 
-struct ModernToggleRow: View {
+struct ToggleRow: View {
     let title: String
     let subtitle: String?
     @Binding var isOn: Bool
@@ -452,7 +452,7 @@ struct ModernToggleRow: View {
     }
 }
 
-struct ModernActionButton: View {
+struct ActionButton: View {
     let title: String
     let subtitle: String?
     let icon: String
@@ -494,7 +494,7 @@ struct ModernActionButton: View {
     }
 }
 
-struct ModernDestructiveButton: View {
+struct DestructiveButton: View {
     let title: String
     let subtitle: String?
     let icon: String
@@ -536,7 +536,7 @@ struct ModernDestructiveButton: View {
     }
 }
 
-struct ModernProgressView: View {
+struct ExportProgressView: View {
     let title: String
     let progress: Double?
     
@@ -574,7 +574,7 @@ struct ModernProgressView: View {
     }
 }
 
-struct ModernStatusMessage: View {
+struct StatusMessage: View {
     let text: String
     let isSuccess: Bool
     
@@ -596,7 +596,7 @@ struct ModernStatusMessage: View {
     }
 }
 
-struct ModernWarningText: View {
+struct WarningText: View {
     let text: String
     
     @Environment(\.colorScheme) var colorScheme
@@ -659,7 +659,7 @@ struct InternalDataManagementView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.presentationMode) var presentationMode
     
-    // Modern color system matching SettingsView
+    // Color system matching SettingsView
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
     }
@@ -747,7 +747,7 @@ struct InternalDataManagementView: View {
     @ViewBuilder
     private var importExportSection: some View {
         VStack(spacing: 16) {
-            ModernSettingsCard(
+            SettingsCard(
                 title: "Import & Export",
                 icon: "externaldrive.fill"
             ) {
@@ -776,14 +776,14 @@ struct InternalDataManagementView: View {
                        }
                     }
                     
-                    ModernActionButton(
+                    ActionButton(
                         title: "Export Stations",
                         subtitle: "Save stations to a file",
                         icon: "square.and.arrow.up",
                         action: exportAction
                     )
                     
-                    ModernActionButton(
+                    ActionButton(
                         title: "Import Stations",
                         subtitle: "Load stations from a file",
                         icon: "square.and.arrow.down",
@@ -791,7 +791,7 @@ struct InternalDataManagementView: View {
                     )
                     
                     if isImporting {
-                        ModernProgressView(
+                        ExportProgressView(
                             title: "Importing stations...",
                             progress: importProgress
                         )
@@ -805,13 +805,13 @@ struct InternalDataManagementView: View {
     private var dataDeletionSection: some View {
         VStack(spacing: 16) {
             // Delete All App Data Section
-            ModernSettingsCard(
+            SettingsCard(
                 title: "Delete All App Data",
                 icon: "internaldrive.fill",
                 isDestructive: true
             ) {
                 VStack(spacing: 12) {
-                    ModernDestructiveButton(
+                    DestructiveButton(
                         title: "Delete All App Data",
                         subtitle: "Remove all stations, podcasts, episodes, downloads, progress & favorites",
                         icon: "trash.fill",
@@ -819,26 +819,26 @@ struct InternalDataManagementView: View {
                     )
                     
                     if isDeletingAllAppData {
-                        ModernProgressView(title: "Deleting all app data in batches...")
+                        ExportProgressView(title: "Deleting all app data in batches...")
                     } else if appDataDeletionComplete {
-                        ModernStatusMessage(
+                        StatusMessage(
                             text: "All app data has been deleted successfully.",
                             isSuccess: true
                         )
                     }
                     
-                    ModernWarningText(text: "This will permanently erase ALL app data including stations, podcasts, episodes, downloads, progress, favorites, and settings from both iCloud and local storage.")
+                    WarningText(text: "This will permanently erase ALL app data including stations, podcasts, episodes, downloads, progress, favorites, and settings from both iCloud and local storage.")
                 }
             }
             
             // Delete Station Data Section  
-            ModernSettingsCard(
+            SettingsCard(
                 title: "Delete Station Data",
                 icon: "antenna.radiowaves.left.and.right",
                 isDestructive: true
             ) {
                 VStack(spacing: 12) {
-                    ModernDestructiveButton(
+                    DestructiveButton(
                         title: "Delete Station Data",
                         subtitle: "Remove all radio stations and their favorites",
                         icon: "radio.fill",
@@ -846,31 +846,31 @@ struct InternalDataManagementView: View {
                     )
                     
                     if isDeletingStationData {
-                        ModernProgressView(title: "Deleting station data in batches...")
+                        ExportProgressView(title: "Deleting station data in batches...")
                     } else if stationDataDeletionComplete {
-                        ModernStatusMessage(
+                        StatusMessage(
                             text: "All station data has been deleted successfully.",
                             isSuccess: true
                         )
                     } else if let error = stationDataDeletionError {
-                        ModernStatusMessage(
+                        StatusMessage(
                             text: "Error: \(error)",
                             isSuccess: false
                         )
                     }
                     
-                    ModernWarningText(text: "This will permanently remove all radio stations and their favorites from both iCloud and local storage.")
+                    WarningText(text: "This will permanently remove all radio stations and their favorites from both iCloud and local storage.")
                 }
             }
             
             // Delete Podcast Data Section
-            ModernSettingsCard(
-                title: "Delete Podcast Data", 
+            SettingsCard(
+                title: "Delete Podcast Data",
                 icon: "microphone",
                 isDestructive: true
             ) {
                 VStack(spacing: 12) {
-                    ModernDestructiveButton(
+                    DestructiveButton(
                         title: "Delete Podcast Data",
                         subtitle: "Remove all podcast feeds, episodes, downloads & progress",
                         icon: "waveform.circle.fill",
@@ -878,20 +878,20 @@ struct InternalDataManagementView: View {
                     )
                     
                     if isDeletingPodcastData {
-                        ModernProgressView(title: "Deleting podcast data in batches...")
+                        ExportProgressView(title: "Deleting podcast data in batches...")
                     } else if podcastDataDeletionComplete {
-                        ModernStatusMessage(
+                        StatusMessage(
                             text: "All podcast data has been deleted successfully.",
                             isSuccess: true
                         )
                     } else if let error = podcastDataDeletionError {
-                        ModernStatusMessage(
+                        StatusMessage(
                             text: "Error: \(error)",
                             isSuccess: false
                         )
                     }
                     
-                    ModernWarningText(text: "This will permanently remove all podcast feeds, episodes, downloads, progress, and favorites from both iCloud and local storage.")
+                    WarningText(text: "This will permanently remove all podcast feeds, episodes, downloads, progress, and favorites from both iCloud and local storage.")
                 }
             }
         }

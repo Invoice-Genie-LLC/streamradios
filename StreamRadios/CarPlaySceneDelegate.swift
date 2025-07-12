@@ -2046,7 +2046,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
-        // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
+        // CarPlay uses CPTemplateApplicationScene and direct template updates
     }
     
     private func handleEpisodeStateChange(_ notification: Notification) {
@@ -2103,7 +2103,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
-        // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
+        // CarPlay uses CPTemplateApplicationScene and direct template updates
     }
     
     private func performDelayedPlaybackUIUpdates(episodeId: String) {
@@ -2160,7 +2160,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
-        // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
+        // CarPlay uses CPTemplateApplicationScene and direct template updates
     }
     
     private func handleCarPlayRefreshRequest(_ notification: Notification) {
@@ -2176,7 +2176,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
-        // Modern CarPlay uses CPTemplateApplicationScene and direct template updates
+        // CarPlay uses CPTemplateApplicationScene and direct template updates
     }
     
     private func handleStationArtworkUpdate(_ notification: Notification) {

@@ -1445,7 +1445,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 bannerAlertView
             }
             
-            modernEpisodeCard
+            episodeCard
         }
         .alert(isPresented: $showingDeleteConfirmation) {
             Alert(
@@ -1474,7 +1474,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }
     
     // MARK: - Optimized Episode Card Design
-    private var modernEpisodeCard: some View {
+    private var episodeCard: some View {
         VStack(spacing: 0) {
             // Simplified episode content without expensive gradients
             Group {
@@ -2052,14 +2052,14 @@ struct PodcastPlayerView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
             } else {
-                modernEpisodeList
+                episodeList
             }
         }
     }
     
 
 
-    private var modernEpisodeList: some View {
+    private var episodeList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
