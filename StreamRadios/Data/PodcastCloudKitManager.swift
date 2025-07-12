@@ -128,8 +128,8 @@ class PodcastCloudKitManager {
     /// Sync episode states from CloudKit with different behavior for fresh install vs upgrade
     /// - For fresh install: sync isFavorite but NOT isDownloaded (files don't exist)
     /// - For upgrade: sync both isFavorite and isDownloaded (files might still exist)
-    /// - Returns: Array of episode state updates that should be saved to Core Data
-    func syncEpisodeStatesFromCloudKit(for episodeIds: [String], isFreshInstall: Bool) async -> [EpisodeStateUpdate] {
+    /// - Returns: Tuple of (Array of episode state updates that should be saved to Core Data, Boolean indicating success)
+    func syncEpisodeStatesFromCloudKit(for episodeIds: [String], isFreshInstall: Bool) async -> (updates: [EpisodeStateUpdate], success: Bool) {
         // UPGRADE PROTECTION: Use EpisodeStateManager's robust upgrade detection
         let isDefiniteUpgrade = EpisodeStateManager.shared.isUpgradeScenario()
         let finalIsFreshInstall = isFreshInstall && !isDefiniteUpgrade
@@ -139,6 +139,7 @@ class PodcastCloudKitManager {
         
         var syncedCount = 0
         var coreDataUpdates: [EpisodeStateUpdate] = []
+        var syncSuccess = false
         
         let episodeIdSet = Set(episodeIds)
         
@@ -146,22 +147,17 @@ class PodcastCloudKitManager {
             // Use bulk fetch for better performance
             let allCloudStates = try await fetchAllEpisodeStatesFromCloudKit()
             
-            
-            
+            // Process CloudKit states
             for (episodeId, cloudState) in allCloudStates {
                 // Only process if this episode exists locally
                 guard episodeIdSet.contains(episodeId) else { continue }
-                
 
-                
                 // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager
-                // BUT: Don't override NEW episodes with accumulated progress from CloudKit
-                let currentEpisodeState = EpisodeStateManager.shared.getState(for: episodeId)
-                
-                if currentEpisodeState == .new && cloudState.progress > 0 {
-                    // Keep the episode as new, don't apply CloudKit progress
-                } else {
-                    EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                // Apply CloudKit progress when it exists - this is the user's data from other devices
+                EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                if cloudState.progress > 0 {
+                    os_log("🔄 Applying CloudKit progress %.2f for episode %@", 
+                           log: log, type: .info, cloudState.progress, episodeId)
                 }
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
                 
@@ -169,22 +165,16 @@ class PodcastCloudKitManager {
                 let finalIsDownloaded: Bool
                 if cloudState.isDownloaded {
                     if finalIsFreshInstall {
-                        // Fresh install: DO NOT sync download status because local files don't exist
-                        // Users should only see downloads for episodes they actually download on this device
+                        // Fresh install: don't restore download state as files don't exist
                         finalIsDownloaded = false
                         EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
-                        os_log("📱 Fresh install: Skipping download state for episode %@ (local files don't exist)", 
-                               log: log, type: .debug, episodeId)
                     } else {
-                        // Upgrade or existing installation: PRESERVE CloudKit download status
-                        // Use protected method to prevent accidental clearing during upgrades
+                        // Upgrade: restore download state as files might exist
                         finalIsDownloaded = true
-                        EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, reason: "cloudkit_sync")
-                        os_log("📱 Upgrade/Existing: Preserved download state for episode %@ (CloudKit shows downloaded)", 
-                               log: log, type: .debug, episodeId)
+                        EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: true)
                     }
                 } else {
-                    // Episode was not downloaded in CloudKit
+                    // CloudKit shows not downloaded
                     if isDefiniteUpgrade {
                         // During upgrades, check local state before clearing
                         let localDownloadState = EpisodeStateManager.shared.isDownloaded(episodeId)
@@ -203,20 +193,23 @@ class PodcastCloudKitManager {
                     }
                 }
                 
-                // Prepare Core Data update - respect new episode state for progress
-                let finalProgress = (currentEpisodeState == .new && cloudState.progress > 0) ? 0.0 : cloudState.progress
-                let finalIsPlayed = (currentEpisodeState == .new && cloudState.progress > 0) ? false : cloudState.isPlayed
-                
+                // Prepare Core Data update - always apply CloudKit progress when it exists
                 coreDataUpdates.append(EpisodeStateUpdate(
                     episodeId: episodeId,
-                    progress: finalProgress,
+                    progress: cloudState.progress,
                     isFavorite: cloudState.isFavorite,
                     isDownloaded: finalIsDownloaded,
-                    isPlayed: finalIsPlayed
+                    isPlayed: cloudState.isPlayed
                 ))
                 
                 syncedCount += 1
             }
+            
+            // Consider sync successful if we processed at least some episodes from CloudKit
+            syncSuccess = syncedCount > 0 || allCloudStates.isEmpty
+            
+            os_log("✅ Bulk CloudKit sync completed: %d synced, %d prepared for Core Data", 
+                   log: log, type: .info, syncedCount, coreDataUpdates.count)
 
         } catch {
             os_log("❌ Failed to bulk fetch episode states from CloudKit: %@", log: log, type: .error, error.localizedDescription)
@@ -226,40 +219,44 @@ class PodcastCloudKitManager {
             let batchSize = 50 // Smaller batches to avoid rate limits
             let batches = episodeIds.chunked(into: batchSize)
             
+            var individualSyncErrors = 0
+            
             for (batchIndex, batch) in batches.enumerated() {
                 
                 for episodeId in batch {
                     do {
                         if let cloudState = try await fetchEpisodeStateFromCloudKit(episodeId) {
-                            // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager  
-                            // BUT: Don't override NEW episodes with accumulated progress from CloudKit
-                            let currentEpisodeState = EpisodeStateManager.shared.getState(for: episodeId)
-                            
-                            if currentEpisodeState == .new && cloudState.progress > 0 {
-                                // Keep the episode as new, don't apply CloudKit progress
-                            } else {
-                                EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                            // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager
+                            // Apply CloudKit progress when it exists - this is the user's data from other devices
+                            EpisodeStateManager.shared.setProgress(for: episodeId, progress: cloudState.progress)
+                            if cloudState.progress > 0 {
+                                os_log("🔄 Applying CloudKit progress %.2f for episode %@", 
+                                       log: log, type: .info, cloudState.progress, episodeId)
                             }
                             EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: cloudState.isFavorite)
                             
                             let finalIsDownloaded: Bool
                             if cloudState.isDownloaded {
                                 if finalIsFreshInstall {
-                                    // Fresh install: DO NOT sync download status because local files don't exist
+                                    // Fresh install: don't restore download state as files don't exist
                                     finalIsDownloaded = false
                                     EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
                                 } else {
-                                    // Upgrade or existing installation: PRESERVE CloudKit download status
+                                    // Upgrade: restore download state as files might exist
                                     finalIsDownloaded = true
-                                    EpisodeStateManager.shared.setDownloadedWithProtection(episodeId, isDownloaded: true, reason: "cloudkit_batch_sync")
+                                    EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: true)
                                 }
                             } else {
-                                // Episode was not downloaded in CloudKit
+                                // CloudKit shows not downloaded
                                 if isDefiniteUpgrade {
                                     // During upgrades, check local state before clearing
                                     let localDownloadState = EpisodeStateManager.shared.isDownloaded(episodeId)
-                                    finalIsDownloaded = localDownloadState
-                                    if !localDownloadState {
+                                    if localDownloadState {
+                                        os_log("⚠️ Upgrade: Local download state exists but CloudKit shows not downloaded for %@ - preserving local state", 
+                                               log: log, type: .info, episodeId)
+                                        finalIsDownloaded = true
+                                    } else {
+                                        finalIsDownloaded = false
                                         EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: false)
                                     }
                                 } else {
@@ -269,16 +266,14 @@ class PodcastCloudKitManager {
                                 }
                             }
                             
-                            // Prepare Core Data update - respect new episode state for progress
-                            let finalProgress = (currentEpisodeState == .new && cloudState.progress > 0) ? 0.0 : cloudState.progress
-                            let finalIsPlayed = (currentEpisodeState == .new && cloudState.progress > 0) ? false : cloudState.isPlayed
+                            // Prepare Core Data update - always apply CloudKit progress when it exists
                             
                             coreDataUpdates.append(EpisodeStateUpdate(
                                 episodeId: episodeId,
-                                progress: finalProgress,
+                                progress: cloudState.progress,
                                 isFavorite: cloudState.isFavorite,
                                 isDownloaded: finalIsDownloaded,
-                                isPlayed: finalIsPlayed
+                                isPlayed: cloudState.isPlayed
                             ))
                             
                             syncedCount += 1
@@ -290,6 +285,7 @@ class PodcastCloudKitManager {
                     } catch {
                         // Only log actual errors (network issues, permissions, etc.)
                         os_log("❌ Failed to sync episode state for %@: %@", log: log, type: .error, episodeId, error.localizedDescription)
+                        individualSyncErrors += 1
                     }
                 }
                 
@@ -298,13 +294,21 @@ class PodcastCloudKitManager {
                     try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
                 }
             }
+            
+            // Consider sync successful if we managed to sync some episodes despite errors
+            let totalEpisodesAttempted = episodeIds.count
+            let errorRate = Double(individualSyncErrors) / Double(totalEpisodesAttempted)
+            syncSuccess = errorRate < 0.5 // Success if less than 50% of episodes failed
+            
+            os_log("✅ Individual CloudKit sync completed: %d synced, %d errors, success: %@", 
+                   log: log, type: .info, syncedCount, individualSyncErrors, syncSuccess ? "YES" : "NO")
         }
         
-        os_log("✅ Episode state sync completed: %d synced, %d prepared for Core Data", 
-               log: log, type: .info, syncedCount, coreDataUpdates.count)
+        os_log("✅ Episode state sync completed: %d synced, %d prepared for Core Data, success: %@", 
+               log: log, type: .info, syncedCount, coreDataUpdates.count, syncSuccess ? "YES" : "NO")
         
-        // Return the updates so the caller can save them to Core Data
-        return coreDataUpdates
+        // Return the updates and success status
+        return (updates: coreDataUpdates, success: syncSuccess)
     }
     
     /// Fetch all episode states from CloudKit (for bulk sync operations)

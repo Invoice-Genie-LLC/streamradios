@@ -1075,51 +1075,58 @@ class PodcastViewModel: ObservableObject {
     /// - Episode states are still synced TO CloudKit when users make changes
     /// 
     /// To force a re-sync (for troubleshooting), call resetEpisodeStatesSyncFlag()
-    private func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async {
+    private func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async -> Bool {
         print("🔄 Syncing episode states from CloudKit (fresh install: \(isFreshInstall))")
         
         do {
-            // CRITICAL FIX: Get episode IDs directly from Core Data, not from in-memory podcastFeeds
-            // During fresh install, podcastFeeds array may not be fully populated yet
-            var allEpisodeIds: [String] = []
-            
-            // Get episode IDs directly from Core Data to ensure we get ALL episodes from ALL feeds
-            allEpisodeIds = await getAllEpisodeIdsFromCoreData()
-            
-            print("📊 Found \(allEpisodeIds.count) total episodes from Core Data for state sync")
+            // CRITICAL FIX: Get episode IDs directly from Core Data to ensure we get ALL episodes
+            let allEpisodeIds = await getAllEpisodeIdsFromCoreData()
             
             if !allEpisodeIds.isEmpty {
-                // Sync episode states with appropriate behavior for install type
-                let coreDataUpdates = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
-                    for: allEpisodeIds, 
+                // Sync episode states from CloudKit
+                let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+                    for: allEpisodeIds,
                     isFreshInstall: isFreshInstall
                 )
                 
-                // Save all synced states to Core Data immediately for fast app restart
+                let coreDataUpdates = syncResult.updates
+                let syncSuccess = syncResult.success
+                
+                // Save all synced states to Core Data if there are updates
                 if !coreDataUpdates.isEmpty {
                     do {
                         try await episodeManager.updateEpisodeStates(coreDataUpdates)
-                        print("💾 Saved \(coreDataUpdates.count) episode states to Core Data for immediate availability")
+                        print("💾 Saved \(coreDataUpdates.count) episode states to Core Data")
                     } catch {
                         print("❌ Failed to save synced episode states to Core Data: \(error)")
                     }
                 }
                 
-                // Refresh episode states from the updated EpisodeStateManager
+                // Update UI with synced states
                 await MainActor.run {
                     self.refreshEpisodeStatesFromManager()
+                    if let selectedFeedId = self.selectedFeedId {
+                        Task {
+                            await self.loadEpisodesForFeed(selectedFeedId)
+                        }
+                    }
                 }
                 
-                // Mark episode states as synced to prevent future CloudKit syncing on app launches
-                UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+                if syncSuccess {
+                    print("✅ Episode state sync completed successfully for \(allEpisodeIds.count) episodes")
+                } else {
+                    print("⚠️ Episode state sync completed with errors for \(allEpisodeIds.count) episodes")
+                }
                 
-                print("✅ Episode states synced from CloudKit for \(allEpisodeIds.count) episodes, \(coreDataUpdates.count) saved to Core Data")
+                return syncSuccess
             } else {
-                print("📊 No episodes found to sync states for - Core Data may not have episodes loaded yet")
+                print("📊 No episodes found for state sync")
+                return true
             }
             
         } catch {
             print("❌ Failed to sync episode states from CloudKit: \(error)")
+            return false
         }
     }
     
@@ -1319,7 +1326,13 @@ class PodcastViewModel: ObservableObject {
         let existingFeedCount = await countExistingFeeds()
         let isFreshInstall = existingFeedCount <= 1 // Allow for the feeds we just added
         print("🔍 Fresh install determination: existingFeedCount=\(existingFeedCount), isFreshInstall=\(isFreshInstall)")
-        await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+        let syncSuccess = await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+        
+        if syncSuccess {
+            print("✅ Episode states sync completed successfully after fresh install processing")
+        } else {
+            print("⚠️ Episode states sync failed after fresh install processing - will retry on next launch")
+        }
     }
     
     /// Wait for Core Data to contain the fresh install data and then refresh UI
@@ -1465,10 +1478,20 @@ class PodcastViewModel: ObservableObject {
             
             if isFreshInstall {
                 print("🔄 Fresh install - syncing episode states for new feeds...")
-                await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+                let syncSuccess = await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+                if syncSuccess {
+                    print("✅ Episode states sync completed successfully for fresh install")
+                } else {
+                    print("⚠️ Episode states sync failed for fresh install - will retry on next launch")
+                }
             } else if isDefiniteUpgrade {
                 print("🔄 App upgrade - syncing episode states with download protection...")
-                await syncEpisodeStatesFromCloudKit(isFreshInstall: false)
+                let syncSuccess = await syncEpisodeStatesFromCloudKit(isFreshInstall: false)
+                if syncSuccess {
+                    print("✅ Episode states sync completed successfully for app upgrade")
+                } else {
+                    print("⚠️ Episode states sync failed for app upgrade - will retry on next launch")
+                }
             } else {
                 print("⚡ Existing installation - skipping CloudKit episode state sync for better performance")
                 // Just refresh local episode states from EpisodeStateManager
@@ -1640,9 +1663,15 @@ class PodcastViewModel: ObservableObject {
             
             if isFreshInstall || !hasEpisodeStatesSynced {
                 print("🔄 Episode state sync needed - fresh install: \(isFreshInstall), states synced: \(hasEpisodeStatesSynced)")
-                await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
-                // Mark episode states as synced
-                UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+                let syncSuccess = await syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+                
+                // Only mark episode states as synced if the sync was successful
+                if syncSuccess {
+                    UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+                    print("✅ Episode states sync completed successfully - marked as synced")
+                } else {
+                    print("⚠️ Episode states sync failed - will retry on next launch")
+                }
             } else {
                 print("⚡ Skipping CloudKit episode state sync - loading from local storage only for better performance")
                 // Just refresh local episode states from EpisodeStateManager
@@ -1692,10 +1721,23 @@ class PodcastViewModel: ObservableObject {
             
             if !allEpisodeIds.isEmpty {
                 // Sync episode states from CloudKit
-                await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+                let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
                     for: allEpisodeIds,
                     isFreshInstall: isFreshInstall
                 )
+                
+                let coreDataUpdates = syncResult.updates
+                let syncSuccess = syncResult.success
+                
+                // Save all synced states to Core Data if there are updates
+                if !coreDataUpdates.isEmpty {
+                    do {
+                        try await episodeManager.updateEpisodeStates(coreDataUpdates)
+                        print("💾 Saved \(coreDataUpdates.count) episode states to Core Data")
+                    } catch {
+                        print("❌ Failed to save synced episode states to Core Data: \(error)")
+                    }
+                }
                 
                 // Update UI with synced states
                 await MainActor.run {
@@ -1707,7 +1749,11 @@ class PodcastViewModel: ObservableObject {
                     }
                 }
                 
-                print("✅ Episode state sync completed for \(allEpisodeIds.count) episodes")
+                if syncSuccess {
+                    print("✅ Episode state sync completed successfully for \(allEpisodeIds.count) episodes")
+                } else {
+                    print("⚠️ Episode state sync completed with errors for \(allEpisodeIds.count) episodes")
+                }
             } else {
                 print("📊 No episodes found for state sync")
             }
