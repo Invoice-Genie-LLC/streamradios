@@ -1041,7 +1041,11 @@ struct EpisodeRowView: View {
                         if viewModel.currentTab == 2 && episode.state.isDownloaded {
                             // Downloads tab: Show trash can for downloaded episodes
                             Button(action: {
-                                showingDeleteConfirmation = true
+                                if isPlaying {
+                                    showBannerAlert(message: "You can't delete downloads while the episode is playing.")
+                                } else {
+                                    showingDeleteConfirmation = true
+                                }
                             }) {
                                 Image(systemName: "trash")
                                     .foregroundColor(.red)
@@ -1613,7 +1617,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     if viewModel.currentTab == 2 && episode.state.isDownloaded {
                         // Downloads tab: Show trash can for downloaded episodes
                         Button(action: {
-                            showingDeleteConfirmation = true
+                            if isPlaying {
+                                showBannerAlert(message: "You can't delete downloads while the episode is playing.")
+                            } else {
+                                showingDeleteConfirmation = true
+                            }
                         }) {
                             Image(systemName: "trash")
                                 .foregroundColor(.red)
@@ -1656,7 +1664,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
         episodeContent
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(action: {
-                    showingDeleteConfirmation = true
+                    if isPlaying {
+                        showBannerAlert(message: "You can't delete downloads while the episode is playing.")
+                    } else {
+                        showingDeleteConfirmation = true
+                    }
                 }) {
                     Label("Delete Download", systemImage: "trash.fill")
                 }
