@@ -315,11 +315,18 @@ struct AddStationView: View {
             showAlert = true
             return
         }
+        
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()
-        viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
-        viewModel.saveStationsToCoreData()
-        presentedSheet = nil
-        onSave?(selectedCountry)
+        let success = viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
+        
+        if success {
+            viewModel.saveStationsToCoreData()
+            presentedSheet = nil
+            onSave?(selectedCountry)
+        } else {
+            alertMessage = "A station with this URL has already been added. Please use a different URL."
+            showAlert = true
+        }
     }
 }
 

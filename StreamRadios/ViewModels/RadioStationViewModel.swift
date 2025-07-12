@@ -935,7 +935,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
         return imageData.base64EncodedString()
     }
     
-    func addStation(name: String, url: String, iconData: String?, country: String) {
+    func addStation(name: String, url: String, iconData: String?, country: String) -> Bool {
+        // Check if a station with the same URL already exists
+        if stations.contains(where: { $0.url == url }) {
+            print("Station with URL \(url) already exists. Skipping addition.")
+            return false
+        }
+        
         // First, increment the order of all existing stations in the same country
         for i in 0..<stations.count {
             if stations[i].country == country {
@@ -949,6 +955,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
         saveStationToCloudKit(station: newStation)
+        return true
     }
 
     
