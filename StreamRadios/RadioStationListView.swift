@@ -425,14 +425,15 @@ struct RadioStationListView: View {
                     // Station logo - 64x64 as per screenshot
                     modernStationLogo(for: station)
                     
-                    // Station info
+                    // Station info - give maximum available space
                     VStack(alignment: .leading, spacing: 4) {
-                        // Station name - adaptive text
+                        // Station name - adaptive text with maximum space
                         Text(station.name)
                             .font(.body)
                             .foregroundColor(.adaptivePrimaryText)
                             .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
                         
                         // Country info with flag for Recent and Favorites tabs
                         HStack(spacing: 6) {
@@ -461,12 +462,15 @@ struct RadioStationListView: View {
                                     .font(.caption)
                                     .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(nil)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .multilineTextAlignment(.leading)
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1) // Give station info priority in layout
                     
-                    Spacer()
+                    Spacer(minLength: 8)
                     
                     // Equalizer (part of tappable area)
                     if isCurrentlyPlaying {
@@ -476,8 +480,7 @@ struct RadioStationListView: View {
                     }
                     
                     // Extra space to extend tappable area further right
-                    Spacer()
-                        .frame(width: 8)
+                    Spacer(minLength: 8)
                 }
                 .contentShape(Rectangle())
             }
