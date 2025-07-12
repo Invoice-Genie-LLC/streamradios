@@ -28,6 +28,7 @@ struct AddStationView: View {
     @State private var alertMessage: String = ""
     @State private var iconImage: UIImage? = nil
     @State private var activeSheet: AddStationSheetType?
+    @State private var keyboardHeight: CGFloat = 0
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var viewModel: RadioStationViewModel
     @EnvironmentObject var permissionManager: PermissionManager
@@ -65,26 +66,30 @@ struct AddStationView: View {
     
     var body: some View {
         NavigationView {
-            ZStack(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    ScrollView {
-                        VStack(spacing: 40) {
-                            stationIconSection
-                            formFieldsSection
+            GeometryReader { geometry in
+                ZStack(alignment: .bottom) {
+                    VStack(spacing: 0) {
+                        ScrollView {
+                            VStack(spacing: 40) {
+                                stationIconSection
+                                formFieldsSection
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 80)
+                            .padding(.bottom, keyboardHeight + 60) // Extra padding for keyboard + buffer
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 80)
-                        .padding(.bottom, 40)
+                        .scrollDisabled(false) // Disable automatic scrolling
+                        .scrollDismissesKeyboard(.never)
                     }
+                    .background(Color.adaptiveBackground.ignoresSafeArea())
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        TapGesture().onEnded { _ in
+                            // Dismiss keyboard when tapping outside input fields
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                    )
                 }
-                .background(Color.adaptiveBackground.ignoresSafeArea())
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    TapGesture().onEnded { _ in
-                        // Dismiss keyboard when tapping outside input fields
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    }
-                )
             }
             .navigationTitle("")
             .navigationBarHidden(true)
@@ -104,6 +109,12 @@ struct AddStationView: View {
                 }
             }
         )
+        .onAppear {
+            addKeyboardObservers()
+        }
+        .onDisappear {
+            removeKeyboardObservers()
+        }
         .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
             Alert(
                 title: Text("Permission Required"),
@@ -242,6 +253,48 @@ struct AddStationView: View {
         }
     }
     
+    // MARK: - Keyboard Handling
+    
+    private func addKeyboardObservers() {
+        NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let keyboardFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue {
+                let keyboardRectangle = keyboardFrame.cgRectValue
+                let keyboardHeight = keyboardRectangle.height
+                
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.keyboardHeight = keyboardHeight
+                }
+            }
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                self.keyboardHeight = 0
+            }
+        }
+    }
+    
+    private func removeKeyboardObservers() {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+        NotificationCenter.default.removeObserver(
+            self,
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+    }
+    
     // MARK: - Helper Methods
     
     private func saveStation() {
@@ -315,17 +368,19 @@ struct AddSimpleTextField: View {
             }
             
             HStack {
-                TextField(placeholder, text: $text)
-                    .font(.body)
-                    .foregroundColor(.adaptivePrimaryText)
-                    .keyboardType(keyboardType)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(keyboardType == .URL)
-                    .onChange(of: text) { newValue in
-                        if let maxLength = maxLength, newValue.count > maxLength {
-                            text = String(newValue.prefix(maxLength))
+                Group {
+                    TextField(placeholder, text: $text)
+                        .font(.body)
+                        .foregroundColor(.adaptivePrimaryText)
+                        .keyboardType(keyboardType)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(keyboardType == .URL)
+                        .onChange(of: text) { oldValue, newValue in
+                            if let maxLength = maxLength, newValue.count > maxLength {
+                                text = String(newValue.prefix(maxLength))
+                            }
                         }
-                    }
+                }
                 
                 if !text.isEmpty {
                     Button(action: { text = "" }) {
