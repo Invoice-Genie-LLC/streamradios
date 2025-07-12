@@ -28,8 +28,8 @@ struct SettingsView: View {
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
     @State private var isCleaningPodcasts = false
     @State private var podcastCleanupComplete = false
-    @StateObject private var podcastPlayer = PodcastPlayer.shared
-    @StateObject private var radioPlayer = RadioPlayer.shared
+    @EnvironmentObject var radioPlayer: RadioPlayer
+    private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false

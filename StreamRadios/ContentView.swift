@@ -28,7 +28,7 @@ struct ContentView: View {
     @State private var selectedTab: Tab
     @EnvironmentObject var alertManager: AlertManager
     @EnvironmentObject var podcastViewModel: PodcastViewModel
-    @StateObject private var podcastPlayer = PodcastPlayer.shared
+    private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @State private var selectedPodcast: PodcastFeed?
     @State private var showPodcastListView: Bool
     @State private var seekPosition: Double
@@ -43,7 +43,7 @@ struct ContentView: View {
         let savedTab: Tab = .radio
         
         self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
-        self._podcastPlayer = StateObject(wrappedValue: PodcastPlayer.shared)
+        // Remove podcastPlayer StateObject initialization
         
         self._isAddStationViewPresented = State(initialValue: false)
         self._isPlayerSheetPresented = State(initialValue: false)

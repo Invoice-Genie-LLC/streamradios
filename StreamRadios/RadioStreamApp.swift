@@ -16,9 +16,9 @@ struct RadioStreamApp: App {
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var alertManager = AlertManager()
     @StateObject private var podcastViewModel = PodcastViewModel()
-    @StateObject private var podcastPlayer = PodcastPlayer.shared
+    private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     var radioPlayer = RadioPlayer.shared
-    var viewModel = RadioStationViewModel.shared
+    @StateObject private var viewModel = RadioStationViewModel.shared
 
     var body: some Scene {
         WindowGroup {

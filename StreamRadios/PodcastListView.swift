@@ -15,7 +15,6 @@ import os
 
 struct PodcastListView: View {
     @EnvironmentObject private var viewModel: PodcastViewModel
-    @StateObject private var podcastPlayer = PodcastPlayer.shared
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
@@ -25,6 +24,7 @@ struct PodcastListView: View {
     @State private var podcastToDelete: PodcastFeed?
     @State private var expandedFeedId: String?
     @State private var isEditing = false
+    private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @StateObject private var radioPlayer = RadioPlayer.shared
     @EnvironmentObject private var radioStationViewModel: RadioStationViewModel
     @State private var scrollToEpisodeID: String?
@@ -165,21 +165,17 @@ struct PodcastListView: View {
                        ),
                        title: Binding(
                            get: { 
-                               print("🔧 DEBUG: Getting title binding value: '\(editPodcastTitle)' (ready: \(isEditDataReady))")
                                return editPodcastTitle 
                            },
                            set: { newValue in 
-                               print("🔧 DEBUG: Setting title binding to: '\(newValue)'")
                                editPodcastTitle = newValue 
                            }
                        ),
                        url: Binding(
                            get: { 
-                               print("🔧 DEBUG: Getting URL binding value: '\(editPodcastURL)' (ready: \(isEditDataReady))")
                                return editPodcastURL 
                            },
                            set: { newValue in 
-                               print("🔧 DEBUG: Setting URL binding to: '\(newValue)'")
                                editPodcastURL = newValue 
                            }
                        ),

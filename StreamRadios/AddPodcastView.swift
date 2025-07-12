@@ -266,7 +266,7 @@ struct AddPodcastView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var permissionManager: PermissionManager
     @StateObject private var podcastViewModel = PodcastViewModel()
-    @StateObject private var podcastPlayer = PodcastPlayer.shared
+    private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
@@ -314,13 +314,13 @@ struct AddPodcastView: View {
                     
                     // Global Player now handles all playback display
                 }
-                .background(Color.adaptiveBackground)
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    TapGesture().onEnded { _ in
-                        // Dismiss keyboard when tapping outside search box
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    }
+                .background(
+                    Color.adaptiveBackground
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            // Only dismiss keyboard when tapping on the background, not on interactive elements
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
                 )
             }
             .navigationBarHidden(true)
@@ -825,6 +825,138 @@ struct ModernFormCard<Content: View>: View {
     }
 }
 
+// MARK: - Stable TextField Implementation
+struct StableTextField: UIViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let keyboardType: UIKeyboardType
+    let autocapitalization: UITextAutocapitalizationType
+    let disableAutocorrection: Bool
+    let maxLength: Int?
+    let onTextChange: ((String) -> Void)?
+    
+    init(text: Binding<String>, 
+         placeholder: String = "", 
+         keyboardType: UIKeyboardType = .default,
+         autocapitalization: UITextAutocapitalizationType = .none,
+         disableAutocorrection: Bool = false,
+         maxLength: Int? = nil,
+         onTextChange: ((String) -> Void)? = nil) {
+        self._text = text
+        self.placeholder = placeholder
+        self.keyboardType = keyboardType
+        self.autocapitalization = autocapitalization
+        self.disableAutocorrection = disableAutocorrection
+        self.maxLength = maxLength
+        self.onTextChange = onTextChange
+    }
+    
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.placeholder = placeholder
+        textField.keyboardType = keyboardType
+        textField.autocapitalizationType = autocapitalization
+        textField.autocorrectionType = disableAutocorrection ? .no : .default
+        textField.borderStyle = .none
+        textField.delegate = context.coordinator
+        textField.addTarget(context.coordinator, action: #selector(Coordinator.textFieldDidChange), for: .editingChanged)
+        
+        // UITextField already supports copy/paste functionality by default
+        textField.isUserInteractionEnabled = true
+        
+        // Prevent automatic text replacement that might interrupt copy/paste
+        textField.smartDashesType = .no
+        textField.smartQuotesType = .no
+        textField.smartInsertDeleteType = .no
+        
+        return textField
+    }
+    
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        // CRITICAL: Only update if text actually changed and the field is not first responder
+        // This prevents interrupting copy/paste operations
+        if uiView.text != text && !uiView.isFirstResponder {
+            uiView.text = text
+        }
+        
+        // Only update placeholder if it's different and field is not active
+        if uiView.placeholder != placeholder && !uiView.isFirstResponder {
+            uiView.placeholder = placeholder
+        }
+        
+        // Update keyboard type and other properties only if they're different
+        if uiView.keyboardType != keyboardType {
+            uiView.keyboardType = keyboardType
+        }
+        
+        if uiView.autocapitalizationType != autocapitalization {
+            uiView.autocapitalizationType = autocapitalization
+        }
+        
+        let correctionType = disableAutocorrection ? UITextAutocorrectionType.no : UITextAutocorrectionType.default
+        if uiView.autocorrectionType != correctionType {
+            uiView.autocorrectionType = correctionType
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: StableTextField
+        
+        init(_ textField: StableTextField) {
+            self.parent = textField
+        }
+        
+        @objc func textFieldDidChange(_ textField: UITextField) {
+            let newText = textField.text ?? ""
+            
+            // Apply max length constraint
+            let finalText: String
+            if let maxLength = parent.maxLength, newText.count > maxLength {
+                finalText = String(newText.prefix(maxLength))
+                textField.text = finalText
+            } else {
+                finalText = newText
+            }
+            
+            // Update binding
+            DispatchQueue.main.async {
+                self.parent.text = finalText
+                self.parent.onTextChange?(finalText)
+            }
+        }
+        
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            textField.resignFirstResponder()
+            return true
+        }
+        
+        // CRITICAL: Allow all text field interactions including copy/paste
+        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+            return true
+        }
+        
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            // Don't interrupt editing with updates
+        }
+        
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            // Sync final text when editing ends
+            DispatchQueue.main.async {
+                self.parent.text = textField.text ?? ""
+            }
+        }
+        
+        // Allow copy/paste and other editing menu actions
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            return true
+        }
+    }
+}
+
 struct ModernTextField: View {
     let title: String
     @Binding var text: String
@@ -860,18 +992,16 @@ struct ModernTextField: View {
             }
             
             HStack {
-                TextField(placeholder, text: $text)
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .foregroundColor(.adaptivePrimaryText)
-                    .keyboardType(keyboardType)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(keyboardType == .URL)
-                    .onChange(of: text) { newValue in
-                        if let maxLength = maxLength, newValue.count > maxLength {
-                            text = String(newValue.prefix(maxLength))
-                        }
-                    }
-                    .padding(.leading, 4)
+                StableTextField(
+                    text: $text,
+                    placeholder: placeholder,
+                    keyboardType: keyboardType,
+                    autocapitalization: .none,
+                    disableAutocorrection: keyboardType == .URL,
+                    maxLength: maxLength
+                )
+                .foregroundColor(.adaptivePrimaryText)
+                .padding(.leading, 4)
                 
                 if !text.isEmpty {
                     Button(action: {
