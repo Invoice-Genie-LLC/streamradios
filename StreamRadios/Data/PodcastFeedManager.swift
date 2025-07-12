@@ -33,13 +33,20 @@ class PodcastFeedManager {
     }
     
     /// Add new feed with background processing and episode parsing
-    func addFeed(from url: URL, forceRefresh: Bool = false) async throws -> PodcastFeed {
+    func addFeed(from url: URL, customTitle: String? = nil, forceRefresh: Bool = false) async throws -> PodcastFeed {
         os_log("🆕 Adding new feed from: %@", log: log, type: .info, url.absoluteString)
         
         // Parse RSS feed in background
         let feedData = try await URLSession.shared.data(from: url).0
         let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString)
-        let (feed, episodes) = try parser.parseComplete()
+        let (parsedFeed, episodes) = try parser.parseComplete()
+        
+        // Use custom title if provided, otherwise use RSS feed title
+        var feed = parsedFeed
+        if let customTitle = customTitle, !customTitle.isEmpty {
+            feed.title = customTitle
+            os_log("🏷️ Using custom title: %@ (RSS title was: %@)", log: log, type: .info, customTitle, parsedFeed.title)
+        }
         
         // CRITICAL: Download artwork immediately and save to Core Data for fast app restart
         var feedWithArtwork = feed
@@ -65,13 +72,9 @@ class PodcastFeedManager {
                 }
             }
         } else {
-            // No artwork to download, still report completion
-            await MainActor.run {
-                DataSyncManager.shared.reportArtworkDownloadCompleted(feedTitle: feed.title)
-            }
+            os_log("ℹ️ No artwork URL found for feed: %@", log: log, type: .info, feed.title)
         }
         
-        // Save feed and episodes in background context (with artwork if downloaded)
         return try await saveFeedWithEpisodes(feed: feedWithArtwork, episodes: episodes, forceRefresh: forceRefresh)
     }
     

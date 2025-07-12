@@ -226,7 +226,7 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// Add a new podcast feed with immediate UI update and background processing
-    func addPodcastFeed(url: String) async -> Bool {
+    func addPodcastFeed(url: String, customTitle: String? = nil) async -> Bool {
         guard let feedURL = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             await MainActor.run {
                 self.error = "Invalid URL format"
@@ -250,8 +250,8 @@ class PodcastViewModel: ObservableObject {
         }
         
         do {
-            // Step 1: Parse feed and create feed object
-            let feed = try await feedManager.addFeed(from: feedURL)
+            // Step 1: Parse feed and create feed object with custom title if provided
+            let feed = try await feedManager.addFeed(from: feedURL, customTitle: customTitle)
             print("📊 Parsed feed: \(feed.title)")
             
             // Step 2: Immediate UI update - add to arrays for instant feedback
@@ -286,11 +286,10 @@ class PodcastViewModel: ObservableObject {
             return true
             
         } catch {
-            print("❌ Failed to add podcast feed: \(error)")
             await MainActor.run {
-                self.error = "Failed to add podcast feed: \(error.localizedDescription)"
-                NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import podcast feed: \(error.localizedDescription)")
+                self.error = error.localizedDescription
             }
+            print("❌ Failed to add podcast feed: \(error)")
             return false
         }
     }
@@ -1212,7 +1211,7 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 let feedManager = PodcastFeedManager()
-                let addedFeed = try await feedManager.addFeed(from: url, forceRefresh: true)
+                let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true)
                 print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
                 
             } catch {
@@ -1291,7 +1290,7 @@ class PodcastViewModel: ObservableObject {
                     continue
                 }
                 
-                let addedFeed = try await feedManager.addFeed(from: url, forceRefresh: true)
+                let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true)
                 print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
                 
             } catch {

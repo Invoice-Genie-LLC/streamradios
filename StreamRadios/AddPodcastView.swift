@@ -608,17 +608,17 @@ struct AddPodcastView: View {
     
     @ViewBuilder
     private var modernPodcastDetailsCard: some View {
-        ModernFormCard(title: "Podcast Details") {
-            VStack(spacing: 16) {
-                ModernTextField(
+        AddSimpleCard {
+            VStack(spacing: 24) {
+                AddSimpleTextField(
                     title: "Podcast Title",
                     text: $title,
                     placeholder: "Enter podcast title",
                     icon: "mic.fill",
-                    maxLength: 40
+                    maxLength: 100
                 )
                 
-                ModernTextField(
+                AddSimpleTextField(
                     title: "RSS Feed URL",
                     text: $url,
                     placeholder: "https://example.com/podcast.rss",
@@ -702,8 +702,10 @@ struct AddPodcastView: View {
                 // Stage 2: Download feed
                 await updateProgress(0.3, "Fetching podcast information...")
                 
-                // Add the podcast feed using the ViewModel
-                let success = await podcastViewModel.addPodcastFeed(url: url)
+                // Add the podcast feed using the ViewModel with custom title
+                let customTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let customTitleToUse = customTitle.isEmpty ? nil : customTitle
+                let success = await podcastViewModel.addPodcastFeed(url: url, customTitle: customTitleToUse)
                 
                 if success {
                     // Stage 3: Processing episodes
@@ -789,236 +791,7 @@ struct AddPodcastView: View {
     }
 }
 
-// MARK: - Modern UI Components for Forms
 
-struct ModernFormCard<Content: View>: View {
-    let title: String
-    let content: () -> Content
-    
-    @Environment(\.colorScheme) var colorScheme
-    
-    private var cardBackgroundColor: Color {
-        Color.adaptiveCardBackground
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            HStack {
-                Text(title)
-                    .font(.headline)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                Spacer()
-            }
-            
-            // Content
-            content()
-        }
-        .padding(20)
-        .background(cardBackgroundColor)
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.adaptiveBorder, lineWidth: 0.5)
-        )
-    }
-}
-
-// MARK: - Stable TextField Implementation
-struct StableTextField: UIViewRepresentable {
-    @Binding var text: String
-    let placeholder: String
-    let keyboardType: UIKeyboardType
-    let autocapitalization: UITextAutocapitalizationType
-    let disableAutocorrection: Bool
-    let maxLength: Int?
-    let onTextChange: ((String) -> Void)?
-    
-    init(text: Binding<String>, 
-         placeholder: String = "", 
-         keyboardType: UIKeyboardType = .default,
-         autocapitalization: UITextAutocapitalizationType = .none,
-         disableAutocorrection: Bool = false,
-         maxLength: Int? = nil,
-         onTextChange: ((String) -> Void)? = nil) {
-        self._text = text
-        self.placeholder = placeholder
-        self.keyboardType = keyboardType
-        self.autocapitalization = autocapitalization
-        self.disableAutocorrection = disableAutocorrection
-        self.maxLength = maxLength
-        self.onTextChange = onTextChange
-    }
-    
-    func makeUIView(context: Context) -> UITextField {
-        let textField = UITextField()
-        textField.placeholder = placeholder
-        textField.keyboardType = keyboardType
-        textField.autocapitalizationType = autocapitalization
-        textField.autocorrectionType = disableAutocorrection ? .no : .default
-        textField.borderStyle = .none
-        textField.delegate = context.coordinator
-        textField.addTarget(context.coordinator, action: #selector(Coordinator.textFieldDidChange), for: .editingChanged)
-        
-        // UITextField already supports copy/paste functionality by default
-        textField.isUserInteractionEnabled = true
-        
-        // Prevent automatic text replacement that might interrupt copy/paste
-        textField.smartDashesType = .no
-        textField.smartQuotesType = .no
-        textField.smartInsertDeleteType = .no
-        
-        return textField
-    }
-    
-    func updateUIView(_ uiView: UITextField, context: Context) {
-        // CRITICAL: Only update if text actually changed and the field is not first responder
-        // This prevents interrupting copy/paste operations
-        if uiView.text != text && !uiView.isFirstResponder {
-            uiView.text = text
-        }
-        
-        // Only update placeholder if it's different and field is not active
-        if uiView.placeholder != placeholder && !uiView.isFirstResponder {
-            uiView.placeholder = placeholder
-        }
-        
-        // Update keyboard type and other properties only if they're different
-        if uiView.keyboardType != keyboardType {
-            uiView.keyboardType = keyboardType
-        }
-        
-        if uiView.autocapitalizationType != autocapitalization {
-            uiView.autocapitalizationType = autocapitalization
-        }
-        
-        let correctionType = disableAutocorrection ? UITextAutocorrectionType.no : UITextAutocorrectionType.default
-        if uiView.autocorrectionType != correctionType {
-            uiView.autocorrectionType = correctionType
-        }
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-    
-    class Coordinator: NSObject, UITextFieldDelegate {
-        var parent: StableTextField
-        
-        init(_ textField: StableTextField) {
-            self.parent = textField
-        }
-        
-        @objc func textFieldDidChange(_ textField: UITextField) {
-            let newText = textField.text ?? ""
-            
-            // Apply max length constraint
-            let finalText: String
-            if let maxLength = parent.maxLength, newText.count > maxLength {
-                finalText = String(newText.prefix(maxLength))
-                textField.text = finalText
-            } else {
-                finalText = newText
-            }
-            
-            // Update binding
-            DispatchQueue.main.async {
-                self.parent.text = finalText
-                self.parent.onTextChange?(finalText)
-            }
-        }
-        
-        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            textField.resignFirstResponder()
-            return true
-        }
-        
-        // CRITICAL: Allow all text field interactions including copy/paste
-        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
-            return true
-        }
-        
-        func textFieldDidBeginEditing(_ textField: UITextField) {
-            // Don't interrupt editing with updates
-        }
-        
-        func textFieldDidEndEditing(_ textField: UITextField) {
-            // Sync final text when editing ends
-            DispatchQueue.main.async {
-                self.parent.text = textField.text ?? ""
-            }
-        }
-        
-        // Allow copy/paste and other editing menu actions
-        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-            return true
-        }
-    }
-}
-
-struct ModernTextField: View {
-    let title: String
-    @Binding var text: String
-    let placeholder: String
-    let icon: String
-    let maxLength: Int?
-    let keyboardType: UIKeyboardType
-    
-    @Environment(\.colorScheme) var colorScheme
-    
-    init(title: String, text: Binding<String>, placeholder: String, icon: String, maxLength: Int? = nil, keyboardType: UIKeyboardType = .default) {
-        self.title = title
-        self._text = text
-        self.placeholder = placeholder
-        self.icon = icon
-        self.maxLength = maxLength
-        self.keyboardType = keyboardType
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.body)
-                    .foregroundColor(.blue)
-                    .frame(width: 20)
-                
-                Text(title)
-                    .font(.body)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                Spacer()
-            }
-            
-            HStack {
-                StableTextField(
-                    text: $text,
-                    placeholder: placeholder,
-                    keyboardType: keyboardType,
-                    autocapitalization: .none,
-                    disableAutocorrection: keyboardType == .URL,
-                    maxLength: maxLength
-                )
-                .foregroundColor(.adaptivePrimaryText)
-                .padding(.leading, 4)
-                
-                if !text.isEmpty {
-                    Button(action: {
-                        text = ""
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.adaptiveSecondaryText)
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.adaptiveFieldBackground)
-            .cornerRadius(8)
-        }
-    }
-}
 
 struct PodcastSearchResultRow: View {
     let result: PodcastSearchResult
@@ -1185,6 +958,8 @@ struct PodcastAddingProgressView: View {
         .animation(.spring(response: 0.6, dampingFraction: 0.8), value: progress)
     }
 }
+
+
 
 struct AddPodcastView_Previews: PreviewProvider {
     static var previews: some View {
