@@ -234,6 +234,16 @@ class PodcastViewModel: ObservableObject {
             return false
         }
         
+        // Check if a podcast feed with the same URL already exists
+        let urlString = feedURL.absoluteString
+        if podcastFeeds.contains(where: { $0.url == urlString }) {
+            await MainActor.run {
+                self.error = "A podcast feed with this URL has already been added. Please use a different URL."
+            }
+            print("Podcast feed with URL \(urlString) already exists. Skipping addition.")
+            return false
+        }
+        
         // Notify user that import started
         await MainActor.run {
             NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing podcast feed from URL...")
