@@ -694,7 +694,7 @@ struct InternalDataManagementView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
-            .padding(.bottom, 80)
+            .padding(.bottom, 140)
         }
         .background(backgroundColor)
         .navigationTitle("Data Management")
