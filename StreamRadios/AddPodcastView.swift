@@ -349,18 +349,18 @@ struct AddPodcastView: View {
                         }
                     }
                 } else {
-                    // Adding new podcast - only clear fields if they're not already set from bindings
+                    // Adding new podcast - always clear search state, but preserve form fields if they exist
+                    print("🔧 DEBUG: New podcast mode - clearing search state")
+                    searchText = ""
+                    searchService.clearResults()
+                    
+                    // Dismiss keyboard if it's showing
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    
                     if title.isEmpty && url.isEmpty {
-                        print("🔧 DEBUG: Clearing fields for new podcast")
-                        title = ""
-                        url = ""
-                        searchText = ""
-                        searchService.clearResults()
-                        
-                        // Dismiss keyboard if it's showing
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        print("🔧 DEBUG: Form fields are empty - ready for new input")
                     } else {
-                        print("🔧 DEBUG: New podcast mode but fields already have values - preserving them")
+                        print("🔧 DEBUG: Form fields have values - preserving them")
                     }
                 }
                 
@@ -737,6 +737,13 @@ struct AddPodcastView: View {
             HStack {
                 Button("Cancel") {
                     if !isAddingPodcast {
+                        // Clear search state when canceling
+                        searchText = ""
+                        searchService.clearResults()
+                        
+                        // Dismiss keyboard
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        
                         isPresented = false
                     }
                 }

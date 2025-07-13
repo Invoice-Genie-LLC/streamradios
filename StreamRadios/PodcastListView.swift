@@ -134,9 +134,25 @@ struct PodcastListView: View {
                    }
                }
                .id(refreshID)
-               .sheet(isPresented: $showingAddPodcast) {
+               .sheet(isPresented: Binding(
+                   get: { showingAddPodcast },
+                   set: { newValue in 
+                       showingAddPodcast = newValue
+                       if !newValue {
+                           resetAddState()
+                       }
+                   }
+               )) {
                    AddPodcastView(
-                       isPresented: $showingAddPodcast, 
+                       isPresented: Binding(
+                           get: { showingAddPodcast },
+                           set: { newValue in 
+                               showingAddPodcast = newValue
+                               if !newValue {
+                                   resetAddState()
+                               }
+                           }
+                       ), 
                        title: $newPodcastTitle, 
                        url: $newPodcastURL, 
                        podcastToEdit: nil,
@@ -571,6 +587,12 @@ struct PodcastListView: View {
         editPodcastURL = ""
         isEditDataReady = false
         isPreparingEditData = false
+    }
+    
+    private func resetAddState() {
+        newPodcastTitle = ""
+        newPodcastURL = ""
+        print("🔧 DEBUG: Form fields cleared - title: '\(newPodcastTitle)', url: '\(newPodcastURL)'")
     }
 
     private func updatePodcast(_ updatedPodcast: PodcastFeed) {
