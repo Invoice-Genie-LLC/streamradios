@@ -36,6 +36,10 @@ struct RadioStationListView: View {
     @State private var showDeleteAlert = false
     @State private var stationToDelete: RadioStation?
     
+    // Edit/Delete protection for playing stations
+    @State private var showEditPlayingAlert = false
+    @State private var showDeletePlayingAlert = false
+    
     // Track tapped station for immediate focus
     @State private var tappedStationId: String?
     
@@ -150,6 +154,16 @@ struct RadioStationListView: View {
             if let station = stationToDelete {
                 Text("Are you sure you want to delete \"\(station.name)\"? This action cannot be undone.")
             }
+        }
+        .alert("Cannot Edit Playing Station", isPresented: $showEditPlayingAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("The station is currently playing. Please stop or switch to another station before editing.")
+        }
+        .alert("Cannot Delete Playing Station", isPresented: $showDeletePlayingAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("The station is currently playing. Please stop or switch to another station before deleting.")
         }
         .onChange(of: showFavoriteError) { oldValue, newValue in
             if newValue == true {
@@ -382,8 +396,7 @@ struct RadioStationListView: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !isEditing {
                 Button(role: .destructive) {
-                    stationToDelete = station
-                    showDeleteAlert = true
+                    handleDeleteStation(station)
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
@@ -1077,6 +1090,14 @@ struct RadioStationListView: View {
     private func editStation(_ station: RadioStation) {
         print("📝 EditStation: Starting edit for station: \(station.name)")
         
+        // Check if this station is currently playing
+        if isStationPlaying(station) && radioPlayer.isPlaying {
+            print("⚠️ EditStation: Cannot edit - station is currently playing")
+            showEditPlayingAlert = true
+            UIDevice.playHapticFeedback()
+            return
+        }
+        
         // Set the station first
         selectedStationForEdit = station
         
@@ -1086,6 +1107,22 @@ struct RadioStationListView: View {
             self.activeSheet = .editStation
             print("✅ EditStation: Sheet presented for station: \(station.name)")
         }
+    }
+    
+    private func handleDeleteStation(_ station: RadioStation) {
+        print("🗑️ HandleDeleteStation: Attempting to delete station: \(station.name)")
+        
+        // Check if this station is currently playing
+        if isStationPlaying(station) && radioPlayer.isPlaying {
+            print("⚠️ HandleDeleteStation: Cannot delete - station is currently playing")
+            showDeletePlayingAlert = true
+            UIDevice.playHapticFeedback()
+            return
+        }
+        
+        // Station is not playing, show delete confirmation
+        stationToDelete = station
+        showDeleteAlert = true
     }
 
 }
