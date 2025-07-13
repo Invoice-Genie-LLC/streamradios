@@ -263,10 +263,10 @@ class PodcastCoreDataManager {
         let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         request.predicate = NSPredicate(format: "feedId == %@", feedId)
         request.propertiesToFetch = ["id"]
-        request.resultType = .dictionaryResultType
+        request.resultType = .managedObjectResultType
         
-        let results = try context.fetch(request) as! [[String: Any]]
-        return Set(results.compactMap { $0["id"] as? String })
+        let episodes = try context.fetch(request)
+        return Set(episodes.compactMap { $0.id })
     }
     
     // MARK: - Artwork Caching

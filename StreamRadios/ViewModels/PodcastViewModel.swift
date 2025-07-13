@@ -88,6 +88,9 @@ struct EpisodeState: Codable, Equatable, Hashable {
 /// High-performance podcast view model designed for thousands of episodes
 @MainActor
 class PodcastViewModel: ObservableObject {
+    // MARK: - Shared Instance
+    static let shared = PodcastViewModel()
+    
     // MARK: - Published Properties
     @Published var currentEpisodes: [PodcastEpisode] = []
     @Published var podcastFeeds: [PodcastFeed] = []
@@ -193,6 +196,46 @@ class PodcastViewModel: ObservableObject {
                     self.objectWillChange.send()
                 }
             }
+        }
+    }
+    
+    // MARK: - Data Sync Coordination Methods
+    
+    /// Wait for data sync completion - used by DataSyncManager
+    func waitForDataSyncCompletion() async {
+        // Start the CloudKit initialization if not already done
+        initializeWithCloudKitSupport()
+        
+        // Wait for CloudKit sync to complete
+        while cloudKitSyncInProgress {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        }
+        
+        // Wait for loading to complete
+        while isLoading || isLoadingFeeds {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        }
+        
+        print("✅ PodcastViewModel: Data sync completion confirmed")
+    }
+    
+    /// Ensure feeds are loaded and available to UI
+    func ensureFeedsAreLoaded() async {
+        // If no feeds are loaded, try loading from Core Data again
+        if podcastFeeds.isEmpty {
+            await MainActor.run {
+                loadFeedsFromCoreData()
+            }
+            
+            // Wait a bit for the loading to complete
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        }
+        
+        // If still no feeds, this might be a fresh install without any feeds
+        if podcastFeeds.isEmpty {
+            print("ℹ️ PodcastViewModel: No feeds found - this might be a fresh install")
+        } else {
+            print("✅ PodcastViewModel: \(podcastFeeds.count) feeds are loaded and available")
         }
     }
     

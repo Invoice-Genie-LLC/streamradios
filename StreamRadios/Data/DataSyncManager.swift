@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import SwiftUI
 import CoreData
+import UIKit
 
 class DataSyncManager: ObservableObject {
     static let shared = DataSyncManager()
@@ -159,13 +160,45 @@ class DataSyncManager: ObservableObject {
     
     @MainActor
     private func syncPodcastFeeds() async {
-        // DISABLED: DataSyncManager no longer handles podcast sync to prevent duplicates
-        // PodcastViewModel handles its own CloudKit sync via initializeWithCloudKitSupport()
-        print("📡 DataSyncManager: Podcast sync disabled - handled by PodcastViewModel")
+        podcastFeedsStatus = .inProgress
+        currentOperation = "Loading podcast feeds..."
         
-        podcastFeedsStatus = .completed
-        podcastFeedsProgress = 1.0
-        print("✅ Podcast feeds sync completed")
+        do {
+            // Get or create PodcastViewModel instance
+            let podcastViewModel = PodcastViewModel.shared
+            
+            // Start podcast loading with progress updates
+            for progress in stride(from: 0.0, through: 0.3, by: 0.1) {
+                podcastFeedsProgress = progress
+                currentOperation = "Initializing podcast feeds..."
+                try await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            }
+            
+            // Wait for podcast feeds to actually load
+            currentOperation = "Syncing podcast feeds from iCloud..."
+            await podcastViewModel.waitForDataSyncCompletion()
+            
+            // Update progress as feeds are loaded
+            for progress in stride(from: 0.3, through: 0.8, by: 0.1) {
+                podcastFeedsProgress = progress
+                currentOperation = "Processing podcast feeds..."
+                try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+            }
+            
+            // Final verification that feeds are loaded
+            currentOperation = "Finalizing podcast feeds..."
+            await podcastViewModel.ensureFeedsAreLoaded()
+            
+            podcastFeedsProgress = 1.0
+            podcastFeedsStatus = .completed
+            currentOperation = "Podcast feeds loaded successfully"
+            print("✅ Podcast feeds sync completed - feeds actually loaded")
+            
+        } catch {
+            podcastFeedsStatus = .failed
+            currentOperation = "Failed to load podcast feeds"
+            print("❌ Podcast feeds sync failed: \(error)")
+        }
     }
     
     @MainActor
@@ -367,43 +400,92 @@ class DataSyncManager: ObservableObject {
     
     @MainActor
     private func completeSynchronization() async {
+        currentOperation = "Finalizing synchronization..."
+        
+        // CRITICAL: Ensure all components are actually ready before completion
+        print("🔄 Final verification: Ensuring all data is loaded and available...")
+        
+        // Verify podcast feeds are loaded
+        let podcastViewModel = PodcastViewModel.shared
+        await podcastViewModel.ensureFeedsAreLoaded()
+        
+        // Verify radio stations are loaded
+        let radioStationViewModel = RadioStationViewModel.shared
+        await waitForRadioStationsToLoad(radioStationViewModel)
+        
+        // Final verification that all sync statuses are completed
+        await waitForAllSyncStatusesToComplete()
+        
         currentOperation = "Synchronization completed!"
         
         // IMMEDIATE: Trigger PodcastViewModel UI refresh as soon as sync completes
         print("🚀 IMMEDIATE: Triggering UI refresh for fresh install completion")
-        if let podcastViewModel = getPodcastViewModelInstance() {
-            podcastViewModel.loadFeedsFromCoreData()
-            podcastViewModel.objectWillChange.send()
-            
-            // Post immediate notification for any listening views
-            NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
-            print("📢 IMMEDIATE: Posted fresh install notification from DataSyncManager")
-        }
+        await podcastViewModel.ensureFeedsAreLoaded()
         
-        // Mark sync as completed immediately for faster UI response
+        // Post immediate notification for any listening views
+        NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
+        print("📢 IMMEDIATE: Posted fresh install notification from DataSyncManager")
+        
+        // Mark sync as completed only after everything is truly ready
         UserDefaults.standard.set(true, forKey: "DataSyncCompleted")
         UserDefaults.standard.synchronize()
         
-        // Hide the sync view immediately
-        isSyncing = false
-        
         print("🎉 Fresh install data synchronization completed successfully!")
+        print("📊 Final state: Podcast feeds: \(podcastViewModel.podcastFeeds.count), Radio stations: \(radioStationViewModel.stations.count)")
         
-        // Brief pause for visual feedback (reduced from 1 second to 0.2 seconds)
-        try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+        // Brief pause for visual feedback
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        
+        // Hide the sync view only after everything is complete
+        isSyncing = false
     }
     
-    /// Get the PodcastViewModel instance from the app's environment
-    private func getPodcastViewModelInstance() -> PodcastViewModel? {
-        // Try to get the PodcastViewModel from the shared app state
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let contentView = window.rootViewController?.view {
-            // The PodcastViewModel should be accessible through the environment
-            // For now, we'll trigger a notification that the PodcastListView can catch
-            return nil
+    /// Wait for radio stations to load
+    private func waitForRadioStationsToLoad(_ radioStationViewModel: RadioStationViewModel) async {
+        // Give radio stations time to load if they haven't already
+        var attempts = 0
+        let maxAttempts = 20 // 2 seconds max wait
+        
+        while radioStationViewModel.stations.isEmpty && attempts < maxAttempts {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            attempts += 1
         }
-        return nil
+        
+        if radioStationViewModel.stations.isEmpty {
+            print("⚠️ Radio stations not loaded after timeout - this might be normal for fresh installs")
+        } else {
+            print("✅ Radio stations loaded: \(radioStationViewModel.stations.count)")
+        }
+    }
+    
+    /// Wait for all sync statuses to complete
+    private func waitForAllSyncStatusesToComplete() async {
+        var attempts = 0
+        let maxAttempts = 30 // 3 seconds max wait
+        
+        while attempts < maxAttempts {
+            let allCompleted = (
+                radioStationsStatus == .completed &&
+                podcastFeedsStatus == .completed &&
+                artworkDownloadsStatus == .completed &&
+                episodeStatesStatus == .completed &&
+                userPreferencesStatus == .completed
+            )
+            
+            if allCompleted {
+                print("✅ All sync statuses completed")
+                break
+            }
+            
+            print("⏳ Waiting for sync statuses to complete: Radio:\(radioStationsStatus), Podcast:\(podcastFeedsStatus), Artwork:\(artworkDownloadsStatus), Episodes:\(episodeStatesStatus), Preferences:\(userPreferencesStatus)")
+            
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            attempts += 1
+        }
+        
+        if attempts >= maxAttempts {
+            print("⚠️ Some sync statuses did not complete in time - proceeding anyway")
+        }
     }
     
     // MARK: - CloudKit Integration Helper Methods

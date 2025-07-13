@@ -322,10 +322,10 @@ class PodcastFeedManager {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
         fetchRequest.propertiesToFetch = ["id"]
-        fetchRequest.resultType = .dictionaryResultType
+        fetchRequest.resultType = .managedObjectResultType
         
-        let results = try context.fetch(fetchRequest) as! [[String: Any]]
-        return Set(results.compactMap { $0["id"] as? String })
+        let episodes = try context.fetch(fetchRequest)
+        return Set(episodes.compactMap { $0.id })
     }
     
     private func saveEpisodesInBatches(
