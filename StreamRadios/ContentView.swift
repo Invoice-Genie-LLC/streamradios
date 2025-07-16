@@ -902,7 +902,12 @@ struct UnifiedPodcastPlayerView: View {
                                     .fill(Color.blue)
                                     .frame(width: playButtonSize, height: playButtonSize)
                                 
-                                if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
+                                    // Show loading spinner when episode is loading
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
                                     // Show spinning indicator when reconnecting or buffering
                                     ProgressView()
                                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
@@ -1009,6 +1014,13 @@ struct UnifiedPodcastPlayerView: View {
     private var podcastConnectionStatusView: some View {
         HStack(spacing: 2) {
             switch podcastPlayer.connectionState {
+            case .loading:
+                ProgressView()
+                    .scaleEffect(0.4)
+                    .tint(.blue)
+                Text("Loading...")
+                    .font(.caption2)
+                    .foregroundColor(.blue)
             case .connecting:
                 ProgressView()
                     .scaleEffect(0.4)

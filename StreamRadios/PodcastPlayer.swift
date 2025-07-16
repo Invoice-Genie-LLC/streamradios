@@ -18,6 +18,7 @@ enum PodcastConnectionState {
     case connecting
     case disconnected
     case buffering
+    case loading
     case error
 }
 
@@ -718,9 +719,18 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps play
         loadingEpisodeId = episode.id
+        connectionState = .loading
         
         // CRITICAL: Set user intent to play podcast (like RadioPlayer)
         userWantsToPlay = true
+        
+        // IMMEDIATE UI POPULATION: Set episode information immediately for instant visual feedback
+        currentEpisode = episode
+        currentFeed = feed
+        isPodcastActive = true
+        
+        // Initialize time and duration immediately for UI display
+        duration = episode.duration
         
         // Reset position restoration flag for the new episode
         hasRestoredPositionForCurrentEpisode = false
@@ -733,7 +743,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         RadioPlayer.shared.stop()
         
         // If there's a currently playing episode, mark it as "In Progress" before switching
-        if let currentEpisode = currentEpisode, currentEpisode.id != episode.id {
+        if let previousEpisode = currentEpisode, previousEpisode.id != episode.id {
             // Get the most accurate current time from the player
             let actualCurrentTime = player?.currentItem?.currentTime().seconds ?? currentTime
             let actualDuration = player?.currentItem?.duration.seconds ?? duration
@@ -750,11 +760,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
             
             // Save progress immediately when switching episodes
-            saveProgressForEpisodeSwitch(currentEpisode, progress: currentProgress, actualTime: actualCurrentTime)
+            saveProgressForEpisodeSwitch(previousEpisode, progress: currentProgress, actualTime: actualCurrentTime)
             
             stateManager.switchToEpisode(
                 newEpisodeId: episode.id,
-                previousEpisodeId: currentEpisode.id,
+                previousEpisodeId: previousEpisode.id,
                 previousProgress: currentProgress
             )
         }
@@ -818,10 +828,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Add to CarPlay recently played list for CarPlay integration
         CarPlayManager.shared.addEpisodeToRecentlyPlayed(episode)
         
-        currentEpisode = episode
-        currentFeed = feed
-        isPodcastActive = true
-        
         // Reset CarPlay progress tracking for new episode
         lastCarPlayProgress = nil
         
@@ -832,9 +838,6 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         } else {
             os_log("Failed to find index for current episode", log: log, type: .error)
         }
-        
-        // Initialize time and duration - preserve existing progress for episodes that were partially played
-        duration = episode.duration
         
         // Initialize progress from saved state, but only for episodes that have been played before
         if !shouldStartFromBeginning {
@@ -927,6 +930,12 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     self.duration = playerItem.duration.seconds
                     self.updatePlaybackInfo()
                     self.seekToSavedProgress()
+                    
+                    // Clear loading state when player item is ready to play
+                    if let currentEpisode = self.currentEpisode, 
+                       self.loadingEpisodeId == currentEpisode.id {
+                        self.loadingEpisodeId = nil
+                    }
                 }
             }
 
@@ -1119,8 +1128,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.play()
                isPlaying = true
         
-        // Clear loading state when playback successfully starts
-        loadingEpisodeId = nil
+        // NOTE: Don't clear loading state here - it should only be cleared when playback actually starts
+        // This will be handled by the time observer when playback begins
         
         // Update connection state when starting playback
         connectionState = .connected
@@ -1186,8 +1195,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.pause()
         isPlaying = false
         
-        // Clear loading state when pausing
-        loadingEpisodeId = nil
+        // NOTE: Don't clear loading state when pausing - loading state should only be cleared when playback starts
+        // loadingEpisodeId = nil
         
         // Connection state should reflect network availability, not playback state
         // Don't change connection state when pausing
