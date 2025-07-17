@@ -28,10 +28,12 @@ struct ContentView: View {
     @State private var selectedTab: Tab
     @EnvironmentObject var alertManager: AlertManager
     @EnvironmentObject var podcastViewModel: PodcastViewModel
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @State private var selectedPodcast: PodcastFeed?
     @State private var showPodcastListView: Bool
     @State private var seekPosition: Double
+    @State private var showingSubscriptionView = false
 
     @State private var showAllEpisodes = false
     @State private var scrollToEpisodeID: String?
@@ -230,6 +232,7 @@ struct ContentView: View {
             .onAppear {
                 setupTabView()
                 checkAndStartDataSync()
+                checkSubscriptionStatus()
             }
             .onChange(of: selectedTab) { oldValue, newValue in
                 // Do NOT clear iTunes artwork when navigating between views
@@ -448,6 +451,11 @@ struct ContentView: View {
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
+            .sheet(isPresented: $showingSubscriptionView) {
+                SubscriptionView()
+                    .environmentObject(subscriptionManager)
+                    .interactiveDismissDisabled(!subscriptionManager.isSubscribedOrInTrial)
+            }
 
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                 bitrateMessage = newBitrateMessage
@@ -564,6 +572,19 @@ struct ContentView: View {
             DataSyncManager.shared.startFreshInstallSync()
         } else {
             print("✅ App has been launched before and sync is complete")
+        }
+    }
+    
+    private func checkSubscriptionStatus() {
+        // Wait a moment for the app to fully load, then check subscription status
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // Always show paywall for non-subscribers - no dismissal allowed
+            if !subscriptionManager.isSubscribedOrInTrial {
+                print("🔔 Showing mandatory subscription paywall for non-subscriber")
+                showingSubscriptionView = true
+            } else {
+                print("✅ User is subscribed or in trial - not showing paywall")
+            }
         }
     }
     

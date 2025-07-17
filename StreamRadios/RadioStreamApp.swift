@@ -11,11 +11,12 @@ import UIKit
 
 @main
 struct RadioStreamApp: App {
-    @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
+    @AppStorage("isDarkMode") private var isDarkMode: Bool = true
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var alertManager = AlertManager()
     @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     var radioPlayer = RadioPlayer.shared
     @StateObject private var viewModel = RadioStationViewModel.shared
@@ -32,6 +33,7 @@ struct RadioStreamApp: App {
                 .environmentObject(alertManager)
                 .environmentObject(podcastViewModel)
                 .environmentObject(podcastPlayer)
+                .environmentObject(subscriptionManager)
                 .preferredColorScheme(isDarkMode ? .dark : .light)
                 .onAppear {
                     setupApp()
@@ -54,6 +56,12 @@ struct RadioStreamApp: App {
 
         // Set the ViewModel for RadioPlayer
         radioPlayer.setViewModel(viewModel)
+        
+        // Handle initial dark mode setup
+        if !UserDefaults.standard.bool(forKey: "isDarkModeSet") {
+            UserDefaults.standard.set(true, forKey: "isDarkMode")
+            UserDefaults.standard.set(true, forKey: "isDarkModeSet")
+        }
                 
         if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
             notificationManager.requestAuthorization()
@@ -79,6 +87,11 @@ struct RadioStreamApp: App {
         
         // Initialize podcast system with CloudKit support
         podcastViewModel.initializeWithCloudKitSupport()
+        
+        // Initialize subscription system - this will load products and check subscription status
+        Task {
+            await subscriptionManager.initialize()
+        }
     }
 
     private func fetchStationsFromCloudKit() {

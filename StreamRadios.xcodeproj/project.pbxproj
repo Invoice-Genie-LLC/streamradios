@@ -33,6 +33,7 @@
 		774180502C6703FC0030B459 /* PodcastPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7741804F2C6703FC0030B459 /* PodcastPlayer.swift */; };
 		774180522C6708020030B459 /* AudioPlayerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774180512C6708020030B459 /* AudioPlayerProtocol.swift */; };
 		7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746177B2C17290200F442B3 /* RadioStreamApp.swift */; };
+		7751A1A12C17290300F442B4 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7751A1A02C17290300F442B4 /* SubscriptionView.swift */; };
 		774617842C17411C00F442B3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617832C17411C00F442B3 /* WidgetKit.framework */; };
 		774617862C17411C00F442B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617852C17411C00F442B3 /* SwiftUI.framework */; };
 		774617892C17411C00F442B3 /* streamRadiosWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774617882C17411C00F442B3 /* streamRadiosWidgetBundle.swift */; };
@@ -65,6 +66,7 @@
 		77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */; };
 		77AAED6A2CE2873C009B2A00 /* EpisodeStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */; };
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
+		77B327A12E27F9D000ABDD89 /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B327A02E27F9D000ABDD89 /* SubscriptionManager.swift */; };
 		77B4E0F12E086FEF0034F886 /* PodcastCoreDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EC2E086FEF0034F886 /* PodcastCoreDataManager.swift */; };
 		77B4E0F22E086FEF0034F886 /* PodcastFeedManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EE2E086FEF0034F886 /* PodcastFeedManager.swift */; };
 		77B4E0F32E086FEF0034F886 /* PodcastEpisodeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */; };
@@ -151,6 +153,7 @@
 		7741804F2C6703FC0030B459 /* PodcastPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastPlayer.swift; sourceTree = "<group>"; };
 		774180512C6708020030B459 /* AudioPlayerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerProtocol.swift; sourceTree = "<group>"; };
 		7746177B2C17290200F442B3 /* RadioStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStreamApp.swift; sourceTree = "<group>"; };
+		7751A1A02C17290300F442B4 /* SubscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionView.swift; sourceTree = "<group>"; };
 		774617812C17411C00F442B3 /* StreamRadioWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamRadioWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		774617832C17411C00F442B3 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		774617852C17411C00F442B3 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -179,6 +182,7 @@
 		7780E96C2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamRadiosModel.xcdatamodel; sourceTree = "<group>"; };
 		7780E96E2C3E2C05009CCF6F /* Country.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Country.swift; sourceTree = "<group>"; };
 		7780E9702C3F2110009CCF6F /* CustomAlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomAlertView.swift; sourceTree = "<group>"; };
+		778F68482E282B72009AE6FD /* StreamRadios.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamRadios.entitlements; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
 		779B5D282E010AD600403D78 /* StreamRadiosRelease.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamRadiosRelease.entitlements; sourceTree = "<group>"; };
@@ -186,6 +190,7 @@
 		77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTriggeredView.swift; sourceTree = "<group>"; };
 		77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeStateManager.swift; sourceTree = "<group>"; };
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
+		77B327A02E27F9D000ABDD89 /* SubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionManager.swift; sourceTree = "<group>"; };
 		77B4E0EB2E086FEF0034F886 /* PodcastCloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCloudKitManager.swift; sourceTree = "<group>"; };
 		77B4E0EC2E086FEF0034F886 /* PodcastCoreDataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCoreDataManager.swift; sourceTree = "<group>"; };
 		77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastEpisodeManager.swift; sourceTree = "<group>"; };
@@ -267,6 +272,7 @@
 				774FED582E1983FD0084FA72 /* AboutView.swift */,
 				774FED592E1983FD0084FA72 /* PrivacyPolicyView.swift */,
 				774FED5A2E1983FD0084FA72 /* TermsAndConditionsView.swift */,
+				778F68482E282B72009AE6FD /* StreamRadios.entitlements */,
 				7778C97C2E03BA0F006B9329 /* streamRadiosWidgetExtension.entitlements */,
 				779B5D282E010AD600403D78 /* StreamRadiosRelease.entitlements */,
 				775B55552C30E8B200ECDBF0 /* Enums */,
@@ -322,6 +328,7 @@
 				7707DA3C2C152EF5006D5EBB /* Assets.xcassets */,
 				7707DA3E2C152EF5006D5EBB /* Preview Content */,
 				7746177B2C17290200F442B3 /* RadioStreamApp.swift */,
+				7751A1A02C17290300F442B4 /* SubscriptionView.swift */,
 			);
 			path = StreamRadios;
 			sourceTree = "<group>";
@@ -381,6 +388,7 @@
 				77B4E0EB2E086FEF0034F886 /* PodcastCloudKitManager.swift */,
 				77B4E0EC2E086FEF0034F886 /* PodcastCoreDataManager.swift */,
 				77F830912E15682E00E2CA1C /* StreamQualityManager.swift */,
+				77B327A02E27F9D000ABDD89 /* SubscriptionManager.swift */,
 				77B4E0ED2E086FEF0034F886 /* PodcastEpisodeManager.swift */,
 				77B4E0EE2E086FEF0034F886 /* PodcastFeedManager.swift */,
 				77B4E0EF2E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld */,
@@ -555,6 +563,7 @@
 				77F830922E15682E00E2CA1C /* StreamQualityManager.swift in Sources */,
 				7715BD962C4C3AD700FA7CB1 /* DocumentPicker.swift in Sources */,
 				7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */,
+				7751A1A12C17290300F442B4 /* SubscriptionView.swift in Sources */,
 				7746A4932C6BE2130025C215 /* ManagedPodcastEpisode.swift in Sources */,
 				779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */,
 				77CCE9632C1632380098EE74 /* ImagePicker.swift in Sources */,
@@ -615,6 +624,7 @@
 				77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */,
 				7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */,
 				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
+				77B327A12E27F9D000ABDD89 /* SubscriptionManager.swift in Sources */,
 				7746A49D2C6D07C10025C215 /* ReachabilityCheck.swift in Sources */,
 				7778807C2CAF31320013AA62 /* ScrollOffsetTracker.swift in Sources */,
 				77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */,
@@ -769,6 +779,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -789,17 +800,16 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				                        MARKETING_VERSION = 2.0.0;
-                        CURRENT_PROJECT_VERSION = 1;
-                        NEW_SETTING = "";
-                        PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
-                        PRODUCT_NAME = "$(TARGET_NAME)";
-                        PROVISIONING_PROFILE_SPECIFIER = "";
-                        SWIFT_EMIT_LOC_STRINGS = YES;
-                        SWIFT_VERSION = 5.0;
-                        TARGETED_DEVICE_FAMILY = "1,2";
-                };
-                name = Debug;
+				MARKETING_VERSION = 2.0.0;
+				NEW_SETTING = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
 		};
 		7707DA452C152EF5006D5EBB /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -809,6 +819,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadiosRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -829,17 +840,16 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				                        MARKETING_VERSION = 2.0.0;
-                        CURRENT_PROJECT_VERSION = 1;
-                        NEW_SETTING = "";
-                        PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
-                        PRODUCT_NAME = "$(TARGET_NAME)";
-                        PROVISIONING_PROFILE_SPECIFIER = "";
-                        SWIFT_EMIT_LOC_STRINGS = YES;
-                        SWIFT_VERSION = 5.0;
-                        TARGETED_DEVICE_FAMILY = "1,2";
-                };
-                name = Release;
+				MARKETING_VERSION = 2.0.0;
+				NEW_SETTING = "";
+				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 		774617952C17411E00F442B3 /* Debug */ = {
 			isa = XCBuildConfiguration;

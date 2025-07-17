@@ -1447,10 +1447,12 @@ class PodcastViewModel: ObservableObject {
                 do {
                     let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                     request.propertiesToFetch = ["url"]
-                    request.resultType = .dictionaryResultType
+                    request.includesPropertyValues = true
+                    request.includesSubentities = false
+                    request.resultType = .managedObjectResultType
                     
-                    let results = try context.fetch(request) as! [[String: Any]]
-                    let urls = Set(results.compactMap { $0["url"] as? String })
+                    let results = try context.fetch(request)
+                    let urls = Set(results.compactMap { $0.url })
                     continuation.resume(returning: urls)
                 } catch {
                     print("❌ Failed to fetch existing feed URLs: \(error)")

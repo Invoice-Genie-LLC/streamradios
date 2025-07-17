@@ -26,9 +26,11 @@ struct SettingsView: View {
     @EnvironmentObject var alertManager: AlertManager
     var onImportComplete: ((String) -> Void)?
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var isCleaningPodcasts = false
     @State private var podcastCleanupComplete = false
     @EnvironmentObject var radioPlayer: RadioPlayer
+    @State private var showingSubscriptionView = false
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
@@ -62,6 +64,7 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 ScrollView {
                                                              LazyVStack(spacing: 24) {
+                        subscriptionSettings
                         playbackSettings
                         displaySettings
                         alarmSettings
@@ -158,6 +161,175 @@ struct SettingsView: View {
         }
     }
     
+    @ViewBuilder
+    private var subscriptionSettings: some View {
+        SettingsCard(
+            title: "StreamRadios Pro",
+            icon: ""
+        ) {
+            VStack(spacing: 16) {
+                HStack {
+                    Image(systemName: "crown.fill")
+                        .foregroundColor(.yellow)
+                        .font(.title2)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Subscription Status")
+                            .font(.headline)
+                            .foregroundColor(primaryTextColor)
+                        
+                        Text(subscriptionStatusText)
+                            .font(.subheadline)
+                            .foregroundColor(secondaryTextColor)
+                    }
+                    
+                    Spacer()
+                    
+                    if subscriptionManager.isSubscribedOrInTrial {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.title2)
+                    }
+                }
+                
+                Button {
+                    showingSubscriptionView = true
+                } label: {
+                    HStack {
+                        Text(subscriptionManager.isSubscribedOrInTrial ? "Manage Subscription" : "Upgrade to Pro")
+                            .font(.headline)
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(subscriptionManager.isSubscribedOrInTrial ? Color.blue.opacity(0.1) : Color.green.opacity(0.1))
+                    )
+                    .foregroundColor(subscriptionManager.isSubscribedOrInTrial ? .blue : .green)
+                }
+                
+                // Dedicated Restore Purchases Button
+                RestorePurchasesButton()
+                    .environmentObject(subscriptionManager)
+                
+                if !subscriptionManager.isSubscribedOrInTrial {
+                    VStack(spacing: 8) {
+                        Text("Unlock Premium Features")
+                            .font(.caption)
+                            .foregroundColor(secondaryTextColor)
+                        
+                        HStack(spacing: 16) {
+                            FeatureBadge(icon: "antenna.radiowaves.left.and.right", text: "Unlimited Stations")
+                            FeatureBadge(icon: "podcasts.fill", text: "Offline Downloads")
+                            FeatureBadge(icon: "icloud.fill", text: "Cloud Sync")
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingSubscriptionView) {
+            SubscriptionView()
+                .environmentObject(subscriptionManager)
+        }
+    }
+    
+    private var subscriptionStatusText: String {
+        switch subscriptionManager.subscriptionStatus {
+        case .freeTrial:
+            return "Free Trial Active"
+        case .subscribed:
+            return "Pro Subscriber"
+        case .oneTimePurchased:
+            return "Pro Lifetime"
+        case .expired:
+            return "Subscription Expired"
+        case .notSubscribed:
+            return "Free Version"
+        case .unknown:
+            return "Loading..."
+        case .needsRestore:
+            return "Needs Restore"
+        }
+    }
+}
+
+// MARK: - Restore Purchases Button Component
+struct RestorePurchasesButton: View {
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
+    @State private var showingAlert = false
+    @State private var alertMessage = ""
+    @State private var isLoading = false
+    
+    var body: some View {
+        Button {
+            restorePurchases()
+        } label: {
+            HStack {
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.headline)
+                }
+                
+                Text("Restore Purchases")
+                    .font(.headline)
+                
+                Spacer()
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.blue.opacity(0.1))
+            )
+            .foregroundColor(.blue)
+        }
+        .disabled(isLoading)
+        .alert("Restore Purchases", isPresented: $showingAlert) {
+            Button("OK") {}
+        } message: {
+            Text(alertMessage)
+        }
+    }
+    
+    private func restorePurchases() {
+        isLoading = true
+        
+        Task {
+            do {
+                try await subscriptionManager.restorePurchases()
+                
+                await MainActor.run {
+                    self.isLoading = false
+                    
+                    if subscriptionManager.isSubscribedOrInTrial {
+                        self.alertMessage = "Purchases restored successfully! Your subscription is now active."
+                    } else {
+                        self.alertMessage = "No previous purchases found to restore."
+                    }
+                    self.showingAlert = true
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.alertMessage = "Failed to restore purchases: \(error.localizedDescription)"
+                    self.showingAlert = true
+                }
+            }
+        }
+    }
+}
+
+// MARK: - SettingsView Extensions
+extension SettingsView {
              @ViewBuilder 
     private var displaySettings: some View {
         SettingsCard(
@@ -1298,5 +1470,27 @@ struct SettingsView_Previews: PreviewProvider {
                 .preferredColorScheme(.light)
                 .previewDisplayName("Light Mode")
         }
+    }
+}
+
+// MARK: - Feature Badge Component
+struct FeatureBadge: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption)
+            Text(text)
+                .font(.caption)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.green.opacity(0.2))
+        )
+        .foregroundColor(.green)
     }
 }

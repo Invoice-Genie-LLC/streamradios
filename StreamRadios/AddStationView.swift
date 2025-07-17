@@ -32,6 +32,7 @@ struct AddStationView: View {
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var viewModel: RadioStationViewModel
     @EnvironmentObject var permissionManager: PermissionManager
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     @Binding var isEditingStation: RadioStation?
     @Binding var presentedSheet: ActiveSheet?
     @StateObject private var podcastViewModel = PodcastViewModel()
@@ -316,6 +317,16 @@ struct AddStationView: View {
             alertMessage = "Please select a valid country."
             showAlert = true
             return
+        }
+        
+        // Check subscription limits for adding stations
+        if !subscriptionManager.isSubscribedOrInTrial {
+            let freeStationLimit = 5
+            if viewModel.stations.count >= freeStationLimit {
+                alertMessage = "Free users can add up to \(freeStationLimit) radio stations. Upgrade to StreamRadios Pro for unlimited stations."
+                showAlert = true
+                return
+            }
         }
         
         let iconData = iconImage?.jpegData(compressionQuality: 0.8)?.base64EncodedString()

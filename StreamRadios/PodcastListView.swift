@@ -10,11 +10,9 @@ import Combine
 import os
 import AVKit
 
-import SwiftUI
-import os
-
 struct PodcastListView: View {
     @EnvironmentObject private var viewModel: PodcastViewModel
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var showingAddPodcast = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
@@ -900,6 +898,7 @@ struct EpisodeRowView: View {
     let onStop: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var progress: Double
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
@@ -1176,6 +1175,12 @@ struct EpisodeRowView: View {
             if isPlaying {
                 showBannerAlert(message: "You can't download episodes while playing.")
             } else if !episode.state.isDownloaded && !isDownloading {
+                // Check subscription for download feature
+                if !subscriptionManager.isSubscribedOrInTrial {
+                    showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
+                    return
+                }
+                
                 viewModel.downloadEpisode(episode) { result in
                     // Download state is managed by the progress tracking
                     print("Download completed for episode: \(episode.title)")
@@ -1312,6 +1317,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     let onStop: () -> Void
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
@@ -1694,13 +1700,17 @@ struct OptimizedEpisodeRowView: View, Equatable {
             }
     }
     
-    // MARK: - Helper Methods
-    
     private var simplifiedDownloadButton: some View {
         Button(action: {
             if isPlaying {
                 showBannerAlert(message: "You can't download episodes while playing.")
             } else if !episode.state.isDownloaded && !isDownloading {
+                // Check subscription for download feature
+                if !subscriptionManager.isSubscribedOrInTrial {
+                    showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
+                    return
+                }
+                
                 viewModel.downloadEpisode(episode) { result in
                     // Download state is managed by the progress tracking
                     print("Download completed for episode: \(episode.title)")
@@ -1712,7 +1722,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     // Downloaded state - green checkmark
                     Image(systemName: "checkmark.circle.fill")
                         .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
+                        .frame(width: 22, height: 22)
                         .foregroundColor(.green)
                 } else if let downloadProgress = viewModel.downloadProgress[episode.id], downloadProgress > 0 && downloadProgress < 1 {
                     // Downloading state - circular progress with percentage
@@ -1720,14 +1730,14 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         // Background circle
                         Circle()
                             .stroke(Color.adaptiveBorder, lineWidth: 2)
-                            .frame(width: buttonSize, height: buttonSize)
+                            .frame(width: 22, height: 22)
                         
                         // Progress circle
                         Circle()
                             .trim(from: 0, to: CGFloat(downloadProgress))
                             .stroke(Color.blue, lineWidth: 2)
                             .rotationEffect(.degrees(-90))
-                            .frame(width: buttonSize, height: buttonSize)
+                            .frame(width: 22, height: 22)
                             .animation(.easeInOut(duration: 0.3), value: downloadProgress)
                         
                         // Percentage text or download icon
@@ -1745,12 +1755,12 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     // Default state - download arrow
                     Image(systemName: "arrow.down.circle")
                         .resizable()
-                        .frame(width: buttonSize, height: buttonSize)
+                        .frame(width: 22, height: 22)
                         .foregroundColor(.gray)
                 }
             }
         }
-        .frame(width: buttonSize, height: buttonSize)
+        .frame(width: 22, height: 22)
         .disabled(isDownloading) // Disable button during download
     }
     
@@ -1762,6 +1772,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
 
+
 }
 
 struct PodcastPlayerView: View {
@@ -1772,6 +1783,7 @@ struct PodcastPlayerView: View {
     let initialScrollToEpisodeID: String?
     @ObservedObject var podcastPlayer: PodcastPlayer
     @StateObject private var radioPlayer = RadioPlayer.shared
+    @StateObject private var subscriptionManager = SubscriptionManager.shared
     
     // MARK: - State
     @State private var selectedTab = 0
@@ -2081,21 +2093,25 @@ struct PodcastPlayerView: View {
     
 
 
+    private var episodeRows: some View {
+        ForEach(viewModel.currentEpisodes, id: \.id) { episode in
+            OptimizedEpisodeRowView(
+                episode: episode,
+                isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
+                onPlay: { playEpisode(episode) },
+                onStop: { podcastPlayer.togglePlayPause() },
+                viewModel: viewModel,
+                podcastPlayer: podcastPlayer
+            )
+            .id(episode.id)
+        }
+    }
+    
     private var episodeList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(viewModel.currentEpisodes, id: \.id) { episode in
-                        OptimizedEpisodeRowView(
-                            episode: episode,
-                            isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                            onPlay: { playEpisode(episode) },
-                            onStop: { podcastPlayer.togglePlayPause() },
-                            viewModel: viewModel,
-                            podcastPlayer: podcastPlayer
-                        )
-                        .id(episode.id)
-                    }
+                    episodeRows
                 
                 // Loading indicator and invisible trigger area for pull-up gesture
                 if viewModel.hasMoreEpisodes && !viewModel.currentEpisodes.isEmpty {
