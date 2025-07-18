@@ -56,255 +56,7 @@ enum RadioSubTab: Int, CaseIterable {
 
 class RadioStationViewModel: NSObject, ObservableObject {
     @Published var stations: [RadioStation] = []
-    @Published var countries: [Country] = [
-        Country(name: "Select Country", flag: ""),
-        Country(name: "Afghanistan", flag: "AF"),
-        Country(name: "Albania", flag: "AL"),
-        Country(name: "Algeria", flag: "DZ"),
-        Country(name: "American Samoa", flag: "AS"),
-        Country(name: "Andorra", flag: "AD"),
-        Country(name: "Angola", flag: "AO"),
-        Country(name: "Anguilla", flag: "AI"),
-        Country(name: "Antigua & Barbuda", flag: "AG"),
-        Country(name: "Argentina", flag: "AR"),
-        Country(name: "Armenia", flag: "AM"),
-        Country(name: "Aruba", flag: "AW"),
-        Country(name: "Australia", flag: "AU"),
-        Country(name: "Austria", flag: "AT"),
-        Country(name: "Azerbaijan", flag: "AZ"),
-        Country(name: "Bahamas", flag: "BS"),
-        Country(name: "Bahrain", flag: "BH"),
-        Country(name: "Bangladesh", flag: "BD"),
-        Country(name: "Barbados", flag: "BB"),
-        Country(name: "Belarus", flag: "BY"),
-        Country(name: "Belgium", flag: "BE"),
-        Country(name: "Belize", flag: "BZ"),
-        Country(name: "Benin", flag: "BJ"),
-        Country(name: "Bermuda", flag: "BM"),
-        Country(name: "Bhutan", flag: "BT"),
-        Country(name: "Bolivia", flag: "BO"),
-        Country(name: "Bosnia & Herzegovina", flag: "BA"),
-        Country(name: "Botswana", flag: "BW"),
-        Country(name: "Brazil", flag: "BR"),
-        Country(name: "British Virgin Islands", flag: "VG"),
-        Country(name: "Brunei", flag: "BN"),
-        Country(name: "Bulgaria", flag: "BG"),
-        Country(name: "Burkina Faso", flag: "BF"),
-        Country(name: "Burundi", flag: "BI"),
-        Country(name: "Cambodia", flag: "KH"),
-        Country(name: "Cameroon", flag: "CM"),
-        Country(name: "Canada", flag: "CA"),
-        Country(name: "Cape Verde", flag: "CV"),
-        Country(name: "Cayman Islands", flag: "KY"),
-        Country(name: "Central African Republic", flag: "CF"),
-        Country(name: "Chad", flag: "TD"),
-        Country(name: "Chile", flag: "CL"),
-        Country(name: "China", flag: "CN"),
-        Country(name: "Christmas Island", flag: "CX"),
-        Country(name: "Cocos (Keeling) Islands", flag: "CC"),
-        Country(name: "Colombia", flag: "CO"),
-        Country(name: "Comoros", flag: "KM"),
-        Country(name: "Congo - Brazzaville", flag: "CG"),
-        Country(name: "Congo - Kinshasa", flag: "CD"),
-        Country(name: "Cook Islands", flag: "CK"),
-        Country(name: "Costa Rica", flag: "CR"),
-        Country(name: "Croatia", flag: "HR"),
-        Country(name: "Cuba", flag: "CU"),
-        Country(name: "Curaçao", flag: "CW"),
-        Country(name: "Cyprus", flag: "CY"),
-        Country(name: "Czech Republic", flag: "CZ"),
-        Country(name: "Côte d'Ivoire", flag: "CI"),
-        Country(name: "Denmark", flag: "DK"),
-        Country(name: "Djibouti", flag: "DJ"),
-        Country(name: "Dominica", flag: "DM"),
-        Country(name: "Dominican Republic", flag: "DO"),
-        Country(name: "Ecuador", flag: "EC"),
-        Country(name: "Egypt", flag: "EG"),
-        Country(name: "El Salvador", flag: "SV"),
-        Country(name: "England", flag: "GB-ENG"),
-        Country(name: "Equatorial Guinea", flag: "GQ"),
-        Country(name: "Eritrea", flag: "ER"),
-        Country(name: "Estonia", flag: "EE"),
-        Country(name: "Ethiopia", flag: "ET"),
-        Country(name: "European Union", flag: "EU"),
-        Country(name: "Falkland Islands", flag: "FK"),
-        Country(name: "Faroe Islands", flag: "FO"),
-        Country(name: "Fiji", flag: "FJ"),
-        Country(name: "Finland", flag: "FI"),
-        Country(name: "France", flag: "FR"),
-        Country(name: "French Guiana", flag: "GF"),
-        Country(name: "French Polynesia", flag: "PF"),
-        Country(name: "Gabon", flag: "GA"),
-        Country(name: "Gambia", flag: "GM"),
-        Country(name: "Georgia", flag: "GE"),
-        Country(name: "Germany", flag: "DE"),
-        Country(name: "Ghana", flag: "GH"),
-        Country(name: "Gibraltar", flag: "GI"),
-        Country(name: "Greece", flag: "GR"),
-        Country(name: "Greenland", flag: "GL"),
-        Country(name: "Grenada", flag: "GD"),
-        Country(name: "Guadeloupe", flag: "GP"),
-        Country(name: "Guam", flag: "GU"),
-        Country(name: "Guatemala", flag: "GT"),
-        Country(name: "Guernsey", flag: "GG"),
-        Country(name: "Guinea", flag: "GN"),
-        Country(name: "Guinea-Bissau", flag: "GW"),
-        Country(name: "Guyana", flag: "GY"),
-        Country(name: "Haiti", flag: "HT"),
-        Country(name: "Honduras", flag: "HN"),
-        Country(name: "Hong Kong", flag: "HK"),
-        Country(name: "Hungary", flag: "HU"),
-        Country(name: "Iceland", flag: "IS"),
-        Country(name: "India", flag: "IN"),
-        Country(name: "Indonesia", flag: "ID"),
-        Country(name: "Iran", flag: "IR"),
-        Country(name: "Iraq", flag: "IQ"),
-        Country(name: "Ireland", flag: "IE"),
-        Country(name: "Isle of Man", flag: "IM"),
-        Country(name: "Israel", flag: "IL"),
-        Country(name: "Italy", flag: "IT"),
-        Country(name: "Jamaica", flag: "JM"),
-        Country(name: "Japan", flag: "JP"),
-        Country(name: "Jersey", flag: "JE"),
-        Country(name: "Jordan", flag: "JO"),
-        Country(name: "Kazakhstan", flag: "KZ"),
-        Country(name: "Kenya", flag: "KE"),
-        Country(name: "Kiribati", flag: "KI"),
-        Country(name: "Kosovo", flag: "XK"),
-        Country(name: "Kuwait", flag: "KW"),
-        Country(name: "Kyrgyzstan", flag: "KG"),
-        Country(name: "Laos", flag: "LA"),
-        Country(name: "Latvia", flag: "LV"),
-        Country(name: "Lebanon", flag: "LB"),
-        Country(name: "Lesotho", flag: "LS"),
-        Country(name: "Liberia", flag: "LR"),
-        Country(name: "Libya", flag: "LY"),
-        Country(name: "Liechtenstein", flag: "LI"),
-        Country(name: "Lithuania", flag: "LT"),
-        Country(name: "Luxembourg", flag: "LU"),
-        Country(name: "Macau", flag: "MO"),
-        Country(name: "Macedonia", flag: "MK"),
-        Country(name: "Madagascar", flag: "MG"),
-        Country(name: "Malawi", flag: "MW"),
-        Country(name: "Malaysia", flag: "MY"),
-        Country(name: "Maldives", flag: "MV"),
-        Country(name: "Mali", flag: "ML"),
-        Country(name: "Malta", flag: "MT"),
-        Country(name: "Marshall Islands", flag: "MH"),
-        Country(name: "Martinique", flag: "MQ"),
-        Country(name: "Mauritania", flag: "MR"),
-        Country(name: "Mauritius", flag: "MU"),
-        Country(name: "Mayotte", flag: "YT"),
-        Country(name: "Mexico", flag: "MX"),
-        Country(name: "Micronesia", flag: "FM"),
-        Country(name: "Moldova", flag: "MD"),
-        Country(name: "Monaco", flag: "MC"),
-        Country(name: "Mongolia", flag: "MN"),
-        Country(name: "Montenegro", flag: "ME"),
-        Country(name: "Montserrat", flag: "MS"),
-        Country(name: "Morocco", flag: "MA"),
-        Country(name: "Mozambique", flag: "MZ"),
-        Country(name: "Myanmar", flag: "MM"),
-        Country(name: "Namibia", flag: "NA"),
-        Country(name: "Nauru", flag: "NR"),
-        Country(name: "Nepal", flag: "NP"),
-        Country(name: "Netherlands", flag: "NL"),
-        Country(name: "New Caledonia", flag: "NC"),
-        Country(name: "New Zealand", flag: "NZ"),
-        Country(name: "Nicaragua", flag: "NI"),
-        Country(name: "Niger", flag: "NE"),
-        Country(name: "Nigeria", flag: "NG"),
-        Country(name: "Niue", flag: "NU"),
-        Country(name: "Norfolk Island", flag: "NF"),
-        Country(name: "North Korea", flag: "KP"),
-        Country(name: "Northern Ireland", flag: "GB-NIR"),
-        Country(name: "Northern Mariana Islands", flag: "MP"),
-        Country(name: "Norway", flag: "NO"),
-        Country(name: "Oman", flag: "OM"),
-        Country(name: "Pakistan", flag: "PK"),
-        Country(name: "Palau", flag: "PW"),
-        Country(name: "Palestinian Territories", flag: "PS"),
-        Country(name: "Panama", flag: "PA"),
-        Country(name: "Papua New Guinea", flag: "PG"),
-        Country(name: "Paraguay", flag: "PY"),
-        Country(name: "Peru", flag: "PE"),
-        Country(name: "Philippines", flag: "PH"),
-        Country(name: "Pitcairn Islands", flag: "PN"),
-        Country(name: "Poland", flag: "PL"),
-        Country(name: "Portugal", flag: "PT"),
-        Country(name: "Puerto Rico", flag: "PR"),
-        Country(name: "Qatar", flag: "QA"),
-        Country(name: "Romania", flag: "RO"),
-        Country(name: "Russia", flag: "RU"),
-        Country(name: "Rwanda", flag: "RW"),
-        Country(name: "Réunion", flag: "RE"),
-        Country(name: "Saint Barthélemy", flag: "BL"),
-        Country(name: "Saint Helena", flag: "SH"),
-        Country(name: "Saint Kitts & Nevis", flag: "KN"),
-        Country(name: "Saint Lucia", flag: "LC"),
-        Country(name: "Saint Martin", flag: "MF"),
-        Country(name: "Saint Pierre & Miquelon", flag: "PM"),
-        Country(name: "Saint Vincent & Grenadines", flag: "VC"),
-        Country(name: "Samoa", flag: "WS"),
-        Country(name: "San Marino", flag: "SM"),
-        Country(name: "Saudi Arabia", flag: "SA"),
-        Country(name: "Scotland", flag: "GB-SCT"),
-        Country(name: "Senegal", flag: "SN"),
-        Country(name: "Serbia", flag: "RS"),
-        Country(name: "Seychelles", flag: "SC"),
-        Country(name: "Sierra Leone", flag: "SL"),
-        Country(name: "Singapore", flag: "SG"),
-        Country(name: "Sint Maarten", flag: "SX"),
-        Country(name: "Slovakia", flag: "SK"),
-        Country(name: "Slovenia", flag: "SI"),
-        Country(name: "Solomon Islands", flag: "SB"),
-        Country(name: "Somalia", flag: "SO"),
-        Country(name: "South Africa", flag: "ZA"),
-        Country(name: "South Korea", flag: "KR"),
-        Country(name: "South Sudan", flag: "SS"),
-        Country(name: "Spain", flag: "ES"),
-        Country(name: "Sri Lanka", flag: "LK"),
-        Country(name: "Sudan", flag: "SD"),
-        Country(name: "Suriname", flag: "SR"),
-        Country(name: "Swaziland", flag: "SZ"),
-        Country(name: "Sweden", flag: "SE"),
-        Country(name: "Switzerland", flag: "CH"),
-        Country(name: "Syria", flag: "SY"),
-        Country(name: "São Tomé & Príncipe", flag: "ST"),
-        Country(name: "Taiwan", flag: "TW"),
-        Country(name: "Tajikistan", flag: "TJ"),
-        Country(name: "Tanzania", flag: "TZ"),
-        Country(name: "Thailand", flag: "TH"),
-        Country(name: "Timor-Leste", flag: "TL"),
-        Country(name: "Togo", flag: "TG"),
-        Country(name: "Tokelau", flag: "TK"),
-        Country(name: "Tonga", flag: "TO"),
-        Country(name: "Trinidad & Tobago", flag: "TT"),
-        Country(name: "Tunisia", flag: "TN"),
-        Country(name: "Turkey", flag: "TR"),
-        Country(name: "Turkmenistan", flag: "TM"),
-        Country(name: "Turks & Caicos Islands", flag: "TC"),
-        Country(name: "Tuvalu", flag: "TV"),
-        Country(name: "Uganda", flag: "UG"),
-        Country(name: "UK", flag: "GB"),
-        Country(name: "Ukraine", flag: "UA"),
-        Country(name: "United Arab Emirates", flag: "AE"),
-        Country(name: "Uruguay", flag: "UY"),
-        Country(name: "USA", flag: "US"),
-        Country(name: "U.S. Virgin Islands", flag: "VI"),
-        Country(name: "Uzbekistan", flag: "UZ"),
-        Country(name: "Vanuatu", flag: "VU"),
-        Country(name: "Vatican City", flag: "VA"),
-        Country(name: "Venezuela", flag: "VE"),
-        Country(name: "Vietnam", flag: "VN"),
-        Country(name: "Wales", flag: "GB-WLS"),
-        Country(name: "Wallis & Futuna", flag: "WF"),
-        Country(name: "Yemen", flag: "YE"),
-        Country(name: "Zambia", flag: "ZM"),
-        Country(name: "Zimbabwe", flag: "ZW"),
-        Country(name: "Åland Islands", flag: "AX"),
-        Country(name: "Unknown Region", flag: "")
-    ]
+    @Published var countries: [Country] = Country.getAllCountriesWithAPICodes()
     @Published var selectedTab: Tab = .radio
     @Published var selectedSubTab: RadioSubTab = .recent
     @Published var activeSheet: ActiveSheet? = nil
@@ -321,10 +73,25 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
-            // Switch to All tab when country changes (except during initialization)
-            if oldValue != selectedCountry && oldValue != "" {
+            print("🌍 Country selection changed from '\(oldValue)' to '\(selectedCountry)'")
+            
+            // Only proceed if the country actually changed and it's not "Select Country"
+            if oldValue != selectedCountry && selectedCountry != "Select Country" {
+                // Switch to All tab when country changes (except during initialization)
                 selectedSubTab = .all
                 print("🌍 Country changed from '\(oldValue)' to '\(selectedCountry)' - switching to All tab")
+                
+                // Automatically fetch stations for the newly selected country if it has no stations
+                print("🌍 Triggering API fetch for newly selected country: \(selectedCountry)")
+                Task { @MainActor in
+                    await fetchStationsForSelectedCountry()
+                }
+            } else if oldValue == selectedCountry {
+                print("🌍 Country selection unchanged, skipping API fetch")
+            } else if selectedCountry == "Select Country" {
+                print("🌍 Reset to 'Select Country', skipping API fetch")
+            } else {
+                print("🌍 Skipping API fetch - oldValue: '\(oldValue)', selectedCountry: '\(selectedCountry)'")
             }
             
             saveSelectedCountry()
@@ -407,89 +174,83 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         do {
             let data = try Data(contentsOf: url)
-            
-            // Debug: Print file contents for troubleshooting
-            if let jsonString = String(data: data, encoding: .utf8) {
-                print("📄 JSON file contents preview (first 500 chars):")
-                print(String(jsonString.prefix(500)))
-                print("📏 Total file size: \(data.count) bytes")
-            }
+            print("📄 Import: Read \(data.count) bytes from file")
             
             let jsonDecoder = JSONDecoder()
             
-            // First, try to decode the JSON to see if it's valid JSON at all
+            // First try to decode as ExportStation (the format we actually export)
             do {
-                let jsonObject = try JSONSerialization.jsonObject(with: data, options: [])
-                print("✅ JSON is valid. Structure type: \(type(of: jsonObject))")
+                let exportStationsFromJson = try jsonDecoder.decode([ExportStation].self, from: data)
+                print("✅ Import: Successfully decoded \(exportStationsFromJson.count) ExportStation objects")
                 
-                if let jsonArray = jsonObject as? [[String: Any]] {
-                    print("📊 Found \(jsonArray.count) objects in JSON array")
-                    
-                    // Check the structure of the first object
-                    if let firstObject = jsonArray.first {
-                        print("🔍 First object keys: \(Array(firstObject.keys).sorted())")
-                        
-                        // Check for required fields
-                        let requiredFields = ["id", "name", "url"]
-                        let missingFields = requiredFields.filter { !firstObject.keys.contains($0) }
-                        if !missingFields.isEmpty {
-                            throw ImportError.missingRequiredFields(missingFields)
-                        }
+                // Convert ExportStation to RadioStation with proper defaults
+                let stationsFromJson = exportStationsFromJson.map { exportStation in
+                    RadioStation(
+                        id: exportStation.id,
+                        name: exportStation.name,
+                        url: exportStation.url,
+                        iconData: nil,                    // Will be downloaded if needed
+                        iTunesArtworkData: nil,           // Will be downloaded if needed
+                        country: exportStation.country,
+                        isFavorite: exportStation.isFavorite,
+                        favoritedAt: exportStation.isFavorite ? Date() : nil,  // Set current time for favorites
+                        favoriteOrder: nil,               // Will be set when organizing favorites
+                        order: 0,                         // Will be set based on position
+                        lastPlayed: nil,                  // New stations haven't been played
+                        isRecent: false                   // New stations aren't recent
+                    )
+                }
+
+                // Get existing URLs to check for duplicates
+                let existingURLs = Set(stations.map { $0.url })
+                
+                // Filter out stations that already exist by URL
+                let newStations = stationsFromJson.filter { !existingURLs.contains($0.url) }
+                
+                let totalNewStations = Double(newStations.count)
+                var importedStations = 0.0
+
+                DispatchQueue.main.async {
+                    // Append new stations instead of removing existing ones
+                    for station in newStations {
+                        self.stations.append(station)
+                        importedStations += 1
+                        progressHandler(importedStations / max(totalNewStations, 1))
                     }
-                } else {
-                    throw ImportError.invalidJSONStructure("Expected array of objects, got \(type(of: jsonObject))")
-                }
-            } catch let jsonError {
-                print("❌ JSON parsing error: \(jsonError)")
-                throw ImportError.invalidJSON(jsonError.localizedDescription)
-            }
-            
-            // Now try to decode to RadioStation objects
-            let stationsFromJson = try jsonDecoder.decode([RadioStation].self, from: data)
-            print("✅ Successfully decoded \(stationsFromJson.count) stations")
 
-            // Get existing URLs to check for duplicates
-            let existingURLs = Set(stations.map { $0.url })
-            
-            // Filter out stations that already exist by URL
-            let newStations = stationsFromJson.filter { !existingURLs.contains($0.url) }
-            
-            let totalNewStations = Double(newStations.count)
-            var importedStations = 0.0
+                    print("Imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
 
-            DispatchQueue.main.async {
-                // Append new stations instead of removing existing ones
-                for station in newStations {
-                    self.stations.append(station)
-                    importedStations += 1
-                    progressHandler(importedStations / max(totalNewStations, 1))
-                }
+                    // Save these to CoreData first
+                    self.saveStationsToCoreData()
 
-                print("Imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
-
-                // Save these to CoreData first
-                self.saveStationsToCoreData()
-
-                // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    // Only save the newly imported stations to CloudKit (with URL duplicate checking)
-                    DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
-                        DispatchQueue.main.async {
-                            if success {
-                                print("Successfully saved \(newStations.count) new stations to CloudKit.")
-                                NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
-                            } else {
-                                print("Failed to save some or all new stations to CloudKit.")
-                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
+                    // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        // Only save the newly imported stations to CloudKit (with URL duplicate checking)
+                        DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
+                            DispatchQueue.main.async {
+                                if success {
+                                    print("Successfully saved \(newStations.count) new stations to CloudKit.")
+                                    NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+                                } else {
+                                    print("Failed to save some or all new stations to CloudKit.")
+                                    NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
+                                }
+                                
+                                // Clear import flag and notify completion
+                                self.isImportInProgress = false
+                                NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                                completion()
                             }
-                            
-                            // Clear import flag and notify completion
-                            self.isImportInProgress = false
-                            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
-                            completion()
                         }
                     }
                 }
+            } catch {
+                print("❌ Import: Failed to decode as ExportStation: \(error)")
+                // Try to decode as String to see what the content actually is
+                if let jsonString = String(data: data, encoding: .utf8) {
+                    print("📄 Import: File content preview: \(String(jsonString.prefix(200)))...")
+                }
+                throw error
             }
         } catch let importError as ImportError {
             DispatchQueue.main.async {
@@ -573,19 +334,20 @@ class RadioStationViewModel: NSObject, ObservableObject {
 
         print("📋 DEBUG: Filtered stations for export: \(filteredStations.count)")
         
-        // Create JSON string manually for each station and join them in an array format
-        let jsonStrings = filteredStations.map { $0.jsonString }
-        let jsonArrayString = "[\n" + jsonStrings.joined(separator: ",\n") + "\n]"
-
         let fileName = "stations_export.json"
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         
         print("📁 DEBUG: Export file path: \(fileURL.path)")
 
         do {
-            try jsonArrayString.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("✅ DEBUG: JSON file written successfully")
-            print("📏 DEBUG: JSON content length: \(jsonArrayString.count) characters")
+            // Use standard JSONEncoder instead of manual string construction
+            let jsonEncoder = JSONEncoder()
+            jsonEncoder.outputFormatting = .prettyPrinted // Make it readable
+            let jsonData = try jsonEncoder.encode(filteredStations)
+            
+            try jsonData.write(to: fileURL)
+            print("✅ DEBUG: JSON file written successfully using JSONEncoder")
+            print("📏 DEBUG: JSON data length: \(jsonData.count) bytes")
             DispatchQueue.main.async {
                 print("🎯 DEBUG: Calling completion with fileURL")
                 completion(fileURL)
@@ -1114,6 +876,264 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func moveStation(from source: IndexSet, to destination: Int) {
         stations.move(fromOffsets: source, toOffset: destination)
         saveStationsToCoreData()  // Save the updated order to CoreData
+    }
+    
+    // MARK: - Radio Browser API Integration
+    
+    @MainActor
+    func fetchStationsFromAPI(for country: Country) async {
+        isLoading = true
+        
+        do {
+            print("🌐 Radio Browser API: Fetching stations for \(country.name) with API code: \(country.apiCountryCode)")
+            let apiStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(countryCode: country.apiCountryCode, limit: 30)
+            print("📡 RadioBrowserAPI: Received \(apiStations.count) stations for \(country.name)")
+            
+            guard !apiStations.isEmpty else {
+                print("📡 RadioBrowserAPI: No stations found for \(country.name)")
+                isLoading = false
+                return
+            }
+            
+            // Convert API stations to app stations, preserving existing favicon data if available
+            let existingStationsMap = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
+            var cachedFaviconCount = 0
+            
+            let newStations: [RadioStation] = apiStations.compactMap { apiStation in
+                guard !apiStation.url.isEmpty else { return nil }
+                
+                // Check if we already have this station with favicon data
+                let existingIconData = existingStationsMap[apiStation.stationuuid]?.iconData
+                if existingIconData != nil {
+                    cachedFaviconCount += 1
+                }
+                
+                return RadioStation(
+                    id: apiStation.stationuuid,
+                    name: apiStation.name,
+                    url: apiStation.url,
+                    iconData: existingIconData, // Use cached favicon if available
+                    country: country.name,
+                    isFavorite: false,
+                    favoritedAt: nil,
+                    favoriteOrder: nil,
+                    order: 0,
+                    lastPlayed: nil
+                )
+            }
+            
+            // Download favicons in background only for stations that don't have them (non-blocking)
+            let stationsNeedingFavicons = newStations.filter { $0.iconData == nil }
+            if !stationsNeedingFavicons.isEmpty {
+                let apiStationsMap = Dictionary(uniqueKeysWithValues: apiStations.map { ($0.stationuuid, $0) })
+                let correspondingAPIStations = stationsNeedingFavicons.compactMap { station in
+                    apiStationsMap[station.id]
+                }
+                
+                Task.detached { [weak self] in
+                    await self?.downloadFaviconsInBackground(for: stationsNeedingFavicons, apiStations: correspondingAPIStations)
+                }
+            }
+            
+            // Filter out stations that already exist (check by URL to avoid duplicates)
+            let existingURLs = Set(stations.map { $0.url })
+            let uniqueNewStations = newStations.filter { !existingURLs.contains($0.url) }
+            
+            guard !uniqueNewStations.isEmpty else {
+                print("📡 RadioBrowserAPI: All fetched stations already exist for \(country.name)")
+                isLoading = false
+                return
+            }
+            
+            print("📡 RadioBrowserAPI: Adding \(uniqueNewStations.count) new stations for \(country.name)")
+            
+            // Add to local stations array (new stations at the top)
+            for newStation in uniqueNewStations.reversed() {
+                // Increment order of existing stations in the same country to make room at top
+                for i in 0..<stations.count {
+                    if stations[i].country == country.name {
+                        stations[i].order += 1
+                    }
+                }
+                // Insert new station at the beginning of the array
+                stations.insert(newStation, at: 0)
+            }
+            
+            print("✅ Added \(uniqueNewStations.count) new stations for \(country.name)")
+            if cachedFaviconCount > 0 {
+                print("🖼️ Using \(cachedFaviconCount) cached favicons, downloading \(uniqueNewStations.count - cachedFaviconCount) new ones")
+            }
+            
+            // Save to CoreData first
+            saveStationsToCoreData()
+            
+            // Save to CloudKit (using the same method as import for new stations)
+            DataStore.shared.saveNewStationsToCloudKit(stations: uniqueNewStations) { success, recordIDs in
+                DispatchQueue.main.async {
+                    if success {
+                        print("📡 ✅ Successfully saved \(uniqueNewStations.count) API-fetched stations to CloudKit for \(country.name)")
+                    } else {
+                        print("📡 ⚠️ Failed to save some API-fetched stations to CloudKit for \(country.name)")
+                    }
+                }
+            }
+            
+            // Notify that stations have been updated
+            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+            
+        } catch {
+            print("❌ RadioBrowserAPI: Failed to fetch stations for \(country.name): \(error)")
+        }
+        
+        isLoading = false
+    }
+    
+    @MainActor
+    func fetchStationsForAllCountries() async {
+        print("🌐 Radio Browser API: Starting to fetch stations for all countries")
+        
+        let supportedCountries = countries.filter { $0.supportsRadioLookup }
+        print("🌐 Radio Browser API: Found \(supportedCountries.count) supported countries")
+        
+        for country in supportedCountries {
+            await fetchStationsFromAPI(for: country)
+            
+            // Add a small delay to be respectful to the API
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+        }
+        
+        print("🌐 Radio Browser API: Finished fetching stations for all countries")
+    }
+    
+    @MainActor
+    func fetchStationsForCurrentCountry() async {
+        guard let currentCountry = countries.first(where: { $0.name == selectedCountry }) else {
+            print("🌐 Radio Browser API: No country selected or country not found")
+            return
+        }
+        
+        await fetchStationsFromAPI(for: currentCountry)
+    }
+    
+    @MainActor
+    func fetchStationsForSelectedCountry() async {
+        print("🌐 Radio Browser API: fetchStationsForSelectedCountry called for country: \(selectedCountry)")
+        
+        // First try to find the country in the existing countries array
+        var currentCountry = countries.first(where: { $0.name == selectedCountry })
+        
+        // If not found (common on fresh install), create a country object as fallback
+        if currentCountry == nil && selectedCountry != "Select Country" {
+            print("🌐 Radio Browser API: Country not found in array, creating fallback country object for: \(selectedCountry)")
+            currentCountry = Country(name: selectedCountry, flag: "")
+            print("🌐 Radio Browser API: Created fallback country with API code: \(currentCountry?.apiCountryCode ?? "nil")")
+        }
+        
+        guard let country = currentCountry else {
+            print("🌐 Radio Browser API: No country selected or could not create country object for: \(selectedCountry)")
+            return
+        }
+        
+        print("🌐 Radio Browser API: Found/created country: \(country.name) with API code: \(country.apiCountryCode)")
+        
+        // Always fetch stations for the selected country to get the latest available stations
+        // The duplicate prevention logic in fetchStationsFromAPI will filter out any existing stations
+        let existingStationsForCountry = stations.filter { $0.country == selectedCountry }
+        print("🌐 Radio Browser API: Current stations for \(selectedCountry): \(existingStationsForCountry.count). Fetching latest stations from API...")
+        await fetchStationsFromAPI(for: country)
+    }
+    
+    func reportStationClick(for station: RadioStation) {
+        Task {
+            await RadioBrowserAPI.shared.reportStationClick(stationUuid: station.id)
+        }
+    }
+    
+    // MARK: - Background Favicon Download
+    
+    @MainActor
+    private func downloadFaviconsInBackground(for stations: [RadioStation], apiStations: [RadioBrowserStation]) async {
+        guard !stations.isEmpty else {
+            print("🖼️ All stations already have cached favicons - skipping download")
+            return
+        }
+        
+        print("🖼️ Downloading favicons for \(stations.count) stations (others already cached)")
+        let stationAPIMap = Dictionary(uniqueKeysWithValues: zip(stations.map { $0.id }, apiStations))
+        
+        // Create URLSession with timeout for favicon downloads
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 3.0 // 3 second timeout
+        config.timeoutIntervalForResource = 5.0 // 5 second total timeout
+        let timeoutSession = URLSession(configuration: config)
+        
+        // Download favicons with limited concurrency to avoid overwhelming the network
+        await withTaskGroup(of: (String, String?).self) { group in
+            var downloadCount = 0
+            
+            for station in stations {
+                // Limit concurrent downloads to avoid overwhelming network
+                guard downloadCount < 5 else { break }
+                
+                if let apiStation = stationAPIMap[station.id],
+                   let faviconURL = apiStation.favicon,
+                   !faviconURL.isEmpty,
+                   let url = URL(string: faviconURL) {
+                    
+                    downloadCount += 1
+                    group.addTask {
+                        do {
+                            let (data, _) = try await timeoutSession.data(from: url)
+                            if let image = UIImage(data: data),
+                               let jpegData = image.jpegData(compressionQuality: 0.6) {
+                                return (station.id, jpegData.base64EncodedString())
+                            }
+                        } catch {
+                            // Silently fail - station will just not have an icon
+                        }
+                        return (station.id, nil)
+                    }
+                }
+            }
+            
+            // Update stations with downloaded favicons as they complete
+            for await (stationId, iconData) in group {
+                if let iconData = iconData,
+                   let index = self.stations.firstIndex(where: { $0.id == stationId }) {
+                    self.stations[index].iconData = iconData
+                    print("✅ Favicon downloaded and cached for station: \(self.stations[index].name)")
+                    
+                    // Save to Core Data in background for persistent caching
+                    Task.detached {
+                        await self.updateStationIconInCoreData(stationId: stationId, iconData: iconData)
+                    }
+                }
+            }
+        }
+        
+        // Clean up the session
+        timeoutSession.invalidateAndCancel()
+    }
+    
+    private func updateStationIconInCoreData(stationId: String, iconData: String) async {
+        let context = CoreDataStack.shared.persistentContainer.newBackgroundContext()
+        
+        await context.perform {
+            let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", stationId)
+            
+            do {
+                if let station = try context.fetch(fetchRequest).first {
+                    station.iconData = iconData
+                    try context.save()
+                    print("💾 Favicon cached to Core Data for station: \(station.name ?? "Unknown")")
+                } else {
+                    print("⚠️ Station not found in Core Data for favicon caching: \(stationId)")
+                }
+            } catch {
+                print("❌ Failed to cache favicon to Core Data: \(error)")
+            }
+        }
     }
 }
 

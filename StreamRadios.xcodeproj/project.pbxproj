@@ -47,6 +47,7 @@
 		774FED5B2E1983FD0084FA72 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774FED582E1983FD0084FA72 /* AboutView.swift */; };
 		774FED5C2E1983FD0084FA72 /* PrivacyPolicyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774FED592E1983FD0084FA72 /* PrivacyPolicyView.swift */; };
 		774FED5D2E1983FD0084FA72 /* TermsAndConditionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774FED5A2E1983FD0084FA72 /* TermsAndConditionsView.swift */; };
+		774FED5F2E199D520084FA72 /* RadioBrowserAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774FED5E2E199D520084FA72 /* RadioBrowserAPI.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
 		775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775B55562C30E8C100ECDBF0 /* Tabs.swift */; };
 		775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04282C287AF700E99061 /* ShazamViewModel.swift */; };
@@ -169,6 +170,7 @@
 		774FED582E1983FD0084FA72 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		774FED592E1983FD0084FA72 /* PrivacyPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyPolicyView.swift; sourceTree = "<group>"; };
 		774FED5A2E1983FD0084FA72 /* TermsAndConditionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermsAndConditionsView.swift; sourceTree = "<group>"; };
+		774FED5E2E199D520084FA72 /* RadioBrowserAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioBrowserAPI.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		775B55562C30E8C100ECDBF0 /* Tabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tabs.swift; sourceTree = "<group>"; };
 		775D04282C287AF700E99061 /* ShazamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamViewModel.swift; sourceTree = "<group>"; };
@@ -359,6 +361,7 @@
 			children = (
 				7707DA652C156F8D006D5EBB /* RadioStation.swift */,
 				7715BD972C4C9D8300FA7CB1 /* ExportStation.swift */,
+				774FED5E2E199D520084FA72 /* RadioBrowserAPI.swift */,
 				7780E96E2C3E2C05009CCF6F /* Country.swift */,
 			);
 			path = Models;
@@ -608,6 +611,7 @@
 				774FED5B2E1983FD0084FA72 /* AboutView.swift in Sources */,
 				774FED5C2E1983FD0084FA72 /* PrivacyPolicyView.swift in Sources */,
 				774FED5D2E1983FD0084FA72 /* TermsAndConditionsView.swift in Sources */,
+				774FED5F2E199D520084FA72 /* RadioBrowserAPI.swift in Sources */,
 				35784634DC5C44839E7A7E8C /* CarPlayManager.swift in Sources */,
 				CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */,
 				77E23F4E2C90A0B300CDECD9 /* PlaybackManager.swift in Sources */,

@@ -948,6 +948,50 @@ struct InternalDataManagementView: View {
                        }
                     }
                     
+                    // Radio Station Discovery Section
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.body)
+                                .foregroundColor(.blue)
+                                .frame(width: 20)
+                            
+                            Text("Discover Radio Stations")
+                                .font(.body)
+                                .foregroundColor(colorScheme == .dark ? .white : .primary)
+                            
+                            Spacer()
+                        }
+                    }
+                    
+                    VStack(spacing: 12) {
+                        ModernActionButton(
+                            title: "Find Stations for Current Country",
+                            subtitle: viewModel.selectedCountry == "Select Country" ? 
+                                "Select a country first" : 
+                                "Discover 20 popular stations in \(viewModel.selectedCountry)",
+                            icon: "magnifyingglass.circle.fill"
+                        ) {
+                            Task {
+                                await viewModel.fetchStationsForCurrentCountry()
+                            }
+                        }
+                        
+                        ModernActionButton(
+                            title: "Find Stations for All Countries",
+                            subtitle: "Discover stations worldwide (this may take a few minutes)",
+                            icon: "globe.americas.fill"
+                        ) {
+                            Task {
+                                await viewModel.fetchStationsForAllCountries()
+                            }
+                        }
+                        
+                        if viewModel.isLoading {
+                            ModernProgressView(title: "Discovering stations...")
+                        }
+                    }
+                    
                     ActionButton(
                         title: "Export Stations",
                         subtitle: "Save stations to a file",
@@ -1492,5 +1536,75 @@ struct FeatureBadge: View {
                 .fill(.green.opacity(0.2))
         )
         .foregroundColor(.green)
+    }
+}
+
+// Modern UI Components for Radio Discovery
+struct ModernActionButton: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let action: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(.blue)
+                    .frame(width: 32, height: 32)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                        .multilineTextAlignment(.leading)
+                    
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(colorScheme == .dark ? Color.gray.opacity(0.2) : Color.blue.opacity(0.1))
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct ModernProgressView: View {
+    let title: String
+    @Environment(\.colorScheme) var colorScheme
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+                .scaleEffect(0.8)
+            
+            Text(title)
+                .font(.body)
+                .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+            
+            Spacer()
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(colorScheme == .dark ? Color.gray.opacity(0.1) : Color.gray.opacity(0.05))
+        )
     }
 }

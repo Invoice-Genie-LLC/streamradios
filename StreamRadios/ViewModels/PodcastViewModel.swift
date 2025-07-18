@@ -148,6 +148,7 @@ class PodcastViewModel: ObservableObject {
     
     init() {
         setupObservers()
+        setupDataSyncCoordination()
         
         // Load feeds from Core Data (radio station pattern)
         // Note: For fresh installs, this will initially find no feeds, but once RSS processing
@@ -166,6 +167,28 @@ class PodcastViewModel: ObservableObject {
         refreshTask?.cancel()
         uiUpdateTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
+    }
+    
+    /// Setup coordination with DataSyncManager
+    private func setupDataSyncCoordination() {
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("DataSyncManager_RequestPodcastStatus"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.reportStatusToDataSyncManager()
+        }
+    }
+    
+    /// Report current loading status to DataSyncManager
+    private func reportStatusToDataSyncManager() {
+        let loadingComplete = !isLoading && !isLoadingFeeds && !isLoadingEpisodes
+        let feedsLoaded = !podcastFeeds.isEmpty
+        
+        UserDefaults.standard.set(loadingComplete, forKey: "PodcastViewModel_LoadingComplete")
+        UserDefaults.standard.set(feedsLoaded, forKey: "PodcastViewModel_FeedsLoaded")
+        
+        print("📊 PodcastViewModel status report - Loading complete: \(loadingComplete), Feeds loaded: \(feedsLoaded), Feed count: \(podcastFeeds.count)")
     }
     
     // PERFORMANCE: Throttled UI update method to improve scrolling performance
@@ -925,6 +948,9 @@ class PodcastViewModel: ObservableObject {
                 print("🔍 DEBUG: Updated currentEpisodes to \(self.currentEpisodes.count) episodes")
                 os_log("📊 Loaded %d episodes (page %d), hasMore: %@", 
                       log: self.log, type: .info, result.episodes.count, page, result.hasMore ? "true" : "false")
+                
+                // Report status to DataSyncManager when loading completes
+                self.reportStatusToDataSyncManager()
             }
             
             // Update episode counts
@@ -2865,6 +2891,9 @@ extension PodcastViewModel {
                 // Single UI refresh after all properties are updated
                 self.throttledUIUpdate()
                 print("📡 ✅ MAIN THREAD: Triggered objectWillChange for UI refresh")
+                
+                // Report status to DataSyncManager
+                self.reportStatusToDataSyncManager()
             }
             
             print("📡 Loaded \(loadedFeeds.count) podcast feeds from CoreData.")

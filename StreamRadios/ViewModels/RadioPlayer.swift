@@ -975,6 +975,9 @@ class RadioPlayer: NSObject, ObservableObject {
         let station = stations[index]
         print("🔄 Station Transition: Playing \(station.name) at index \(index)")
         
+        // Report station click to Radio Browser API if station was discovered from there
+        viewModel?.reportStationClick(for: station)
+        
         // CRITICAL: Reset network evaluation for fresh quality assessment on new station
         streamQualityManager.resetNetworkEvaluation()
         print("🌐 Station Transition: Reset network evaluation for fresh quality assessment")
