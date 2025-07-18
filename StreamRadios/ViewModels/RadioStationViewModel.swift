@@ -158,6 +158,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 print("App relaunch detected.")
                 // Removed the second syncStationsWithCloudKit() call for performance optimization
             }
+            
+            // INITIAL API FETCH: Automatically fetch stations for the initially selected country
+            // This ensures the station list updates immediately when the app opens with a country already selected
+            if selectedCountry != "Select Country" {
+                print("🌍 Initial load: Fetching fresh stations for pre-selected country: \(selectedCountry)")
+                Task { @MainActor in
+                    await fetchStationsForSelectedCountry()
+                }
+            }
         }
     
     func importStationsFromFile(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
