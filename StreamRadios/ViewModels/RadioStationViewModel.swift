@@ -948,6 +948,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let existingURLs = Set(stations.map { $0.url })
             let uniqueNewStations = newStations.filter { !existingURLs.contains($0.url) }
             
+            // Calculate counts for notification
+            let totalFetched = apiStations.count
+            let newStationsAdded = uniqueNewStations.count
+            let skippedCount = totalFetched - newStationsAdded
+            
             guard !uniqueNewStations.isEmpty else {
                 print("📡 RadioBrowserAPI: All fetched stations already exist for \(country.name)")
                 isLoading = false
@@ -987,6 +992,21 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
             
+            // Notify user about the fetch results (only when new stations were added)
+            DispatchQueue.main.async {
+                let notificationMessage: String
+                if skippedCount > 0 {
+                    notificationMessage = "Added \(newStationsAdded) new stations for \(country.name). Skipped \(skippedCount) stations already in your list."
+                } else {
+                    notificationMessage = "Added \(newStationsAdded) new stations for \(country.name)."
+                }
+                
+                NotificationManager.shared.notifyUserImmediate(
+                    title: "Radio Stations Fetched",
+                    message: notificationMessage
+                )
+            }
+            
             // Notify that stations have been updated
             NotificationCenter.default.post(name: .stationsUpdated, object: nil)
             
@@ -1004,6 +1024,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
         let supportedCountries = countries.filter { $0.supportsRadioLookup }
         print("🌐 Radio Browser API: Found \(supportedCountries.count) supported countries")
         
+        let initialStationCount = stations.count
+        
         for country in supportedCountries {
             await fetchStationsFromAPI(for: country)
             
@@ -1011,7 +1033,20 @@ class RadioStationViewModel: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
         }
         
+        let finalStationCount = stations.count
+        let totalStationsAdded = finalStationCount - initialStationCount
+        
         print("🌐 Radio Browser API: Finished fetching stations for all countries")
+        
+        // Notify user about the overall results (only when new stations were added)
+        if totalStationsAdded > 0 {
+            DispatchQueue.main.async {
+                NotificationManager.shared.notifyUserImmediate(
+                    title: "Global Radio Fetch Complete",
+                    message: "Completed fetching stations from \(supportedCountries.count) countries. Added \(totalStationsAdded) new stations to your collection."
+                )
+            }
+        }
     }
     
     @MainActor
