@@ -262,13 +262,13 @@ struct CountryRow: View {
                         Image(systemName: "flag.slash")
                             .foregroundColor(.adaptiveSecondaryText)
                             .font(.body)
-                            .frame(width: 32, height: 24)
+                            .frame(width: 40, height: 30)
                     } else {
                         if let flag = Flag(countryCode: country.flag) {
                             Image(uiImage: flag.image(style: .roundedRect))
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
-                                .frame(width: 32, height: 24)
+                                .frame(width: 40, height: 30)
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 4)
@@ -278,7 +278,7 @@ struct CountryRow: View {
                             Image(systemName: "flag.slash")
                                 .foregroundColor(.adaptiveSecondaryText)
                                 .font(.body)
-                                .frame(width: 32, height: 24)
+                                .frame(width: 40, height: 30)
                         }
                     }
                 }
@@ -417,7 +417,7 @@ struct CountryPickerButton: View {
                         Image(uiImage: flag.image(style: .roundedRect))
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: 24, height: 16)
+                            .frame(width: 30, height: 20)
                             .clipShape(RoundedRectangle(cornerRadius: 2))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 2)
@@ -427,7 +427,7 @@ struct CountryPickerButton: View {
                         Image(systemName: "flag.slash")
                             .foregroundColor(.adaptiveSecondaryText)
                             .font(.body)
-                            .frame(width: 24, height: 16)
+                            .frame(width: 30, height: 20)
                     }
                 }
                 

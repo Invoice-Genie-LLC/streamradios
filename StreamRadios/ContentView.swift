@@ -344,7 +344,7 @@ struct ContentView: View {
                             }
                             .padding(.horizontal, 16)
                         }
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 1)
                         .background(Color.adaptiveSectionBackground)
                         .cornerRadius(12)
                         .padding(.horizontal, 16)
