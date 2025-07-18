@@ -10,6 +10,13 @@ struct SubscriptionView: View {
     @State private var showTerms = false
     @State private var showPrivacy = false
     
+    // Parameter to track if view was opened from Settings (to show "You're all set!" screen)
+    let showManagementScreen: Bool
+    
+    init(showManagementScreen: Bool = false) {
+        self.showManagementScreen = showManagementScreen
+    }
+    
     var body: some View {
         NavigationView {
             ZStack {
@@ -27,9 +34,20 @@ struct SubscriptionView: View {
                         
                         switch subscriptionManager.subscriptionStatus {
                         case .subscribed, .oneTimePurchased:
-                            subscribedSection
+                            // Only show "You're all set!" screen if opened from Settings
+                            if showManagementScreen {
+                                subscribedSection
+                            } else {
+                                // Auto-dismiss if user is subscribed but view wasn't opened from Settings
+                                EmptyView()
+                            }
                         case .freeTrial(let daysRemaining):
-                            trialSection(daysRemaining: daysRemaining)
+                            if showManagementScreen {
+                                trialSection(daysRemaining: daysRemaining)
+                            } else {
+                                // Auto-dismiss if user is in trial but view wasn't opened from Settings
+                                EmptyView()
+                            }
                         case .needsRestore:
                             restoreNeededSection
                         default:
@@ -76,6 +94,19 @@ struct SubscriptionView: View {
             // Check subscription status when view appears to update trial expiration
             Task {
                 await subscriptionManager.updateSubscriptionStatus()
+                
+                // Auto-dismiss if user is subscribed/in trial but view wasn't opened from Settings
+                if !showManagementScreen && subscriptionManager.isSubscribedOrInTrial {
+                    print("✅ User is subscribed/in trial - auto-dismissing subscription view")
+                    dismiss()
+                }
+            }
+        }
+        .onChange(of: subscriptionManager.subscriptionStatus) { oldStatus, newStatus in
+            // Auto-dismiss if subscription status changes to subscribed/trial and not opened from Settings
+            if !showManagementScreen && subscriptionManager.isSubscribedOrInTrial {
+                print("✅ Subscription status changed to \(newStatus) - auto-dismissing subscription view")
+                dismiss()
             }
         }
     }
@@ -747,6 +778,10 @@ struct TertiaryButtonStyle: ButtonStyle {
     }
 }
 
-#Preview {
+#Preview("Subscription Flow") {
     SubscriptionView()
+}
+
+#Preview("Management Screen") {
+    SubscriptionView(showManagementScreen: true)
 }

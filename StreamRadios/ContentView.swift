@@ -460,6 +460,13 @@ struct ContentView: View {
             .onReceive(radioPlayer.bitrateSubject) { newBitrateMessage in
                 bitrateMessage = newBitrateMessage
             }
+            .onChange(of: subscriptionManager.subscriptionStatus) { oldStatus, newStatus in
+                // Auto-hide subscription sheet if user becomes subscribed/trial
+                if showingSubscriptionView && subscriptionManager.isSubscribedOrInTrial {
+                    print("✅ Subscription status changed to \(newStatus) - hiding subscription sheet")
+                    showingSubscriptionView = false
+                }
+            }
             .onChange(of: activeSheet) { oldValue, newValue in
                 // Clear selectedStationForEdit when activeSheet becomes nil
                 if newValue == nil {
@@ -576,14 +583,23 @@ struct ContentView: View {
     }
     
     private func checkSubscriptionStatus() {
-        // Wait a moment for the app to fully load, then check subscription status
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            // Always show paywall for non-subscribers - no dismissal allowed
-            if !subscriptionManager.isSubscribedOrInTrial {
-                print("🔔 Showing mandatory subscription paywall for non-subscriber")
-                showingSubscriptionView = true
-            } else {
-                print("✅ User is subscribed or in trial - not showing paywall")
+        // Use async/await to properly wait for subscription status update
+        Task {
+            // Wait a moment for the app to fully load
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            
+            // Ensure subscription status is fully updated before checking
+            await subscriptionManager.updateSubscriptionStatus()
+            
+            await MainActor.run {
+                // Double-check subscription status after update
+                if !subscriptionManager.isSubscribedOrInTrial {
+                    print("🔔 Showing mandatory subscription paywall for non-subscriber")
+                    showingSubscriptionView = true
+                } else {
+                    print("✅ User is subscribed or in trial - not showing paywall")
+                    print("   Current status: \(subscriptionManager.subscriptionStatus)")
+                }
             }
         }
     }

@@ -234,7 +234,7 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showingSubscriptionView) {
-            SubscriptionView()
+            SubscriptionView(showManagementScreen: true)
                 .environmentObject(subscriptionManager)
         }
     }

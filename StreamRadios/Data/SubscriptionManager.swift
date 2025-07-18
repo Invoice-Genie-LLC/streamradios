@@ -34,7 +34,7 @@ class SubscriptionManager: ObservableObject {
     private let lastKnownSubscriptionKey = "LastKnownSubscriptionStatus"
     private let oneTimePurchaseKey = "HasOneTimePurchase"
     
-    enum SubscriptionStatus {
+    enum SubscriptionStatus: Equatable {
         case unknown
         case notSubscribed
         case freeTrial(daysRemaining: Int)
@@ -83,6 +83,51 @@ class SubscriptionManager: ObservableObject {
     
     // MARK: - Initialization
     
+    /// Validates that the subscription product has the correct 7-day trial configuration
+    private func validateSubscriptionConfiguration() async {
+        guard let subscriptionProduct = products.first(where: { $0.id == subscriptionProductId }) else {
+            print("❌ Subscription product '\(subscriptionProductId)' not found")
+            return
+        }
+        
+        print("🔍 Validating subscription configuration for: \(subscriptionProduct.displayName)")
+        
+        guard let subscription = subscriptionProduct.subscription else {
+            print("❌ Product is not a subscription type - check App Store Connect configuration")
+            return
+        }
+        
+        if let introductoryOffer = subscription.introductoryOffer {
+            print("✅ Introductory offer found:")
+            print("   - Type: \(introductoryOffer.type)")
+            print("   - Period: \(introductoryOffer.period)")
+            print("   - Period Count: \(introductoryOffer.periodCount)")
+            print("   - Price: \(introductoryOffer.displayPrice)")
+            
+            // Check if it's configured as expected (7-day free trial)
+            if introductoryOffer.paymentMode == .freeTrial && 
+               introductoryOffer.period.unit == .day && 
+               introductoryOffer.periodCount == 7 {
+                print("✅ Perfect! 7-day free trial is correctly configured")
+            } else {
+                print("⚠️ Trial configuration doesn't match expected 7-day free trial:")
+                print("   - Expected: 7-day free trial")
+                print("   - Current: \(introductoryOffer.periodCount) \(introductoryOffer.period.unit) \(introductoryOffer.paymentMode)")
+            }
+        } else {
+            print("❌ CRITICAL: NO INTRODUCTORY OFFER CONFIGURED!")
+            print("🔧 To fix this issue in App Store Connect:")
+            print("   1. Go to App Store Connect → My Apps → StreamRadios")
+            print("   2. Navigate to Subscriptions → \(subscriptionProductId)")
+            print("   3. Add Introductory Offer:")
+            print("      - Type: Free Trial")
+            print("      - Duration: 7 days")
+            print("      - Price: $0.00")
+            print("   4. Submit for review if needed")
+            print("   ⚠️ Until fixed, recent subscriptions will be treated as trials automatically")
+        }
+    }
+    
     func initialize() async {
         guard !isInitialized else { return }
         
@@ -105,6 +150,9 @@ class SubscriptionManager: ObservableObject {
                 self.products = products
                 print("📦 Loaded \(products.count) products")
             }
+            
+            // Validate subscription product configuration
+            await validateSubscriptionConfiguration()
             
             // Check current subscription status
             await updateSubscriptionStatus()
@@ -170,17 +218,26 @@ class SubscriptionManager: ObservableObject {
                 
                 // Check if this is our subscription product
                 if transaction.productID == subscriptionProductId {
+                    print("📋 Processing subscription transaction:")
+                    print("   - Product ID: \(transaction.productID)")
+                    print("   - Purchase Date: \(transaction.purchaseDate)")
+                    print("   - Is Upgraded: \(transaction.isUpgraded)")
+                    print("   - Revocation Date: \(transaction.revocationDate?.description ?? "none")")
+                    
                     await MainActor.run {
                         if transaction.isUpgraded == false || transaction.revocationDate == nil {
                             // Check if it's a trial or regular subscription
                             if isFreeTrial(transaction: transaction) {
                                 let daysRemaining = calculateTrialDaysRemaining(transaction: transaction)
                                 self.subscriptionStatus = .freeTrial(daysRemaining: max(0, daysRemaining))
+                                print("✅ Set status to free trial with \(daysRemaining) days remaining")
                             } else {
                                 self.subscriptionStatus = .subscribed
+                                print("✅ Set status to regular subscription")
                             }
                         } else {
                             self.subscriptionStatus = .expired
+                            print("❌ Set status to expired")
                         }
                     }
                     return
@@ -209,9 +266,33 @@ class SubscriptionManager: ObservableObject {
     }
     
     private func isFreeTrial(transaction: StoreKit.Transaction) -> Bool {
-        // Check if this is a trial period
-        // Note: In StoreKit 2, you can check if it's an introductory offer
-        return transaction.offerType == .introductory
+        // Enhanced trial detection with fallback logic
+        print("🔍 Checking trial status for transaction:")
+        print("   - Product ID: \(transaction.productID)")
+        print("   - Purchase Date: \(transaction.purchaseDate)")
+        print("   - Offer Type: \(transaction.offerType?.rawValue.description ?? "none")")
+        print("   - Environment: \(transaction.environment.rawValue)")
+        
+        // Primary check: App Store Connect configured trial
+        if transaction.offerType == .introductory {
+            print("✅ App Store Connect trial detected")
+            return true
+        }
+        
+        // FALLBACK: If App Store Connect doesn't have trial configured,
+        // treat recent subscriptions (within 7 days) as trials
+        let sevenDaysAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        let isRecentSubscription = transaction.purchaseDate > sevenDaysAgo
+        
+        if isRecentSubscription {
+            print("⚠️ App Store Connect trial NOT configured, but treating recent subscription as trial")
+            print("   - This subscription should have a 7-day trial period")
+            print("   - Please configure introductory offer in App Store Connect")
+            return true
+        }
+        
+        print("❌ No trial detected - regular subscription")
+        return false
     }
     
     private func calculateTrialDaysRemaining(transaction: StoreKit.Transaction) -> Int {
@@ -276,6 +357,24 @@ class SubscriptionManager: ObservableObject {
         
         guard let product = products.first(where: { $0.id == subscriptionProductId }) else {
             throw SubscriptionError.productNotFound
+        }
+        
+        // Check if the product has introductory offers configured
+        print("🛒 Purchasing subscription:")
+        print("   - Product ID: \(product.id)")
+        print("   - Display Name: \(product.displayName)")
+        print("   - Price: \(product.displayPrice)")
+        
+        if let introductoryOffer = product.subscription?.introductoryOffer {
+            print("✅ Introductory offer found:")
+            print("   - Type: \(introductoryOffer.type)")
+            print("   - Period: \(introductoryOffer.period)")
+            print("   - Price: \(introductoryOffer.displayPrice)")
+        } else {
+            print("⚠️ NO INTRODUCTORY OFFER CONFIGURED!")
+            print("   - This product should have a 7-day free trial")
+            print("   - Please add introductory offer in App Store Connect:")
+            print("   - Type: Free Trial, Duration: 7 days")
         }
         
         let result = try await product.purchase()
