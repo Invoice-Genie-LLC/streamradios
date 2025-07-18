@@ -334,7 +334,10 @@ struct ContentView: View {
                             HStack {
                                 CountryPickerButton(
                                     selectedCountry: $viewModel.selectedCountry,
-                                    countries: viewModel.countries
+                                    countries: viewModel.countries,
+                                    stationCount: { country in
+                                        viewModel.stations.filter { $0.country == country }.count
+                                    }
                                 )
                                 
                                 Spacer()

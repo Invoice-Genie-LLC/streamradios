@@ -11,6 +11,7 @@ import FlagKit
 struct CountryPicker: View {
     @Binding var selectedCountry: String
     var countries: [Country]
+    var stationCount: ((String) -> Int)?
     @Environment(\.presentationMode) var presentationMode
     
     @State private var searchText = ""
@@ -78,7 +79,8 @@ struct CountryPicker: View {
                                 CountryRow(
                                     country: country,
                                     isSelected: selectedCountry == country.name,
-                                    showRegion: false
+                                    showRegion: false,
+                                    stationCount: stationCount?(country.name)
                                 ) {
                                     selectCountry(country.name)
                                 }
@@ -103,7 +105,8 @@ struct CountryPicker: View {
                                 CountryRow(
                                     country: country,
                                     isSelected: selectedCountry == country.name,
-                                    showRegion: false
+                                    showRegion: false,
+                                    stationCount: stationCount?(country.name)
                                 ) {
                                     selectCountry(country.name)
                                 }
@@ -129,7 +132,8 @@ struct CountryPicker: View {
                                     CountryRow(
                                         country: country,
                                         isSelected: selectedCountry == country.name,
-                                        showRegion: searchText.isEmpty ? false : true
+                                        showRegion: searchText.isEmpty ? false : true,
+                                        stationCount: stationCount?(country.name)
                                     ) {
                                         selectCountry(country.name)
                                     }
@@ -246,6 +250,7 @@ struct CountryRow: View {
     let country: Country
     let isSelected: Bool
     let showRegion: Bool
+    let stationCount: Int?
     let onTap: () -> Void
     
     var body: some View {
@@ -292,6 +297,17 @@ struct CountryRow: View {
                 }
                 
                 Spacer()
+                
+                // Station count badge
+                if let count = stationCount, count > 0 {
+                    Text("\(count)")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.8))
+                        .cornerRadius(10)
+                }
                 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
@@ -385,6 +401,7 @@ enum CountryRegion: String, CaseIterable, Hashable {
 struct CountryPickerButton: View {
     @Binding var selectedCountry: String
     var countries: [Country]
+    var stationCount: ((String) -> Int)?
     @State private var showingPicker = false
     
     var body: some View {
@@ -414,11 +431,22 @@ struct CountryPickerButton: View {
                     }
                 }
                 
-                Text(selectedCountry.isEmpty || selectedCountry == "Select Country" ? "Select Country" : selectedCountry)
-                    .font(.body)
-                    .foregroundColor(.adaptivePrimaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(selectedCountry.isEmpty || selectedCountry == "Select Country" ? "Select Country" : selectedCountry)
+                        .font(.body)
+                        .foregroundColor(.adaptivePrimaryText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    
+                    // Show station count for selected country
+                    if let count = stationCount?(selectedCountry), count > 0, selectedCountry != "Select Country" && !selectedCountry.isEmpty {
+                        Text("\(count) stations")
+                            .font(.caption)
+                            .foregroundColor(.adaptiveSecondaryText)
+                    }
+                }
+                
+                Spacer()
                 
                 Image(systemName: "chevron.down")
                     .font(.body)
@@ -430,7 +458,7 @@ struct CountryPickerButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .sheet(isPresented: $showingPicker) {
-            CountryPicker(selectedCountry: $selectedCountry, countries: countries)
+            CountryPicker(selectedCountry: $selectedCountry, countries: countries, stationCount: stationCount)
         }
     }
 }
@@ -438,14 +466,24 @@ struct CountryPickerButton: View {
 struct CountryPicker_Previews: PreviewProvider {
     static var previews: some View {
         CountryPickerButton(
-            selectedCountry: .constant("Select Country"),
+            selectedCountry: .constant("Canada"),
             countries: [
                 Country(name: "Select Country", flag: ""),
                 Country(name: "Canada", flag: "CA"),
                 Country(name: "Mexico", flag: "MX"),
                 Country(name: "Germany", flag: "DE"),
                 Country(name: "France", flag: "FR")
-            ]
+            ],
+            stationCount: { country in
+                // Sample station counts for preview
+                switch country {
+                case "Canada": return 15
+                case "Mexico": return 8
+                case "Germany": return 25
+                case "France": return 12
+                default: return 0
+                }
+            }
         )
         .previewLayout(.sizeThatFits)
         .padding()

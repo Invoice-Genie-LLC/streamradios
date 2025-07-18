@@ -941,7 +941,10 @@ struct InternalDataManagementView: View {
                        
                        CountryPickerButton(
                            selectedCountry: $viewModel.selectedCountry,
-                           countries: viewModel.countries
+                           countries: viewModel.countries,
+                           stationCount: { country in
+                               viewModel.stations.filter { $0.country == country }.count
+                           }
                        )
                        .onChange(of: viewModel.selectedCountry) { newValue in
                            viewModel.selectedCountry = newValue

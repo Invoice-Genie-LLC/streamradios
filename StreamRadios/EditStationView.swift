@@ -346,7 +346,8 @@ struct SimpleCountryPicker: View {
             HStack {
                 CountryPickerButton(
                     selectedCountry: $selectedCountry,
-                    countries: countries
+                    countries: countries,
+                    stationCount: nil
                 )
                 
                 Spacer()
