@@ -171,13 +171,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // Removed the second syncStationsWithCloudKit() call for performance optimization
             }
             
-            // INITIAL API FETCH: Automatically fetch stations for the initially selected country
-            // This ensures the station list updates immediately when the app opens with a country already selected
+            // INSTANT STARTUP: Skip automatic API refresh on startup to show cached stations immediately
+            // Users can manually refresh if they want fresh stations from the API
+            // This ensures cached stations appear instantly without any loading states
             if selectedCountry != "Select Country" {
-                print("🌍 Initial load: Fetching fresh stations for pre-selected country: \(selectedCountry)")
-                Task { @MainActor in
-                    await fetchStationsForSelectedCountry()
-                }
+                print("⚡ Instant startup: Showing cached stations for \(selectedCountry). API refresh available via manual refresh.")
             }
         }
     
@@ -1327,6 +1325,9 @@ extension RadioStationViewModel {
     }
     
     func loadStationsFromCoreData() {
+        // Set loading state to prevent UI delays
+        isLoading = true
+        
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
         
@@ -1340,8 +1341,11 @@ extension RadioStationViewModel {
                 print("No stations found in CoreData.")
                 stations.removeAll()
                 print("📡 ✅ Cleared all in-memory station data due to empty Core Data")
+                isLoading = false
                 return
             }
+            
+            // Map Core Data objects to app models
             stations = results.map { cdStation in
                 RadioStation(
                     id: cdStation.id ?? UUID().uuidString,
@@ -1356,19 +1360,32 @@ extension RadioStationViewModel {
                     lastPlayed: cdStation.lastPlayed
                 )
             }
-            print("Loaded \(stations.count) stations from CoreData.")
+            print("⚡ Instantly loaded \(stations.count) stations from CoreData.")
             
-            // Initialize proper order values for stations that might not have them
-            initializeOrderValues()
+            // Set loading to false immediately to show stations
+            isLoading = false
             
             // Post notification that stations have been loaded
             NotificationCenter.default.post(name: NSNotification.Name("StationsLoaded"), object: nil)
             
-            // Migration: Set favoritedAt for existing favorites that don't have a timestamp
-            migrateFavoriteTimestamps()
+            // Defer maintenance operations to avoid blocking initial station display
+            DispatchQueue.main.async { [weak self] in
+                self?.performDeferredMaintenance()
+            }
+            
         } catch {
             print("Failed to load stations from CoreData: \(error)")
+            isLoading = false
         }
+    }
+    
+    /// Perform maintenance operations asynchronously to avoid blocking initial station display
+    private func performDeferredMaintenance() {
+        // Initialize proper order values for stations that might not have them
+        initializeOrderValues()
+        
+        // Migration: Set favoritedAt for existing favorites that don't have a timestamp
+        migrateFavoriteTimestamps()
     }
     
     private func initializeOrderValues() {

@@ -77,12 +77,10 @@ struct RadioStreamApp: App {
             print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
             fetchStationsFromCloudKit()
         } else {
-            print("⚡ Skipping CloudKit radio station sync - loading from local storage only for better performance")
-            viewModel.loadStationsFromCoreData()
-            // After loading stations, ensure radio player state is restored
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                radioPlayer.restoreStateAfterStationsLoaded()
-            }
+            print("⚡ Skipping CloudKit radio station sync - stations already loaded by ViewModel for instant startup")
+            // RadioStationViewModel already loaded stations in its init, no need to reload
+            // Restore radio player state immediately since stations are already available
+            radioPlayer.restoreStateAfterStationsLoaded()
         }
         
         // Initialize podcast system with CloudKit support
@@ -109,9 +107,7 @@ struct RadioStreamApp: App {
                     NotificationCenter.default.post(name: .stationsUpdated, object: nil)
                     
                     // After loading stations from CloudKit, ensure radio player state is restored
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        RadioPlayer.shared.restoreStateAfterStationsLoaded()
-                    }
+                    RadioPlayer.shared.restoreStateAfterStationsLoaded()
                 }
             } else if let error = error {
                 print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")

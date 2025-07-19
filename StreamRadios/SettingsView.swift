@@ -951,50 +951,6 @@ struct InternalDataManagementView: View {
                        }
                     }
                     
-                    // Radio Station Discovery Section
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .font(.body)
-                                .foregroundColor(.blue)
-                                .frame(width: 20)
-                            
-                            Text("Discover Radio Stations")
-                                .font(.body)
-                                .foregroundColor(colorScheme == .dark ? .white : .primary)
-                            
-                            Spacer()
-                        }
-                    }
-                    
-                    VStack(spacing: 12) {
-                        ModernActionButton(
-                            title: "Find Stations for Current Country",
-                            subtitle: viewModel.selectedCountry == "Select Country" ? 
-                                "Select a country first" : 
-                                "Discover 20 popular stations in \(viewModel.selectedCountry)",
-                            icon: "magnifyingglass.circle.fill"
-                        ) {
-                            Task {
-                                await viewModel.fetchStationsForCurrentCountry()
-                            }
-                        }
-                        
-                        ModernActionButton(
-                            title: "Find Stations for All Countries",
-                            subtitle: "Discover stations worldwide (this may take a few minutes)",
-                            icon: "globe.americas.fill"
-                        ) {
-                            Task {
-                                await viewModel.fetchStationsForAllCountries()
-                            }
-                        }
-                        
-                        if viewModel.isLoading {
-                            ModernProgressView(title: "Discovering stations...")
-                        }
-                    }
-                    
                     ActionButton(
                         title: "Export Stations",
                         subtitle: "Save stations to a file",
