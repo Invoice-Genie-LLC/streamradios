@@ -1,5 +1,5 @@
 {
-  "originHash" : "2a49c1eb7b8d98c621f27f82dffd89ec641d7c02a76e1d631ab4a39254079858",
+  "originHash" : "0c64ce8d271f241c677e04de991fa28f864ddae0a23fdb991cfe7b09ce4b43a7",
   "pins" : [
     {
       "identity" : "appauth-ios",
@@ -17,15 +17,6 @@
       "state" : {
         "revision" : "f12111d91902d23fd1d9cc7ad9198030b049795d",
         "version" : "2.4.0"
-      }
-    },
-    {
-      "identity" : "google-api-objectivec-client-for-rest",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/google/google-api-objectivec-client-for-rest.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "9e6f1028bc64c9e534eddb7ad2f1024388e0456f"
       }
     },
     {
@@ -53,15 +44,6 @@
       "state" : {
         "revision" : "5d7d66f647400952b1758b230e019b07c0b4b22a",
         "version" : "4.1.1"
-      }
-    },
-    {
-      "identity" : "ios-sdk",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/spotify/ios-sdk.git",
-      "state" : {
-        "branch" : "master",
-        "revision" : "cc087da108cc95f3ca4aa4e64a526be688472bcb"
       }
     },
     {

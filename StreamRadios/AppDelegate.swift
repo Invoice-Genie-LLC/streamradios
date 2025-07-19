@@ -11,7 +11,6 @@ import UserNotifications
 import AVFoundation
 import SwiftUI
 import BackgroundTasks
-import SpotifyiOS
 import MediaPlayer
 
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -227,10 +226,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
     
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
-        if url.scheme == "spotify-ios-quick-start" {
-            SpotifyAuthorizationManager.shared.handleAuthCallback(url: url)
-            return true
-        }
+        // Handle other URL schemes if needed
         return false
     }
     

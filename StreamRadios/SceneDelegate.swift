@@ -31,10 +31,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         guard let url = URLContexts.first?.url else { return }
-        let handled = SpotifyAuthorizationManager.shared.handleAuthCallback(url: url)
-        if handled {
-            print("Handled Spotify auth callback")
-        }
+        // Handle other URL schemes if needed
     }
     
     func handleIncomingURL(_ url: URL) {

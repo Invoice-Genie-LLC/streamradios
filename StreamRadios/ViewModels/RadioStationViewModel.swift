@@ -928,11 +928,36 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 return
             }
             
+            // DEDUPLICATION: Filter out stations with identical URLs from the API response
+            // Only keep the first occurrence of each unique URL (usually the one with highest click count)
+            var seenURLs = Set<String>()
+            let deduplicatedStations = apiStations.filter { apiStation in
+                guard !apiStation.url.isEmpty else { return false }
+                
+                if seenURLs.contains(apiStation.url) {
+                    print("🔄 Skipping duplicate URL: \(apiStation.url) (Station: \(apiStation.name))")
+                    return false
+                }
+                
+                seenURLs.insert(apiStation.url)
+                return true
+            }
+            
+            let duplicatesSkippedFromAPI = apiStations.count - deduplicatedStations.count
+            if duplicatesSkippedFromAPI > 0 {
+                print("⚡ URL Deduplication: Filtered out \(duplicatesSkippedFromAPI) stations with duplicate URLs from API response")
+            }
+            
+            print("📡 RadioBrowserAPI: Processing \(deduplicatedStations.count) unique stations (removed \(duplicatesSkippedFromAPI) URL duplicates)")
+            
+            // Use deduplicated stations for processing
+            let processedAPIStations = deduplicatedStations
+            
             // Convert API stations to app stations, preserving existing favicon data if available
             let existingStationsMap = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
             var cachedFaviconCount = 0
             
-            let newStations: [RadioStation] = apiStations.compactMap { apiStation in
+            let newStations: [RadioStation] = processedAPIStations.compactMap { apiStation in
                 guard !apiStation.url.isEmpty else { return nil }
                 
                 // Skip stations that were manually deleted by the user
@@ -964,7 +989,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Download favicons in background only for stations that don't have them (non-blocking)
             let stationsNeedingFavicons = newStations.filter { $0.iconData == nil }
             if !stationsNeedingFavicons.isEmpty {
-                let apiStationsMap = Dictionary(uniqueKeysWithValues: apiStations.map { ($0.stationuuid, $0) })
+                let apiStationsMap = Dictionary(uniqueKeysWithValues: processedAPIStations.map { ($0.stationuuid, $0) })
                 let correspondingAPIStations = stationsNeedingFavicons.compactMap { station in
                     apiStationsMap[station.id]
                 }
@@ -980,7 +1005,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Calculate counts for notification
             let totalFetched = apiStations.count
-            let deletedStationsFiltered = totalFetched - newStations.count
+            let totalAfterURLDeduplication = processedAPIStations.count
+            let deletedStationsFiltered = totalAfterURLDeduplication - newStations.count
             let newStationsAdded = uniqueNewStations.count
             let duplicatesSkipped = newStations.count - newStationsAdded
             
@@ -1028,8 +1054,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 var notificationMessage = "Added \(newStationsAdded) new stations for \(country.name)."
                 
                 var skipDetails: [String] = []
+                if duplicatesSkippedFromAPI > 0 {
+                    skipDetails.append("\(duplicatesSkippedFromAPI) duplicate URLs")
+                }
                 if duplicatesSkipped > 0 {
-                    skipDetails.append("\(duplicatesSkipped) duplicates")
+                    skipDetails.append("\(duplicatesSkipped) existing stations")
                 }
                 if deletedStationsFiltered > 0 {
                     skipDetails.append("\(deletedStationsFiltered) previously deleted")
