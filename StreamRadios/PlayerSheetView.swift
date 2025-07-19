@@ -891,7 +891,7 @@ struct PlaylistPickerView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
+                    Button("Done") {
                 presentationMode.wrappedValue.dismiss()
                     }
                     .font(.headline)
@@ -1216,7 +1216,7 @@ struct EnhancedPlaylistPickerView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Cancel") {
+                    Button("Done") {
                         presentationMode.wrappedValue.dismiss()
                     }
                     .font(.headline)
