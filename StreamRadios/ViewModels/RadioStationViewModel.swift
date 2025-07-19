@@ -103,6 +103,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
     private var backgroundObserver: NSObjectProtocol?
     static let shared = RadioStationViewModel()
     
+    // Track manually deleted station IDs to prevent re-fetching
+    private let deletedStationIdsKey = "DeletedStationIds"
+    private var deletedStationIds: Set<String> {
+        get {
+            let array = UserDefaults.standard.array(forKey: deletedStationIdsKey) as? [String] ?? []
+            return Set(array)
+        }
+        set {
+            UserDefaults.standard.set(Array(newValue), forKey: deletedStationIdsKey)
+        }
+    }
+    
     var currentlyPlayingStation: RadioStation? {
             guard let currentStationIndex = RadioPlayer.shared.currentStationIndex,
                   stations.indices.contains(currentStationIndex) else {
@@ -435,10 +447,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         self.clearCoreData { coreDataSuccess, coreDataError in
                             if !isTaskCompleted {
                                 isTaskCompleted = true
-                                if coreDataSuccess {
-                                    self.stations.removeAll()
-                                }
-                                self.cleanupAfterDeletion(success: coreDataSuccess, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
+                                                    if coreDataSuccess {
+                        self.stations.removeAll()
+                        // Clear deleted stations list since all data is being removed
+                        self.clearDeletedStationsList()
+                    }
+                    self.cleanupAfterDeletion(success: coreDataSuccess, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
                             }
                         }
                     } else {
@@ -505,6 +519,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         
                         // Clear in-memory data after successful save
                         self.stations.removeAll()
+                        // Clear deleted stations list since all data is being removed
+                        self.clearDeletedStationsList()
                         self.isDeletingData = false
                         self.deletionComplete = true
                         completion(true, nil)
@@ -722,6 +738,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         // Create new station with order = 0 to place it at the top
         let newStation = RadioStation(id: UUID().uuidString, name: name, url: url, iconData: iconData, country: country, isFavorite: false, favoriteOrder: nil, order: 0)
+        
+        // Remove from deleted stations list if user is manually re-adding it
+        // Note: This won't match by ID since manual additions get new UUIDs,
+        // but it's here for consistency and future improvements
+        removeFromDeletedStations(newStation.id)
+        
         stations.append(newStation)
         print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
@@ -796,6 +818,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     func deleteStationFromCoreData(_ station: RadioStation) {
         NotificationManager.shared.notifyUserImmediate(title: "Deletion Started", message: "Deleting station '\(station.name)'...")
+        
+        // Track the station ID as manually deleted to prevent re-fetching
+        addToDeletedStations(station.id)
         
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
@@ -895,6 +920,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         do {
             print("🌐 Radio Browser API: Fetching stations for \(country.name) with API code: \(country.apiCountryCode)")
+            logDeletedStationsCount()
             let apiStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(countryCode: country.apiCountryCode, limit: 100)
             print("📡 RadioBrowserAPI: Received \(apiStations.count) stations for \(country.name)")
             
@@ -910,6 +936,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             let newStations: [RadioStation] = apiStations.compactMap { apiStation in
                 guard !apiStation.url.isEmpty else { return nil }
+                
+                // Skip stations that were manually deleted by the user
+                if isStationDeleted(apiStation.stationuuid) {
+                    print("🚫 Skipping deleted station: \(apiStation.name) (ID: \(apiStation.stationuuid))")
+                    return nil
+                }
                 
                 // Check if we already have this station with favicon data
                 let existingIconData = existingStationsMap[apiStation.stationuuid]?.iconData
@@ -950,8 +982,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Calculate counts for notification
             let totalFetched = apiStations.count
+            let deletedStationsFiltered = totalFetched - newStations.count
             let newStationsAdded = uniqueNewStations.count
-            let skippedCount = totalFetched - newStationsAdded
+            let duplicatesSkipped = newStations.count - newStationsAdded
             
             guard !uniqueNewStations.isEmpty else {
                 print("📡 RadioBrowserAPI: All fetched stations already exist for \(country.name)")
@@ -994,11 +1027,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Notify user about the fetch results (only when new stations were added)
             DispatchQueue.main.async {
-                let notificationMessage: String
-                if skippedCount > 0 {
-                    notificationMessage = "Added \(newStationsAdded) new stations for \(country.name). Skipped \(skippedCount) stations already in your list."
-                } else {
-                    notificationMessage = "Added \(newStationsAdded) new stations for \(country.name)."
+                var notificationMessage = "Added \(newStationsAdded) new stations for \(country.name)."
+                
+                var skipDetails: [String] = []
+                if duplicatesSkipped > 0 {
+                    skipDetails.append("\(duplicatesSkipped) duplicates")
+                }
+                if deletedStationsFiltered > 0 {
+                    skipDetails.append("\(deletedStationsFiltered) previously deleted")
+                }
+                
+                if !skipDetails.isEmpty {
+                    notificationMessage += " Skipped \(skipDetails.joined(separator: ", ")) stations."
                 }
                 
                 NotificationManager.shared.notifyUserImmediate(
@@ -1090,6 +1130,43 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func reportStationClick(for station: RadioStation) {
         Task {
             await RadioBrowserAPI.shared.reportStationClick(stationUuid: station.id)
+        }
+    }
+    
+    // MARK: - Deleted Stations Management
+    
+    /// Add a station ID to the deleted stations list to prevent re-fetching
+    private func addToDeletedStations(_ stationId: String) {
+        var deleted = deletedStationIds
+        deleted.insert(stationId)
+        deletedStationIds = deleted
+        print("📝 Added station to deleted list: \(stationId)")
+    }
+    
+    /// Remove a station ID from the deleted stations list (if user manually adds it back)
+    func removeFromDeletedStations(_ stationId: String) {
+        var deleted = deletedStationIds
+        deleted.remove(stationId)
+        deletedStationIds = deleted
+        print("📝 Removed station from deleted list: \(stationId)")
+    }
+    
+    /// Clear all deleted station IDs (for troubleshooting or data reset)
+    func clearDeletedStationsList() {
+        deletedStationIds = Set()
+        print("📝 Cleared all deleted stations list")
+    }
+    
+    /// Check if a station was manually deleted
+    private func isStationDeleted(_ stationId: String) -> Bool {
+        return deletedStationIds.contains(stationId)
+    }
+    
+    /// Log current deleted stations count for debugging
+    private func logDeletedStationsCount() {
+        let count = deletedStationIds.count
+        if count > 0 {
+            print("📝 Currently tracking \(count) manually deleted stations to prevent re-fetching")
         }
     }
     
