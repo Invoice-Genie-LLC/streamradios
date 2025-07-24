@@ -793,6 +793,9 @@ class RadioPlayer: NSObject, ObservableObject {
         PlaybackManager.shared.setActivePlayer(.radio)
         print("📻 Play: Set radio as active player")
         
+        // CRITICAL: Configure Remote Command Center for radio to show station navigation buttons
+        configureRadioRemoteCommands()
+        
         // Track user intent - user wants to play
         userWantsToPlay = true
         
@@ -967,6 +970,9 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Ensure PlaybackManager knows radio is the active player
         PlaybackManager.shared.setActivePlayer(.radio)
+        
+        // CRITICAL: Configure Remote Command Center for radio to show station navigation buttons
+        configureRadioRemoteCommands()
         
         guard index >= 0 && index < stations.count else {
             print("Invalid station index: \(index)")
@@ -1417,6 +1423,12 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
+        configureRadioRemoteCommands()
+        isRemoteCommandCenterConfigured = true
+    }
+    
+    // MARK: - Force Remote Command Center Configuration for Radio
+    func configureRadioRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
         
         // Clear any existing targets first
@@ -1424,6 +1436,9 @@ class RadioPlayer: NSObject, ObservableObject {
         commandCenter.pauseCommand.removeTarget(nil)
         commandCenter.nextTrackCommand.removeTarget(nil)
         commandCenter.previousTrackCommand.removeTarget(nil)
+        commandCenter.skipForwardCommand.removeTarget(nil)
+        commandCenter.skipBackwardCommand.removeTarget(nil)
+        commandCenter.togglePlayPauseCommand.removeTarget(nil)
         
         // Enable and configure play command
         commandCenter.playCommand.isEnabled = true
@@ -1449,7 +1464,7 @@ class RadioPlayer: NSObject, ObservableObject {
             return .commandFailed
         }
         
-        // Enable and configure next track command
+        // Enable and configure next track command for station navigation
         commandCenter.nextTrackCommand.isEnabled = true
         commandCenter.nextTrackCommand.addTarget { [weak self] event in
             guard let self = self else { return .commandFailed }
@@ -1463,7 +1478,7 @@ class RadioPlayer: NSObject, ObservableObject {
             return .commandFailed
         }
         
-        // Enable and configure previous track command
+        // Enable and configure previous track command for station navigation
         commandCenter.previousTrackCommand.isEnabled = true
         commandCenter.previousTrackCommand.addTarget { [weak self] event in
             guard let self = self else { return .commandFailed }
@@ -1494,13 +1509,16 @@ class RadioPlayer: NSObject, ObservableObject {
             return .commandFailed
         }
         
-        // Disable commands that don't make sense for radio
+        // CRITICAL: Disable podcast-specific commands to prevent rewind buttons in Now Playing
+        commandCenter.skipForwardCommand.isEnabled = false
+        commandCenter.skipBackwardCommand.isEnabled = false
+        
+        // Disable other commands that don't make sense for radio
         commandCenter.stopCommand.isEnabled = false
         commandCenter.seekForwardCommand.isEnabled = false
         commandCenter.seekBackwardCommand.isEnabled = false
         
-        isRemoteCommandCenterConfigured = true
-        print("✅ Remote Command Center configured for Now Playing")
+        print("✅ Remote Command Center configured for Radio - Next/Previous Station enabled, Skip commands disabled")
     }
     
     private func scheduleAppRefresh() {

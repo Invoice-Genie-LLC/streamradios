@@ -390,7 +390,22 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func setupRemoteCommandCenter() {
+        configurePodcastRemoteCommands()
+        os_log("Podcast Remote Command Center configured for CarPlay", log: log, type: .info)
+    }
+    
+    // MARK: - Force Remote Command Center Configuration for Podcast
+    func configurePodcastRemoteCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
+        
+        // Clear any existing targets first
+        commandCenter.playCommand.removeTarget(nil)
+        commandCenter.pauseCommand.removeTarget(nil)
+        commandCenter.nextTrackCommand.removeTarget(nil)
+        commandCenter.previousTrackCommand.removeTarget(nil)
+        commandCenter.skipForwardCommand.removeTarget(nil)
+        commandCenter.skipBackwardCommand.removeTarget(nil)
+        commandCenter.togglePlayPauseCommand.removeTarget(nil)
         
         commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [weak self] _ in
@@ -467,7 +482,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         commandCenter.seekBackwardCommand.isEnabled = false
         commandCenter.changePlaybackRateCommand.isEnabled = false
         
-        os_log("Podcast Remote Command Center configured for CarPlay", log: log, type: .info)
+        os_log("✅ Remote Command Center configured for Podcast - Skip Forward/Backward enabled, Station navigation disabled", log: log, type: .info)
     }
     
     private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
@@ -771,6 +786,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Set podcast as the active player - this will handle audio session activation
         PlaybackManager.shared.setActivePlayer(.podcast)
+        
+        // CRITICAL: Configure Remote Command Center for podcast to show skip buttons
+        configurePodcastRemoteCommands()
         
         // Load all episodes for the feed
         loadAllEpisodesForFeed(feed)
@@ -1119,6 +1137,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Set podcast as the active player - this will handle audio session activation
         PlaybackManager.shared.setActivePlayer(.podcast)
+        
+        // CRITICAL: Configure Remote Command Center for podcast to show skip buttons
+        configurePodcastRemoteCommands()
         
         // Ensure progress is tracked when playing starts
            ensureProgressTracking(for: currentEpisode)
