@@ -45,8 +45,8 @@ struct ReconnectingIndicatorView: View {
     
     private var shouldShowIndicator: Bool {
         switch connectionState {
-        case .connected:
-            return false // Don't show indicator when connected
+        case .connected, .paused:
+            return false // Don't show indicator when connected or paused by user
         case .connecting, .disconnected, .buffering, .error:
             return true
         }
@@ -75,6 +75,9 @@ struct ReconnectingIndicatorView: View {
             case .error:
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundColor(.red)
+            case .paused:
+                Image(systemName: "pause.circle")
+                    .foregroundColor(.gray)
             }
         }
         .font(.subheadline)
@@ -92,6 +95,8 @@ struct ReconnectingIndicatorView: View {
             return "Buffering..."
         case .error:
             return "Connection error"
+        case .paused:
+            return "Paused"
         }
     }
     
@@ -107,6 +112,8 @@ struct ReconnectingIndicatorView: View {
             return .orange
         case .error:
             return .red
+        case .paused:
+            return .gray
         }
     }
     
@@ -118,7 +125,7 @@ struct ReconnectingIndicatorView: View {
         switch connectionState {
         case .connecting, .buffering:
             return true
-        case .connected, .disconnected, .error:
+        case .connected, .disconnected, .error, .paused:
             return false
         }
     }

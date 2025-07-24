@@ -814,7 +814,7 @@ struct CompactPlayerView: View {
                         Animation.linear(duration: 1.0).repeatForever(autoreverses: false), 
                         value: radioPlayer.connectionState
                     )
-            case .connected:
+            case .connected, .paused:
                 EmptyView()
             case .error:
                 Image(systemName: "exclamationmark.triangle")

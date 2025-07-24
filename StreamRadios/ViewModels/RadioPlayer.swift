@@ -22,6 +22,7 @@ enum ConnectionState {
     case disconnected
     case buffering
     case error
+    case paused
 }
 
 class RadioPlayer: NSObject, ObservableObject {
@@ -561,7 +562,7 @@ class RadioPlayer: NSObject, ObservableObject {
                         if self?.userWantsToPlay == true {
                             self?.connectionState = .connecting
                         } else {
-                            self?.connectionState = .disconnected
+                            self?.connectionState = .paused
                         }
                         
                     @unknown default:
@@ -676,7 +677,7 @@ class RadioPlayer: NSObject, ObservableObject {
                         if self?.userWantsToPlay == true {
                             self?.connectionState = .connecting
                         } else {
-                            self?.connectionState = .disconnected
+                            self?.connectionState = .paused
                         }
                         
                     @unknown default:
@@ -863,7 +864,7 @@ class RadioPlayer: NSObject, ObservableObject {
         
         player.pause()
         isPlaying = false
-        connectionState = .disconnected
+        connectionState = .paused
         
         // Track elapsed time when pausing
         if let startTime = playbackStartTime {

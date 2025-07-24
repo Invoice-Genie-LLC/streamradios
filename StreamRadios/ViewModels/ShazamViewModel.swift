@@ -47,21 +47,15 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             let currentMode = audioSession.mode
             let currentOptions = audioSession.categoryOptions
             
-            // Temporarily set category for recording if needed
-            if currentCategory != .playAndRecord {
-                try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
-                print("🎤 ShazamViewModel: Temporarily set audio session to playAndRecord for Shazam")
-            }
-            
-            try audioSession.setActive(true)
-            
             // Store original configuration for restoration
             UserDefaults.standard.set(currentCategory.rawValue, forKey: "ShazamOriginalAudioCategory")
             UserDefaults.standard.set(currentMode.rawValue, forKey: "ShazamOriginalAudioMode") 
             UserDefaults.standard.set(currentOptions.rawValue, forKey: "ShazamOriginalAudioOptions")
             
+            print("🎤 ShazamViewModel: Stored original audio session configuration")
+            
         } catch {
-            print("❌ ShazamViewModel: Failed to set up audio session: \(error)")
+            print("❌ ShazamViewModel: Failed to store audio session configuration: \(error)")
         }
     }
     
@@ -130,8 +124,34 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
         }
     
     private func setupAudioEngine() {
+        // Ensure audio session is properly configured before setting up engine
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
+            try audioSession.setActive(true)
+            print("🎤 ShazamViewModel: Audio session configured for recording")
+        } catch {
+            print("❌ ShazamViewModel: Failed to configure audio session: \(error)")
+            DispatchQueue.main.async {
+                self.isRecording = false
+            }
+            return
+        }
+        
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
+        
+        // Validate the recording format before proceeding
+        guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
+            print("❌ ShazamViewModel: Invalid recording format - sampleRate: \(recordingFormat.sampleRate), channels: \(recordingFormat.channelCount)")
+            DispatchQueue.main.async {
+                self.isRecording = false
+            }
+            return
+        }
+        
+        print("🎤 ShazamViewModel: Using recording format - sampleRate: \(recordingFormat.sampleRate), channels: \(recordingFormat.channelCount)")
+        
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] (buffer, when) in
             self?.applyGain(to: buffer)
             self?.session.matchStreamingBuffer(buffer, at: when)
@@ -142,8 +162,9 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             DispatchQueue.main.async {
                 self.isRecording = true
             }
+            print("✅ ShazamViewModel: Audio engine started successfully")
         } catch {
-            print("Error starting audio engine: \(error)")
+            print("❌ ShazamViewModel: Error starting audio engine: \(error)")
             DispatchQueue.main.async {
                 self.isRecording = false
             }
@@ -164,14 +185,24 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
     
     func stopListening() {
         DispatchQueue.global(qos: .userInitiated).async {
-            self.audioEngine.stop()
-            self.audioEngine.inputNode.removeTap(onBus: 0)
+            // Stop audio engine safely
+            if self.audioEngine.isRunning {
+                self.audioEngine.stop()
+                print("🔇 ShazamViewModel: Audio engine stopped")
+            }
+            
+            // Remove tap safely
+            if self.audioEngine.inputNode.numberOfInputs > 0 {
+                self.audioEngine.inputNode.removeTap(onBus: 0)
+                print("🔇 ShazamViewModel: Audio input tap removed")
+            }
             
             // Restore original audio session configuration
             self.restoreOriginalAudioSession()
             
             DispatchQueue.main.async {
                 self.isRecording = false
+                print("🔇 ShazamViewModel: Shazam listening stopped")
             }
         }
     }
@@ -190,16 +221,22 @@ class ShazamViewModel: NSObject, ObservableObject, SHSessionDelegate {
             let originalOptions = AVAudioSession.CategoryOptions(rawValue: originalOptionsRaw)
             
             try audioSession.setCategory(originalCategory, mode: originalMode, options: originalOptions)
-            print("✅ ShazamViewModel: Restored original audio session configuration")
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            print("✅ ShazamViewModel: Restored original audio session configuration - category: \(originalCategory.rawValue)")
             
             // Clean up stored values
             UserDefaults.standard.removeObject(forKey: "ShazamOriginalAudioCategory")
             UserDefaults.standard.removeObject(forKey: "ShazamOriginalAudioMode")
             UserDefaults.standard.removeObject(forKey: "ShazamOriginalAudioOptions")
             
+            // Let PlaybackManager know the active player to ensure proper state
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                PlaybackManager.shared.activateAudioSessionForPlayer(PlaybackManager.shared.activePlayer)
+            }
+            
         } catch {
             print("❌ ShazamViewModel: Failed to restore original audio session: \(error)")
-            // Fallback: Let PlaybackManager reconfigure
+            // Fallback: Let PlaybackManager reconfigure immediately
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 PlaybackManager.shared.activateAudioSessionForPlayer(PlaybackManager.shared.activePlayer)
             }
