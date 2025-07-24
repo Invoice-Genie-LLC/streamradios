@@ -945,9 +945,15 @@ struct PlaylistRowView: View {
     let isAdded: Bool
     let onSelect: () -> Void
     @State private var isPressed = false
+    @State private var isLoading = false
     
     var body: some View {
-        Button(action: onSelect) {
+        Button(action: {
+            if !isAdded && !isLoading {
+                isLoading = true
+                onSelect()
+            }
+        }) {
             HStack(spacing: 16) {
                 // Playlist icon
                 ZStack {
@@ -984,12 +990,16 @@ struct PlaylistRowView: View {
                 
                 Spacer()
                 
-                // Add/Check indicator
+                // Add/Check/Loading indicator
                 if isAdded {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title2)
                         .foregroundColor(.green)
                         .scaleEffect(1.1)
+                } else if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
                 } else {
                     Image(systemName: "plus.circle.fill")
                         .font(.title2)
@@ -1007,11 +1017,19 @@ struct PlaylistRowView: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(isAdded || isLoading)
         .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-            withAnimation(.easeInOut(duration: 0.1)) {
-                isPressed = pressing
+            if !isAdded && !isLoading {
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    isPressed = pressing
+                }
             }
         }, perform: {})
+        .onChange(of: isAdded) { _, newValue in
+            if newValue {
+                isLoading = false
+            }
+        }
     }
 }
 
@@ -1298,9 +1316,15 @@ struct EnhancedPlaylistRowView: View {
     let isAdded: Bool
     let onSelect: () -> Void
     @State private var isPressed = false
+    @State private var isLoading = false
     
     var body: some View {
-        Button(action: onSelect) {
+        Button(action: {
+            if !isAdded && !isLoading {
+                isLoading = true
+                onSelect()
+            }
+        }) {
             HStack(spacing: 16) {
                 // Playlist icon
                 ZStack {
@@ -1334,12 +1358,16 @@ struct EnhancedPlaylistRowView: View {
                 
                 Spacer()
                 
-                // Add/Check indicator
+                // Add/Check/Loading indicator
                 if isAdded {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title2)
                         .foregroundColor(.green)
                         .scaleEffect(1.1)
+                } else if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
                 } else {
                     Image(systemName: "plus.circle.fill")
                         .font(.title2)
@@ -1348,17 +1376,30 @@ struct EnhancedPlaylistRowView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color(.systemBackground))
-            .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-            .scaleEffect(isPressed ? 0.98 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: isPressed)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemGray6))
+                    .scaleEffect(isPressed ? 0.95 : 1.0)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color(.systemGray4), lineWidth: 0.5)
+            )
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(isAdded || isLoading)
         .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-            isPressed = pressing
+            if !isAdded && !isLoading {
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    isPressed = pressing
+                }
+            }
         }, perform: {})
-        .disabled(isAdded)
+        .onChange(of: isAdded) { _, newValue in
+            if newValue {
+                isLoading = false
+            }
+        }
     }
 }
