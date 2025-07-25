@@ -1,11 +1,59 @@
 import Foundation
 import StoreKit
 import SwiftUI
+import os.log
 
 @MainActor
 class SubscriptionManager: ObservableObject {
     static let shared = SubscriptionManager()
     
+    // MARK: - Persistent Debug Logging
+    private static let logFileName = "subscription_debug.log"
+    private static var logFileURL: URL {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documentsPath.appendingPathComponent(logFileName)
+    }
+    
+    private static func writeToLog(_ message: String) {
+        let timestamp = DateFormatter().string(from: Date())
+        let logEntry = "[\(timestamp)] \(message)\n"
+        
+        // Also print to console if debugger is connected
+        print(logEntry.trimmingCharacters(in: .whitespacesAndNewlines))
+        
+        // Write to persistent log file
+        if let data = logEntry.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logFileURL.path) {
+                if let fileHandle = try? FileHandle(forWritingTo: logFileURL) {
+                    fileHandle.seekToEndOfFile()
+                    fileHandle.write(data)
+                    fileHandle.closeFile()
+                }
+            } else {
+                try? data.write(to: logFileURL)
+            }
+        }
+    }
+    
+    // Method to retrieve logs for viewing in app
+    static func getDebugLogs() -> String {
+        guard let data = try? Data(contentsOf: logFileURL),
+              let logs = String(data: data, encoding: .utf8) else {
+            return "No logs found"
+        }
+        return logs
+    }
+    
+    // Method to clear logs
+    static func clearDebugLogs() {
+        try? FileManager.default.removeItem(at: logFileURL)
+    }
+    
+    private func log(_ message: String) {
+        SubscriptionManager.writeToLog(message)
+    }
+    
+    // MARK: - Published Properties
     @Published var subscriptionStatus: SubscriptionStatus = .unknown
     @Published var products: [Product] = []
     @Published var purchasedSubscriptions: [Product] = []
@@ -73,6 +121,17 @@ class SubscriptionManager: ObservableObject {
     }
     
     private init() {
+        log("🚀 SubscriptionManager: App starting up, initializing SubscriptionManager")
+        if isSimulationMode {
+            log("🧪 SubscriptionManager: Running in simulation mode")
+        } else {
+            log("🏪 SubscriptionManager: Running in App Store mode")
+        }
+        
+        Task {
+            await updateSubscriptionStatus()
+        }
+        
         // Start listening for transaction updates
         updates = listenForTransactions()
     }
@@ -174,44 +233,80 @@ class SubscriptionManager: ObservableObject {
     
     func updateSubscriptionStatus() async {
         if isSimulationMode {
+            log("🔍 DEBUG: Starting updateSubscriptionStatus in simulation mode")
+            
             // Check for one-time purchase first
             let hasOneTimePurchase = UserDefaults.standard.bool(forKey: oneTimePurchaseKey)
+            log("🔍 DEBUG: hasOneTimePurchase = \(hasOneTimePurchase)")
             if hasOneTimePurchase {
                 await MainActor.run {
                     self.subscriptionStatus = .oneTimePurchased
-                    print("🧪 Simulation: One-time purchase detected")
+                    log("🧪 Simulation: One-time purchase detected")
                 }
                 return
             }
             
-            // In simulation mode, check if trial has expired
-            if let trialStartDate = UserDefaults.standard.object(forKey: simulatedTrialStartKey) as? Date {
-                let daysRemaining = calculateSimulatedTrialDaysRemaining(from: trialStartDate)
+            // Check if user has upgraded to full subscription (priority over trial)
+            let lastKnownStatus = UserDefaults.standard.string(forKey: lastKnownSubscriptionKey)
+            log("🔍 DEBUG: lastKnownStatus = \(lastKnownStatus ?? "nil")")
+            if lastKnownStatus == "subscribed" {
                 await MainActor.run {
+                    self.subscriptionStatus = .subscribed
+                    log("🔍 DEBUG: Found upgraded subscription status - setting to subscribed")
+                }
+                return
+            }
+            
+            // Check trial logic only if no subscription found
+            if let trialStartDate = UserDefaults.standard.object(forKey: simulatedTrialStartKey) as? Date {
+                log("🔍 DEBUG: trialStartDate found = \(trialStartDate)")
+                await MainActor.run {
+                    let daysRemaining = self.calculateSimulatedTrialDaysRemaining(from: trialStartDate)
                     if daysRemaining > 0 {
                         self.subscriptionStatus = .freeTrial(daysRemaining: daysRemaining)
-                        print("🧪 Simulation: Trial active with \(daysRemaining) days remaining")
+                        log("🧪 Simulation: Free trial active (\(daysRemaining) days remaining)")
                     } else {
                         self.subscriptionStatus = .expired
-                        print("🧪 Simulation: Trial has expired - user needs to subscribe")
+                        log("🧪 Simulation: Free trial expired")
                     }
                 }
             } else {
-                // Check if user has ever purchased and might need to restore
-                let hasEverPurchased = UserDefaults.standard.bool(forKey: hasEverPurchasedKey)
+                log("🔍 DEBUG: No trial start date found - setting to unknown")
                 await MainActor.run {
-                    if hasEverPurchased {
-                        self.subscriptionStatus = .needsRestore
-                        print("🧪 Simulation: User has previous subscription - showing restore option")
-                    } else {
-                        self.subscriptionStatus = .notSubscribed
-                        print("🧪 Simulation: New user - showing subscription options")
-                    }
+                    self.subscriptionStatus = .unknown
+                    log("🧪 Simulation: No subscription or trial data found")
                 }
             }
             return
         }
 
+        // App Store mode - CHECK USERDEFAULTS FIRST like simulation mode
+        log("🔍 DEBUG: Starting updateSubscriptionStatus in App Store mode")
+        
+        // Check for one-time purchase first
+        let hasOneTimePurchase = UserDefaults.standard.bool(forKey: oneTimePurchaseKey)
+        log("🔍 DEBUG: App Store - hasOneTimePurchase = \(hasOneTimePurchase)")
+        if hasOneTimePurchase {
+            await MainActor.run {
+                self.subscriptionStatus = .oneTimePurchased
+                log("🏪 App Store: One-time purchase detected")
+            }
+            return
+        }
+        
+        // Check if user has upgraded to full subscription (priority over StoreKit transactions)
+        let lastKnownStatus = UserDefaults.standard.string(forKey: lastKnownSubscriptionKey)
+        log("🔍 DEBUG: App Store - lastKnownStatus = \(lastKnownStatus ?? "nil")")
+        if lastKnownStatus == "subscribed" {
+            await MainActor.run {
+                self.subscriptionStatus = .subscribed
+                log("🔍 DEBUG: App Store - Found upgraded subscription status - setting to subscribed")
+            }
+            return
+        }
+
+        // Fall back to StoreKit transactions if no UserDefaults override found
+        log("🔍 DEBUG: App Store - No UserDefaults override, checking StoreKit transactions")
         for await result in Transaction.currentEntitlements {
             do {
                 let transaction = try checkVerified(result)
@@ -346,6 +441,7 @@ class SubscriptionManager: ObservableObject {
             // Mark that user has ever purchased (for restore logic)
             UserDefaults.standard.set(true, forKey: hasEverPurchasedKey)
             UserDefaults.standard.set("freeTrial", forKey: lastKnownSubscriptionKey)
+            UserDefaults.standard.synchronize()
             
             await MainActor.run {
                 let daysRemaining = self.calculateSimulatedTrialDaysRemaining(from: trialStartDate)
@@ -413,6 +509,7 @@ class SubscriptionManager: ObservableObject {
             UserDefaults.standard.set(true, forKey: oneTimePurchaseKey)
             UserDefaults.standard.set(true, forKey: hasEverPurchasedKey)
             UserDefaults.standard.set("oneTimePurchased", forKey: lastKnownSubscriptionKey)
+            UserDefaults.standard.synchronize()
             
             await MainActor.run {
                 self.subscriptionStatus = .oneTimePurchased
@@ -442,6 +539,152 @@ class SubscriptionManager: ObservableObject {
         }
     }
     
+    /// Convert yearly subscription to lifetime access
+    /// This allows yearly subscribers to upgrade to one-time lifetime purchase
+    func convertYearlyToLifetime() async throws -> StoreKit.Transaction? {
+        await MainActor.run {
+            self.isLoading = true
+        }
+        
+        defer {
+            Task {
+                await MainActor.run {
+                    self.isLoading = false
+                }
+            }
+        }
+        
+        if isSimulationMode {
+            // Simulate successful conversion to lifetime
+            UserDefaults.standard.set(true, forKey: oneTimePurchaseKey)
+            UserDefaults.standard.set(true, forKey: hasEverPurchasedKey)
+            UserDefaults.standard.set("oneTimePurchased", forKey: lastKnownSubscriptionKey)
+            // Clear subscription data
+            UserDefaults.standard.removeObject(forKey: simulatedTrialStartKey)
+            UserDefaults.standard.synchronize()
+            
+            await MainActor.run {
+                self.subscriptionStatus = .oneTimePurchased
+                log("🧪 Simulated yearly to lifetime conversion: Lifetime access granted")
+            }
+            return nil
+        }
+        
+        guard let product = products.first(where: { $0.id == oneTimeProductId }) else {
+            throw SubscriptionError.productNotFound
+        }
+        
+        print("🛒 Converting yearly subscription to lifetime:")
+        print("   - Product ID: \(product.id)")
+        print("   - Display Name: \(product.displayName)")
+        print("   - Price: \(product.displayPrice)")
+        
+        let result = try await product.purchase()
+        
+        switch result {
+        case .success(let verification):
+            let transaction = try checkVerified(verification)
+            
+            // Update status to lifetime
+            await MainActor.run {
+                self.subscriptionStatus = .oneTimePurchased
+                UserDefaults.standard.set(true, forKey: self.oneTimePurchaseKey)
+                UserDefaults.standard.set("oneTimePurchased", forKey: self.lastKnownSubscriptionKey)
+                UserDefaults.standard.synchronize()
+                log("✅ Yearly subscription converted to lifetime access")
+            }
+            
+            await transaction.finish()
+            return transaction
+            
+        case .userCancelled, .pending:
+            return nil
+            
+        @unknown default:
+            return nil
+        }
+    }
+    
+    /// Upgrade from free trial to full paid subscription immediately
+    /// This bypasses the trial period and activates yearly subscription right away
+    func upgradeTrialToFullSubscription() async throws {
+        await MainActor.run {
+            self.isLoading = true
+        }
+        
+        defer {
+            Task {
+                await MainActor.run {
+                    self.isLoading = false
+                }
+            }
+        }
+        
+        if isSimulationMode {
+            // In simulation mode, immediately convert trial to full subscription
+            await MainActor.run {
+                log("🔍 DEBUG: Upgrading trial to full subscription")
+                log("🔍 DEBUG: Before - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
+                log("🔍 DEBUG: Before - trialStartDate = \(String(describing: UserDefaults.standard.object(forKey: self.simulatedTrialStartKey) as? Date))")
+                
+                self.subscriptionStatus = .subscribed
+                UserDefaults.standard.set("subscribed", forKey: self.lastKnownSubscriptionKey)
+                UserDefaults.standard.set(true, forKey: self.hasEverPurchasedKey)
+                // Clear trial start date to prevent trial logic from overriding subscription
+                UserDefaults.standard.removeObject(forKey: self.simulatedTrialStartKey)
+                // Force immediate synchronization to disk to survive force close
+                UserDefaults.standard.synchronize()
+                
+                log("🔍 DEBUG: After - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
+                log("🔍 DEBUG: After - trialStartDate = \(String(describing: UserDefaults.standard.object(forKey: self.simulatedTrialStartKey) as? Date))")
+                log("🔍 DEBUG: UserDefaults synchronized to disk")
+                log("🧪 Simulated trial upgrade: Converted to full subscription immediately")
+            }
+            return
+        }
+        
+        // For real App Store implementation, purchase the subscription product
+        guard let product = products.first(where: { $0.id == subscriptionProductId }) else {
+            throw SubscriptionError.productNotFound
+        }
+        
+        print("🛒 Upgrading trial to full subscription:")
+        print("   - Product ID: \(product.id)")
+        print("   - Display Name: \(product.displayName)")
+        print("   - Price: \(product.displayPrice)")
+        
+        let result = try await product.purchase()
+        
+        switch result {
+        case .success(let verification):
+            let transaction = try checkVerified(verification)
+            // Immediately set status to subscribed (not trial)
+            await MainActor.run {
+                log("🔍 DEBUG: App Store - Upgrading trial to full subscription")
+                log("🔍 DEBUG: App Store - Before - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
+                
+                self.subscriptionStatus = .subscribed
+                // Also persist to UserDefaults for force close scenarios
+                UserDefaults.standard.set("subscribed", forKey: self.lastKnownSubscriptionKey)
+                UserDefaults.standard.set(true, forKey: self.hasEverPurchasedKey)
+                // Clear any trial data that might interfere
+                UserDefaults.standard.removeObject(forKey: self.simulatedTrialStartKey)
+                UserDefaults.standard.synchronize()
+                
+                log("🔍 DEBUG: App Store - After - lastKnownStatus = \(UserDefaults.standard.string(forKey: self.lastKnownSubscriptionKey) ?? "nil")")
+                log("🔍 DEBUG: App Store - UserDefaults synchronized to disk")
+                print("✅ Trial successfully upgraded to full subscription")
+            }
+            await transaction.finish()
+            
+        case .userCancelled, .pending:
+            break
+            
+        @unknown default:
+            break
+        }
+    }
+
     /// Legacy purchase method - now defaults to subscription
     func purchase() async throws -> StoreKit.Transaction? {
         return try await purchaseSubscription()
@@ -476,6 +719,7 @@ class SubscriptionManager: ObservableObject {
                     // Mark subscription as restored by setting a subscription date
                     UserDefaults.standard.set(Date(), forKey: "RestoredSubscriptionDate")
                     UserDefaults.standard.set("subscribed", forKey: self.lastKnownSubscriptionKey)
+                    UserDefaults.standard.synchronize()
                     print("🧪 Simulated restore: Previous subscription restored successfully")
                 } else {
                     // No previous purchases exist
@@ -575,6 +819,16 @@ class SubscriptionManager: ObservableObject {
     
     var isSubscribedOrInTrial: Bool {
         return isSubscribed
+    }
+    
+    /// Check if user has yearly subscription (not lifetime)
+    var isYearlySubscriber: Bool {
+        switch subscriptionStatus {
+        case .subscribed:
+            return true
+        default:
+            return false
+        }
     }
     
     var displayName: String {

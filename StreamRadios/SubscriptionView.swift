@@ -207,15 +207,31 @@ struct SubscriptionView: View {
                     .multilineTextAlignment(.center)
             }
             
-            Button("Manage Subscription") {
-                openManageSubscription()
+            VStack(spacing: 12) {
+                // Show conversion option only for yearly subscribers
+                if subscriptionManager.isYearlySubscriber {
+                    Button("Upgrade to Lifetime Access") {
+                        convertToLifetime()
+                    }
+                    .buttonStyle(PrimaryButtonStyle(colorScheme: colorScheme))
+                    
+                    Text("Upgrade to lifetime access for $29.99")
+                        .font(.caption)
+                        .foregroundColor(tertiaryTextColor)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                }
+                
+                Button("Manage Subscription") {
+                    openManageSubscription()
+                }
+                .buttonStyle(SecondaryButtonStyle(colorScheme: colorScheme))
+                
+                Button("Restore Purchases") {
+                    restorePurchases()
+                }
+                .buttonStyle(TertiaryButtonStyle(colorScheme: colorScheme))
             }
-            .buttonStyle(SecondaryButtonStyle(colorScheme: colorScheme))
-            
-            Button("Restore Purchases") {
-                restorePurchases()
-            }
-            .buttonStyle(TertiaryButtonStyle(colorScheme: colorScheme))
         }
         .padding(32)
         .background(
@@ -252,7 +268,7 @@ struct SubscriptionView: View {
             VStack(spacing: 12) {
                 Button("Upgrade to Full Subscription") {
                     // This would upgrade trial to paid subscription immediately
-                    purchaseSubscription()
+                    upgradeToFullSubscription()
                 }
                 .buttonStyle(PrimaryButtonStyle(colorScheme: colorScheme))
                 
@@ -567,6 +583,44 @@ struct SubscriptionView: View {
                 }
             } catch {
                 alertMessage = "One-time purchase failed: \(error.localizedDescription)"
+                showingAlert = true
+            }
+        }
+    }
+    
+    private func upgradeToFullSubscription() {
+        Task {
+            do {
+                try await subscriptionManager.upgradeTrialToFullSubscription()
+                if subscriptionManager.subscriptionStatus.isSubscribed {
+                    alertMessage = "Trial upgraded to full subscription! Welcome to StreamRadios Pro!"
+                    showingAlert = true
+                    // Auto-dismiss after successful upgrade
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        dismiss()
+                    }
+                }
+            } catch {
+                alertMessage = "Upgrade failed: \(error.localizedDescription)"
+                showingAlert = true
+            }
+        }
+    }
+    
+    private func convertToLifetime() {
+        Task {
+            do {
+                try await subscriptionManager.convertYearlyToLifetime()
+                if subscriptionManager.subscriptionStatus == .oneTimePurchased {
+                    alertMessage = "Successfully upgraded to lifetime access! Welcome to StreamRadios Pro Lifetime!"
+                    showingAlert = true
+                    // Auto-dismiss after successful conversion
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        dismiss()
+                    }
+                }
+            } catch {
+                alertMessage = "Upgrade to lifetime failed: \(error.localizedDescription)"
                 showingAlert = true
             }
         }

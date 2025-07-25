@@ -40,6 +40,8 @@ struct SettingsView: View {
     @State private var miniPlayerHeight: CGFloat = 60
     @State private var selectedTab: Tab = .settings
     @State private var isPlayerSheetPresented = false
+    @State private var showingDebugAlert = false
+    @State private var debugLogsContent = ""
     
     // Color system for adaptive theming
     private var backgroundColor: Color {
@@ -71,6 +73,7 @@ struct SettingsView: View {
                         alarmSettings
                         dataManagementLink
                         aboutSettings
+                        debugSettings
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
@@ -459,6 +462,52 @@ extension SettingsView {
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+    }
+    
+    @ViewBuilder
+    private var debugSettings: some View {
+        Button {
+            debugLogsContent = SubscriptionManager.getDebugLogs()
+            showingDebugAlert = true
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.headline)
+                        .foregroundColor(.orange)
+                        .frame(width: 20)
+                    
+                    Text("Debug Logs")
+                        .font(.body)
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+                
+                Text("View persistent subscription debug logs")
+                    .font(.caption)
+                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .background(cardBackgroundColor)
+            .cornerRadius(16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .alert("Debug Logs", isPresented: $showingDebugAlert) {
+            Button("Clear Logs") {
+                SubscriptionManager.clearDebugLogs()
+                debugLogsContent = ""
+            }
+            Button("Close", role: .cancel) { }
+        } message: {
+            Text(debugLogsContent.isEmpty ? "No debug logs available" : debugLogsContent)
+        }
     }
     
     // MARK: - Helper Properties
