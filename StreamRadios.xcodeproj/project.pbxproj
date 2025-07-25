@@ -33,7 +33,6 @@
 		774180502C6703FC0030B459 /* PodcastPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7741804F2C6703FC0030B459 /* PodcastPlayer.swift */; };
 		774180522C6708020030B459 /* AudioPlayerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774180512C6708020030B459 /* AudioPlayerProtocol.swift */; };
 		7746177C2C17290200F442B3 /* RadioStreamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7746177B2C17290200F442B3 /* RadioStreamApp.swift */; };
-		7751A1A12C17290300F442B4 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7751A1A02C17290300F442B4 /* SubscriptionView.swift */; };
 		774617842C17411C00F442B3 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617832C17411C00F442B3 /* WidgetKit.framework */; };
 		774617862C17411C00F442B3 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 774617852C17411C00F442B3 /* SwiftUI.framework */; };
 		774617892C17411C00F442B3 /* streamRadiosWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774617882C17411C00F442B3 /* streamRadiosWidgetBundle.swift */; };
@@ -49,6 +48,7 @@
 		774FED5D2E1983FD0084FA72 /* TermsAndConditionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774FED5A2E1983FD0084FA72 /* TermsAndConditionsView.swift */; };
 		774FED5F2E199D520084FA72 /* RadioBrowserAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774FED5E2E199D520084FA72 /* RadioBrowserAPI.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
+		7751A1A12C17290300F442B4 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7751A1A02C17290300F442B4 /* SubscriptionView.swift */; };
 		775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775B55562C30E8C100ECDBF0 /* Tabs.swift */; };
 		775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04282C287AF700E99061 /* ShazamViewModel.swift */; };
 		775D04382C28E89300E99061 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04372C28E89300E99061 /* LyricsView.swift */; };
@@ -81,11 +81,8 @@
 		77DD9D182C96698000C7BA3C /* NotificationCenterProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77DD9D172C96698000C7BA3C /* NotificationCenterProtocol.swift */; };
 		77E23F422C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */; };
 		77E23F4E2C90A0B300CDECD9 /* PlaybackManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */; };
-
-
 		77F50BBC2C63BAEF00187488 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BBB2C63BAEE00187488 /* GoogleSignIn */; };
 		77F50BBE2C63BAEF00187488 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 77F50BBD2C63BAEF00187488 /* GoogleSignInSwift */; };
-
 		77F50BC72C64723600187488 /* PodcastViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC62C64723600187488 /* PodcastViewModel.swift */; };
 		77F50BC92C64725600187488 /* AddPodcastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BC82C64725600187488 /* AddPodcastView.swift */; };
 		77F50BCB2C647AEF00187488 /* PodcastListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F50BCA2C647AEF00187488 /* PodcastListView.swift */; };
@@ -151,7 +148,6 @@
 		7741804F2C6703FC0030B459 /* PodcastPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastPlayer.swift; sourceTree = "<group>"; };
 		774180512C6708020030B459 /* AudioPlayerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayerProtocol.swift; sourceTree = "<group>"; };
 		7746177B2C17290200F442B3 /* RadioStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStreamApp.swift; sourceTree = "<group>"; };
-		7751A1A02C17290300F442B4 /* SubscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionView.swift; sourceTree = "<group>"; };
 		774617812C17411C00F442B3 /* StreamRadioWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamRadioWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		774617832C17411C00F442B3 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		774617852C17411C00F442B3 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -169,6 +165,7 @@
 		774FED5A2E1983FD0084FA72 /* TermsAndConditionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermsAndConditionsView.swift; sourceTree = "<group>"; };
 		774FED5E2E199D520084FA72 /* RadioBrowserAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioBrowserAPI.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		7751A1A02C17290300F442B4 /* SubscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionView.swift; sourceTree = "<group>"; };
 		775B55562C30E8C100ECDBF0 /* Tabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tabs.swift; sourceTree = "<group>"; };
 		775D04282C287AF700E99061 /* ShazamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamViewModel.swift; sourceTree = "<group>"; };
 		775D04372C28E89300E99061 /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
@@ -202,8 +199,6 @@
 		77DD9D172C96698000C7BA3C /* NotificationCenterProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCenterProtocol.swift; sourceTree = "<group>"; };
 		77E23F412C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconnectingIndicatorView.swift; sourceTree = "<group>"; };
 		77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackManager.swift; sourceTree = "<group>"; };
-
-
 		77F50BC62C64723600187488 /* PodcastViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastViewModel.swift; sourceTree = "<group>"; };
 		77F50BC82C64725600187488 /* AddPodcastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPodcastView.swift; sourceTree = "<group>"; };
 		77F50BCA2C647AEF00187488 /* PodcastListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastListView.swift; sourceTree = "<group>"; };
@@ -221,11 +216,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				77F50BBE2C63BAEF00187488 /* GoogleSignInSwift in Frameworks */,
-
 				77CC1EB52C2DBD8600F8FD5B /* Reachability in Frameworks */,
 				77F50BBC2C63BAEF00187488 /* GoogleSignIn in Frameworks */,
-
-
 				7780E9622C3CDEF2009CCF6F /* FlagKit in Frameworks */,
 				CARPLAY001234567890ABCDEF /* CarPlay.framework in Frameworks */,
 			);
@@ -288,9 +280,7 @@
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
 				77F50BCA2C647AEF00187488 /* PodcastListView.swift */,
 				774180512C6708020030B459 /* AudioPlayerProtocol.swift */,
-
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
-
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
 				77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */,
 				7741804F2C6703FC0030B459 /* PodcastPlayer.swift */,
@@ -301,7 +291,6 @@
 				7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				77F6689E2C7A56CF00E2618C /* BannerAlert.swift */,
-
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
 				77DD9D172C96698000C7BA3C /* NotificationCenterProtocol.swift */,
@@ -458,10 +447,8 @@
 			packageProductDependencies = (
 				77CC1EB42C2DBD8600F8FD5B /* Reachability */,
 				7780E9612C3CDEF2009CCF6F /* FlagKit */,
-
 				77F50BBB2C63BAEE00187488 /* GoogleSignIn */,
 				77F50BBD2C63BAEF00187488 /* GoogleSignInSwift */,
-
 			);
 			productName = AlbRadioStream;
 			productReference = 7707DA352C152EF2006D5EBB /* StreamRadios.app */;
@@ -514,9 +501,7 @@
 			packageReferences = (
 				77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */,
 				7780E9602C3CDEF2009CCF6F /* XCRemoteSwiftPackageReference "FlagKit" */,
-
 				77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
-
 			);
 			productRefGroup = 7707DA362C152EF2006D5EBB /* Products */;
 			projectDirPath = "";
@@ -578,7 +563,6 @@
 				771553A02C19E6C800BE43FA /* AppDelegate.swift in Sources */,
 				7707DA6A2C156FDA006D5EBB /* RadioStationListView.swift in Sources */,
 				7715BD982C4C9D8300FA7CB1 /* ExportStation.swift in Sources */,
-
 				774180522C6708020030B459 /* AudioPlayerProtocol.swift in Sources */,
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7715BD9A2C4CA97300FA7CB1 /* ExportSheet.swift in Sources */,
@@ -590,9 +574,7 @@
 				7709599F2E0A592700478E7C /* DataSyncManager.swift in Sources */,
 				770959A02E0A592700478E7C /* DataSyncProgressView.swift in Sources */,
 				77B4E0F52E086FEF0034F886 /* PodcastCloudKitManager.swift in Sources */,
-
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
-
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
 				7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */,
 				7727D7E82C616A6A004549C9 /* MusicAuthorizationManager.swift in Sources */,
@@ -778,7 +760,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -818,7 +800,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadiosRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -957,7 +939,6 @@
 				kind = branch;
 			};
 		};
-
 		77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
@@ -966,7 +947,6 @@
 				minimumVersion = 7.1.0;
 			};
 		};
-
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -980,7 +960,6 @@
 			package = 77CC1EB32C2DBD1900F8FD5B /* XCRemoteSwiftPackageReference "Reachability" */;
 			productName = Reachability;
 		};
-
 		77F50BBB2C63BAEE00187488 /* GoogleSignIn */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
@@ -991,7 +970,6 @@
 			package = 77F50BBA2C63BAEE00187488 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
 		};
-
 /* End XCSwiftPackageProductDependency section */
 
 /* Begin XCVersionGroup section */

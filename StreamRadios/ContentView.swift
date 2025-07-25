@@ -454,7 +454,12 @@ struct ContentView: View {
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
-            .sheet(isPresented: $showingSubscriptionView) {
+            .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $showingSubscriptionView : .constant(false)) {
+                SubscriptionView()
+                    .environmentObject(subscriptionManager)
+                    .interactiveDismissDisabled(!subscriptionManager.isSubscribedOrInTrial)
+            }
+            .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $showingSubscriptionView : .constant(false)) {
                 SubscriptionView()
                     .environmentObject(subscriptionManager)
                     .interactiveDismissDisabled(!subscriptionManager.isSubscribedOrInTrial)

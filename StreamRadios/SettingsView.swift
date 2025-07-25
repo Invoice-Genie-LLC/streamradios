@@ -4,6 +4,7 @@
 // Created by Kley Sulo on 6/9/24.
 
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
@@ -233,7 +234,11 @@ struct SettingsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingSubscriptionView) {
+        .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $showingSubscriptionView : .constant(false)) {
+            SubscriptionView(showManagementScreen: true)
+                .environmentObject(subscriptionManager)
+        }
+        .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $showingSubscriptionView : .constant(false)) {
             SubscriptionView(showManagementScreen: true)
                 .environmentObject(subscriptionManager)
         }
