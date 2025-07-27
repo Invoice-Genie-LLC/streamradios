@@ -255,7 +255,7 @@ struct ContentView: View {
                         .environmentObject(viewModel)
                         .environmentObject(podcastPlayer)
                         .environmentObject(podcastViewModel)
-                        .padding(.bottom, 49) // Just tab bar height, no extra spacing
+                        .padding(.bottom, 45)
                     }
                 }
                 .allowsHitTesting(true) // Allow interaction with player
@@ -449,7 +449,12 @@ struct ContentView: View {
                 }
             }
 
-            .sheet(isPresented: $isPlayerSheetPresented) {
+            .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $isPlayerSheetPresented : .constant(false)) {
+                PlayerSheetView()
+                    .environmentObject(radioPlayer)
+                    .environmentObject(viewModel)
+            }
+            .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $isPlayerSheetPresented : .constant(false)) {
                 PlayerSheetView()
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)

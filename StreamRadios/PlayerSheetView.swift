@@ -10,6 +10,18 @@ import AVKit
 import Combine
 import MusicKit
 
+// MARK: - View Extension for Conditional Modifiers
+extension View {
+    @ViewBuilder
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
+    }
+}
+
 // Extension to safely access indices of a collection
 extension Collection {
     subscript (safe index: Index) -> Element? {
@@ -97,7 +109,8 @@ struct PlayerSheetView: View {
                         // Content view in ScrollView to prevent cutoff
                         ScrollView {
                             contentView
-                                .padding(.top, 10)
+                                .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 
+                                         max(geometry.size.height * 0.01, 5) : 10)
                                 .padding(.horizontal, 16)
                         }
                         .scrollIndicators(.hidden)
@@ -111,7 +124,9 @@ struct PlayerSheetView: View {
                             AirPlayButtonView()
                                 .frame(width: 44, height: 44)
                         }
-                        .padding(.bottom, geometry.safeAreaInsets.bottom + 8)
+                        .padding(.bottom, UIDevice.current.userInterfaceIdiom == .pad ? 
+                                 max(geometry.size.height * 0.01, 4) : 
+                                 geometry.safeAreaInsets.bottom + 8)
                     }
                     .navigationBarHidden(true)
                 }
@@ -243,7 +258,8 @@ struct PlayerSheetView: View {
             VStack {
                 Spacer()
                 
-                VStack(spacing: 20) {
+                VStack(spacing: UIDevice.current.userInterfaceIdiom == .pad ? 
+                       max(geometry.size.height * 0.015, 8) : 20) {
                     // Current station info at top - now centered
                     if let currentStationIndex = radioPlayer.currentStationIndex,
                        let currentStation = viewModel.stations[safe: currentStationIndex] {
@@ -374,7 +390,7 @@ struct PlayerSheetView: View {
                         )
                         .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
                     }
-                    .padding(.top, 10)
+                    .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 5 : 10)
                 }
                 .frame(maxWidth: .infinity)
                 
