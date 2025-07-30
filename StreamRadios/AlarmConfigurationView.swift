@@ -1018,7 +1018,7 @@ struct NoStationsMessage: View {
                     .foregroundColor(.orange)
             }
             
-            Text("No favorite stations have been configured. Please add a station to your favorites in the 'Favorites' tab before scheduling an alert.")
+            Text("No favorite stations yet. Click \"Go to All Stations\" to add one or more favorites before scheduling alerts.")
                 .font(.body)
                 .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 .lineLimit(nil)

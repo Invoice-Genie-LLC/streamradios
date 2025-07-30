@@ -489,6 +489,9 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToAlarmStation"))) { notification in
                 handleAlarmStationNavigation(notification)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .switchToAllTab)) { _ in
+                handleSwitchToAllStations()
+            }
             .navigationBarHidden(true)
         }
         .navigationViewStyle(StackNavigationViewStyle())
@@ -661,6 +664,18 @@ struct ContentView: View {
                 print("❌ Alarm station not found after navigation: \(stationId)")
             }
         }
+    }
+    
+    private func handleSwitchToAllStations() {
+        print("🧭 Navigating to All Stations tab from Set Program Alert")
+        
+        // Switch to the radio tab
+        selectedTab = .radio
+        
+        // Switch to All Stations tab within radio
+        viewModel.selectedSubTab = .all
+        
+        print("📍 Successfully navigated to All Stations tab")
     }
 }
 

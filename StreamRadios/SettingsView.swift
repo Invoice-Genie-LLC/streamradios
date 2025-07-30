@@ -378,7 +378,7 @@ extension SettingsView {
                             .foregroundColor(.gray)
                     }
                     
-                    Text("Set up wake-up alarms with your favorite stations")
+                    Text("Set up alerts for your favorite shows and never miss an episode again")
                         .font(.caption)
                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
                 }
