@@ -29,7 +29,7 @@
         <key>CFBundleGetInfoString</key>
         <string></string>
         <key>CFBundleVersion</key>
-        <string>1</string>
+        <string>9</string>
         <key>CFBundleShortVersionString</key>
         <string>2.0.0</string>
         <key>NSAppleMusicUsageDescription</key>
@@ -48,12 +48,15 @@
             <dict>
                 <key>CFBundleURLName</key>
                 <string>com.yourdomain.StreamRadios</string>
+                <key>CFBundleURLSchemes</key>
+                <array>
+                    <string>streamradios</string>
+                </array>
             </dict>
         </array>
         <key>LSApplicationQueriesSchemes</key>
         <array>
             <string>music</string>
-
             <string>https</string>
         </array>
         <key>NSAppTransportSecurity</key>
@@ -72,9 +75,40 @@
         <string>833637905829-hd8dhr5k1adbji0mcn12lmqtgbvc0k3s.apps.googleusercontent.com</string>
         <key>NSCalendarUsageDescription</key>
         <string>StreamRadios requires access to the calendar to schedule radio station program alerts.</string>
-        <key>NSDocumentTypes</key>
+        <key>UTExportedTypeDeclarations</key>
         <array>
-            <string>public.text</string>
+            <dict>
+                <key>UTTypeConformsTo</key>
+                <array>
+                    <string>public.text</string>
+                </array>
+                <key>UTTypeDescription</key>
+                <string>StreamRadios Station Export</string>
+                <key>UTTypeIdentifier</key>
+                <string>com.radio.streamradios.station</string>
+                <key>UTTypeTagSpecification</key>
+                <dict>
+                    <key>public.filename-extension</key>
+                    <array>
+                        <string>streamradios</string>
+                    </array>
+                </dict>
+            </dict>
+        </array>
+        <key>CFBundleDocumentTypes</key>
+        <array>
+            <dict>
+                <key>CFBundleTypeName</key>
+                <string>Radio Station</string>
+                <key>CFBundleTypeRole</key>
+                <string>Editor</string>
+                <key>LSHandlerRank</key>
+                <string>Owner</string>
+                <key>LSItemContentTypes</key>
+                <array>
+                    <string>com.radio.streamradios.station</string>
+                </array>
+            </dict>
         </array>
         <key>UIApplicationSceneManifest</key>
         <dict>
@@ -108,10 +142,6 @@
         <key>UISupportedExternalAccessoryProtocols</key>
         <array>
             <string>com.apple.IAP.Radio</string>
-        </array>
-        <key>MKDirectionsApplicationSupportedModes</key>
-        <array>
-            <string>MKDirectionsModeCar</string>
         </array>
         <key>NSMicrophoneUsageDescription</key>
         <string>StreamRadios needs access to your microphone to identify songs.</string>
