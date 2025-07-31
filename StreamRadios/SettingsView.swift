@@ -80,6 +80,10 @@ struct SettingsView: View {
     @State private var crashCount = 0
     @State private var memoryWarningCount = 0
     @State private var recentExceptions: [ExceptionInfo] = []
+    @State private var audioSessionErrorCount = 1
+    @State private var carPlayDisconnectionCount = 2
+    @State private var playbackFailureCount = 0
+    @State private var jsonDecodeFailureCount = 1
     
     // Color system for adaptive theming
     private var backgroundColor: Color {
@@ -662,9 +666,9 @@ extension SettingsView {
                             icon: "exclamationmark.triangle",
                             color: .red,
                             content: """
-                            Recent API Errors: 3
-                            JSON Decode Failures: 1
-                            Network Timeouts: 2
+                            Recent API Errors: \(apiErrorCount)
+                            JSON Decode Failures: \(jsonDecodeFailureCount)
+                            Network Timeouts: \(networkErrorCount)
                             Last Error: RadioBrowserAPI JSON decode failed
                             Timestamp: \(getCurrentTimestamp())
                             """
@@ -691,9 +695,9 @@ extension SettingsView {
                             icon: "speaker.badge.exclamationmark",
                             color: .pink,
                             content: """
-                            Audio Session Errors: 1
-                            CarPlay Disconnections: 2
-                            Playback Failures: 0
+                            Audio Session Errors: \(audioSessionErrorCount)
+                            CarPlay Disconnections: \(carPlayDisconnectionCount)
+                            Playback Failures: \(playbackFailureCount)
                             Last Audio Error: CarPlay disconnect session maintenance
                             """
                         )
@@ -789,12 +793,20 @@ extension SettingsView {
         // Clear exception history
         recentExceptions.removeAll()
         
+        // Reset audio and player error counters
+        audioSessionErrorCount = 0
+        carPlayDisconnectionCount = 0
+        playbackFailureCount = 0
+        jsonDecodeFailureCount = 0
+        
         print("🧹 All debug counters and timers have been reset")
         print("📊 Session timer restarted")
         print("🔢 Error counters cleared: API(\(apiErrorCount)), Network(\(networkErrorCount)), Core Data(\(coreDataErrorCount))")
         print("⚠️ Warning/Error logs reset: Errors(\(errorCount)), Warnings(\(warningCount)), Info(\(infoCount))")
         print("💥 Crash and memory counters reset: Crashes(\(crashCount)), Memory Warnings(\(memoryWarningCount))")
         print("🚨 Exception history cleared: \(recentExceptions.count) exceptions removed")
+        print("🔊 Audio/Player counters reset: Audio(\(audioSessionErrorCount)), CarPlay(\(carPlayDisconnectionCount)), Playback(\(playbackFailureCount))")
+        print("📡 Network decode counters reset: JSON Failures(\(jsonDecodeFailureCount))")
     }
     
     private func shareDebugLogs() {
@@ -895,7 +907,7 @@ extension SettingsView {
         ⚠️ API & NETWORK ERRORS
         ──────────────────────
         Recent API Errors: \(apiErrorCount)
-        JSON Decode Failures: 1
+        JSON Decode Failures: \(jsonDecodeFailureCount)
         Network Timeouts: \(networkErrorCount)
         Last Error: RadioBrowserAPI JSON decode failed
         Error Timestamp: \(getCurrentTimestamp())
@@ -914,9 +926,9 @@ extension SettingsView {
         
         🔊 AUDIO & PLAYER ERRORS
         ───────────────────────
-        Audio Session Errors: 1
-        CarPlay Disconnections: 2
-        Playback Failures: 0
+        Audio Session Errors: \(audioSessionErrorCount)
+        CarPlay Disconnections: \(carPlayDisconnectionCount)
+        Playback Failures: \(playbackFailureCount)
         Last Audio Error: CarPlay disconnect session maintenance
         Audio Session Active: Yes
         Current Player State: Ready
