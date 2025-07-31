@@ -563,6 +563,8 @@ extension SettingsView {
                                 .font(.body)
                                 .fontWeight(.medium)
                                 .foregroundColor(primaryTextColor)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                             Text("Opt-in to collect diagnostic information")
                                 .font(.caption)
                                 .foregroundColor(secondaryTextColor)
@@ -853,6 +855,7 @@ extension SettingsView {
                                 }
                                 .lineLimit(1)
                                 .buttonStyle(.borderedProminent)
+                                .frame(minWidth: 200)
                             }
                             .padding(.vertical, 80)
                             .frame(maxWidth: .infinity)
@@ -1027,7 +1030,7 @@ extension SettingsView {
         ─────────────────────
         Free Memory: \(getFormattedMemoryInfo())
         Current Usage: \(String(format: "%.1f MB", getMemoryUsage()))
-        Battery Level: \(getBatteryLevel()) (Raw: \(String(format: "%.3f", UIDevice.current.batteryLevel)))
+        Battery Level: \(getBatteryLevel()) (Raw: \(getRawBatteryLevel()))
         Battery State: \(getBatteryState())
         Low Power Mode: \(ProcessInfo.processInfo.isLowPowerModeEnabled ? "Enabled" : "Disabled")
         Thermal State: \(getThermalState())
@@ -1404,34 +1407,56 @@ extension SettingsView {
     }
     
     private func getBatteryLevel() -> String {
-        // Ensure battery monitoring is enabled for accurate readings
-        if !UIDevice.current.isBatteryMonitoringEnabled {
-            UIDevice.current.isBatteryMonitoringEnabled = true
-            
-            // Give the system a moment to update the battery level after enabling monitoring
-            Thread.sleep(forTimeInterval: 0.05)
+        // Check if we're running on iOS Simulator
+        if isSimulator() {
+            return "Simulated (N/A)"
         }
+        
+        // Force a fresh battery reading by disabling and re-enabling monitoring
+        UIDevice.current.isBatteryMonitoringEnabled = false
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        
+        // Give the system time to update with fresh battery data
+        Thread.sleep(forTimeInterval: 0.2)
         
         let batteryLevel = UIDevice.current.batteryLevel
         if batteryLevel < 0 {
-            // Try refreshing once more if we get an invalid reading
-            UIDevice.current.isBatteryMonitoringEnabled = false
-            UIDevice.current.isBatteryMonitoringEnabled = true
-            Thread.sleep(forTimeInterval: 0.05)
-            
+            // Try once more with a longer delay if we get an invalid reading
+            Thread.sleep(forTimeInterval: 0.3)
             let refreshedLevel = UIDevice.current.batteryLevel
+            
             if refreshedLevel < 0 {
                 return "Unknown"
             }
             
-            // Use proper rounding instead of truncation for more accurate percentage
+            // Use proper rounding for accurate percentage
             let percentage = round(refreshedLevel * 100)
             return "\(Int(percentage))%"
         }
         
-        // Use proper rounding instead of truncation for more accurate percentage
+        // Use proper rounding for accurate percentage
         let percentage = round(batteryLevel * 100)
         return "\(Int(percentage))%"
+    }
+    
+    private func getRawBatteryLevel() -> String {
+        if isSimulator() {
+            return "N/A (Simulator)"
+        }
+        
+        // Force a fresh battery reading by disabling and re-enabling monitoring
+        UIDevice.current.isBatteryMonitoringEnabled = false
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        
+        // Give the system time to update with fresh battery data
+        Thread.sleep(forTimeInterval: 0.2)
+        
+        let batteryLevel = UIDevice.current.batteryLevel
+        if batteryLevel < 0 {
+            return "Unknown"
+        }
+        
+        return String(format: "%.3f", batteryLevel)
     }
     
     private func isDebugBuild() -> Bool {
