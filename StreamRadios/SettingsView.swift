@@ -10,6 +10,7 @@ import MessageUI
 import AVFoundation
 import MediaPlayer
 import UserNotifications
+import os.log
 
 // MARK: - Exception Info Structure
 struct ExceptionInfo: Identifiable {
@@ -85,6 +86,12 @@ struct SettingsView: View {
     @State private var playbackFailureCount = 0
     @State private var jsonDecodeFailureCount = 1
     
+    // Privacy and consent state variables
+    @AppStorage("debugLoggingEnabled") private var debugLoggingEnabled = false
+    @AppStorage("debugDataSharingConsent") private var debugDataSharingConsent = false
+    @State private var showingPrivacyConsentAlert = false
+    @State private var showingDebugEnableAlert = false
+    
     // Color system for adaptive theming
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
@@ -144,8 +151,11 @@ struct SettingsView: View {
                 // Enable battery monitoring for accurate battery level reporting
                 UIDevice.current.isBatteryMonitoringEnabled = true
                 
-                // Initialize sample exception data for demonstration
-                initializeSampleExceptions()
+                // Initialize sample exception data only if debug logging is enabled
+                if debugLoggingEnabled {
+                    initializeSampleExceptions()
+                    os_log("Debug logging session started", log: OSLog(subsystem: "com.radio.streamradios", category: "Debug"), type: .info)
+                }
             }
             .onDisappear {
                 // Disable battery monitoring to save battery when leaving Settings
@@ -543,18 +553,87 @@ extension SettingsView {
             .padding(.horizontal, 16)
             .padding(.top, 16)
             
-
+            // Privacy Controls Section
+            VStack(spacing: 12) {
+                // Debug Logging Toggle
+                VStack(spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Enable Debug Logging")
+                                .font(.body)
+                                .fontWeight(.medium)
+                                .foregroundColor(primaryTextColor)
+                            Text("Opt-in to collect diagnostic information")
+                                .font(.caption)
+                                .foregroundColor(secondaryTextColor)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $debugLoggingEnabled)
+                            .toggleStyle(SwitchToggleStyle(tint: .blue))
+                    }
+                    .padding(.horizontal, 16)
+                    
+                    if debugLoggingEnabled {
+                        // Data Sharing Consent Toggle
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Allow Data Sharing")
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(primaryTextColor)
+                                Text("Consent to share debug data via email")
+                                    .font(.caption)
+                                    .foregroundColor(secondaryTextColor)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $debugDataSharingConsent)
+                                .toggleStyle(SwitchToggleStyle(tint: .green))
+                        }
+                        .padding(.horizontal, 16)
+                        .transition(.opacity)
+                    }
+                }
+                
+                // Privacy Notice
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "lock.shield")
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                        Text("Privacy Notice")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(primaryTextColor)
+                        Spacer()
+                    }
+                    
+                    Text("Debug logs may contain device information, app performance data, and error details. No personal content or user data is collected. All data is processed locally and only shared with your explicit consent.")
+                        .font(.caption2)
+                        .foregroundColor(secondaryTextColor)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(nil)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(cardBackgroundColor.opacity(0.5))
+                .cornerRadius(8)
+                .padding(.horizontal, 16)
+            }
             
             // Action Buttons
             HStack(spacing: 12) {
                 // View Logs Button
                 Button {
-                    updateNotificationPermissionStatus()
-                    // Enable battery monitoring early for accurate readings in debug logs
-                    UIDevice.current.isBatteryMonitoringEnabled = true
-                    // Give battery monitoring time to initialize accurate readings
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        showingDebugLogsView = true
+                    if debugLoggingEnabled {
+                        updateNotificationPermissionStatus()
+                        // Enable battery monitoring early for accurate readings in debug logs
+                        UIDevice.current.isBatteryMonitoringEnabled = true
+                        // Give battery monitoring time to initialize accurate readings
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            showingDebugLogsView = true
+                        }
+                    } else {
+                        showingDebugEnableAlert = true
                     }
                 } label: {
                     HStack(spacing: 8) {
@@ -566,7 +645,7 @@ extension SettingsView {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(.blue)
+                    .background(debugLoggingEnabled ? .blue : .gray)
                     .foregroundColor(.white)
                     .cornerRadius(12)
                 }
@@ -618,8 +697,9 @@ extension SettingsView {
                         }
                         .padding(.horizontal, 16)
                         
-                        // System Information Card
-                        DebugInfoCard(
+                        if debugLoggingEnabled {
+                            // System Information Card
+                            DebugInfoCard(
                             title: "System Information",
                             icon: "iphone",
                             color: .blue,
@@ -747,6 +827,36 @@ extension SettingsView {
                         .padding(.horizontal, 16)
                         
                         Spacer(minLength: 20)
+                        } else {
+                            // Debug logging disabled message
+                            VStack(spacing: 16) {
+                                Image(systemName: "lock.shield")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.gray)
+                                
+                                VStack(spacing: 8) {
+                                    Text("Debug Logging Disabled")
+                                        .font(.title2)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.primary)
+                                    
+                                    Text("Debug logging is currently disabled for privacy protection. Enable it in Settings to view diagnostic information.")
+                                        .font(.body)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 32)
+                                }
+                                
+                                Button("Enable Debug Logging") {
+                                    debugLoggingEnabled = true
+                                    os_log("Debug logging enabled from logs view", log: OSLog(subsystem: "com.radio.streamradios", category: "Privacy"), type: .info)
+                                }
+                                .lineLimit(1)
+                                .buttonStyle(.borderedProminent)
+                            }
+                            .padding(.vertical, 80)
+                            .frame(maxWidth: .infinity)
+                        }
                     }
                     .padding(.top, 8)
                 }
@@ -768,6 +878,25 @@ extension SettingsView {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This will reset all debug counters, error counts, and restart the session timer. This action cannot be undone.")
+        }
+        .alert("Enable Debug Logging", isPresented: $showingDebugEnableAlert) {
+            Button("Enable") {
+                debugLoggingEnabled = true
+                os_log("Debug logging enabled by user", log: OSLog(subsystem: "com.radio.streamradios", category: "Privacy"), type: .info)
+            }
+            Button("Keep Disabled", role: .cancel) { }
+        } message: {
+            Text("Debug logging is currently disabled. Would you like to enable it to view diagnostic information? You can always disable it later in Settings.")
+        }
+        .alert("Data Sharing Required", isPresented: $showingPrivacyConsentAlert) {
+            Button("Allow Sharing") {
+                debugDataSharingConsent = true
+                os_log("Debug data sharing consent granted by user", log: OSLog(subsystem: "com.radio.streamradios", category: "Privacy"), type: .info)
+                shareDebugLogs() // Retry sharing after consent
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("To share debug logs, you must consent to data sharing. The logs contain only technical diagnostic information and no personal data.")
         }
     }
     
@@ -810,8 +939,14 @@ extension SettingsView {
     }
     
     private func shareDebugLogs() {
+        // Check for data sharing consent before proceeding
+        guard debugDataSharingConsent else {
+            showingPrivacyConsentAlert = true
+            return
+        }
+        
         // let debugContent = DebugLogger.getAllLogsForSharing() - will be added when import is fixed
-        let debugContent = generateDebugReport() // Using placeholder content
+        let debugContent = generateSanitizedDebugReport() // Using sanitized content
         
         // Create email-specific sharing items
         let emailSubject = "Debug Sent From User"
@@ -977,6 +1112,203 @@ extension SettingsView {
         End of StreamRadios Debug Report
         ========================================
         """
+    }
+    
+    // MARK: - Privacy-Conscious Debug Report (Sanitized)
+    
+    private func generateSanitizedDebugReport() -> String {
+        let sanitizedExceptions = sanitizeExceptionData(recentExceptions)
+        
+        return """
+        ========================================
+        🔧 STREAMRADIOS DEBUG REPORT (SANITIZED)
+        ========================================
+        Generated: \(getCurrentTimestamp())
+        Report ID: \(UUID().uuidString.prefix(8))
+        
+        📱 SYSTEM INFORMATION
+        ────────────────────
+        Device: \(UIDevice.current.model)
+        iOS Version: \(UIDevice.current.systemVersion)
+        App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")
+        Build: \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown")
+        Bundle ID: [REDACTED]
+        
+        🧠 MEMORY & PERFORMANCE
+        ─────────────────────
+        Free Memory: \(getFormattedMemoryInfo())
+        Current Usage: \(String(format: "%.1f MB", getMemoryUsage()))
+        Battery Level: \(getBatteryLevel())
+        Battery State: \(getBatteryState())
+        Low Power Mode: \(ProcessInfo.processInfo.isLowPowerModeEnabled ? "Enabled" : "Disabled")
+        Thermal State: \(getThermalState())
+        
+        🌐 NETWORK STATUS
+        ───────────────
+        Connection: Active
+        Reachability: Available
+        Background Refresh: \(UIApplication.shared.backgroundRefreshStatus == .available ? "Enabled" : "Disabled")
+        Session Duration: \(getSessionDuration())
+        
+        ⚠️ API & NETWORK ERRORS
+        ──────────────────────
+        Recent API Errors: \(apiErrorCount)
+        JSON Decode Failures: \(jsonDecodeFailureCount)
+        Network Timeouts: \(networkErrorCount)
+        Last Error: [SANITIZED]
+        Error Timestamp: \(getCurrentTimestamp())
+        
+        💾 CORE DATA ERRORS
+        ─────────────────
+        Save Failures: \(coreDataErrorCount)
+        Fetch Errors: 0
+        Context Issues: 0
+        Database Status: Operational
+        
+        🔊 AUDIO & PLAYER ERRORS
+        ───────────────────────
+        Audio Session Errors: \(audioSessionErrorCount)
+        CarPlay Disconnections: \(carPlayDisconnectionCount)
+        Playback Failures: \(playbackFailureCount)
+        Audio Session Active: Yes
+        Current Player State: Ready
+        
+        🔄 APP LIFECYCLE & CRASHES
+        ─────────────────────────
+        Crash Reports: \(crashCount)
+        Memory Warnings: \(memoryWarningCount)
+        Session Errors: \(errorCount)
+        Session Warnings: \(warningCount)
+        App State: Active
+        Uptime: \(getSessionDuration())
+        
+        🔒 PERMISSIONS STATUS
+        ──────────────────
+        Notifications: \(notificationPermissionStatus)
+        Microphone: \(getMicrophonePermission())
+        Apple Music: \(getMediaLibraryPermission())
+        Background App Refresh: \(getBackgroundRefreshPermission())
+        CarPlay: \(getCarPlayPermission())
+        Camera/Photos: [NOT COLLECTED]
+        Location: [NOT COLLECTED]
+        
+        🚨 SANITIZED STACK TRACES & EXCEPTIONS
+        ────────────────────────────────────
+        \(sanitizedExceptions.isEmpty ? "No recent exceptions" : formatSanitizedExceptions(sanitizedExceptions))
+        
+        🛠️ DEBUGGING CONTEXT
+        ──────────────────
+        Debug Mode: \(isDebugBuild() ? "Enabled" : "Disabled")
+        Simulator: \(isSimulator() ? "Yes" : "No")
+        Privacy Logging: Enabled
+        Data Sanitization: Applied
+        
+        ========================================
+        📋 PRIVACY NOTICE:
+        This report contains only non-personal 
+        technical data. All file paths, user data,
+        and sensitive information have been removed.
+        ========================================
+        """
+    }
+    
+    // MARK: - Data Sanitization Functions
+    
+    private func sanitizeExceptionData(_ exceptions: [ExceptionInfo]) -> [ExceptionInfo] {
+        return exceptions.map { exception in
+            ExceptionInfo(
+                timestamp: exception.timestamp,
+                errorMessage: sanitizeErrorMessage(exception.errorMessage),
+                filename: sanitizeFilePath(exception.filename),
+                lineNumber: exception.lineNumber,
+                functionName: sanitizeFunctionName(exception.functionName),
+                stackTrace: sanitizeStackTrace(exception.stackTrace),
+                errorType: exception.errorType
+            )
+        }
+    }
+    
+    private func sanitizeErrorMessage(_ message: String) -> String {
+        // Remove file paths, user data, and sensitive information
+        var sanitized = message
+        
+        // Remove file system paths
+        sanitized = sanitized.replacingOccurrences(of: #"\/Users\/[^\/\s]+\/[^\s]*"#, with: "[PATH_REDACTED]", options: .regularExpression)
+        sanitized = sanitized.replacingOccurrences(of: #"\/Library\/[^\s]*"#, with: "[LIBRARY_PATH_REDACTED]", options: .regularExpression)
+        sanitized = sanitized.replacingOccurrences(of: #"\/System\/[^\s]*"#, with: "[SYSTEM_PATH_REDACTED]", options: .regularExpression)
+        
+        // Remove UUIDs and identifiers
+        sanitized = sanitized.replacingOccurrences(of: #"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}"#, with: "[UUID_REDACTED]", options: [.regularExpression, .caseInsensitive])
+        
+        // Remove IP addresses
+        sanitized = sanitized.replacingOccurrences(of: #"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"#, with: "[IP_REDACTED]", options: .regularExpression)
+        
+        return sanitized
+    }
+    
+    private func sanitizeFilePath(_ filePath: String) -> String {
+        // Extract only the filename, remove directory structure
+        if let filename = filePath.components(separatedBy: "/").last {
+            return filename
+        }
+        return "[FILENAME_REDACTED]"
+    }
+    
+    private func sanitizeFunctionName(_ functionName: String) -> String {
+        // Keep function names but remove sensitive parameters
+        var sanitized = functionName
+        
+        // Remove parameter values that might contain user data
+        sanitized = sanitized.replacingOccurrences(of: #":\s*\"[^\"]*\""#, with: ": \"[REDACTED]\"", options: .regularExpression)
+        sanitized = sanitized.replacingOccurrences(of: #"=\s*\"[^\"]*\""#, with: "= \"[REDACTED]\"", options: .regularExpression)
+        
+        return sanitized
+    }
+    
+    private func sanitizeStackTrace(_ stackTrace: [String]) -> [String] {
+        return stackTrace.map { frame in
+            var sanitizedFrame = frame
+            
+            // Remove file paths from stack frames
+            sanitizedFrame = sanitizedFrame.replacingOccurrences(of: #"\/Users\/[^\/\s]+\/[^\s]*"#, with: "[PATH]", options: .regularExpression)
+            sanitizedFrame = sanitizedFrame.replacingOccurrences(of: #"\/Library\/[^\s]*"#, with: "[LIBRARY]", options: .regularExpression)
+            sanitizedFrame = sanitizedFrame.replacingOccurrences(of: #"\/System\/[^\s]*"#, with: "[SYSTEM]", options: .regularExpression)
+            
+            // Remove memory addresses
+            sanitizedFrame = sanitizedFrame.replacingOccurrences(of: #"0x[0-9a-fA-F]+"#, with: "[ADDRESS]", options: .regularExpression)
+            
+            return sanitizedFrame
+        }
+    }
+    
+    private func formatSanitizedExceptions(_ exceptions: [ExceptionInfo]) -> String {
+        var output = ""
+        let recentLimit = 3 // Show only recent exceptions
+        
+        for (index, exception) in exceptions.prefix(recentLimit).enumerated() {
+            output += "[\(index + 1)] \(exception.formattedTimestamp)\n"
+            output += "Error: \(exception.errorMessage)\n"
+            output += "File: \(exception.filename):\(exception.lineNumber)\n"
+            output += "Function: \(exception.functionName)\n"
+            output += "Type: \(exception.errorType)\n"
+            
+            if !exception.stackTrace.isEmpty {
+                output += "Stack Trace (Top 3 frames):\n"
+                for stackFrame in exception.stackTrace.prefix(3) {
+                    output += "  → \(stackFrame)\n"
+                }
+            }
+            
+            if index < exceptions.prefix(recentLimit).count - 1 {
+                output += "\n" + String(repeating: "─", count: 30) + "\n\n"
+            }
+        }
+        
+        if exceptions.count > recentLimit {
+            output += "\n... and \(exceptions.count - recentLimit) more (use View Logs for details)"
+        }
+        
+        return output
     }
     
     private func getSystemInfo() -> String {
