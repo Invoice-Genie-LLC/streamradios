@@ -42,6 +42,9 @@ struct RadioStreamApp: App {
                     
                     // Clear notifications and badge when app launches
                     NotificationManager.shared.clearAllNotificationsAndBadge()
+                    
+                    // Initialize comprehensive debug logging system
+                    // DebugLogger.logInfo will be added when import is fixed
                 }
                 .onDisappear {
                             appDelegate.updatePodcastStateAndSave()

@@ -110,6 +110,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                try reachability?.startNotifier()
            } catch {
                os_log("Unable to start reachability notifier: %@", log: log, type: .error, error.localizedDescription)
+
            }
        }
        
@@ -257,6 +258,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         print("✅ CarPlay Disconnect: Audio session kept active for main app podcast")
                     } catch {
                         print("⚠️ CarPlay Disconnect: Failed to maintain audio session: \(error)")
+
                     }
                     
                     // CRITICAL: Force player to continue/resume playback if it was playing

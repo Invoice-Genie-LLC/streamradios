@@ -73,12 +73,15 @@ class CoreDataStack {
             do {
                 try context.save()
                 print("CoreData: Successfully saved changes to the context.")
+
             } catch let error as NSError {
                 print("CoreData: Failed to save context: \(error), \(error.userInfo)")
+                // DebugLogger.logError will be added when import is fixed
                 // ToDo: Handle the error according to your app's needs, e.g., showing UI to inform the user
             }
         } else {
             print("CoreData: No changes to save in context.")
+            // DebugLogger.logDebug will be added when import is fixed
         }
     }
 
@@ -87,9 +90,11 @@ class CoreDataStack {
         let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         do {
             let results = try context.fetch(request)
+
             return results.map { $0.toPodcastEpisode() }
         } catch {
             print("CoreData: Error fetching episodes: \(error)")
+
             return []
         }
     }
