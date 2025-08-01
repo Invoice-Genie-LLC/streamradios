@@ -445,8 +445,8 @@ struct RadioStationListView: View {
                             .font(.body)
                             .foregroundColor(.adaptivePrimaryText)
                             .lineLimit(nil)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                             .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         
                         // Country info with flag for Recent and Favorites tabs
                         HStack(spacing: 6) {
@@ -466,7 +466,10 @@ struct RadioStationListView: View {
                                 .font(.subheadline)
                                 .foregroundColor(.blue)
                                 .lineLimit(1)
+                            
+                            Spacer()
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         
                         // Show metadata if playing
                         if isCurrentlyPlaying {
@@ -475,25 +478,19 @@ struct RadioStationListView: View {
                                     .font(.caption)
                                     .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(nil)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
                                     .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1) // Give station info priority in layout
                     
-                    Spacer(minLength: 8)
-                    
-                    // Equalizer (part of tappable area)
+                    // Equalizer aligned to the right
                     if isCurrentlyPlaying {
                         animatedEqualizer
                     } else {
                         staticEqualizer
                     }
-                    
-                    // Extra space to extend tappable area further right
-                    Spacer(minLength: 8)
                 }
                 .contentShape(Rectangle())
             }
@@ -534,7 +531,7 @@ struct RadioStationListView: View {
                     Rectangle()
                         .fill(Color.adaptiveSeparator)
                         .frame(height: 0.5)
-                        .padding(.leading, 88) // Align with text content
+                        .padding(.leading, 92) // Align with text content
                 }
             },
             alignment: .bottom

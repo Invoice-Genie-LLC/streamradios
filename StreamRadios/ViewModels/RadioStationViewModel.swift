@@ -919,7 +919,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         do {
             print("🌐 Radio Browser API: Fetching stations for \(country.name) with API code: \(country.apiCountryCode)")
             logDeletedStationsCount()
-            let apiStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(countryCode: country.apiCountryCode, limit: 100)
+            let apiStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(countryCode: country.apiCountryCode, limit: 500)
             print("📡 RadioBrowserAPI: Received \(apiStations.count) stations for \(country.name)")
             
             guard !apiStations.isEmpty else {
