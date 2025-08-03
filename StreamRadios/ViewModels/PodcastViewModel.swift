@@ -1263,13 +1263,33 @@ class PodcastViewModel: ObservableObject {
         
         print("🚀 Processing \(cloudKitFeeds.count) feeds for fresh install")
         
-        // Start artwork download tracking
-        await MainActor.run {
-            DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: cloudKitFeeds.count)
+        // CRITICAL FIX: Remove duplicates from CloudKit feeds BEFORE processing
+        let uniqueFeeds = removeDuplicateFeeds(cloudKitFeeds)
+        print("📊 Removed \(cloudKitFeeds.count - uniqueFeeds.count) duplicate feeds from CloudKit data")
+        
+        // CRITICAL FIX: Check what feeds already exist in Core Data to prevent duplicate processing
+        let existingFeedUrls = await getExistingFeedUrls()
+        let feedsToProcess = uniqueFeeds.filter { !existingFeedUrls.contains($0.url) }
+        
+        if feedsToProcess.isEmpty {
+            print("✅ All feeds already exist in Core Data, skipping processing")
+            await MainActor.run { 
+                self.isLoading = false
+                // Start artwork tracking even if no new feeds to process
+                DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: 0)
+            }
+            return
         }
         
-        // Process feeds directly without accessing private methods
-        for feed in cloudKitFeeds {
+        print("📊 Processing \(feedsToProcess.count) new feeds (skipping \(uniqueFeeds.count - feedsToProcess.count) existing)")
+        
+        // Start artwork download tracking for the feeds we're about to process
+        await MainActor.run {
+            DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: feedsToProcess.count)
+        }
+        
+        // Process only new feeds to prevent duplicates
+        for feed in feedsToProcess {
             do {
                 print("📡 Processing feed: \(feed.title)")
                 
@@ -1286,12 +1306,21 @@ class PodcastViewModel: ObservableObject {
             } catch {
                 print("❌ Failed to process feed \(feed.title): \(error)")
                 
-                // Skip saving if RSS parsing fails - let the existing system handle it
-                print("⚠️ Skipping feed save due to RSS parsing failure")
+                // Save feed without episodes if RSS parsing fails
+                try? await saveFeedToCoreData(feed)
             }
         }
         
         print("🎉 Fresh install RSS processing complete")
+        
+        // Clean up any duplicates that might have been created
+        await cleanupDuplicateFeeds()
+        
+        // CRITICAL: Clear episode cache and reload feeds from Core Data AFTER all RSS processing and cleanup
+        await episodeManager.clearAllCache()
+        
+        // CRITICAL: Wait briefly for main context synchronization to complete
+        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
         
         // CRITICAL: Trigger UI refresh after fresh install processing
         print("🔄 Triggered UI refresh after fresh install RSS processing")
