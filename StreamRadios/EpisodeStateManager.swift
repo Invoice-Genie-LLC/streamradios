@@ -423,6 +423,9 @@ class EpisodeStateManager: ObservableObject {
         episodeStates[episodeId] = .playing
         currentlyPlayingEpisodeId = episodeId
         saveCurrentStates()
+        
+        // CRITICAL: Send immediate update for playing state changes to prevent UI lag
+        sendImmediateUpdate()
         sendThrottledUpdate()
     }
     
@@ -444,6 +447,11 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func switchToEpisode(newEpisodeId: String, previousEpisodeId: String, previousProgress: Double) {
+        // CRITICAL: Immediately stop the previous episode from showing as playing
+        if currentlyPlayingEpisodeId == previousEpisodeId {
+            currentlyPlayingEpisodeId = nil
+        }
+        
         // Mark previous episode as "In Progress" only if it wasn't already marked as "Played"
         if previousProgress > 0 {
             let currentState = episodeStates[previousEpisodeId] ?? .new
@@ -463,6 +471,9 @@ class EpisodeStateManager: ObservableObject {
         currentlyPlayingEpisodeId = newEpisodeId
         
         saveCurrentStates()
+        
+        // CRITICAL: Send immediate update to refresh UI immediately, then follow with throttled update
+        sendImmediateUpdate()
         sendThrottledUpdate()
     }
     
@@ -578,6 +589,10 @@ class EpisodeStateManager: ObservableObject {
         
         episodeStates[episodeId] = newState
         saveCurrentStates()
+        
+        // CRITICAL FIX: Force synchronize UserDefaults immediately for CloudKit synced progress to prevent loss
+        userDefaults.synchronize()
+        
         sendThrottledUpdate()
     }
     
@@ -834,6 +849,13 @@ class EpisodeStateManager: ObservableObject {
             DispatchQueue.main.async {
                 self.objectWillChange.send()
             }
+        }
+    }
+    
+    private func sendImmediateUpdate() {
+        // Send immediate update to refresh UI without throttling
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
         }
     }
 }

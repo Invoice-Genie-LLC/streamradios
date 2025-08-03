@@ -121,6 +121,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             // CRITICAL: Synchronize ALL download states during force close protection
             synchronizeAllDownloadStates()
             
+            // CRITICAL FIX: Force save all episode states to prevent progress loss on force close
+            EpisodeStateManager.shared.forceSave()
+            
             // Save context and force synchronize
             podcastViewModel.saveContextIfNeeded()
         }

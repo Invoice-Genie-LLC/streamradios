@@ -1710,14 +1710,18 @@ class PodcastViewModel: ObservableObject {
         
         // Single CloudKit sync in background
         Task {
-            // Clean up any duplicate episodes first to prevent crashes
+            // CRITICAL FIX: Move duplicate cleanup AFTER CloudKit sync to prevent episode loss
+            // First sync data from CloudKit to ensure we have the most accurate episode data
+            await checkForFreshInstallAndSetup()
+            
+            // SAFE cleanup: Only run duplicate cleanup after CloudKit sync completes
+            // This prevents legitimate episodes from being deleted due to force close inconsistencies
             do {
                 try await episodeManager.cleanupDuplicateEpisodes()
+                print("✅ Cleaned up duplicate episodes after CloudKit sync")
             } catch {
                 print("⚠️ Failed to cleanup duplicate episodes: \(error)")
             }
-            
-            await checkForFreshInstallAndSetup()
             
             // After CloudKit sync, check if any feeds need episode refreshing
             await refreshFeedsWithoutEpisodes()

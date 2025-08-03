@@ -83,9 +83,9 @@ class PodcastEpisodeManager {
         await cacheManager.clearAllCache()
     }
     
-    /// Clean up duplicate episodes in Core Data
+    /// Clean up duplicate episodes in Core Data with conservative safety checks
     func cleanupDuplicateEpisodes() async throws {
-        os_log("🧹 Starting cleanup of duplicate episodes in Core Data", log: log, type: .info)
+        os_log("🧹 Starting conservative cleanup of duplicate episodes in Core Data", log: log, type: .info)
         
         try await withCheckedThrowingContinuation { continuation in
             let backgroundContext = CoreDataStack.shared.newBackgroundContext()
@@ -102,21 +102,52 @@ class PodcastEpisodeManager {
                     let allEpisodes = try backgroundContext.fetch(fetchRequest)
                     var seenIds = Set<String>()
                     var duplicatesToDelete: [PodcastModel] = []
+                    var episodeIdCounts: [String: Int] = [:]
                     
+                    // First pass: Count occurrences of each episode ID
                     for episode in allEpisodes {
-                        guard let episodeId = episode.id else {
-                            // Delete episodes without IDs
+                        guard let episodeId = episode.id, !episodeId.isEmpty else {
+                            // Delete episodes without valid IDs
                             duplicatesToDelete.append(episode)
                             continue
                         }
-                        
-                        if seenIds.contains(episodeId) {
-                            // This is a duplicate, mark for deletion
-                            duplicatesToDelete.append(episode)
-                            os_log("🗑️ Marking duplicate episode for deletion: %@", log: self.log, type: .debug, episodeId)
-                        } else {
-                            seenIds.insert(episodeId)
+                        episodeIdCounts[episodeId, default: 0] += 1
+                    }
+                    
+                    // CRITICAL SAFETY CHECK: Don't delete more than 10% of episodes to prevent data loss
+                    let totalEpisodes = allEpisodes.count
+                    let maxAllowedDeletions = Int(Double(totalEpisodes) * 0.1) // 10% maximum
+                    
+                    os_log("🔍 Found %d total episodes, will delete maximum %d duplicates", log: self.log, type: .info, totalEpisodes, maxAllowedDeletions)
+                    
+                    // Second pass: Mark only true duplicates for deletion (keep most recent)
+                    for episode in allEpisodes {
+                        guard let episodeId = episode.id, !episodeId.isEmpty else {
+                            continue // Already handled above
                         }
+                        
+                        // Only consider for deletion if there are actually multiple episodes with this ID
+                        if episodeIdCounts[episodeId] ?? 0 > 1 {
+                            if seenIds.contains(episodeId) {
+                                // This is a duplicate, mark for deletion but only if we haven't exceeded our safety limit
+                                if duplicatesToDelete.count < maxAllowedDeletions {
+                                    duplicatesToDelete.append(episode)
+                                    os_log("🗑️ Marking duplicate episode for deletion: %@ (occurrence %d)", log: self.log, type: .debug, episodeId, episodeIdCounts[episodeId] ?? 0)
+                                } else {
+                                    os_log("⚠️ Reached maximum deletion limit, skipping duplicate: %@", log: self.log, type: .info, episodeId)
+                                }
+                            } else {
+                                seenIds.insert(episodeId)
+                            }
+                        }
+                    }
+                    
+                    // FINAL SAFETY CHECK: If we're about to delete more than 5% of episodes, abort the operation
+                    let deletionRatio = Double(duplicatesToDelete.count) / Double(totalEpisodes)
+                    if deletionRatio > 0.05 { // 5% safety threshold
+                        os_log("🛑 SAFETY ABORT: Would delete %.1f%% of episodes (%d/%d), this seems excessive - skipping cleanup", log: self.log, type: .error, deletionRatio * 100, duplicatesToDelete.count, totalEpisodes)
+                        continuation.resume()
+                        return
                     }
                     
                     // Delete duplicates
@@ -126,9 +157,9 @@ class PodcastEpisodeManager {
                     
                     if !duplicatesToDelete.isEmpty {
                         try backgroundContext.save()
-                        os_log("✅ Cleaned up %d duplicate episodes", log: self.log, type: .info, duplicatesToDelete.count)
+                        os_log("✅ Safely cleaned up %d duplicate episodes (%.1f%% of total)", log: self.log, type: .info, duplicatesToDelete.count, deletionRatio * 100)
                     } else {
-                        os_log("✅ No duplicate episodes found", log: self.log, type: .info)
+                        os_log("✅ No duplicate episodes found requiring cleanup", log: self.log, type: .info)
                     }
                     
                     continuation.resume()

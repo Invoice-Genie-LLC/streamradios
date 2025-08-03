@@ -208,7 +208,10 @@ class PodcastCloudKitManager {
             // Consider sync successful if we processed at least some episodes from CloudKit
             syncSuccess = syncedCount > 0 || allCloudStates.isEmpty
             
-            os_log("✅ Bulk CloudKit sync completed: %d synced, %d prepared for Core Data", 
+            // CRITICAL FIX: Force save all episode states immediately after CloudKit sync to prevent loss on force close
+            EpisodeStateManager.shared.forceSave()
+            
+            os_log("✅ Bulk CloudKit sync completed: %d synced, %d prepared for Core Data, states force-saved", 
                    log: log, type: .info, syncedCount, coreDataUpdates.count)
 
         } catch {
@@ -300,7 +303,10 @@ class PodcastCloudKitManager {
             let errorRate = Double(individualSyncErrors) / Double(totalEpisodesAttempted)
             syncSuccess = errorRate < 0.5 // Success if less than 50% of episodes failed
             
-            os_log("✅ Individual CloudKit sync completed: %d synced, %d errors, success: %@", 
+            // CRITICAL FIX: Force save all episode states after individual fallback sync to prevent loss on force close
+            EpisodeStateManager.shared.forceSave()
+            
+            os_log("✅ Individual CloudKit sync completed: %d synced, %d errors, success: %@, states force-saved", 
                    log: log, type: .info, syncedCount, individualSyncErrors, syncSuccess ? "YES" : "NO")
         }
         

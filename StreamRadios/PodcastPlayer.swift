@@ -741,27 +741,16 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL: Set user intent to play podcast (like RadioPlayer)
         userWantsToPlay = true
         
-        // IMMEDIATE UI POPULATION: Set episode information immediately for instant visual feedback
-        currentEpisode = episode
-        currentFeed = feed
-        isPodcastActive = true
+        // CRITICAL FIX: Stop current playback FIRST to prevent multiple episodes showing as playing
+        let previousEpisode = currentEpisode
         
-        // Initialize time and duration immediately for UI display
-        duration = episode.duration
-        
-        // Reset position restoration flag for the new episode
-        hasRestoredPositionForCurrentEpisode = false
-        currentEpisodeIdForRestoration = nil
-        
-        // Reset network state when loading a new episode
-        resetNetworkState()
-        
-        // Completely stop radio playback to prevent it from getting stuck in "connecting" state
-        RadioPlayer.shared.stop()
-        
-        // If there's a currently playing episode, mark it as "In Progress" before switching
-        if let previousEpisode = currentEpisode, previousEpisode.id != episode.id {
-            // Get the most accurate current time from the player
+        // If there's a currently playing episode, stop it immediately and save progress
+        if let previousEpisode = previousEpisode, previousEpisode.id != episode.id {
+            // IMMEDIATE: Stop playing state to prevent UI showing multiple episodes as playing
+            isPlaying = false
+            player?.pause()
+            
+            // Get the most accurate current time from the player before stopping
             let actualCurrentTime = player?.currentItem?.currentTime().seconds ?? currentTime
             let actualDuration = player?.currentItem?.duration.seconds ?? duration
             
@@ -779,12 +768,31 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Save progress immediately when switching episodes
             saveProgressForEpisodeSwitch(previousEpisode, progress: currentProgress, actualTime: actualCurrentTime)
             
+            // Update state manager immediately to stop showing previous episode as playing
             stateManager.switchToEpisode(
                 newEpisodeId: episode.id,
                 previousEpisodeId: previousEpisode.id,
                 previousProgress: currentProgress
             )
         }
+        
+        // NOW set the new episode information
+        currentEpisode = episode
+        currentFeed = feed
+        isPodcastActive = true
+        
+        // Initialize time and duration for the new episode
+        duration = episode.duration
+        
+        // Reset position restoration flag for the new episode
+        hasRestoredPositionForCurrentEpisode = false
+        currentEpisodeIdForRestoration = nil
+        
+        // Reset network state when loading a new episode
+        resetNetworkState()
+        
+        // Completely stop radio playback to prevent it from getting stuck in "connecting" state
+        RadioPlayer.shared.stop()
         
         // Set podcast as the active player - this will handle audio session activation
         PlaybackManager.shared.setActivePlayer(.podcast)
