@@ -117,17 +117,10 @@ class DataSyncManager: ObservableObject {
     @MainActor
     private func syncRadioStations() async {
         radioStationsStatus = .inProgress
-        currentOperation = "Fetching radio stations from iCloud..."
+        currentOperation = "Initializing radio stations sync..."
+        radioStationsProgress = 0.0
         
         do {
-            // Simulate progress updates
-            for progress in stride(from: 0.0, through: 1.0, by: 0.2) {
-                radioStationsProgress = progress
-                if progress < 1.0 {
-                    try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
-                }
-            }
-            
             // PERFORMANCE FIX: Only sync radio stations from CloudKit on fresh installs
             // Check if this is a fresh install before fetching from CloudKit
             let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
@@ -137,11 +130,20 @@ class DataSyncManager: ObservableObject {
             
             if isFreshInstall || !hasRadioStationsSynced {
                 print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
-                await syncRadioStationsFromCloudKit()
+                currentOperation = "Fetching radio stations from iCloud..."
+                await syncRadioStationsFromCloudKitWithProgress()
                 // Mark radio stations as synced
                 UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
             } else {
                 print("⚡ Skipping CloudKit radio station sync - loading from local storage only for better performance")
+                currentOperation = "Loading radio stations from local storage..."
+                // Simulate quick progress for local loading
+                for progress in stride(from: 0.0, through: 1.0, by: 0.25) {
+                    radioStationsProgress = progress
+                    if progress < 1.0 {
+                        try await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                    }
+                }
                 // Load from Core Data instead of CloudKit
                 await MainActor.run {
                     viewModel.loadStationsFromCoreData()
@@ -150,10 +152,12 @@ class DataSyncManager: ObservableObject {
             
             radioStationsStatus = .completed
             radioStationsProgress = 1.0
+            currentOperation = "Radio stations loaded successfully"
             print("✅ Radio stations sync completed")
             
         } catch {
             radioStationsStatus = .failed
+            currentOperation = "Failed to load radio stations"
             print("❌ Radio stations sync failed: \(error)")
         }
     }
@@ -509,6 +513,38 @@ class DataSyncManager: ObservableObject {
                 }
                 continuation.resume()
             }
+        }
+    }
+    
+    @MainActor
+    private func syncRadioStationsFromCloudKitWithProgress() async {
+        let viewModel = RadioStationViewModel.shared
+        
+        return await withCheckedContinuation { continuation in
+            DataStore.shared.fetchRadioStationsWithProgress(
+                progressCallback: { [weak self] progress, count, message in
+                    Task { @MainActor in
+                        self?.radioStationsProgress = progress
+                        self?.currentOperation = message
+                        print("📊 Radio stations progress: \(Int(progress * 100))% - \(message)")
+                    }
+                },
+                completion: { stations, error in
+                    if let stations = stations {
+                        DispatchQueue.main.async {
+                            viewModel.stations = stations
+                            viewModel.saveStationsToCoreData()
+                            print("✅ Synced \(stations.count) radio stations with progress tracking")
+                            
+                            // Mark radio stations as synced to prevent future CloudKit syncing on app launches
+                            UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+                        }
+                    } else if let error = error {
+                        print("❌ Failed to sync radio stations: \(error)")
+                    }
+                    continuation.resume()
+                }
+            )
         }
     }
     

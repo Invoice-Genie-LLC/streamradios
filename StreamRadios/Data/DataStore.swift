@@ -654,14 +654,19 @@ class DataStore {
         fetchRadioStationsWithPagination(allRecords: [], cursor: nil, completion: completion)
     }
     
+    func fetchRadioStationsWithProgress(progressCallback: @escaping (Double, Int, String) -> Void, completion: @escaping ([RadioStation]?, Error?) -> Void) {
+        print("Starting paginated fetch of radio stations from CloudKit with progress tracking...")
+        fetchRadioStationsWithPaginationAndProgress(allRecords: [], cursor: nil, totalEstimate: nil, progressCallback: progressCallback, completion: completion)
+    }
+    
     private func fetchRadioStationsWithPagination(allRecords: [CKRecord], cursor: CKQueryOperation.Cursor?, completion: @escaping ([RadioStation]?, Error?) -> Void) {
         let predicate = NSPredicate(value: true)
         let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
         
         let queryOperation = CKQueryOperation(query: query)
         
-        // Set limits to handle large datasets efficiently
-        queryOperation.resultsLimit = 200 // CloudKit recommended batch size for queries
+        // Set limits to handle large datasets efficiently - optimized for faster fetching
+        queryOperation.resultsLimit = 500 // Increased batch size for faster fetching
         queryOperation.cursor = cursor
         
         var fetchedRecords = allRecords
@@ -686,6 +691,96 @@ class DataStore {
                     // All records fetched
                     print("Completed fetching all \(fetchedRecords.count) records from CloudKit.")
                     self.processAndReturnStations(from: fetchedRecords, completion: completion)
+                }
+            case .failure(let error):
+                DispatchQueue.main.async {
+                    print("Error during CloudKit query operation: \(error.localizedDescription)")
+                    completion(nil, error)
+                }
+            }
+        }
+        
+        privateDatabase.add(queryOperation)
+    }
+    
+    private func fetchRadioStationsWithPaginationAndProgress(allRecords: [CKRecord], cursor: CKQueryOperation.Cursor?, totalEstimate: Int?, progressCallback: @escaping (Double, Int, String) -> Void, completion: @escaping ([RadioStation]?, Error?) -> Void) {
+        let predicate = NSPredicate(value: true)
+        let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
+        
+        let queryOperation = CKQueryOperation(query: query)
+        
+        // Set optimized limits for faster fetching
+        queryOperation.resultsLimit = 500 // Increased batch size for faster fetching
+        queryOperation.cursor = cursor
+        
+        var fetchedRecords = allRecords
+        let startingCount = allRecords.count
+        
+        queryOperation.recordMatchedBlock = { recordID, result in
+            switch result {
+            case .success(let record):
+                fetchedRecords.append(record)
+                
+                // Report progress for every 50 records or so to avoid too many updates
+                if fetchedRecords.count % 50 == 0 || fetchedRecords.count - startingCount == 1 {
+                    let currentCount = fetchedRecords.count
+                    let progressMessage = "Fetched \(currentCount) radio stations..."
+                    
+                    // Estimate progress - if we have a total estimate, use it, otherwise estimate based on current batch
+                    let estimatedProgress: Double
+                    if let total = totalEstimate, total > 0 {
+                        estimatedProgress = Double(currentCount) / Double(total)
+                    } else {
+                        // Conservative estimate: assume we're getting decent progress based on current batch
+                        estimatedProgress = min(0.9, Double(currentCount) / 1000.0) // Estimate max 1000 stations for conservative progress
+                    }
+                    
+                    DispatchQueue.main.async {
+                        progressCallback(estimatedProgress, currentCount, progressMessage)
+                    }
+                }
+            case .failure(let error):
+                print("Error fetching individual record \(recordID.recordName): \(error.localizedDescription)")
+            }
+        }
+        
+        queryOperation.queryResultBlock = { result in
+            switch result {
+            case .success(let cursor):
+                let currentCount = fetchedRecords.count
+                let batchSize = currentCount - startingCount
+                
+                if let cursor = cursor {
+                    // More records available, continue fetching
+                    print("Fetched \(batchSize) records in this batch (\(currentCount) total), continuing with pagination...")
+                    
+                    // Update progress for this batch completion
+                    let progressMessage = "Loaded \(currentCount) stations, fetching more..."
+                    let estimatedProgress = min(0.9, Double(currentCount) / 1000.0) // Conservative estimate
+                    
+                    DispatchQueue.main.async {
+                        progressCallback(estimatedProgress, currentCount, progressMessage)
+                    }
+                    
+                    // Continue with next batch
+                    self.fetchRadioStationsWithPaginationAndProgress(allRecords: fetchedRecords, cursor: cursor, totalEstimate: totalEstimate, progressCallback: progressCallback, completion: completion)
+                } else {
+                    // All records fetched
+                    print("Completed fetching all \(currentCount) records from CloudKit.")
+                    
+                    // Report final progress
+                    DispatchQueue.main.async {
+                        progressCallback(0.95, currentCount, "Processing \(currentCount) stations...")
+                    }
+                    
+                    self.processAndReturnStations(from: fetchedRecords) { stations, error in
+                        DispatchQueue.main.async {
+                            if let stations = stations {
+                                progressCallback(1.0, stations.count, "Completed! Loaded \(stations.count) stations")
+                            }
+                        }
+                        completion(stations, error)
+                    }
                 }
             case .failure(let error):
                 DispatchQueue.main.async {
