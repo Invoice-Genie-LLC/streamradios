@@ -85,7 +85,7 @@ class PodcastCoreDataManager {
         os_log("📦 Batch inserted %d feeds", log: log, type: .debug, feeds.count)
     }
     
-    /// Batch insert episodes for optimal performance
+    /// Batch insert episodes with duplicate checking for optimal performance
     private func batchInsertEpisodes(from feeds: [PodcastFeed], in context: NSManagedObjectContext) throws {
         let allEpisodes = feeds.flatMap { feed in
             feed.episodes.map { episode in (episode, feed.id) }
@@ -93,14 +93,25 @@ class PodcastCoreDataManager {
         
         guard !allEpisodes.isEmpty else { return }
         
+        // CRITICAL FIX: Check for existing episodes to prevent duplicates
+        let episodeIds = allEpisodes.map { $0.0.id }
+        let existingEpisodeIds = try getExistingEpisodeIds(episodeIds: episodeIds, in: context)
+        
+        // Filter out episodes that already exist
+        let newEpisodes = allEpisodes.filter { !existingEpisodeIds.contains($0.0.id) }
+        
+        guard !newEpisodes.isEmpty else {
+            os_log("📦 No new episodes to insert - all %d episodes already exist", log: log, type: .debug, allEpisodes.count)
+            return
+        }
+        
+        // Batch insert only new episodes
+        var insertIndex = 0
         let batchInsert = NSBatchInsertRequest(entity: PodcastModel.entity()) { (managedObject: NSManagedObject) -> Bool in
             guard let episodeModel = managedObject as? PodcastModel else { return true }
             
-            var index = 0
-            defer { index += 1 }
-            
-            if index < allEpisodes.count {
-                let (episode, feedId) = allEpisodes[index]
+            if insertIndex < newEpisodes.count {
+                let (episode, feedId) = newEpisodes[insertIndex]
                 episodeModel.id = episode.id
                 episodeModel.title = episode.title
                 episodeModel.audioUrl = episode.audioUrl
@@ -113,6 +124,7 @@ class PodcastCoreDataManager {
                 episodeModel.isPlayed = false
                 episodeModel.isFavorite = false
                 episodeModel.isDownloaded = false
+                insertIndex += 1
                 return false
             }
             return true
@@ -121,7 +133,18 @@ class PodcastCoreDataManager {
         batchInsert.resultType = NSBatchInsertRequestResultType.objectIDs
         try context.execute(batchInsert)
         
-        os_log("📦 Batch inserted %d episodes", log: log, type: .debug, allEpisodes.count)
+        os_log("📦 Batch inserted %d new episodes (skipped %d duplicates)", log: log, type: .info, newEpisodes.count, existingEpisodeIds.count)
+    }
+    
+    /// Get existing episode IDs for multiple episodes (batch duplicate checking)
+    private func getExistingEpisodeIds(episodeIds: [String], in context: NSManagedObjectContext) throws -> Set<String> {
+        let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        request.predicate = NSPredicate(format: "id IN %@", episodeIds)
+        request.propertiesToFetch = ["id"]
+        request.resultType = .managedObjectResultType
+        
+        let episodes = try context.fetch(request)
+        return Set(episodes.compactMap { $0.id })
     }
     
     // MARK: - Fast Loading for App Launch

@@ -12,6 +12,7 @@ import AVFoundation
 import SwiftUI
 import BackgroundTasks
 import MediaPlayer
+import CloudKit
 
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     
@@ -39,6 +40,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             UNUserNotificationCenter.current().setNotificationCategories([alarmCategory])
             
             application.registerForRemoteNotifications()
+            
+            // Initialize enhanced CloudKit sync for cross-device deletion notifications
+            _ = PodcastCloudKitManager.shared
+            print("📡 Enhanced CloudKit sync initialized for cross-device deletion")
             
             checkBackgroundRefreshStatus()
             
@@ -218,6 +223,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        print("📡 🔔 REMOTE NOTIFICATION: Received remote notification")
+        print("📡 📝 UserInfo: \(userInfo)")
+        
+        // Check if this is a CloudKit notification
+        if let ckNotification = CKNotification(fromRemoteNotificationDictionary: userInfo) {
+            print("📡 ☁️ CLOUDKIT NOTIFICATION: Detected CloudKit notification")
+            
+            // Handle CloudKit notification asynchronously
+            Task {
+                // Handle with enhanced PodcastCloudKitManager for comprehensive sync
+                await PodcastCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+                
+                completionHandler(.newData)
+            }
+            return
+        }
+        
+        // Handle existing alarm notifications
         if let aps = userInfo["aps"] as? [String: AnyObject] {
             if aps["content-available"] as? Int == 1 {
                 checkAndPlayAlarm()
@@ -225,6 +248,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             } else {
                 completionHandler(.noData)
             }
+        } else {
+            completionHandler(.noData)
         }
     }
     

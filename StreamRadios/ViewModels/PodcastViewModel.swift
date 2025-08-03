@@ -158,8 +158,521 @@ class PodcastViewModel: ObservableObject {
         // Load last played episodes from UserDefaults
         loadLastPlayedEpisodes()
         
+        // Setup instant sync listener for real-time cross-device updates
+        setupInstantSyncListener()
+        
         // Note: CloudKit sync is now handled by explicit initializeWithCloudKitSupport() call
         // This prevents duplicate syncing when multiple ViewModels are created
+    }
+    
+    // MARK: - Instant Sync Listener
+    
+    private func setupInstantSyncListener() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantPodcastProgressSync),
+            name: .init("InstantSyncDidUpdatePodcastProgress"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantPodcastFeedAddedSync),
+            name: .init("InstantSyncDidAddPodcastFeed"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantPodcastFeedRemovedSync),
+            name: .init("InstantSyncDidRemovePodcastFeed"),
+            object: nil
+        )
+        
+        // Real-time CloudKit deletion notifications
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRealtimeCloudKitFeedDeletedSync(_:)),
+            name: .init("CloudKitDidDeletePodcastFeed"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantPodcastFavoriteSync),
+            name: .init("InstantSyncDidUpdatePodcastFavorite"),
+            object: nil
+        )
+        
+        // CloudKit automatic sync listeners
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCloudKitFeedAddedSync),
+            name: .init("CloudKitDidAddPodcastFeed"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCloudKitFeedDeletedSync),
+            name: .init("CloudKitDidDeletePodcastFeed"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCloudKitAllFeedsUpdatedSync),
+            name: .init("CloudKitDidUpdateAllFeeds"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCloudKitEpisodeStateSync),
+            name: .init("CloudKitDidUpdateEpisodeState"),
+            object: nil
+        )
+    }
+    
+    @objc private func handleInstantPodcastProgressSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let progress = userInfo["progress"] as? Double else {
+            return
+        }
+        
+        // Update episode progress from remote sync
+        let currentProgress = episodeProgress[episodeId] ?? 0.0
+        
+        // Only update if the value actually changed to avoid infinite loops
+        // Also check if this progress is newer (has a reasonable threshold)
+        if abs(currentProgress - progress) > 0.01 {
+            DispatchQueue.main.async {
+                self.episodeProgress[episodeId] = progress
+                
+                // Update EpisodeStateManager as well
+                EpisodeStateManager.shared.setProgress(for: episodeId, progress: progress)
+                
+                print("📡 Applied instant podcast progress sync: \(episodeId) (%.2f)", progress)
+            }
+        }
+    }
+    
+    @objc private func handleInstantPodcastFeedAddedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let feedData = userInfo["feed"] as? [String: Any] else {
+            return
+        }
+        
+        // Convert dictionary back to PodcastFeed
+        if let feed = podcastFeedFromDictionary(feedData) {
+            // Check if feed already exists to avoid duplicates
+            if !podcastFeeds.contains(where: { $0.id == feed.id }) {
+                DispatchQueue.main.async {
+                    self.podcastFeeds.append(feed)
+                    self.saveFeedsToCoreData()
+                    
+                    print("📡 Applied instant podcast feed addition sync: \(feed.title)")
+                }
+            }
+        }
+    }
+    
+    @objc private func handleInstantPodcastFeedRemovedSync(_ notification: Notification) {
+        print("📡 🔔 NOTIFICATION RECEIVED: InstantSyncDidRemovePodcastFeed")
+        print("📡 📝 Notification object: \(String(describing: notification.object))")
+        
+        guard let userInfo = notification.userInfo else {
+            print("📡 ❌ SYNC RECEIVE FAILED: No userInfo in notification")
+            return
+        }
+        
+        print("📡 📝 Notification userInfo: \(userInfo)")
+        
+        guard let feedId = userInfo["feedId"] as? String,
+              let feedTitle = userInfo["feedTitle"] as? String else {
+            print("📡 ❌ SYNC RECEIVE FAILED: Invalid feed removal notification data")
+            print("📡 📝 Missing feedId or feedTitle in userInfo: \(userInfo)")
+            return
+        }
+        
+        let episodeIds = userInfo["episodeIds"] as? [String] ?? []
+        let actionId = userInfo["actionId"] as? String ?? "unknown"
+        
+        print("📡 🎯 Processing feed removal sync:")
+        print("📡    📚 Feed: '\(feedTitle)' (\(feedId))")
+        print("📡    📊 Episodes to clean up: \(episodeIds.count)")
+        print("📡    🆔 Action ID: \(actionId)")
+        
+        // Check if we already have this feed (avoid removing non-existent feeds)
+        let feedExists = podcastFeeds.contains { $0.id == feedId }
+        print("📡 🔍 Feed exists in local list: \(feedExists) (total feeds: \(podcastFeeds.count))")
+        
+        if !feedExists {
+            print("📡 ⚠️ Feed '\(feedTitle)' not found in local feeds list - might already be deleted or CloudKit-first order working correctly")
+            return
+        }
+        
+        // Comprehensive cleanup similar to local deletePodcastFeed
+        Task {
+            // Step 1: Clean up episode data from EpisodeStateManager
+            for episodeId in episodeIds {
+                EpisodeStateManager.shared.clearEpisodeData(episodeId)
+            }
+            print("📡 Cleared \(episodeIds.count) episode states from EpisodeStateManager")
+            
+            // Step 2: Delete downloaded episode files
+            await deleteDownloadedEpisodeFiles(episodeIds)
+            
+            // Step 3: Remove feed and episodes from UI and Core Data
+            await MainActor.run {
+                // Remove from UI arrays
+                if let index = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+                    self.podcastFeeds.remove(at: index)
+                }
+                self.podcastFeedOrder.removeAll { $0 == feedId }
+                self.currentEpisodes.removeAll { $0.feedId == feedId }
+                
+                // Clear selected feed if it's the one being deleted
+                if self.selectedFeedId == feedId {
+                    self.selectedFeedId = nil
+                }
+                
+                // Clean up local episode state tracking
+                for episodeId in episodeIds {
+                    self.episodeProgress.removeValue(forKey: episodeId)
+                }
+                
+                // Trigger UI update
+                self.throttledUIUpdate()
+            }
+            
+            // Step 4: Delete from Core Data
+            do {
+                let feed = PodcastFeed(id: feedId, title: feedTitle, url: "", artworkUrl: nil, description: nil)
+                try await deleteFeedFromCoreData(feed)
+                print("📡 Deleted feed and episodes from Core Data: \(feedTitle)")
+                
+                await MainActor.run {
+                    print("📡 ✅ Applied instant podcast feed removal sync: \(feedTitle)")
+                    print("📡 📊 Remote device cleanup summary:")
+                    print("📡    ✅ CloudKit was already cleaned by originating device")
+                    print("📡    ✅ EpisodeStateManager: \(episodeIds.count) episode states cleared")
+                    print("📡    ✅ Downloaded files: cleaned up")
+                    print("📡    ✅ Core Data: feed and episodes deleted")
+                    print("📡    ✅ UI: feed and episodes removed")
+                    print("📡    🚨 NOTE: CloudKit-first deletion order prevents feed restoration!")
+                }
+            } catch {
+                print("📡 ❌ Error during Core Data cleanup for synced feed removal: \(error)")
+            }
+        }
+    }
+    
+    @objc private func handleInstantPodcastFavoriteSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let isFavorite = userInfo["isFavorite"] as? Bool else {
+            return
+        }
+        
+        // Update episode favorite status from remote sync
+        let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+        
+        // Only update if the value actually changed to avoid infinite loops
+        if currentFavorite != isFavorite {
+            DispatchQueue.main.async {
+                // Update EpisodeStateManager as the source of truth
+                EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
+                
+                print("📡 Applied instant podcast favorite sync: \(episodeId) (favorite: \(isFavorite))")
+            }
+        }
+    }
+    
+    // MARK: - CloudKit Automatic Sync Handlers
+    
+    @objc private func handleCloudKitFeedAddedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let feed = userInfo["feed"] as? PodcastFeed else {
+            print("📡 ☁️ CLOUDKIT FEED ADD FAILED: Invalid feed data in notification")
+            return
+        }
+        
+        print("📡 ☁️ CLOUDKIT FEED ADD: Received feed addition from CloudKit: \(feed.title)")
+        
+        // Check if feed already exists to avoid duplicates
+        if !podcastFeeds.contains(where: { $0.id == feed.id }) {
+            
+            // **FIX**: Only parse RSS episodes without duplicating Core Data save
+            Task {
+                do {
+                    print("📡 🔄 CLOUDKIT FEED ADD: Fetching episodes for synced feed: \(feed.title)")
+                    
+                    // Parse RSS for episodes only (don't save feed to Core Data again)
+                    guard let url = URL(string: feed.url) else {
+                        print("📡 ❌ CLOUDKIT FEED ADD: Invalid URL for feed \(feed.title): \(feed.url)")
+                        await addFeedToUIOnly(feed)
+                        return
+                    }
+                    
+                    // Parse RSS to get episodes
+                    let episodes = try await parseRSSEpisodesOnly(from: url)
+                    
+                    // Add episodes to Core Data for this feed
+                    try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id)
+                    
+                    await MainActor.run {
+                        // Add feed with episodes to UI
+                        var feedWithEpisodes = feed
+                        feedWithEpisodes.episodes = episodes
+                        
+                        self.podcastFeeds.append(feedWithEpisodes)
+                        self.podcastFeedOrder.append(feedWithEpisodes.id)
+                        self.throttledUIUpdate()
+                        
+                        print("📡 ☁️ CLOUDKIT FEED ADD: ✅ Added feed with \(episodes.count) episodes from CloudKit: \(feed.title)")
+                    }
+                    
+                } catch {
+                    print("📡 ❌ CLOUDKIT FEED ADD: Failed to fetch episodes for \(feed.title): \(error)")
+                    // Still add the feed without episodes as fallback
+                    await addFeedToUIOnly(feed)
+                }
+            }
+        } else {
+            print("📡 ☁️ CLOUDKIT FEED ADD: ⚠️ Feed already exists, skipping duplicate: \(feed.title)")
+        }
+    }
+    
+    /// Parse RSS feed to get episodes only (without saving feed to Core Data)
+    private func parseRSSEpisodesOnly(from url: URL) async throws -> [PodcastEpisode] {
+        print("🔍 Parsing RSS episodes from: \(url.absoluteString)")
+        
+        // Fetch RSS data
+        let (feedData, _) = try await URLSession.shared.data(from: url)
+        
+        // Parse RSS using the same parser as PodcastFeedManager
+        let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString)
+        let (_, episodes) = try parser.parseComplete()
+        
+        print("🔍 Parsed \(episodes.count) episodes from RSS")
+        return episodes
+    }
+    
+    /// Helper method to add feed to UI without episode parsing (fallback)
+    @MainActor
+    private func addFeedToUIOnly(_ feed: PodcastFeed) {
+        if !podcastFeeds.contains(where: { $0.id == feed.id }) {
+            podcastFeeds.append(feed)
+            podcastFeedOrder.append(feed.id)
+            throttledUIUpdate()
+            print("📡 ☁️ CLOUDKIT FEED ADD: ✅ Added feed (without episodes) from CloudKit: \(feed.title)")
+        }
+    }
+    
+    @objc private func handleCloudKitFeedDeletedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let feedId = userInfo["feedId"] as? String else {
+            print("📡 ☁️ CLOUDKIT FEED DELETE FAILED: Invalid feed ID in notification")
+            return
+        }
+        
+        print("📡 ☁️ CLOUDKIT FEED DELETE: Received feed deletion from CloudKit: \(feedId)")
+        
+        // Find and remove the feed
+        if let index = podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+            let feedTitle = podcastFeeds[index].title
+            
+            DispatchQueue.main.async {
+                // Remove from UI arrays
+                self.podcastFeeds.remove(at: index)
+                self.podcastFeedOrder.removeAll { $0 == feedId }
+                self.currentEpisodes.removeAll { $0.feedId == feedId }
+                
+                // Clear selected feed if it's the one being deleted
+                if self.selectedFeedId == feedId {
+                    self.selectedFeedId = nil
+                }
+                
+                // Trigger UI update
+                self.throttledUIUpdate()
+                print("📡 ☁️ CLOUDKIT FEED DELETE: ✅ Removed feed from CloudKit: \(feedTitle)")
+            }
+        } else {
+            print("📡 ☁️ CLOUDKIT FEED DELETE: ⚠️ Feed not found locally, might already be deleted: \(feedId)")
+        }
+    }
+    
+    @objc private func handleRealtimeCloudKitFeedDeletedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let feedId = userInfo["feedId"] as? String else {
+            print("📡 🔔 REALTIME CLOUDKIT DELETE FAILED: Invalid feed ID in notification")
+            return
+        }
+        
+        print("📡 🔔 REALTIME CLOUDKIT DELETE: Received real-time feed deletion from CloudKit: \(feedId)")
+        
+        // Find the feed first to get episode IDs and title before deletion
+        guard let feed = podcastFeeds.first(where: { $0.id == feedId }) else {
+            print("📡 🔔 REALTIME CLOUDKIT DELETE: ⚠️ Feed not found locally, might already be deleted: \(feedId)")
+            return
+        }
+        
+        let feedTitle = feed.title // Store title early since we'll need it later
+        
+        Task {
+            // Get episode IDs for cleanup
+            let episodeIds = await getEpisodeIdsForFeed(feedId)
+            print("📡 🔔 Found \(episodeIds.count) episodes to clean up for real-time deletion: \(feedTitle)")
+            
+            // Clean up episode data from EpisodeStateManager
+            for episodeId in episodeIds {
+                EpisodeStateManager.shared.clearEpisodeData(episodeId)
+            }
+            
+            // Delete downloaded episode files
+            await deleteDownloadedEpisodeFiles(episodeIds)
+            
+            // Remove from UI and Core Data
+            await MainActor.run {
+                // **RACE CONDITION FIX**: Find the feed again right before removal
+                // The array might have changed during the async operations above
+                if let currentFeedIndex = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+                    self.podcastFeeds.remove(at: currentFeedIndex)
+                    print("📡 🔔 REALTIME CLOUDKIT DELETE: ✅ Removed feed from UI at index \(currentFeedIndex)")
+                } else {
+                    print("📡 🔔 REALTIME CLOUDKIT DELETE: ⚠️ Feed was already removed from UI during async operations")
+                }
+                
+                // These operations are safe even if the feed was already removed
+                self.podcastFeedOrder.removeAll { $0 == feedId }
+                self.currentEpisodes.removeAll { $0.feedId == feedId }
+                
+                // Clear selected feed if it's the one being deleted
+                if self.selectedFeedId == feedId {
+                    self.selectedFeedId = nil
+                }
+                
+                // Clear local episode state tracking
+                for episodeId in episodeIds {
+                    self.episodeProgress.removeValue(forKey: episodeId)
+                }
+                
+                // Trigger UI update
+                self.throttledUIUpdate()
+                print("📡 🔔 REALTIME CLOUDKIT DELETE: ✅ Applied real-time deletion for: \(feedTitle)")
+            }
+            
+            // Delete from Core Data
+            do {
+                let feedForDeletion = PodcastFeed(id: feedId, title: feedTitle, url: "", artworkUrl: nil, description: nil)
+                try await deleteFeedFromCoreData(feedForDeletion)
+                print("📡 🔔 REALTIME CLOUDKIT DELETE: ✅ Deleted from Core Data: \(feedTitle)")
+            } catch {
+                print("📡 🔔 REALTIME CLOUDKIT DELETE: ❌ Error deleting from Core Data: \(error)")
+            }
+        }
+    }
+    
+    @objc private func handleCloudKitAllFeedsUpdatedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let feeds = userInfo["feeds"] as? [PodcastFeed] else {
+            print("📡 ☁️ CLOUDKIT ALL FEEDS FAILED: Invalid feeds data in notification")
+            return
+        }
+        
+        print("📡 ☁️ CLOUDKIT ALL FEEDS: Received full feed sync from CloudKit: \(feeds.count) feeds")
+        
+        DispatchQueue.main.async {
+            // Replace local feeds with CloudKit feeds (full sync)
+            self.podcastFeeds = feeds
+            self.podcastFeedOrder = feeds.map { $0.id }
+            self.throttledUIUpdate()
+            print("📡 ☁️ CLOUDKIT ALL FEEDS: ✅ Updated all feeds from CloudKit")
+        }
+    }
+    
+    @objc private func handleCloudKitEpisodeStateSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let progress = userInfo["progress"] as? Double,
+              let isFavorite = userInfo["isFavorite"] as? Bool,
+              let isDownloaded = userInfo["isDownloaded"] as? Bool else {
+            print("📡 ☁️ CLOUDKIT EPISODE STATE FAILED: Invalid episode state data in notification")
+            return
+        }
+        
+        print("📡 ☁️ CLOUDKIT EPISODE STATE: Received episode state from CloudKit: \(episodeId)")
+        
+        DispatchQueue.main.async {
+            // Update local episode tracking (CloudKit already updated EpisodeStateManager)
+            self.episodeProgress[episodeId] = progress
+            
+            // Trigger UI update if this episode is currently displayed
+            if self.currentEpisodes.contains(where: { $0.id == episodeId }) {
+                self.throttledUIUpdate()
+            }
+            
+            print("📡 ☁️ CLOUDKIT EPISODE STATE: ✅ Updated episode state from CloudKit: \(episodeId)")
+        }
+    }
+    
+    // Helper method to convert dictionary to PodcastFeed
+    private func podcastFeedFromDictionary(_ data: [String: Any]) -> PodcastFeed? {
+        guard let id = data["id"] as? String,
+              let title = data["title"] as? String,
+              let url = data["url"] as? String else {
+            return nil
+        }
+        
+        let artworkUrl = data["artworkUrl"] as? String
+        let descriptionText = data["description"] as? String
+        let iconData = data["iconData"] as? String
+        
+        // Handle imageData if present
+        var imageData: Data?
+        if let imageDataString = data["imageData"] as? String {
+            imageData = Data(base64Encoded: imageDataString)
+        }
+        
+        return PodcastFeed(
+            id: id,
+            title: title,
+            url: url,
+            artworkUrl: artworkUrl,
+            description: descriptionText,
+            iconData: iconData,
+            imageData: imageData,
+            episodes: [] // Episodes will be loaded separately
+        )
+    }
+    
+    // Helper method to convert PodcastFeed to dictionary for syncing
+    private func podcastFeedToDictionary(_ feed: PodcastFeed) -> [String: Any] {
+        var data: [String: Any] = [
+            "id": feed.id,
+            "title": feed.title,
+            "url": feed.url
+        ]
+        
+        if let artworkUrl = feed.artworkUrl {
+            data["artworkUrl"] = artworkUrl
+        }
+        
+        if let descriptionText = feed.descriptionText {
+            data["description"] = descriptionText
+        }
+        
+        if let iconData = feed.iconData {
+            data["iconData"] = iconData
+        }
+        
+        if let imageData = feed.imageData {
+            data["imageData"] = imageData.base64EncodedString()
+        }
+        
+        return data
     }
     
     deinit {
@@ -326,6 +839,11 @@ class PodcastViewModel: ObservableObject {
                 self.podcastFeedOrder.append(feed.id)
                 self.throttledUIUpdate()
                 print("✅ Feed immediately added to UI: \(feed.title)")
+                
+                // INSTANT SYNC: Sync podcast feed addition immediately across devices
+                PodcastCloudKitManager.shared.syncPodcastFeedAddedInstantly(
+                    feedData: self.podcastFeedToDictionary(feed)
+                )
             }
             
             // Step 3: Background CloudKit sync
@@ -428,6 +946,7 @@ class PodcastViewModel: ObservableObject {
             }
             
             await MainActor.run {
+                // Update current episodes with filtered results (duplicates prevented at source)
                 self.currentEpisodes = filteredEpisodes
                 self.isLoadingEpisodes = false
                 self.hasMoreEpisodes = false
@@ -588,9 +1107,23 @@ class PodcastViewModel: ObservableObject {
             if let _ = progress {
                 // Use our carefully calculated finalProgress (which may have rejected corrupted explicit progress)
                 EpisodeStateManager.shared.setProgress(for: episodeId, progress: finalProgress)
+                
+                            // INSTANT SYNC: Sync episode progress immediately across devices
+            print("📡 CALLING SYNC: Episode \(episodeId) progress \(finalProgress)")
+            PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+                episodeId: episodeId,
+                progress: finalProgress
+            )
             } else if isCurrentlyPlaying {
                 // For currently playing episodes, sync the player's progress
                 EpisodeStateManager.shared.setProgress(for: episodeId, progress: playerProgress)
+                
+                // INSTANT SYNC: Sync episode progress immediately across devices
+                print("📡 CALLING SYNC: Currently playing episode \(episodeId) progress \(playerProgress)")
+                PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+                    episodeId: episodeId,
+                    progress: playerProgress
+                )
             }
             // IMPORTANT: If no explicit progress and not currently playing, DON'T modify stored progress
             
@@ -729,11 +1262,76 @@ class PodcastViewModel: ObservableObject {
                     self.selectedFeedId = nil
                 }
                 
-                // Trigger immediate UI update
+                // Trigger immediate UI update for user feedback
                 self.throttledUIUpdate()
             }
             
-            // Step 3: Background cleanup - all data associated with the feed
+            // Step 3: **CRITICAL** - Delete from CloudKit FIRST before syncing to other devices
+            // This prevents CloudKit from restoring the deleted feed on other devices
+            var cloudKitDeletionSucceeded = false
+            do {
+                print("☁️ 🚨 CRITICAL STEP: Deleting from CloudKit BEFORE syncing to other devices")
+                print("☁️ Feed to delete: '\(feed.title)' (\(feed.id))")
+                
+                // Debug: List all feeds in CloudKit before deletion
+                print("🔍 DEBUG: Listing all feeds in CloudKit before deletion:")
+                await cloudKitManager.debugListAllFeeds()
+                
+                // Debug: Check if feed exists by exact ID
+                await cloudKitManager.debugCheckFeedExists(feed.id)
+                
+                try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
+                cloudKitDeletionSucceeded = true
+                
+                print("☁️ ✅ SUCCESS: Feed deleted from CloudKit: \(feed.title)")
+                print("☁️ ✅ CloudKit deleted all \(episodeIds.count) related episode states")
+                
+                // Debug: Verify deletion worked
+                print("🔍 DEBUG: Verifying deletion in CloudKit:")
+                await cloudKitManager.debugCheckFeedExists(feed.id)
+                
+            } catch {
+                cloudKitDeletionSucceeded = false
+                print("☁️ ❌ CRITICAL ERROR: Failed to delete from CloudKit: \(error)")
+                print("☁️ ❌ This may cause the feed to reappear on other devices!")
+                print("☁️ ❌ Error details: \(error.localizedDescription)")
+                if let ckError = error as? CKError {
+                    print("☁️ ❌ CloudKit error code: \(ckError.code)")
+                }
+            }
+            
+            // Step 4: Only sync to other devices AFTER CloudKit deletion succeeds
+            // This ensures other devices won't have CloudKit restore the deleted feed
+            if cloudKitDeletionSucceeded {
+                await MainActor.run {
+                    print("📡 🚀 NOW SAFE TO SYNC: CloudKit deletion successful, syncing to other devices")
+                    print("📡 📝 Feed ID: \(feed.id)")
+                    print("📡 📝 Feed Title: \(feed.title)")
+                    print("📡 📝 Episode count: \(episodeIds.count)")
+                    
+                    PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
+                        feedId: feed.id,
+                        feedTitle: feed.title,
+                        episodeIds: episodeIds
+                    )
+                    
+                    print("📡 ✅ SYNC TRIGGERED: Other devices will now delete feed safely")
+                }
+            } else {
+                await MainActor.run {
+                    print("📡 ⚠️ SYNC SKIPPED: CloudKit deletion failed, not syncing to prevent inconsistency")
+                    print("📡 ⚠️ Feed may still exist in CloudKit and could reappear")
+                    
+                    // Show user warning about potential issues
+                    NotificationManager.shared.notifyUserImmediate(
+                        title: "Deletion Warning", 
+                        message: "Feed deleted locally but may reappear due to sync issues"
+                    )
+                }
+            }
+            
+            // Step 5: Final local cleanup - EpisodeStateManager, files, and Core Data  
+            // (CloudKit deletion was already completed in Step 3 above)
             do {
                 // Delete episode progress, favorites, and downloads from EpisodeStateManager
                 for episodeId in episodeIds {
@@ -744,49 +1342,18 @@ class PodcastViewModel: ObservableObject {
                 // Delete downloaded episode files
                 await deleteDownloadedEpisodeFiles(episodeIds)
                 
-                // Delete feed and all associated episode states from CloudKit
-                do {
-                    print("🔄 Attempting to delete feed and episode states from CloudKit: \(feed.id)")
-                    print("🔍 Feed details - Title: '\(feed.title)', URL: '\(feed.url)'")
-                    
-                    // Debug: List all feeds in CloudKit before deletion
-                    print("🔍 DEBUG: Listing all feeds in CloudKit before deletion:")
-                    await cloudKitManager.debugListAllFeeds()
-                    
-                    // Debug: Check if feed exists by exact ID
-                    await cloudKitManager.debugCheckFeedExists(feed.id)
-                    
-                    try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
-                    print("☁️ Successfully deleted feed from CloudKit: \(feed.title)")
-                    print("☁️ CloudKit explicitly deleted all \(episodeIds.count) related episode states (progress, favorites, downloads)")
-                    
-                    // Debug: List all feeds in CloudKit after deletion
-                    print("🔍 DEBUG: Listing all feeds in CloudKit after deletion:")
-                    await cloudKitManager.debugListAllFeeds()
-                    
-                } catch {
-                    print("❌ Failed to delete feed from CloudKit: \(error)")
-                    print("❌ CloudKit deletion error details: \(error.localizedDescription)")
-                    if let ckError = error as? CKError {
-                        print("❌ CloudKit error code: \(ckError.code)")
-                        print("❌ CloudKit error description: \(ckError.localizedDescription)")
-                    }
-                    
-                    // Debug: List all feeds after failed deletion
-                    print("🔍 DEBUG: Listing all feeds in CloudKit after failed deletion:")
-                    await cloudKitManager.debugListAllFeeds()
-                }
-                
-                // Delete from Core Data (episodes and feed) - this will also remove episode states
+                // Delete from Core Data (episodes and feed) - CloudKit was already handled above
                 try await deleteFeedFromCoreData(feed)
                 print("💾 Deleted feed and \(episodeIds.count) episodes from Core Data: \(feed.title)")
                 
                 print("🎉 Successfully completed comprehensive deletion of: \(feed.title)")
-                print("📊 Cleanup summary:")
-                print("   - EpisodeStateManager: \(episodeIds.count) episode states cleared")
-                print("   - CloudKit: Feed and \(episodeIds.count) episode states explicitly deleted")
-                print("   - Downloaded files: cleaned up")
-                print("   - Core Data: feed and \(episodeIds.count) episodes deleted")
+                print("📊 Final cleanup summary:")
+                print("   - CloudKit: ✅ Deleted FIRST (preventing restoration on other devices)")
+                print("   - Cross-device sync: ✅ Triggered AFTER CloudKit deletion")
+                print("   - EpisodeStateManager: ✅ \(episodeIds.count) episode states cleared")
+                print("   - Downloaded files: ✅ Cleaned up")
+                print("   - Core Data: ✅ Feed and episodes removed")
+                print("🚨 CRITICAL: Proper order prevents feed from reappearing on other devices!")
                 
                 // Notify user of successful deletion
                 await MainActor.run {
@@ -937,8 +1504,10 @@ class PodcastViewModel: ObservableObject {
             
             await MainActor.run {
                 if isAppending {
+                    // Simply append new episodes (duplicates prevented at source)
                     self.currentEpisodes.append(contentsOf: result.episodes)
                 } else {
+                    // Replace with new episodes (duplicates prevented at source)
                     self.currentEpisodes = result.episodes
                 }
                 
@@ -980,6 +1549,7 @@ class PodcastViewModel: ObservableObject {
             updated.state.isPlayed = updated.state.progress >= 0.99
             return updated
         }
+        // Update current episodes with refreshed states
         currentEpisodes = updatedCurrentEpisodes
         
         // CRITICAL: Also update episode states in ALL podcastFeeds so that download states
@@ -2407,6 +2977,12 @@ extension PodcastViewModel {
         // Update EpisodeStateManager immediately (source of truth)
         EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: newState)
         
+        // INSTANT SYNC: Sync podcast favorite immediately across devices
+        PodcastCloudKitManager.shared.syncPodcastFavoriteInstantly(
+            episodeId: episode.id,
+            isFavorite: newState
+        )
+        
         // Update local state immediately for all tabs
         Task { @MainActor in
             // Update the episode in place across all states immediately
@@ -3132,4 +3708,6 @@ extension PodcastViewModel {
         // Save the new order to Core Data
         saveFeedsToCoreData()
     }
+    
+
 }

@@ -177,7 +177,181 @@ class RadioStationViewModel: NSObject, ObservableObject {
             if selectedCountry != "Select Country" {
                 print("⚡ Instant startup: Showing cached stations for \(selectedCountry). API refresh available via manual refresh.")
             }
+            
+            // Setup instant sync listener for real-time cross-device updates
+            setupInstantSyncListener()
         }
+    
+    // MARK: - Instant Sync Listener
+    
+    private func setupInstantSyncListener() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantRadioFavoriteSync),
+            name: .init("InstantSyncDidUpdateRadioFavorite"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantRadioStationAddedSync),
+            name: .init("InstantSyncDidAddRadioStation"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantRadioStationRemovedSync),
+            name: .init("InstantSyncDidRemoveRadioStation"),
+            object: nil
+        )
+    }
+    
+    @objc private func handleInstantRadioFavoriteSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String,
+              let isFavorite = userInfo["isFavorite"] as? Bool,
+              let index = stations.firstIndex(where: { $0.id == stationId }) else {
+            return
+        }
+        
+        // Update station favorite status from remote sync
+        var updatedStation = stations[index]
+        let wasAlreadyFavorite = updatedStation.isFavorite
+        
+        // Only update if the value actually changed to avoid infinite loops
+        if wasAlreadyFavorite != isFavorite {
+            updatedStation.isFavorite = isFavorite
+            
+            if isFavorite {
+                updatedStation.favoritedAt = Date()
+                updatedStation.favoriteOrder = 0
+            } else {
+                updatedStation.favoritedAt = nil
+                updatedStation.favoriteOrder = nil
+            }
+            
+            stations[index] = updatedStation
+            saveStationsToCoreData()
+            
+            print("📡 Applied instant radio favorite sync: \(stationId) (favorite: \(isFavorite))")
+        }
+    }
+    
+    @objc private func handleInstantRadioStationAddedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationData = userInfo["station"] as? [String: Any] else {
+            return
+        }
+        
+        // Convert dictionary back to RadioStation
+        if let station = radioStationFromDictionary(stationData) {
+            // Check if station already exists to avoid duplicates
+            if !stations.contains(where: { $0.id == station.id }) {
+                stations.append(station)
+                saveStationsToCoreData()
+                
+                print("📡 Applied instant radio station addition sync: \(station.name)")
+            }
+        }
+    }
+    
+    @objc private func handleInstantRadioStationRemovedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            return
+        }
+        
+        // Remove station if it exists
+        if let index = stations.firstIndex(where: { $0.id == stationId }) {
+            let stationName = stations[index].name
+            stations.remove(at: index)
+            saveStationsToCoreData()
+            
+            print("📡 Applied instant radio station removal sync: \(stationName)")
+        }
+    }
+    
+    // Helper method to convert dictionary to RadioStation
+    private func radioStationFromDictionary(_ data: [String: Any]) -> RadioStation? {
+        guard let id = data["id"] as? String,
+              let name = data["name"] as? String,
+              let url = data["url"] as? String else {
+            return nil
+        }
+        
+        let iconData = data["iconData"] as? String
+        let iTunesArtworkData = data["iTunesArtworkData"] as? String
+        let country = data["country"] as? String ?? "Unknown Region"
+        let isFavorite = data["isFavorite"] as? Bool ?? false
+        let order = data["order"] as? Int ?? 0
+        let favoriteOrder = data["favoriteOrder"] as? Int
+        let isRecent = data["isRecent"] as? Bool ?? false
+        
+        // Handle dates
+        var lastPlayed: Date?
+        if let lastPlayedTimestamp = data["lastPlayed"] as? TimeInterval {
+            lastPlayed = Date(timeIntervalSince1970: lastPlayedTimestamp)
+        }
+        
+        var favoritedAt: Date?
+        if let favoritedAtTimestamp = data["favoritedAt"] as? TimeInterval {
+            favoritedAt = Date(timeIntervalSince1970: favoritedAtTimestamp)
+        }
+        
+        return RadioStation(
+            id: id,
+            name: name,
+            url: url,
+            iconData: iconData,
+            iTunesArtworkData: iTunesArtworkData,
+            country: country,
+            isFavorite: isFavorite,
+            favoritedAt: favoritedAt,
+            favoriteOrder: favoriteOrder,
+            order: order,
+            lastPlayed: lastPlayed,
+            isRecent: isRecent
+        )
+    }
+    
+    // Helper method to convert RadioStation to dictionary for syncing
+    private func radioStationToDictionary(_ station: RadioStation) -> [String: Any] {
+        var data: [String: Any] = [
+            "id": station.id,
+            "name": station.name,
+            "url": station.url,
+            "country": station.country,
+            "isFavorite": station.isFavorite,
+            "order": station.order
+        ]
+        
+        if let iconData = station.iconData {
+            data["iconData"] = iconData
+        }
+        
+        if let iTunesArtworkData = station.iTunesArtworkData {
+            data["iTunesArtworkData"] = iTunesArtworkData
+        }
+        
+        if let lastPlayed = station.lastPlayed {
+            data["lastPlayed"] = lastPlayed.timeIntervalSince1970
+        }
+        
+        if let favoriteOrder = station.favoriteOrder {
+            data["favoriteOrder"] = favoriteOrder
+        }
+        
+        if let favoritedAt = station.favoritedAt {
+            data["favoritedAt"] = favoritedAt.timeIntervalSince1970
+        }
+        
+        if let isRecent = station.isRecent {
+            data["isRecent"] = isRecent
+        }
+        
+        return data
+    }
     
     func importStationsFromFile(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
         // Set import flag to prevent sync interference
@@ -623,6 +797,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             stations[index] = updatedStation
+            
+            // INSTANT SYNC: Sync favorite status immediately across devices
+            print("📡 CALLING RADIO SYNC: Station \(updatedStation.id) favorite \(updatedStation.isFavorite)")
+            PodcastCloudKitManager.shared.syncRadioFavoriteInstantly(
+                stationId: updatedStation.id,
+                isFavorite: updatedStation.isFavorite
+            )
+            
             updateStationInCloudKit(station: updatedStation)
             saveStationsToCoreData()
         }
@@ -746,6 +928,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
         print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
         saveStationToCloudKit(station: newStation)
+        
+        // INSTANT SYNC: Sync station addition immediately across devices
+        PodcastCloudKitManager.shared.syncRadioStationAddedInstantly(
+            station: radioStationToDictionary(newStation)
+        )
+        
         return true
     }
 

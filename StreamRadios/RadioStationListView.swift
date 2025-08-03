@@ -849,6 +849,13 @@ struct RadioStationListView: View {
                         print("Station successfully deleted from CloudKit.")
                         self.viewModel.stations.remove(at: index)
                         self.viewModel.deleteStationFromCoreData(station)
+                        
+                        // INSTANT SYNC: Sync station removal immediately across devices
+                        PodcastCloudKitManager.shared.syncRadioStationRemovedInstantly(
+                            stationId: station.id,
+                            stationName: station.name
+                        )
+                        
                         self.adjustRadioPlayerIndexAfterDeletion(at: index)
                     } else {
                         print("Failed to delete station from CloudKit.")
