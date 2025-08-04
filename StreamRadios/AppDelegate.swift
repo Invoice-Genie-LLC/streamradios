@@ -233,11 +233,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             
             // Handle CloudKit notification asynchronously
             Task {
-                // Handle with enhanced PodcastCloudKitManager for comprehensive podcast sync
-                await PodcastCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
-                
-                // Handle with RadioStationCloudKitManager for comprehensive radio station sync
-                await RadioStationCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+                // ENHANCED ROUTING: Route notifications to the correct manager based on content
+                await routeCloudKitNotification(userInfo)
                 
                 completionHandler(.newData)
             }
@@ -522,6 +519,42 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         if UIApplication.shared.backgroundRefreshStatus == .denied {
             print("Background refresh is disabled. Alarms may not function as expected.")
             // Consider showing an alert to the user here
+        }
+    }
+    
+    // MARK: - Enhanced CloudKit Notification Routing
+    
+    /// Intelligently route CloudKit notifications to the appropriate manager
+    private func routeCloudKitNotification(_ userInfo: [AnyHashable: Any]) async {
+        print("📡 🔄 NOTIFICATION ROUTER: Analyzing CloudKit notification...")
+        
+        // Extract subscription ID from the CloudKit notification
+        if let ckInfo = userInfo["ck"] as? [String: Any],
+           let qry = ckInfo["qry"] as? [String: Any],
+           let subscriptionId = qry["sid"] as? String {
+            
+            print("📡 🔄 NOTIFICATION ROUTER: Found subscription ID: \(subscriptionId)")
+            
+            switch subscriptionId {
+            case "RadioStationSubscription":
+                print("📡 📻 NOTIFICATION ROUTER: Routing to RadioStationCloudKitManager")
+                await RadioStationCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+                
+            case "PodcastFeedSubscription", "EpisodeStateSubscription":
+                print("📡 🎧 NOTIFICATION ROUTER: Routing to PodcastCloudKitManager")
+                await PodcastCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+                
+            default:
+                print("📡 ⚠️ NOTIFICATION ROUTER: Unknown subscription ID: \(subscriptionId), trying both managers")
+                // Fallback: try both managers (for unknown subscription types)
+                await PodcastCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+                await RadioStationCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+            }
+        } else {
+            print("📡 ⚠️ NOTIFICATION ROUTER: No subscription ID found, trying both managers")
+            // Fallback: if we can't determine the type, try both managers
+            await PodcastCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+            await RadioStationCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
         }
     }
 }

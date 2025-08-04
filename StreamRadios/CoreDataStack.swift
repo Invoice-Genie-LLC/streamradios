@@ -100,7 +100,10 @@ class CoreDataStack {
     }
 
     func saveEpisodes(_ episodes: [PodcastEpisode]) {
-        for episode in episodes {
+        // CRITICAL FIX: Remove duplicates before saving
+        let uniqueEpisodes = removeDuplicateEpisodes(episodes)
+        
+        for episode in uniqueEpisodes {
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
             
@@ -118,6 +121,33 @@ class CoreDataStack {
         }
         
         saveContext()
+    }
+    
+    /// Remove duplicate episodes using compositeID for robust duplicate detection
+    private func removeDuplicateEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+        var seenCompositeIDs = Set<String>()
+        var seenIds = Set<String>()
+        var uniqueEpisodes: [PodcastEpisode] = []
+        
+        for episode in episodes {
+            let compositeKey = episode.compositeID
+            
+            // Skip if we've seen this composite ID or episode ID before
+            if !seenCompositeIDs.contains(compositeKey) && !seenIds.contains(episode.id) {
+                seenCompositeIDs.insert(compositeKey)
+                seenIds.insert(episode.id)
+                uniqueEpisodes.append(episode)
+            } else {
+                print("CoreData: Skipping duplicate episode - ID: \(episode.id), Title: \(episode.title)")
+            }
+        }
+        
+        let duplicatesCount = episodes.count - uniqueEpisodes.count
+        if duplicatesCount > 0 {
+            print("CoreData: Removed \(duplicatesCount) duplicate episodes from \(episodes.count) total")
+        }
+        
+        return uniqueEpisodes
     }
 
     func deleteAllEpisodes() {

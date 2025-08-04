@@ -538,6 +538,17 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(Color.adaptiveSectionBackground)
             .cornerRadius(10)
+            
+            // Sorting arrow - shows only for All and Favorites tabs when not editing
+            if selectedTab == .radio && (viewModel.selectedSubTab == .all || viewModel.selectedSubTab == .favorites) && !isEditingMode {
+                Button(action: { 
+                    viewModel.sortStationsAlphabetically() 
+                }) {
+                    Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                        .font(.title2)
+                }
+                .padding(.leading, 8)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, -5)

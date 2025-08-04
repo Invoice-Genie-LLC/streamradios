@@ -67,6 +67,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var isDeletionInProgress = false
     @Published var isUploadingToCloudKit = false
     @Published var isImportInProgress = false
+    @Published var isAscendingSort = true
     
     // Flag to prevent infinite loop in favorite timestamp migration
     private var isMigrationInProgress = false
@@ -145,6 +146,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Always start with Recent tab (no persistence)
             selectedSubTab = .recent
+            
+            // Load sorting preferences
+            loadSortingPreferences()
         
             // PERFORMANCE FIX: Only sync radio stations from CloudKit on fresh installs
             // Check if radio stations have been synced to prevent unnecessary CloudKit fetching
@@ -1445,6 +1449,27 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         print("📡 🔄 Updated favorite order values for \(favoritesList.count) stations")
+    }
+    
+    /// Sort stations alphabetically and toggle sort direction
+    func sortStationsAlphabetically() {
+        // Toggle sort direction
+        isAscendingSort.toggle()
+        
+        // Save the sort direction to UserDefaults
+        UserDefaults.standard.set(isAscendingSort, forKey: "RadioStationSortAscending")
+        
+        print("📡 📝 Toggled radio station sort direction to: \(isAscendingSort ? "A-Z" : "Z-A")")
+    }
+    
+    /// Load sorting preferences from UserDefaults
+    private func loadSortingPreferences() {
+        if UserDefaults.standard.object(forKey: "RadioStationSortAscending") != nil {
+            isAscendingSort = UserDefaults.standard.bool(forKey: "RadioStationSortAscending")
+        } else {
+            isAscendingSort = true // Default to ascending (A-Z)
+            UserDefaults.standard.set(isAscendingSort, forKey: "RadioStationSortAscending")
+        }
     }
     
     /// Sync station order changes to CloudKit

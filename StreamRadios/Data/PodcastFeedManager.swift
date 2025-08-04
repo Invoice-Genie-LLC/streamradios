@@ -456,7 +456,7 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
         switch elementName {
         case "item":
             isParsingItem = true
-            currentEpisode = EpisodeBuilder()
+            currentEpisode = EpisodeBuilder(feedUrl: feedUrl)
         case "enclosure":
             if isParsingItem, let url = attributeDict["url"] {
                 currentEpisode?.audioUrl = url
@@ -531,6 +531,11 @@ private class EpisodeBuilder {
     var guid: String?
     var duration: String?
     var fileSize: Int64?
+    let feedUrl: String
+    
+    init(feedUrl: String) {
+        self.feedUrl = feedUrl
+    }
     
     func build() -> PodcastEpisode? {
         guard let title = title,
@@ -542,7 +547,22 @@ private class EpisodeBuilder {
         
         let publicationDate = DateFormatter.rfc2822.date(from: pubDateString) ?? Date()
         let episodeDuration = parseDuration(duration ?? "0")
-        let episodeId = guid ?? UUID().uuidString
+        
+        // CRITICAL FIX: Generate deterministic IDs to prevent duplicates
+        let episodeId: String
+        if let guid = guid, !guid.isEmpty {
+            // Use existing GUID if available
+            episodeId = guid
+        } else {
+            // Generate deterministic ID based on content to prevent duplicates
+            // This ensures the same episode always gets the same ID across RSS parses
+            episodeId = PodcastEpisode.generateDeterministicID(
+                title: title,
+                audioUrl: audioUrl,
+                publicationDate: publicationDate,
+                feedUrl: feedUrl // Use feedUrl for uniqueness across different feeds
+            )
+        }
         
         return PodcastEpisode(
             id: episodeId,

@@ -170,9 +170,17 @@ class RadioStationCloudKitManager: ObservableObject {
         
         // Determine record type from subscription ID
         let recordType: String
-        if let subscriptionID = notification.subscriptionID,
-           subscriptionID == "RadioStationSubscription" {
-            recordType = RecordType.radioStation
+        if let subscriptionID = notification.subscriptionID {
+            switch subscriptionID {
+            case "RadioStationSubscription":
+                recordType = RecordType.radioStation
+            case "PodcastFeedSubscription", "EpisodeStateSubscription":
+                // This is a podcast notification - ignore it gracefully as it should be handled by PodcastCloudKitManager
+                os_log("🎧 RADIO Ignoring podcast notification in RadioStationCloudKitManager (handled by PodcastCloudKitManager)", log: log, type: .debug)
+                return
+            default:
+                recordType = "Unknown"
+            }
         } else {
             recordType = "Unknown"
         }

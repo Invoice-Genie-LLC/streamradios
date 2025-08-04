@@ -53,6 +53,20 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     var localFilePath: String?
     var fileSize: Int64? // File size in bytes
     
+    /// Deterministic composite ID for duplicate detection and stable identification
+    var compositeID: String {
+        let dateString = String(publicationDate.timeIntervalSince1970)
+        let titleHash = String(abs(title.hashValue))
+        let audioUrlHash = String(abs(audioUrl.hashValue))
+        return "\(feedId)_\(dateString)_\(titleHash)_\(audioUrlHash)"
+    }
+    
+    /// Generate a deterministic episode ID based on content (for episodes without GUID)
+    static func generateDeterministicID(title: String, audioUrl: String, publicationDate: Date, feedUrl: String) -> String {
+        let content = "\(feedUrl)_\(title)_\(audioUrl)_\(publicationDate.timeIntervalSince1970)"
+        return "det_\(abs(content.hashValue))"
+    }
+    
     init(id: String = UUID().uuidString, title: String, descriptionText: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil) {
         self.id = id
         self.title = title
@@ -70,6 +84,7 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(feedId)
+        hasher.combine(publicationDate)
     }
     
     // Equatable based on unique identifier
@@ -898,8 +913,15 @@ class PodcastViewModel: ObservableObject {
         selectedFeedId = feedId
         currentPage = 1
         
+        // Check if episodes are already available before showing loading state
+        let feed = podcastFeeds.first(where: { $0.id == feedId })
+        let hasEpisodesInMemory = feed?.episodes.isEmpty == false
+        
         await MainActor.run {
-            self.isLoadingEpisodes = true
+            // Only show loading if we don't have episodes cached
+            if !hasEpisodesInMemory {
+                self.isLoadingEpisodes = true
+            }
             if isInitialLoad {
                 self.currentEpisodes = []
             }
@@ -915,6 +937,7 @@ class PodcastViewModel: ObservableObject {
             // Reduce logging during scrolling for better performance
             if !isUserScrolling {
                 print("🔍 DEBUG: Found \(feed.episodes.count) episodes already loaded in feed: \(feed.title)")
+                print("⚡ Using cached episodes - no network request needed")
             }
             
             // Refresh episode states from EpisodeStateManager to ensure they're current
@@ -952,7 +975,7 @@ class PodcastViewModel: ObservableObject {
                 self.hasMoreEpisodes = false
                 // Reduce logging during scrolling for better performance
                 if !self.isUserScrolling {
-                    print("📊 Using pre-loaded episodes with filter: \(self.currentEpisodes.count) episodes displayed")
+                    print("📊 ⚡ Using pre-loaded episodes with filter: \(self.currentEpisodes.count) episodes displayed instantly")
                 }
             }
             

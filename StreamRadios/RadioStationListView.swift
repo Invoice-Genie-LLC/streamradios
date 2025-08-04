@@ -65,6 +65,23 @@ struct RadioStationListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.adaptiveBackground)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // Add station button (always shown when not editing)
+                if !isEditing {
+                    Button(action: {
+                        if viewModel.selectedCountry == "Select Country" {
+                            alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
+                        } else {
+                            selectedStationForEdit = nil
+                            activeSheet = .addStation
+                        }
+                    }) {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+        }
         .onAppear(perform: setup)
         .onAppear {
             setup()
@@ -106,8 +123,8 @@ struct RadioStationListView: View {
                         )
                 }
                 
-                // Edit mode header
-                if isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) {
+                // Edit mode header (only for Favorites tab since All tab doesn't allow reordering)
+                if isEditing && selectedSubTab == .favorites {
                     VStack {
                         HStack {
                             Text("Drag to Reorder Stations")
@@ -180,7 +197,7 @@ struct RadioStationListView: View {
     private var emptyStateView: some View {
         VStack {
             Text("No stations configured")
-                .font(.title)
+                .font(.headline)
                 .foregroundColor(.adaptivePrimaryText)
                 .padding(.bottom, 15)
             Button(action: {
@@ -190,9 +207,9 @@ struct RadioStationListView: View {
                     self.selectedStationForEdit = nil
                     self.activeSheet = .addStation
                 }}) {
-                    Image(systemName: "plus.circle")
-                        .font(.largeTitle)
-                        .foregroundColor(.adaptivePrimaryText)
+                    Image(systemName: "plus")
+                        .font(.title2)
+                        .foregroundColor(.blue)
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -202,8 +219,8 @@ struct RadioStationListView: View {
     
     private func stationsListView(screenWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
-            // Add top padding when in editing mode for All and Favorites tabs
-            if isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) {
+            // Add top padding when in editing mode for Favorites tab only
+            if isEditing && selectedSubTab == .favorites {
                 Spacer()
                     .frame(height: 50)
             }
@@ -218,7 +235,7 @@ struct RadioStationListView: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets())
                     }
-                    .onMove(perform: selectedTab == .radio && isEditing && (selectedSubTab == .all || selectedSubTab == .favorites) ? moveStations : nil)
+                    .onMove(perform: selectedTab == .radio && isEditing && selectedSubTab == .favorites ? moveStations : nil)
                     
                     // Add extra space at the bottom for better scrolling when global player is visible
                     Color.clear
@@ -363,8 +380,8 @@ struct RadioStationListView: View {
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.5)
                 .onEnded { _ in
-                    // Long press activates sorting mode for All and Favorites tabs
-                    if !isEditing && selectedTab == .radio && (selectedSubTab == .all || selectedSubTab == .favorites) {
+                    // Long press activates sorting mode for Favorites tab only (All tab reordering is disabled)
+                    if !isEditing && selectedTab == .radio && selectedSubTab == .favorites {
                         // Stop any currently playing audio to prevent interference with sorting
                         if radioPlayer.isPlaying {
                             radioPlayer.pause()
@@ -815,15 +832,31 @@ struct RadioStationListView: View {
         
         switch selectedSubTab {
         case .all:
-            // All tab shows stations from the selected country only, sorted by order
+            // All tab shows stations from the selected country only, sorted alphabetically
             stations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
-                .sorted { $0.order < $1.order }
+            // Sort alphabetically by name based on toggle setting
+            if viewModel.isAscendingSort {
+                stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            } else {
+                stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+            }
         case .recent:
             // Recent tab shows recent stations from ALL countries
             stations = viewModel.recentStations()
         case .favorites:
             // Favorites tab shows favorites from ALL countries
-            stations = viewModel.favoriteStations()
+            if isEditing {
+                // When editing, use favoriteOrder for manual reordering
+                stations = viewModel.favoriteStations()
+            } else {
+                // When not editing, sort alphabetically by name
+                stations = viewModel.favoriteStations()
+                if viewModel.isAscendingSort {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                } else {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                }
+            }
         }
         
         // Apply search filter if search text is not empty
@@ -1038,27 +1071,9 @@ struct RadioStationListView: View {
         // Handle different subtab scenarios
         switch selectedSubTab {
         case .all:
-            // ENHANCED CLOUDKIT SYNC: Use ViewModel method for proper CloudKit sync
-            print("📡 🔄 UI: Moving stations in All tab with CloudKit sync")
-            
-            // Get the current filtered stations (all stations for this country) sorted by order
-            var countryStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
-                .sorted { $0.order < $1.order }
-            
-            // Perform the move operation
-            countryStations.move(fromOffsets: source, toOffset: destination)
-            
-            // Update the order property for each station in the reordered country list
-            for (index, station) in countryStations.enumerated() {
-                if let stationIndex = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
-                    viewModel.stations[stationIndex].order = index
-                }
-            }
-            
-            // CRITICAL: Use ViewModel method to trigger CloudKit sync
-            Task {
-                await viewModel.syncOrderChangesToCloudKit()
-            }
+            // All tab: Order changing is disabled
+            print("⚠️ Order changing is disabled for All tab")
+            return
             
         case .favorites:
             // ENHANCED CLOUDKIT SYNC: Use ViewModel method for proper CloudKit sync

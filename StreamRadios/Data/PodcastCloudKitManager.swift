@@ -224,6 +224,10 @@ class PodcastCloudKitManager: ObservableObject {
                 recordType = RecordType.podcastFeed
             case "EpisodeStateSubscription":
                 recordType = RecordType.episodeState
+            case "RadioStationSubscription":
+                // This is a radio station notification - ignore it gracefully as it should be handled by RadioStationCloudKitManager
+                os_log("📻 Ignoring radio station notification in PodcastCloudKitManager (handled by RadioStationCloudKitManager)", log: log, type: .debug)
+                return
             default:
                 os_log("⚠️ Unknown subscription ID: %@", log: log, type: .debug, subscriptionID)
                 recordType = "Unknown"
