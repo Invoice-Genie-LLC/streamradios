@@ -69,6 +69,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var isImportInProgress = false
     @Published var isAscendingSort = true
     
+    // Progress tracking for station loading
+    @Published var loadingProgress: Double = 0.0
+    @Published var loadingStationsCount: Int = 0
+    @Published var totalStationsToLoad: Int = 0
+    @Published var loadingPhase: String = ""
+    
     // Flag to prevent infinite loop in favorite timestamp migration
     private var isMigrationInProgress = false
     
@@ -1516,23 +1522,88 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @MainActor
     func fetchStationsFromAPI(for country: Country) async {
         isLoading = true
+        loadingProgress = 0.0
+        totalStationsToLoad = 0
+        loadingStationsCount = 0
+        loadingPhase = "Connecting to API..."
         
         do {
             print("🌐 Radio Browser API: Fetching stations for \(country.name) with API code: \(country.apiCountryCode)")
             logDeletedStationsCount()
+            
+            await MainActor.run {
+                loadingPhase = "Connecting to radio database..."
+                loadingProgress = 0.05
+            }
+            
+            // Start progress simulation during API call
+            let progressTask = Task { @MainActor in
+                var currentProgress = 0.05
+                while currentProgress < 0.25 && !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+                    currentProgress += 0.02
+                    loadingProgress = currentProgress
+                    
+                    // Update phase messages during download
+                    if currentProgress < 0.1 {
+                        loadingPhase = "Connecting to radio database..."
+                    } else if currentProgress < 0.15 {
+                        loadingPhase = "Downloading station data..."
+                    } else if currentProgress < 0.2 {
+                        loadingPhase = "Receiving stations..."
+                    } else {
+                        loadingPhase = "Finishing download..."
+                    }
+                }
+            }
+            
             let apiStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(countryCode: country.apiCountryCode, limit: 500)
+            
+            // Cancel progress simulation as API call completed
+            progressTask.cancel()
+            
             print("📡 RadioBrowserAPI: Received \(apiStations.count) stations for \(country.name)")
+            
+            await MainActor.run {
+                loadingProgress = 0.3
+                loadingPhase = "Download completed, received \(apiStations.count) stations..."
+            }
             
             guard !apiStations.isEmpty else {
                 print("📡 RadioBrowserAPI: No stations found for \(country.name)")
                 isLoading = false
+                loadingProgress = 0.0
+                loadingPhase = ""
                 return
+            }
+            
+            await MainActor.run {
+                totalStationsToLoad = apiStations.count
+                loadingPhase = "Preparing to process \(totalStationsToLoad) stations..."
+                loadingProgress = 0.32
             }
             
             // DEDUPLICATION: Filter out stations with identical URLs from the API response
             // Only keep the first occurrence of each unique URL (usually the one with highest click count)
+            await MainActor.run {
+                loadingPhase = "Checking for duplicates..."
+                loadingProgress = 0.35
+            }
+            
             var seenURLs = Set<String>()
+            var processedCount = 0
             let deduplicatedStations = apiStations.filter { apiStation in
+                processedCount += 1
+                
+                // Update progress during deduplication
+                if processedCount % 50 == 0 || processedCount == apiStations.count {
+                    let dedupeProgress = Double(processedCount) / Double(apiStations.count) * 0.15 // 15% range for deduplication
+                    Task { @MainActor in
+                        loadingProgress = 0.35 + dedupeProgress
+                        loadingPhase = "Checking duplicates... \(processedCount)/\(apiStations.count)"
+                    }
+                }
+                
                 guard !apiStation.url.isEmpty else { return false }
                 
                 if seenURLs.contains(apiStation.url) {
@@ -1553,13 +1624,34 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Use deduplicated stations for processing
             let processedAPIStations = deduplicatedStations
+            await MainActor.run {
+                totalStationsToLoad = processedAPIStations.count
+                loadingPhase = "Converting \(totalStationsToLoad) stations..."
+                loadingProgress = 0.5
+            }
             
             // Convert API stations to app stations, preserving existing favicon data if available
             let existingStationsMap = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
             var cachedFaviconCount = 0
+            var conversionProcessedCount = 0
             
             let newStations: [RadioStation] = processedAPIStations.compactMap { apiStation in
-                guard !apiStation.url.isEmpty else { return nil }
+                conversionProcessedCount += 1
+                
+                // Update progress every 10 stations or on completion for smoother progress
+                if conversionProcessedCount % 10 == 0 || conversionProcessedCount == totalStationsToLoad {
+                    // Map conversion progress from 50% to 75% (25% range)
+                    let conversionProgress = Double(conversionProcessedCount) / Double(totalStationsToLoad) * 0.25
+                    Task { @MainActor in
+                        loadingStationsCount = conversionProcessedCount
+                        loadingProgress = 0.5 + conversionProgress
+                        loadingPhase = "Converting stations... \(conversionProcessedCount)/\(totalStationsToLoad)"
+                    }
+                }
+                
+                guard !apiStation.url.isEmpty else { 
+                    return nil 
+                }
                 
                 // Skip stations that were manually deleted by the user
                 if isStationDeleted(apiStation.stationuuid) {
@@ -1601,8 +1693,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             // Filter out stations that already exist (check by URL to avoid duplicates)
+            await MainActor.run {
+                loadingPhase = "Filtering existing stations..."
+                loadingProgress = 0.75
+            }
+            
             let existingURLs = Set(stations.map { $0.url })
             let uniqueNewStations = newStations.filter { !existingURLs.contains($0.url) }
+            
+            await MainActor.run {
+                loadingPhase = "Analyzing results..."
+                loadingProgress = 0.8
+            }
             
             // Calculate counts for notification
             let totalFetched = apiStations.count
@@ -1613,8 +1715,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             guard !uniqueNewStations.isEmpty else {
                 print("📡 RadioBrowserAPI: All fetched stations already exist for \(country.name)")
-                isLoading = false
+                await MainActor.run {
+                    isLoading = false
+                    loadingProgress = 0.0
+                    loadingPhase = ""
+                }
                 return
+            }
+            
+            await MainActor.run {
+                loadingPhase = "Adding \(uniqueNewStations.count) new stations..."
+                loadingProgress = 0.82
             }
             
             print("📡 RadioBrowserAPI: Adding \(uniqueNewStations.count) new stations for \(country.name)")
@@ -1637,9 +1748,24 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             // Save to CoreData first
+            await MainActor.run {
+                loadingPhase = "Preparing local storage..."
+                loadingProgress = 0.85
+            }
+            
             saveStationsToCoreData()
             
+            await MainActor.run {
+                loadingPhase = "Saving to local storage..."
+                loadingProgress = 0.9
+            }
+            
             // Save to CloudKit (using the same method as import for new stations)
+            await MainActor.run {
+                loadingPhase = "Initiating cloud sync..."
+                loadingProgress = 0.93
+            }
+            
             DataStore.shared.saveNewStationsToCloudKit(stations: uniqueNewStations) { success, recordIDs in
                 DispatchQueue.main.async {
                     if success {
@@ -1650,8 +1776,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
             
+            await MainActor.run {
+                loadingPhase = "Completing sync..."
+                loadingProgress = 0.96
+            }
+            
             // Notify user about the fetch results (only when new stations were added)
-            DispatchQueue.main.async {
+            await MainActor.run {
                 var notificationMessage = "Added \(newStationsAdded) new stations for \(country.name)."
                 
                 var skipDetails: [String] = []
@@ -1676,13 +1807,41 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             // Notify that stations have been updated
+            await MainActor.run {
+                loadingPhase = "Finalizing..."
+                loadingProgress = 0.98
+            }
+            
             NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+            
+            // Complete loading
+            await MainActor.run {
+                loadingPhase = "Completed!"
+                loadingProgress = 1.0
+            }
             
         } catch {
             print("❌ RadioBrowserAPI: Failed to fetch stations for \(country.name): \(error)")
+            await MainActor.run {
+                loadingPhase = "Failed to load stations"
+                loadingProgress = 0.0
+            }
         }
         
-        isLoading = false
+        await MainActor.run {
+            isLoading = false
+        }
+        
+        // Reset progress values after a short delay
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            await MainActor.run {
+                self.loadingProgress = 0.0
+                self.loadingStationsCount = 0
+                self.totalStationsToLoad = 0
+                self.loadingPhase = ""
+            }
+        }
     }
     
     @MainActor

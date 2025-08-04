@@ -475,7 +475,7 @@ class PodcastViewModel: ObservableObject {
         return episodes
     }
     
-    /// Helper method to add feed to UI without episode parsing (fallback)
+    /// Helper met hod to add feed to UI without episode parsing (fallback)
     @MainActor
     private func addFeedToUIOnly(_ feed: PodcastFeed) {
         if !podcastFeeds.contains(where: { $0.id == feed.id }) {
