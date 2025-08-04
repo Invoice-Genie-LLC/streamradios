@@ -1038,6 +1038,9 @@ struct RadioStationListView: View {
         // Handle different subtab scenarios
         switch selectedSubTab {
         case .all:
+            // ENHANCED CLOUDKIT SYNC: Use ViewModel method for proper CloudKit sync
+            print("📡 🔄 UI: Moving stations in All tab with CloudKit sync")
+            
             // Get the current filtered stations (all stations for this country) sorted by order
             var countryStations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
                 .sorted { $0.order < $1.order }
@@ -1052,7 +1055,15 @@ struct RadioStationListView: View {
                 }
             }
             
+            // CRITICAL: Use ViewModel method to trigger CloudKit sync
+            Task {
+                await viewModel.syncOrderChangesToCloudKit()
+            }
+            
         case .favorites:
+            // ENHANCED CLOUDKIT SYNC: Use ViewModel method for proper CloudKit sync
+            print("📡 🔄 UI: Moving stations in Favorites tab with CloudKit sync")
+            
             // Move within favorites (all countries)
             var favoriteStations = filteredStations
             favoriteStations.move(fromOffsets: source, toOffset: destination)
@@ -1064,12 +1075,17 @@ struct RadioStationListView: View {
                 }
             }
             
+            // CRITICAL: Use ViewModel method to trigger CloudKit sync for favorites
+            Task {
+                await viewModel.syncFavoriteOrderChangesToCloudKit()
+            }
+            
         case .recent:
             // Recent stations can't be reordered manually (they're sorted by play time across all countries)
             return
         }
         
-        // Save changes
+        // Save changes to CoreData
         viewModel.saveStationsToCoreData()
         
         // Update radio player index if needed

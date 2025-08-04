@@ -41,9 +41,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             
             application.registerForRemoteNotifications()
             
-            // Initialize enhanced CloudKit sync for cross-device deletion notifications
+            // Initialize enhanced CloudKit sync for cross-device sync notifications
             _ = PodcastCloudKitManager.shared
-            print("📡 Enhanced CloudKit sync initialized for cross-device deletion")
+            _ = RadioStationCloudKitManager.shared
+            print("📡 Enhanced CloudKit sync initialized for podcasts and radio stations")
             
             checkBackgroundRefreshStatus()
             
@@ -232,8 +233,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             
             // Handle CloudKit notification asynchronously
             Task {
-                // Handle with enhanced PodcastCloudKitManager for comprehensive sync
+                // Handle with enhanced PodcastCloudKitManager for comprehensive podcast sync
                 await PodcastCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+                
+                // Handle with RadioStationCloudKitManager for comprehensive radio station sync
+                await RadioStationCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
                 
                 completionHandler(.newData)
             }

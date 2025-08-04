@@ -185,6 +185,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     // MARK: - Instant Sync Listener
     
     private func setupInstantSyncListener() {
+        // Legacy instant sync notifications (keeping for backward compatibility)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleInstantRadioFavoriteSync),
@@ -203,6 +204,57 @@ class RadioStationViewModel: NSObject, ObservableObject {
             self,
             selector: #selector(handleInstantRadioStationRemovedSync),
             name: .init("InstantSyncDidRemoveRadioStation"),
+            object: nil
+        )
+        
+        // New enhanced CloudKit sync notifications from RadioStationCloudKitManager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCloudKitStationUpdatedSync(_:)),
+            name: .init("CloudKitDidUpdateRadioStation"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCloudKitStationAddedSync(_:)),
+            name: .init("CloudKitDidAddRadioStation"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCloudKitStationDeletedSync(_:)),
+            name: .init("CloudKitDidDeleteRadioStation"),
+            object: nil
+        )
+        
+        // Enhanced instant sync notifications from RadioStationCloudKitManager
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantStationUpdatedSync(_:)),
+            name: .init("InstantSyncDidUpdateRadioStation"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantStationDeletedSync(_:)),
+            name: .init("InstantSyncDidDeleteRadioStation"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantFavoriteChangedSync(_:)),
+            name: .init("InstantSyncDidChangeFavorite"),
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantOrderChangedSync(_:)),
+            name: .init("InstantSyncDidChangeOrder"),
             object: nil
         )
     }
@@ -269,6 +321,224 @@ class RadioStationViewModel: NSObject, ObservableObject {
             saveStationsToCoreData()
             
             print("📡 Applied instant radio station removal sync: \(stationName)")
+        }
+    }
+    
+    // MARK: - Enhanced CloudKit Sync Handlers
+    
+    @objc private func handleCloudKitStationUpdatedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            print("📡 ☁️ CLOUDKIT STATION UPDATE FAILED: Invalid station ID in notification")
+            return
+        }
+        
+        print("📡 ☁️ CLOUDKIT STATION UPDATE: Received station update from CloudKit: \(stationId)")
+        
+        // Trigger a refresh of the specific station from CloudKit
+        Task {
+            await refreshStationFromCloudKit(stationId: stationId)
+        }
+    }
+    
+    @objc private func handleCloudKitStationAddedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            print("📡 ☁️ CLOUDKIT STATION ADD FAILED: Invalid station ID in notification")
+            return
+        }
+        
+        print("📡 ☁️ CLOUDKIT STATION ADD: Received station addition from CloudKit: \(stationId)")
+        
+        // Trigger a refresh to get the new station
+        Task {
+            await refreshStationFromCloudKit(stationId: stationId)
+        }
+    }
+    
+    @objc private func handleCloudKitStationDeletedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            print("📡 ☁️ CLOUDKIT STATION DELETE FAILED: Invalid station ID in notification")
+            return
+        }
+        
+        print("📡 ☁️ CLOUDKIT STATION DELETE: Received station deletion from CloudKit: \(stationId)")
+        
+        // Remove station if it exists
+        if let index = stations.firstIndex(where: { $0.id == stationId }) {
+            let stationName = stations[index].name
+            
+            DispatchQueue.main.async {
+                self.stations.remove(at: index)
+                self.saveStationsToCoreData()
+                
+                print("📡 ☁️ CLOUDKIT STATION DELETE: ✅ Removed station from CloudKit deletion: \(stationName)")
+            }
+        } else {
+            print("📡 ☁️ CLOUDKIT STATION DELETE: Station not found locally: \(stationId)")
+        }
+    }
+    
+    @objc private func handleInstantStationUpdatedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            print("📡 🔔 INSTANT STATION UPDATE FAILED: Invalid station ID in notification")
+            return
+        }
+        
+        print("📡 🔔 INSTANT STATION UPDATE: Received real-time station update: \(stationId)")
+        
+        // Trigger a refresh of the specific station from CloudKit
+        Task {
+            await refreshStationFromCloudKit(stationId: stationId)
+        }
+    }
+    
+    @objc private func handleInstantStationDeletedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String else {
+            print("📡 🔔 INSTANT STATION DELETE FAILED: Invalid station ID in notification")
+            return
+        }
+        
+        print("📡 🔔 INSTANT STATION DELETE: Received real-time station deletion: \(stationId)")
+        
+        // Remove station if it exists
+        if let index = stations.firstIndex(where: { $0.id == stationId }) {
+            let stationName = stations[index].name
+            
+            DispatchQueue.main.async {
+                self.stations.remove(at: index)
+                self.saveStationsToCoreData()
+                
+                print("📡 🔔 INSTANT STATION DELETE: ✅ Applied real-time deletion: \(stationName)")
+            }
+        } else {
+            print("📡 🔔 INSTANT STATION DELETE: Station not found locally: \(stationId)")
+        }
+    }
+    
+    @objc private func handleInstantFavoriteChangedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let stationId = userInfo["stationId"] as? String,
+              let isFavorite = userInfo["isFavorite"] as? Bool else {
+            print("📡 🔔 INSTANT FAVORITE CHANGE FAILED: Invalid data in notification")
+            return
+        }
+        
+        print("📡 🔔 INSTANT FAVORITE CHANGE: Received real-time favorite change: \(stationId) (favorite: \(isFavorite))")
+        
+        // Find and update the station
+        if let index = stations.firstIndex(where: { $0.id == stationId }) {
+            var updatedStation = stations[index]
+            let wasAlreadyFavorite = updatedStation.isFavorite
+            
+            // Only update if the value actually changed to avoid infinite loops
+            if wasAlreadyFavorite != isFavorite {
+                updatedStation.isFavorite = isFavorite
+                
+                if isFavorite {
+                    // Use provided timestamp or current time
+                    updatedStation.favoritedAt = userInfo["favoritedAt"] as? Date ?? Date()
+                    updatedStation.favoriteOrder = userInfo["favoriteOrder"] as? Int ?? 0
+                } else {
+                    updatedStation.favoritedAt = nil
+                    updatedStation.favoriteOrder = nil
+                }
+                
+                DispatchQueue.main.async {
+                    self.stations[index] = updatedStation
+                    self.saveStationsToCoreData()
+                    
+                    print("📡 🔔 INSTANT FAVORITE CHANGE: ✅ Applied real-time favorite change: \(stationId) (favorite: \(isFavorite))")
+                }
+            }
+        } else {
+            print("📡 🔔 INSTANT FAVORITE CHANGE: Station not found locally: \(stationId)")
+        }
+    }
+    
+    @objc private func handleInstantOrderChangedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo else {
+            print("📡 🔔 INSTANT ORDER CHANGE FAILED: No data in notification")
+            return
+        }
+        
+        print("📡 🔔 INSTANT ORDER CHANGE: Received real-time order change from CloudKit")
+        
+        // Extract action type from notification
+        if let action = userInfo["action"] as? String {
+            print("📡 🔔 INSTANT ORDER CHANGE: Action type: \(action)")
+            
+            Task {
+                await handleOrderChangeSync(action: action)
+            }
+        } else {
+            print("📡 🔔 INSTANT ORDER CHANGE: No action specified, doing full refresh")
+            Task {
+                await refreshStationsFromCloudKit()
+            }
+        }
+    }
+    
+    /// Handle specific order change sync actions
+    private func handleOrderChangeSync(action: String) async {
+        switch action {
+        case "order_changed":
+            print("📡 🔔 INSTANT ORDER CHANGE: Handling station list order change")
+            await refreshStationsFromCloudKit()
+        case "favorite_order_changed":
+            print("📡 🔔 INSTANT ORDER CHANGE: Handling favorites order change")
+            await refreshStationsFromCloudKit()
+        default:
+            print("📡 🔔 INSTANT ORDER CHANGE: Unknown action '\(action)', doing full refresh")
+            await refreshStationsFromCloudKit()
+        }
+    }
+    
+    // MARK: - CloudKit Refresh Helpers
+    
+    private func refreshStationFromCloudKit(stationId: String) async {
+        do {
+            if let updatedStation = try await RadioStationCloudKitManager.shared.fetchRadioStationFromCloudKit(stationId: stationId) {
+                await MainActor.run {
+                    // Find and update the station in the stations array
+                    if let index = self.stations.firstIndex(where: { $0.id == stationId }) {
+                        self.stations[index] = updatedStation
+                        print("📡 🔄 CLOUDKIT STATION REFRESH: ✅ Updated station \\(updatedStation.name)")
+                        
+                        // Save the updated station to Core Data
+                        self.saveStationsToCoreData()
+                        
+                        // Update UI
+                        self.objectWillChange.send()
+                    } else {
+                        // Station not found locally, add it
+                        self.stations.append(updatedStation)
+                        print("📡 🔄 CLOUDKIT STATION REFRESH: ✅ Added new station \\(updatedStation.name)")
+                        
+                        // Save to Core Data
+                        self.saveStationsToCoreData()
+                        
+                        // Update UI
+                        self.objectWillChange.send()
+                    }
+                }
+            } else {
+                print("📡 🔄 CLOUDKIT STATION REFRESH: ❌ Station \\(stationId) not found in CloudKit")
+            }
+        } catch {
+            print("📡 🔄 CLOUDKIT STATION REFRESH: ❌ Error refreshing station \\(stationId): \\(error)")
+        }
+    }
+    
+    private func refreshStationsFromCloudKit() async {
+        print("📡 🔄 Refreshing stations from CloudKit...")
+        
+        await MainActor.run {
+            // Trigger a CloudKit sync to get the latest data
+            syncStationsWithCloudKit()
         }
     }
     
@@ -798,14 +1068,27 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             stations[index] = updatedStation
             
-            // INSTANT SYNC: Sync favorite status immediately across devices
-            print("📡 CALLING RADIO SYNC: Station \(updatedStation.id) favorite \(updatedStation.isFavorite)")
-            PodcastCloudKitManager.shared.syncRadioFavoriteInstantly(
-                stationId: updatedStation.id,
-                isFavorite: updatedStation.isFavorite
-            )
+            // ENHANCED CLOUDKIT SYNC: Sync favorite status and station data to CloudKit automatically
+            print("📡 🚨 RADIO CLOUDKIT SYNC: Station \(updatedStation.id) favorite \(updatedStation.isFavorite)")
             
-            updateStationInCloudKit(station: updatedStation)
+            Task {
+                do {
+                    // Save the complete updated station to CloudKit
+                    try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(updatedStation)
+                    
+                    // Also update the specific favorite status for real-time sync
+                    try await RadioStationCloudKitManager.shared.updateFavoriteStatus(
+                        stationId: updatedStation.id,
+                        isFavorite: updatedStation.isFavorite,
+                        favoritedAt: updatedStation.favoritedAt,
+                        favoriteOrder: updatedStation.favoriteOrder
+                    )
+                    
+                    print("📡 ✅ RADIO CLOUDKIT SYNC: Successfully synced favorite change for \(updatedStation.name)")
+                } catch {
+                    print("📡 ❌ RADIO CLOUDKIT SYNC: Failed to sync favorite change: \(error)")
+                }
+            }
             saveStationsToCoreData()
         }
     }
@@ -927,12 +1210,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
         stations.append(newStation)
         print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
-        saveStationToCloudKit(station: newStation)
         
-        // INSTANT SYNC: Sync station addition immediately across devices
-        PodcastCloudKitManager.shared.syncRadioStationAddedInstantly(
-            station: radioStationToDictionary(newStation)
-        )
+        // ENHANCED CLOUDKIT SYNC: Save new station to CloudKit and sync across all devices
+        Task {
+            do {
+                try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(newStation)
+                print("📡 ✅ RADIO CLOUDKIT SYNC: Successfully added station to CloudKit: \(newStation.name)")
+            } catch {
+                print("📡 ❌ RADIO CLOUDKIT SYNC: Failed to add station to CloudKit: \(error)")
+            }
+        }
         
         return true
     }
@@ -1025,6 +1312,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 deleteLocalFile()
             }
             
+            // ENHANCED CLOUDKIT SYNC: Delete from CloudKit and sync across all devices
+            Task {
+                do {
+                    try await RadioStationCloudKitManager.shared.deleteRadioStationFromCloudKit(station.id)
+                    print("📡 ✅ RADIO CLOUDKIT SYNC: Successfully deleted station from CloudKit: \(station.name)")
+                } catch {
+                    print("📡 ❌ RADIO CLOUDKIT SYNC: Failed to delete station from CloudKit: \(error)")
+                }
+            }
             
             print("Station deleted from CoreData successfully.")
             NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Successfully deleted station '\(station.name)'.")
@@ -1094,8 +1390,100 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func moveStation(from source: IndexSet, to destination: Int) {
+        // Move the station in the array
         stations.move(fromOffsets: source, toOffset: destination)
-        saveStationsToCoreData()  // Save the updated order to CoreData
+        
+        // Update order values for all stations to reflect new positions
+        updateStationOrderValues()
+        
+        // Save to CoreData
+        saveStationsToCoreData()
+        
+        // ENHANCED CLOUDKIT SYNC: Sync order changes to CloudKit
+        Task {
+            await syncOrderChangesToCloudKit()
+        }
+    }
+    
+    /// Update order values for all stations to reflect their current positions
+    private func updateStationOrderValues() {
+        // Group stations by country and update order values
+        let groupedStations = Dictionary(grouping: stations.enumerated()) { $0.element.country }
+        
+        for (country, indexedStations) in groupedStations {
+            // Sort by current array index to maintain the new order
+            let sortedStations = indexedStations.sorted { $0.offset < $1.offset }
+            
+            // Update order values
+            for (newOrder, indexedStation) in sortedStations.enumerated() {
+                let originalIndex = indexedStation.offset
+                stations[originalIndex].order = newOrder
+            }
+        }
+        
+        print("📡 🔄 Updated order values for all stations")
+    }
+    
+    /// Move station within favorites list and update favoriteOrder values
+    func moveFavoriteStation(from source: IndexSet, to destination: Int) {
+        var favoritesList = favoriteStations()
+        favoritesList.move(fromOffsets: source, toOffset: destination)
+        
+        // Update favoriteOrder values
+        for (index, favorite) in favoritesList.enumerated() {
+            if let stationIndex = stations.firstIndex(where: { $0.id == favorite.id }) {
+                stations[stationIndex].favoriteOrder = index
+            }
+        }
+        
+        // Save to CoreData
+        saveStationsToCoreData()
+        
+        // ENHANCED CLOUDKIT SYNC: Sync favorite order changes to CloudKit
+        Task {
+            await syncFavoriteOrderChangesToCloudKit()
+        }
+        
+        print("📡 🔄 Updated favorite order values for \(favoritesList.count) stations")
+    }
+    
+    /// Sync station order changes to CloudKit
+    func syncOrderChangesToCloudKit() async {
+        print("📡 🚨 RADIO ORDER SYNC: Starting order sync to CloudKit...")
+        
+        do {
+            // Sync all affected stations to CloudKit
+            for station in stations {
+                try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(station)
+            }
+            
+            // Trigger cross-device order sync notification
+            await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "order_changed")
+            
+            print("📡 ✅ RADIO ORDER SYNC: Successfully synced station order to CloudKit")
+        } catch {
+            print("📡 ❌ RADIO ORDER SYNC: Failed to sync order to CloudKit: \(error)")
+        }
+    }
+    
+    /// Sync favorite order changes to CloudKit
+    func syncFavoriteOrderChangesToCloudKit() async {
+        print("📡 🚨 RADIO FAVORITE ORDER SYNC: Starting favorite order sync to CloudKit...")
+        
+        do {
+            // Only sync favorite stations to CloudKit
+            let favorites = favoriteStations()
+            for station in favorites {
+                try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(station)
+            }
+            
+            // Trigger cross-device favorite order sync notification
+            await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "favorite_order_changed")
+            
+            print("📡 ✅ RADIO FAVORITE ORDER SYNC: Successfully synced favorite order to CloudKit")
+        } catch {
+            print("📡 ❌ RADIO FAVORITE ORDER SYNC: Failed to sync favorite order to CloudKit: \(error)")
+        }
     }
     
     // MARK: - Radio Browser API Integration
