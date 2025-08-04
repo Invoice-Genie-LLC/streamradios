@@ -11,6 +11,7 @@ import AVFoundation
 import MediaPlayer
 import UserNotifications
 import os.log
+import CloudKit
 
 // MARK: - Exception Info Structure
 struct ExceptionInfo: Identifiable {
@@ -2029,6 +2030,14 @@ struct InternalDataManagementView: View {
     @State private var podcastDataDeletionComplete = false
     @State private var podcastDataDeletionError: String?
     
+    // Progress tracking for enhanced deletion UI
+    @State private var appDataDeletionProgress: Double = 0.0
+    @State private var appDataDeletionPhase: String = ""
+    @State private var stationDataDeletionProgress: Double = 0.0
+    @State private var stationDataDeletionPhase: String = ""
+    @State private var podcastDataDeletionProgress: Double = 0.0
+    @State private var podcastDataDeletionPhase: String = ""
+    
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.presentationMode) var presentationMode
     
@@ -2195,7 +2204,10 @@ struct InternalDataManagementView: View {
                     )
                     
                     if isDeletingAllAppData {
-                        ExportProgressView(title: "Deleting all app data in batches...")
+                        ExportProgressView(
+                            title: appDataDeletionPhase.isEmpty ? "Preparing to delete all app data..." : appDataDeletionPhase,
+                            progress: appDataDeletionProgress
+                        )
                     } else if appDataDeletionComplete {
                         StatusMessage(
                             text: "All app data has been deleted successfully.",
@@ -2222,7 +2234,10 @@ struct InternalDataManagementView: View {
                     )
                     
                     if isDeletingStationData {
-                        ExportProgressView(title: "Deleting station data in batches...")
+                        ExportProgressView(
+                            title: stationDataDeletionPhase.isEmpty ? "Preparing to delete station data..." : stationDataDeletionPhase,
+                            progress: stationDataDeletionProgress
+                        )
                     } else if stationDataDeletionComplete {
                         StatusMessage(
                             text: "All station data has been deleted successfully.",
@@ -2254,7 +2269,10 @@ struct InternalDataManagementView: View {
                     )
                     
                     if isDeletingPodcastData {
-                        ExportProgressView(title: "Deleting podcast data in batches...")
+                        ExportProgressView(
+                            title: podcastDataDeletionPhase.isEmpty ? "Preparing to delete podcast data..." : podcastDataDeletionPhase,
+                            progress: podcastDataDeletionProgress
+                        )
                     } else if podcastDataDeletionComplete {
                         StatusMessage(
                             text: "All podcast data has been deleted successfully.",
@@ -2352,13 +2370,15 @@ struct InternalDataManagementView: View {
         DispatchQueue.main.async {
             self.isDeletingAllAppData = true
             self.appDataDeletionComplete = false
+            self.appDataDeletionProgress = 0.0
+            self.appDataDeletionPhase = "Clearing local data..."
             
             // Clear UI immediately for instant feedback
             self.viewModel.clearStationsFromUI()
             self.podcastViewModel.clearPodcastFeedsFromUI()
         }
         
-        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all app data in batches...")
+        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all app data using enhanced batch processing...")
         
         let group = DispatchGroup()
         var allSuccess = true
@@ -2366,83 +2386,142 @@ struct InternalDataManagementView: View {
         
         // Delete station data from local CoreData
         group.enter()
+        DispatchQueue.main.async {
+            self.appDataDeletionPhase = "Deleting local station data..."
+            self.appDataDeletionProgress = 0.1
+        }
         viewModel.deleteAllData { success, errorMessage in
             if !success {
                 allSuccess = false
                 lastError = errorMessage?.localizedDescription ?? "Station deletion failed"
+            }
+            DispatchQueue.main.async {
+                self.appDataDeletionProgress = 0.2
             }
             group.leave()
         }
         
         // Delete podcast data from local CoreData
         group.enter()
+        DispatchQueue.main.async {
+            self.appDataDeletionPhase = "Deleting local podcast data..."
+            self.appDataDeletionProgress = 0.25
+        }
         podcastViewModel.clearPodcastCoreData { success, error in
             if !success {
                 allSuccess = false
                 lastError = error?.localizedDescription ?? "Failed to clear local podcast data"
             }
+            DispatchQueue.main.async {
+                self.appDataDeletionProgress = 0.35
+            }
             group.leave()
         }
         
-        // Delete all station records from CloudKit with improved error handling
+        // Delete all station records from CloudKit using enhanced async batch deletion
         group.enter()
-        DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
-            if let error = error {
-                allSuccess = false
-                lastError = "Failed to fetch station records: \(error.localizedDescription)"
-                print("❌ App Data Deletion: Failed to fetch station records - \(error.localizedDescription)")
-                group.leave()
-                return
-            }
-            
-            guard let recordIDs = recordIDs, !recordIDs.isEmpty else {
-                print("✅ App Data Deletion: No station records to delete")
-                group.leave()
-                return
-            }
-            
-            print("🔄 App Data Deletion: Starting deletion of \(recordIDs.count) station records")
-            DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
-                if !success {
-                    allSuccess = false
-                    lastError = error?.localizedDescription ?? "CloudKit station deletion failed"
-                    print("❌ App Data Deletion: Station records deletion failed - \(lastError ?? "Unknown error")")
-                } else {
-                    print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) station records")
+        Task {
+            do {
+                await MainActor.run {
+                    self.appDataDeletionPhase = "Fetching station records..."
+                    self.appDataDeletionProgress = 0.4
                 }
+                
+                let recordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
+                    DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
+                        if let error = error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            continuation.resume(returning: recordIDs ?? [])
+                        }
+                    }
+                }
+                
+                guard !recordIDs.isEmpty else {
+                    print("✅ App Data Deletion: No station records to delete")
+                    await MainActor.run {
+                        self.appDataDeletionProgress = 0.5
+                    }
+                    group.leave()
+                    return
+                }
+                
+                await MainActor.run {
+                    self.appDataDeletionPhase = "Deleting \(recordIDs.count) station records from iCloud..."
+                }
+                
+                print("🔄 App Data Deletion: Starting enhanced deletion of \(recordIDs.count) station records")
+                try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
+                    Task { @MainActor in
+                        // Station deletion takes 0.4 to 0.5 of total progress
+                        self.appDataDeletionProgress = 0.4 + (progress * 0.1)
+                        self.appDataDeletionPhase = "Deleting \(recordIDs.count) station records from iCloud... (\(Int(progress * 100))%)"
+                    }
+                }
+                print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) station records using enhanced batching")
+                group.leave()
+                
+            } catch {
+                allSuccess = false
+                lastError = "Enhanced station deletion failed: \(error.localizedDescription)"
+                print("❌ App Data Deletion: Enhanced station records deletion failed - \(error.localizedDescription)")
                 group.leave()
             }
         }
         
-        // Delete all podcast-related records from CloudKit sequentially to reduce load
+        // Delete all podcast-related records from CloudKit using enhanced async batch deletion
         let podcastRecordTypes = ["PodcastFeed", "EpisodeState"]
         
-        for recordType in podcastRecordTypes {
+        for (index, recordType) in podcastRecordTypes.enumerated() {
             group.enter()
-            DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
-                if let error = error {
-                    allSuccess = false
-                    lastError = "Failed to fetch \(recordType) records: \(error.localizedDescription)"
-                    print("❌ App Data Deletion: Failed to fetch \(recordType) records - \(error.localizedDescription)")
-                    group.leave()
-                    return
-                }
-                
-                guard let recordIDs = recordIDs, !recordIDs.isEmpty else {
-                    print("✅ App Data Deletion: No \(recordType) records to delete")
-                    group.leave()
-                    return
-                }
-                
-                print("🔄 App Data Deletion: Starting deletion of \(recordIDs.count) \(recordType) records")
-                DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
-                    if !success {
-                        allSuccess = false
-                        lastError = error?.localizedDescription ?? "CloudKit \(recordType) deletion failed"
-                        print("❌ App Data Deletion: \(recordType) records deletion failed - \(lastError ?? "Unknown error")")
-                    } else {
-                        print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records")
+            Task {
+                do {
+                    // Progress ranges: PodcastFeed (0.5-0.75), EpisodeState (0.75-1.0)
+                    let progressStart = 0.5 + Double(index) * 0.25
+                    let progressEnd = progressStart + 0.25
+                    
+                    await MainActor.run {
+                        self.appDataDeletionPhase = "Fetching \(recordType) records..."
+                        self.appDataDeletionProgress = progressStart
                     }
+                    
+                    let recordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
+                        DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
+                            if let error = error {
+                                continuation.resume(throwing: error)
+                            } else {
+                                continuation.resume(returning: recordIDs ?? [])
+                            }
+                        }
+                    }
+                    
+                    guard !recordIDs.isEmpty else {
+                        print("✅ App Data Deletion: No \(recordType) records to delete")
+                        await MainActor.run {
+                            self.appDataDeletionProgress = progressEnd
+                        }
+                        group.leave()
+                        return
+                    }
+                    
+                    await MainActor.run {
+                        self.appDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud..."
+                    }
+                    
+                    print("🔄 App Data Deletion: Starting enhanced deletion of \(recordIDs.count) \(recordType) records")
+                    try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
+                        Task { @MainActor in
+                            self.appDataDeletionProgress = progressStart + (progress * 0.25)
+                            self.appDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud... (\(Int(progress * 100))%)"
+                        }
+                    }
+                    print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records using enhanced batching")
+                    group.leave()
+                    
+                } catch {
+                    allSuccess = false
+                    lastError = "Enhanced \(recordType) deletion failed: \(error.localizedDescription)"
+                    print("❌ App Data Deletion: Enhanced \(recordType) records deletion failed - \(error.localizedDescription)")
                     group.leave()
                 }
             }
@@ -2463,6 +2542,8 @@ struct InternalDataManagementView: View {
             // Update UI states immediately
             self.isDeletingAllAppData = false
             self.appDataDeletionComplete = allSuccess
+            self.appDataDeletionProgress = 1.0
+            self.appDataDeletionPhase = allSuccess ? "All app data deleted successfully!" : "Deletion completed with errors"
             
             // Refresh view models to update UI immediately  
             if allSuccess {
@@ -2475,7 +2556,7 @@ struct InternalDataManagementView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if allSuccess {
                     print("✅ App Data Deletion: All operations completed successfully")
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All app data has been successfully deleted.")
+                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All app data has been successfully deleted using enhanced batch processing.")
                 } else {
                     let errorMessage = lastError ?? "An unknown error occurred"
                     print("❌ App Data Deletion: Operations failed - \(errorMessage)")
@@ -2496,12 +2577,14 @@ struct InternalDataManagementView: View {
             self.isDeletingStationData = true
             self.stationDataDeletionComplete = false
             self.stationDataDeletionError = nil
+            self.stationDataDeletionProgress = 0.0
+            self.stationDataDeletionPhase = "Clearing local station data..."
             
             // Clear radio stations from UI immediately for instant feedback
             self.viewModel.clearStationsFromUI()
         }
         
-        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all radio station data...")
+        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all radio station data using enhanced batch processing...")
         
         let group = DispatchGroup()
         var allSuccess = true
@@ -2509,34 +2592,69 @@ struct InternalDataManagementView: View {
         
         // Delete from local CoreData
         group.enter()
+        DispatchQueue.main.async {
+            self.stationDataDeletionPhase = "Deleting local station data..."
+            self.stationDataDeletionProgress = 0.1
+        }
         viewModel.deleteAllData { success, errorMessage in
             if !success {
                 allSuccess = false
                 lastError = errorMessage?.localizedDescription ?? "Station deletion failed"
             }
+            DispatchQueue.main.async {
+                self.stationDataDeletionProgress = 0.3
+            }
             group.leave()
         }
         
-        // Delete from CloudKit in batches
+        // Delete from CloudKit using enhanced async batch deletion
         group.enter()
-        DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
-            if let error = error {
-                allSuccess = false
-                lastError = error.localizedDescription
-                group.leave()
-                return
-            }
-            
-            guard let recordIDs = recordIDs, !recordIDs.isEmpty else {
-                group.leave()
-                return
-            }
-            
-            DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
-                if !success {
-                    allSuccess = false
-                    lastError = error?.localizedDescription ?? "CloudKit deletion failed"
+        Task {
+            do {
+                await MainActor.run {
+                    self.stationDataDeletionPhase = "Fetching station records from iCloud..."
+                    self.stationDataDeletionProgress = 0.4
                 }
+                
+                let recordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
+                    DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
+                        if let error = error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            continuation.resume(returning: recordIDs ?? [])
+                        }
+                    }
+                }
+                
+                guard !recordIDs.isEmpty else {
+                    print("✅ Station Data Deletion: No records to delete")
+                    await MainActor.run {
+                        self.stationDataDeletionProgress = 1.0
+                        self.stationDataDeletionPhase = "No station records found in iCloud"
+                    }
+                    group.leave()
+                    return
+                }
+                
+                await MainActor.run {
+                    self.stationDataDeletionPhase = "Deleting \(recordIDs.count) station records from iCloud..."
+                }
+                
+                print("🔄 Station Data Deletion: Starting enhanced deletion of \(recordIDs.count) records")
+                try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
+                    Task { @MainActor in
+                        // CloudKit deletion takes 0.4 to 1.0 of total progress
+                        self.stationDataDeletionProgress = 0.4 + (progress * 0.6)
+                        self.stationDataDeletionPhase = "Deleting \(recordIDs.count) station records from iCloud... (\(Int(progress * 100))%)"
+                    }
+                }
+                print("✅ Station Data Deletion: Successfully deleted \(recordIDs.count) records using enhanced batching")
+                group.leave()
+                
+            } catch {
+                allSuccess = false
+                lastError = "Enhanced CloudKit deletion failed: \(error.localizedDescription)"
+                print("❌ Station Data Deletion: Enhanced deletion failed - \(error.localizedDescription)")
                 group.leave()
             }
         }
@@ -2545,6 +2663,8 @@ struct InternalDataManagementView: View {
             // Update UI states immediately
             self.isDeletingStationData = false
             self.stationDataDeletionComplete = allSuccess
+            self.stationDataDeletionProgress = 1.0
+            self.stationDataDeletionPhase = allSuccess ? "All station data deleted successfully!" : "Deletion completed with errors"
             
             if let error = lastError {
                 self.stationDataDeletionError = error
@@ -2560,7 +2680,7 @@ struct InternalDataManagementView: View {
                 if let error = lastError {
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "Station data deletion failed: \(error)")
                 } else {
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All station data has been successfully deleted.")
+                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All station data has been successfully deleted using enhanced batch processing.")
                 }
                 
                 // Reset completion states after 5 seconds for clean UI
@@ -2578,12 +2698,14 @@ struct InternalDataManagementView: View {
             self.isDeletingPodcastData = true
             self.podcastDataDeletionComplete = false
             self.podcastDataDeletionError = nil
+            self.podcastDataDeletionProgress = 0.0
+            self.podcastDataDeletionPhase = "Clearing local podcast data..."
             
             // Clear podcast feeds from UI immediately for instant feedback
             self.podcastViewModel.clearPodcastFeedsFromUI()
         }
         
-        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all podcast data...")
+        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all podcast data using enhanced batch processing...")
         
         let group = DispatchGroup()
         var allSuccess = true
@@ -2591,37 +2713,75 @@ struct InternalDataManagementView: View {
         
         // Delete podcast data from local CoreData
         group.enter()
+        DispatchQueue.main.async {
+            self.podcastDataDeletionPhase = "Deleting local podcast data..."
+            self.podcastDataDeletionProgress = 0.1
+        }
         podcastViewModel.clearPodcastCoreData { success, error in
             if !success { 
                 allSuccess = false
                 lastError = error?.localizedDescription ?? "Failed to clear local podcast data"
             }
+            DispatchQueue.main.async {
+                self.podcastDataDeletionProgress = 0.3
+            }
             group.leave()
         }
         
-        // Delete from CloudKit in batches (podcast feeds, episodes, etc.)
+        // Delete from CloudKit using enhanced async batch deletion (podcast feeds, episodes, etc.)
         let podcastRecordTypes = ["PodcastFeed", "EpisodeState"]
         
-        for recordType in podcastRecordTypes {
+        for (index, recordType) in podcastRecordTypes.enumerated() {
             group.enter()
-            DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
-                if let error = error {
-                    allSuccess = false
-                    lastError = error.localizedDescription
-                    group.leave()
-                    return
-                }
-                
-                guard let recordIDs = recordIDs, !recordIDs.isEmpty else {
-                    group.leave()
-                    return
-                }
-                
-                DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
-                    if !success {
-                        allSuccess = false
-                        lastError = error?.localizedDescription ?? "CloudKit deletion failed for \(recordType)"
+            Task {
+                do {
+                    // Progress ranges: PodcastFeed (0.3-0.65), EpisodeState (0.65-1.0)
+                    let progressStart = 0.3 + Double(index) * 0.35
+                    let progressEnd = progressStart + 0.35
+                    
+                    await MainActor.run {
+                        self.podcastDataDeletionPhase = "Fetching \(recordType) records from iCloud..."
+                        self.podcastDataDeletionProgress = progressStart
                     }
+                    
+                    let recordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
+                        DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
+                            if let error = error {
+                                continuation.resume(throwing: error)
+                            } else {
+                                continuation.resume(returning: recordIDs ?? [])
+                            }
+                        }
+                    }
+                    
+                    guard !recordIDs.isEmpty else {
+                        print("✅ Podcast Data Deletion: No \(recordType) records to delete")
+                        await MainActor.run {
+                            self.podcastDataDeletionProgress = progressEnd
+                            self.podcastDataDeletionPhase = "No \(recordType) records found in iCloud"
+                        }
+                        group.leave()
+                        return
+                    }
+                    
+                    await MainActor.run {
+                        self.podcastDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud..."
+                    }
+                    
+                    print("🔄 Podcast Data Deletion: Starting enhanced deletion of \(recordIDs.count) \(recordType) records")
+                    try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
+                        Task { @MainActor in
+                            self.podcastDataDeletionProgress = progressStart + (progress * 0.35)
+                            self.podcastDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud... (\(Int(progress * 100))%)"
+                        }
+                    }
+                    print("✅ Podcast Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records using enhanced batching")
+                    group.leave()
+                    
+                } catch {
+                    allSuccess = false
+                    lastError = "Enhanced CloudKit deletion failed for \(recordType): \(error.localizedDescription)"
+                    print("❌ Podcast Data Deletion: Enhanced deletion failed for \(recordType) - \(error.localizedDescription)")
                     group.leave()
                 }
             }
@@ -2631,6 +2791,8 @@ struct InternalDataManagementView: View {
             // Update UI states immediately
             self.isDeletingPodcastData = false
             self.podcastDataDeletionComplete = allSuccess
+            self.podcastDataDeletionProgress = 1.0
+            self.podcastDataDeletionPhase = allSuccess ? "All podcast data deleted successfully!" : "Deletion completed with errors"
             
             if let error = lastError {
                 self.podcastDataDeletionError = error
@@ -2646,7 +2808,7 @@ struct InternalDataManagementView: View {
                 if let error = lastError {
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "Podcast data deletion failed: \(error)")
                 } else {
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All podcast data has been successfully deleted.")
+                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All podcast data has been successfully deleted using enhanced batch processing.")
                 }
                 
                 // Reset completion states after 5 seconds for clean UI

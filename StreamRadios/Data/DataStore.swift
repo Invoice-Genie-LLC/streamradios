@@ -165,84 +165,156 @@ class DataStore {
         }
     
     func deleteRecordsInBatches(recordIDs: [CKRecord.ID], completion: @escaping (Bool, Error?) -> Void) {
-        let maxBatchSize = 400
-        let totalBatches = (recordIDs.count + maxBatchSize - 1) / maxBatchSize
-        
-        // Use a class to hold mutable state to avoid concurrency issues
-        class DeletionState {
-            var index = 0
-            var totalDeleted = 0
+        Task {
+            do {
+                try await deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
+                    // Legacy completion doesn't handle progress, but we can log it
+                    print("🔄 Deletion progress: \(Int(progress * 100))%")
+                }
+                completion(true, nil)
+            } catch {
+                completion(false, error)
+            }
         }
-        let state = DeletionState()
+    }
+    
+    /// Enhanced async batch deletion with progress reporting and Apple best practices
+    func deleteRecordsInBatchesAsync(
+        recordIDs: [CKRecord.ID],
+        progressHandler: @escaping (Double) -> Void = { _ in }
+    ) async throws {
+        guard !recordIDs.isEmpty else {
+            print("✅ No records to delete")
+            await MainActor.run {
+                progressHandler(1.0)
+            }
+            return
+        }
         
-        // Recursive function to handle batch deletion
-        func deleteNextBatch() {
-            if state.index >= recordIDs.count {
-                print("🎉 Successfully deleted all \(state.totalDeleted) records from CloudKit in \(totalBatches) batches.")
-                completion(true, nil)  // All batches processed successfully
-                return
+        let maxBatchSize = 400 // CloudKit limit
+        let batches = recordIDs.chunked(into: maxBatchSize)
+        
+        print("🗑️ Starting deletion of \(recordIDs.count) records in \(batches.count) batches")
+        
+        var completedBatches = 0
+        var totalDeleted = 0
+        
+        // Process batches sequentially for now to avoid complexity
+        for (batchIndex, batch) in batches.enumerated() {
+            let deletedInBatch = try await deleteBatchWithRetry(
+                batch: batch,
+                batchNumber: batchIndex + 1,
+                totalBatches: batches.count
+            )
+            
+            totalDeleted += deletedInBatch
+            completedBatches += 1
+            
+            // Report progress
+            let progress = Double(completedBatches) / Double(batches.count)
+            await MainActor.run {
+                progressHandler(progress)
             }
             
-            let nextBatchLimit = min(state.index + maxBatchSize, recordIDs.count)
-            let batch = Array(recordIDs[state.index..<nextBatchLimit])
-            let batchNumber = (state.index / maxBatchSize) + 1
-            
-            print("🗑️ Deleting CloudKit batch \(batchNumber)/\(totalBatches) (\(batch.count) records)")
-            
-            let modifyOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
-            
-            modifyOperation.savePolicy = .allKeys
-            modifyOperation.qualityOfService = .userInitiated
-            
-            modifyOperation.modifyRecordsCompletionBlock = { _, deletedRecordIDs, error in
-                if let error = error {
-                    print("❌ Error during CloudKit batch \(batchNumber) deletion: \(error.localizedDescription)")
+            print("✅ Completed batch \(completedBatches)/\(batches.count) - Total deleted: \(totalDeleted)")
+        }
+        
+        print("🎉 Successfully deleted all \(totalDeleted) records from CloudKit in \(batches.count) batches")
+        await MainActor.run {
+            progressHandler(1.0)
+        }
+    }
+    
+    /// Delete a single batch with automatic retry logic
+    private func deleteBatchWithRetry(
+        batch: [CKRecord.ID],
+        batchNumber: Int,
+        totalBatches: Int,
+        maxRetries: Int = 3
+    ) async throws -> Int {
+        var lastError: Error?
+        
+        for attempt in 1...maxRetries {
+            do {
+                print("🗑️ Deleting batch \(batchNumber)/\(totalBatches) (\(batch.count) records) - Attempt \(attempt)")
+                
+                let deletedRecordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { continuation in
+                    let operation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
+                    operation.savePolicy = .allKeys
+                    operation.qualityOfService = .userInitiated
+                    operation.isAtomic = false // Allow partial success for large batches
                     
-                    // Handle rate limiting errors with exponential backoff
-                    if let ckError = error as? CKError, ckError.code == .requestRateLimited {
-                        if let retryAfter = ckError.errorUserInfo[CKErrorRetryAfterKey] as? TimeInterval {
-                            print("⏱️ Rate limited. Retrying deletion batch \(batchNumber) after \(retryAfter) seconds...")
-                            DispatchQueue.global().asyncAfter(deadline: .now() + retryAfter) {
-                                deleteNextBatch()
+                    operation.modifyRecordsCompletionBlock = { _, deletedRecordIDs, error in
+                        if let error = error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            continuation.resume(returning: deletedRecordIDs ?? [])
+                        }
+                    }
+                    
+                    operation.perRecordCompletionBlock = { record, error in
+                        if let error = error {
+                            if let ckError = error as? CKError {
+                                let recordName = record.recordID.recordName
+                                switch ckError.code {
+                                case .unknownItem:
+                                    print("🔍 Record \(recordName) already deleted")
+                                case .networkFailure, .networkUnavailable:
+                                    print("🌐 Network error for record \(recordName): \(error.localizedDescription)")
+                                default:
+                                    print("❌ Error deleting record \(recordName): \(error.localizedDescription)")
+                                }
                             }
-                            return
                         }
                     }
                     
-                    completion(false, error)  // Stop and return on first error
-                    return
-                } else {
-                    let deletedCount = deletedRecordIDs?.count ?? batch.count
-                    state.totalDeleted += deletedCount
-                    print("✅ Successfully deleted batch \(batchNumber)/\(totalBatches) (\(deletedCount) records)")
-                    
-                    state.index += maxBatchSize
-                    deleteNextBatch()  // Process the next batch
+                    privateDatabase.add(operation)
                 }
-            }
-            
-            modifyOperation.perRecordCompletionBlock = { recordID, error in
-                if let error = error {
-                    // Check if it's a specific "record not found" error and handle it gracefully
-                    if let ckError = error as? CKError {
-                        switch ckError.code {
-                        case .unknownItem:
-                            print("🔍 Record not found in CloudKit (may have been already deleted).")
-                        default:
-                            print("❌ Error deleting record from CloudKit: \(error.localizedDescription)")
+                
+                print("✅ Successfully deleted batch \(batchNumber)/\(totalBatches) (\(deletedRecordIDs.count) records)")
+                return deletedRecordIDs.count
+                
+            } catch {
+                lastError = error
+                
+                // Handle rate limiting with exponential backoff
+                if let ckError = error as? CKError, ckError.code == .requestRateLimited {
+                    let retryAfter = ckError.errorUserInfo[CKErrorRetryAfterKey] as? TimeInterval ?? Double(attempt * 2)
+                    print("⏱️ Rate limited. Retrying batch \(batchNumber) after \(retryAfter) seconds... (Attempt \(attempt)/\(maxRetries))")
+                    try await Task.sleep(nanoseconds: UInt64(retryAfter * 1_000_000_000))
+                    continue
+                }
+                
+                // Handle network errors with shorter retry delay
+                if let ckError = error as? CKError {
+                    switch ckError.code {
+                    case .networkFailure, .networkUnavailable, .serviceUnavailable:
+                        let retryDelay = min(Double(attempt * attempt), 10.0) // Exponential backoff, max 10s
+                        print("🌐 Network/service error. Retrying batch \(batchNumber) after \(retryDelay) seconds... (Attempt \(attempt)/\(maxRetries))")
+                        try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+                        continue
+                    case .internalError, .serverRejectedRequest:
+                        print("🚫 Server error for batch \(batchNumber): \(error.localizedDescription)")
+                        if attempt < maxRetries {
+                            let retryDelay = Double(attempt * 3)
+                            print("🔄 Retrying batch \(batchNumber) after \(retryDelay) seconds... (Attempt \(attempt)/\(maxRetries))")
+                            try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+                            continue
                         }
-                    } else {
-                        print("❌ Error deleting record from CloudKit: \(error.localizedDescription)")
+                    default:
+                        break
                     }
-                } else {
-                    print("🗑️ Successfully deleted record from CloudKit.")
+                }
+                
+                // For non-retryable errors or final attempt, break the loop
+                if attempt == maxRetries {
+                    print("❌ Failed to delete batch \(batchNumber) after \(maxRetries) attempts: \(error.localizedDescription)")
+                    throw error
                 }
             }
-            
-            self.privateDatabase.add(modifyOperation)
         }
         
-        deleteNextBatch()  // Start the first batch
+        throw lastError ?? NSError(domain: "DataStoreDeletion", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown deletion error"])
     }
     
     func fetchAllRecordIDs(ofType recordType: String, completion: @escaping ([CKRecord.ID]?, Error?) -> Void) {
@@ -602,20 +674,21 @@ class DataStore {
         }
 
         modifyOperation.perRecordCompletionBlock = { record, error in
+            let recordName = record.recordID.recordName
             if let error = error {
                 // Check if it's a specific "record already exists" error and handle it gracefully
                 if let ckError = error as? CKError {
                     switch ckError.code {
                     case .serverRecordChanged, .unknownItem:
-                        print("Record \(record.recordID.recordName) already exists in CloudKit, skipping.")
+                        print("Record \(recordName) already exists in CloudKit, skipping.")
                     default:
-                        print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
+                        print("Error saving record \(recordName) to CloudKit: \(error.localizedDescription)")
                     }
                 } else {
-                    print("Error saving record \(record.recordID.recordName) to CloudKit: \(error.localizedDescription)")
+                    print("Error saving record \(recordName) to CloudKit: \(error.localizedDescription)")
                 }
             } else {
-                print("Successfully saved record \(record.recordID.recordName) to CloudKit.")
+                print("Successfully saved record \(recordName) to CloudKit.")
             }
         }
         CKContainer.default().privateCloudDatabase.add(modifyOperation)
@@ -896,3 +969,5 @@ class DataStore {
         }
     }
 }
+
+
