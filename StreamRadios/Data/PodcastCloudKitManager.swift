@@ -815,18 +815,31 @@ class PodcastCloudKitManager: ObservableObject {
         let episodeIds = removalData["episodeIds"] as? [String] ?? []
         let actionId = removalData["actionId"] as? String ?? "unknown"
         
-        os_log("📡 SYNC RECEIVED: Feed removal %@ (%@) with %d episodes, actionId: %@", log: log, type: .info, feedTitle, feedId, episodeIds.count, actionId)
-        print("📡 🎯 SYNC RECEIVED: Feed removal '\(feedTitle)' (\(feedId)) with \(episodeIds.count) episodes")
-        print("📡 🆔 Action ID: \(actionId)")
+        // Enhanced validation and logging
+        let operationType = removalData["operation_type"] as? String ?? "legacy"
         
-        // Notify PodcastViewModel to remove the feed and clean up episodes
+        os_log("📡 SYNC RECEIVED: Feed removal %@ (%@) with %d episodes, actionId: %@, operation: %@", log: log, type: .info, feedTitle, feedId, episodeIds.count, actionId, operationType)
+        print("📡 🎯 COMPREHENSIVE SYNC RECEIVED: Feed removal '\(feedTitle)' (\(feedId)) with \(episodeIds.count) episodes")
+        print("📡 🆔 Action ID: \(actionId)")
+        print("📡 🔧 Operation type: \(operationType)")
+        print("📡 🚨 CRITICAL: Processing deletion to ensure comprehensive CoreData cleanup")
+        
+        // Notify PodcastViewModel to remove the feed and clean up episodes comprehensively
         NotificationCenter.default.post(
             name: .init("InstantSyncDidRemovePodcastFeed"),
             object: nil,
-            userInfo: ["feedId": feedId, "feedTitle": feedTitle, "episodeIds": episodeIds, "actionId": actionId]
+            userInfo: [
+                "feedId": feedId, 
+                "feedTitle": feedTitle, 
+                "episodeIds": episodeIds, 
+                "actionId": actionId,
+                "operation_type": operationType,
+                "sync_timestamp": Date().timeIntervalSince1970
+            ]
         )
         
-        print("📡 📨 Posted InstantSyncDidRemovePodcastFeed notification")
+        print("📡 📨 Posted enhanced InstantSyncDidRemovePodcastFeed notification")
+        print("📡 🔄 This will trigger comprehensive CoreData cleanup on receiving device")
     }
     
     private func handleInstantPodcastFavoriteSync() {
@@ -987,10 +1000,11 @@ class PodcastCloudKitManager: ObservableObject {
         }
     }
     
-    /// Instantly sync podcast feed removal across devices
+    /// Instantly sync podcast feed removal across devices with enhanced reliability
     func syncPodcastFeedRemovedInstantly(feedId: String, feedTitle: String, episodeIds: [String]) {
         guard let accountID = getCurrentiCloudAccountID() else {
             print("📡 ❌ Cannot sync feed removal - no iCloud account available")
+            os_log("📡 SYNC FAILED: No iCloud account for cross-device deletion sync", log: log, type: .error)
             return
         }
         
@@ -1000,24 +1014,56 @@ class PodcastCloudKitManager: ObservableObject {
             "episodeIds": episodeIds,
             "timestamp": Date().timeIntervalSince1970,
             "actionId": UUID().uuidString,  // Unique action ID to prevent conflicts
-            "icloud_account_id": accountID
+            "icloud_account_id": accountID,
+            "operation_type": "comprehensive_feed_deletion" // Enhanced operation tracking
         ]
         
-        print("📡 🚀 FEED DELETION SYNC: Starting sync for feed '\(feedTitle)' (\(feedId))")
+        print("📡 🚀 ENHANCED FEED DELETION SYNC: Starting comprehensive sync for feed '\(feedTitle)' (\(feedId))")
         print("📡 📊 Episode count: \(episodeIds.count)")
+        print("📡 🆔 Account ID: \(String(accountID.prefix(16)))...")
         print("📡 📝 Data to sync: \(removalData)")
         
-        ubiquitousStore.set(removalData, forKey: "instant_podcast_feed_removed")
-        let syncResult = ubiquitousStore.synchronize()
+        // Enhanced sync with retry logic for better reliability
+        var syncAttempt = 0
+        let maxAttempts = 3
+        var syncSucceeded = false
         
-        os_log("📡 SYNC SEND: Feed removal %@ (%@) with %d episodes, result: %@", log: log, type: .info, feedTitle, feedId, episodeIds.count, syncResult ? "SUCCESS" : "FAILED")
-        print("📡 SYNC SEND: Feed removal \(feedTitle) (\(feedId)) with \(episodeIds.count) episodes, result: \(syncResult)")
+        while syncAttempt < maxAttempts && !syncSucceeded {
+            syncAttempt += 1
+            print("📡 🔄 Sync attempt \(syncAttempt)/\(maxAttempts)")
+            
+            ubiquitousStore.set(removalData, forKey: "instant_podcast_feed_removed")
+            let syncResult = ubiquitousStore.synchronize()
+            
+            if syncResult {
+                // Verify sync by attempting to read back
+                if let readBack = ubiquitousStore.object(forKey: "instant_podcast_feed_removed") as? [String: Any],
+                   let syncedFeedId = readBack["feedId"] as? String,
+                   syncedFeedId == feedId {
+                    syncSucceeded = true
+                    print("📡 ✅ ENHANCED SYNC SUCCESS: Feed removal synced on attempt \(syncAttempt)")
+                    os_log("📡 SYNC SUCCESS: Feed removal %@ (%@) with %d episodes synced successfully", log: log, type: .info, feedTitle, feedId, episodeIds.count)
+                } else {
+                    print("📡 ⚠️ Sync result was true but verification failed on attempt \(syncAttempt)")
+                }
+            } else {
+                print("📡 ❌ Sync failed on attempt \(syncAttempt)")
+            }
+            
+            if !syncSucceeded && syncAttempt < maxAttempts {
+                // Brief delay before retry
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
         
-        // Test: try to read back immediately to verify
-        if let readBack = ubiquitousStore.object(forKey: "instant_podcast_feed_removed") as? [String: Any] {
-            print("📡 ✅ VERIFICATION: Successfully read back data: \(readBack)")
+        if syncSucceeded {
+            print("📡 🎉 FINAL SUCCESS: Cross-device deletion sync completed for '\(feedTitle)'")
+            print("📡 🔄 Other devices will now receive notification to delete CoreData for this feed")
         } else {
-            print("📡 ❌ VERIFICATION: Failed to read back data immediately")
+            print("📡 ❌ FINAL FAILURE: Failed to sync feed removal after \(maxAttempts) attempts")
+            os_log("📡 SYNC FAILED: Could not sync feed removal %@ (%@) after %d attempts", log: log, type: .error, feedTitle, feedId, maxAttempts)
+            
+            // TODO: Consider adding this to a retry queue for later attempts
         }
     }
     

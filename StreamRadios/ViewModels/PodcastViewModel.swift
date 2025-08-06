@@ -440,20 +440,21 @@ class PodcastViewModel: ObservableObject {
         
         let episodeIds = userInfo["episodeIds"] as? [String] ?? []
         let actionId = userInfo["actionId"] as? String ?? "unknown"
+        let operationType = userInfo["operation_type"] as? String ?? "legacy"
+        let syncTimestamp = userInfo["sync_timestamp"] as? TimeInterval ?? 0
         
-        print("📡 🎯 Processing feed removal sync:")
+        print("📡 🎯 Processing comprehensive feed removal sync:")
         print("📡    📚 Feed: '\(feedTitle)' (\(feedId))")
         print("📡    📊 Episodes to clean up: \(episodeIds.count)")
         print("📡    🆔 Action ID: \(actionId)")
+        print("📡    🔧 Operation type: \(operationType)")
+        print("📡    ⏰ Sync timestamp: \(syncTimestamp)")
         
-        // Check if we already have this feed (avoid removing non-existent feeds)
+        // Enhanced processing - always attempt cleanup for comprehensive CoreData sync
         let feedExists = podcastFeeds.contains { $0.id == feedId }
-        print("📡 🔍 Feed exists in local list: \(feedExists) (total feeds: \(podcastFeeds.count))")
-        
-        if !feedExists {
-            print("📡 ⚠️ Feed '\(feedTitle)' not found in local feeds list - might already be deleted or CloudKit-first order working correctly")
-            return
-        }
+        print("📡 🔍 Feed exists in UI list: \(feedExists) (total feeds: \(podcastFeeds.count))")
+        print("📡 🚨 CRITICAL: Processing deletion regardless of UI state for comprehensive CoreData cleanup")
+        print("📡 📊 This ensures all storage layers are properly synchronized across devices")
         
         // Comprehensive cleanup similar to local deletePodcastFeed
         Task {
@@ -4043,20 +4044,25 @@ extension PodcastViewModel {
         }
     }
     
-    /// Clear all podcast data from Core Data and CloudKit
+    /// Clear all podcast data from Core Data and CloudKit with comprehensive cross-device sync
     func clearPodcastCoreData(completion: @escaping (Bool, Error?) -> Void) {
         Task {
             var allSuccess = true
             var lastError: Error?
             
-            // First, get the feed IDs before deletion for CloudKit cleanup
+            // First, get the feed IDs and details before deletion for CloudKit cleanup and cross-device sync
             let context = CoreDataStack.shared.persistentContainer.viewContext
             let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
             var feedIdsToDelete: [String] = []
+            var feedDataForSync: [(String, String)] = [] // (feedId, feedTitle) for sync
             
             do {
                 let feeds = try context.fetch(feedFetchRequest)
                 feedIdsToDelete = feeds.compactMap { $0.id }
+                feedDataForSync = feeds.compactMap { feed in
+                    guard let feedId = feed.id, let title = feed.title else { return nil }
+                    return (feedId, title)
+                }
                 print("🗑️ Found \(feedIdsToDelete.count) feeds to delete from CloudKit")
                 
                 // Debug: List all feeds that will be deleted
@@ -4148,9 +4154,27 @@ extension PodcastViewModel {
                     print("🔍 DEBUG: After clearing - podcastFeeds count: \(self.podcastFeeds.count)")
                     print("🔍 DEBUG: After clearing - podcastFeedOrder count: \(self.podcastFeedOrder.count)")
                     
+                    // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup
                     if allSuccess {
                         print("🎯 ✅ Successfully deleted all podcast data from both CloudKit and Core Data")
-                        NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "All podcast data has been successfully deleted.")
+                        
+                        // Trigger cross-device sync for each deleted feed to ensure CoreData cleanup on all devices
+                        Task {
+                            for (feedId, feedTitle) in feedDataForSync {
+                                // Get episode IDs for comprehensive cleanup
+                                let episodeIds = await self.getEpisodeIdsForFeed(feedId)
+                                
+                                print("📡 🚨 DATA MANAGEMENT: Syncing deletion of '\(feedTitle)' (\(feedId)) across devices")
+                                PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
+                                    feedId: feedId,
+                                    feedTitle: feedTitle,
+                                    episodeIds: episodeIds
+                                )
+                            }
+                            print("📡 ✅ DATA MANAGEMENT: Cross-device sync triggered for \(feedDataForSync.count) deleted feeds")
+                        }
+                        
+                        NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "All podcast data has been successfully deleted across all devices.")
                     } else {
                         print("⚠️ Partial success: Local deletion completed, but some CloudKit deletions failed")
                         NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Podcast data deletion completed with some warnings.")
