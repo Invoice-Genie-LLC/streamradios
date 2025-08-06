@@ -593,7 +593,18 @@ class EpisodeStateManager: ObservableObject {
         // CRITICAL FIX: Force synchronize UserDefaults immediately for CloudKit synced progress to prevent loss
         userDefaults.synchronize()
         
-        sendThrottledUpdate()
+        // REAL-TIME UI: Send immediate update for progress changes to ensure instant UI refresh
+        // Note: sendImmediateUpdate() already handles main thread dispatch internally
+        sendImmediateUpdate()
+        
+        // REAL-TIME NOTIFICATION: Send immediate notification for episode progress changes on main thread
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .init("EpisodeProgressChangedInstantly"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "progress": progress]
+            )
+        }
     }
     
     /// Force save current states immediately (for critical saves)

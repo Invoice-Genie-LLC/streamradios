@@ -895,12 +895,23 @@ struct EpisodeRowView: View {
     @ObservedObject var viewModel: PodcastViewModel
     @ObservedObject var podcastPlayer: PodcastPlayer
     @StateObject private var subscriptionManager = SubscriptionManager.shared
-    @State private var progress: Double
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
+    @State private var refreshTrigger = UUID() // Force UI refresh when progress changes
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
+    
+    // REAL-TIME PROGRESS: Use computed property that always reflects current state
+    private var currentProgress: Double {
+        if isPlaying {
+            return podcastPlayer.currentProgress
+        } else {
+            // For non-playing episodes, get real-time progress from viewModel's episodeProgress cache
+            // This will update when sync notifications are received
+            return viewModel.episodeProgress[episode.id] ?? episode.state.progress
+        }
+    }
     
     // Computed property for checking download state
     private var isDownloading: Bool {
@@ -919,7 +930,7 @@ struct EpisodeRowView: View {
         if isPlaying {
             return podcastPlayer.remainingTime
         } else {
-            return episode.duration * (1 - progress)
+            return episode.duration * (1 - currentProgress)
         }
     }
     
@@ -930,7 +941,6 @@ struct EpisodeRowView: View {
         self.onStop = onStop
         self.viewModel = viewModel
         self.podcastPlayer = podcastPlayer
-        _progress = State(initialValue: viewModel.getProgress(for: episode))
     }
     
     var body: some View {
@@ -950,9 +960,11 @@ struct EpisodeRowView: View {
             HStack(alignment: .top, spacing: 12) {
                 
                 // COLUMN 1: Play/Pause button (Fixed width)
+                // Calculate progress once for both action and UI
+                let currentProgress = podcastPlayer.getCurrentProgress(for: episode)
+                
                 Button(action: {
-                    let progress = podcastPlayer.getCurrentProgress(for: episode)
-                    if episode.state.isPlayed || progress >= 0.99 {
+                    if episode.state.isPlayed || currentProgress >= 0.99 {
                         podcastPlayer.rewindAndPlay(episode: episode)
                     } else if isPlaying {
                         onStop()
@@ -971,10 +983,10 @@ struct EpisodeRowView: View {
                                 .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
                         } else {
                             // Regular play/pause/replay button
-                            Image(systemName: episode.state.isPlayed || progress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
+                            Image(systemName: episode.state.isPlayed || currentProgress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
                                 .resizable()
                                 .frame(width: buttonSize, height: buttonSize)
-                                .foregroundColor(episode.state.isPlayed || progress >= 0.99 ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
+                                .foregroundColor(episode.state.isPlayed || currentProgress >= 0.99 ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
                         }
                     }
                 }
@@ -993,14 +1005,15 @@ struct EpisodeRowView: View {
                         .multilineTextAlignment(.leading)
                         .layoutPriority(1) // Give title priority in layout
                     
-                    // Progress bar for currently playing episode (embedded in content)
-                    if isPlaying {
-                        ProgressView(value: podcastPlayer.currentProgress)
-                            .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                    // Progress bar for episodes with progress (embedded in content)
+                    // GRANULAR PROGRESS FIX: Show progress bar all the way to completion, not just until 99%
+                    if currentProgress > 0 && currentProgress < 1.0 {
+                        ProgressView(value: currentProgress)
+                            .progressViewStyle(LinearProgressViewStyle(tint: isPlaying ? .blue : .gray))
                             .frame(height: 3)
                             .background(Color.adaptiveBorder)
                             .cornerRadius(1.5)
-                            .animation(.easeInOut(duration: 0.3), value: podcastPlayer.currentProgress)
+                            .animation(.easeInOut(duration: 0.3), value: currentProgress)
                     }
                     
                     // Compact metadata row (priority-based truncation)
@@ -1121,20 +1134,23 @@ struct EpisodeRowView: View {
                 secondaryButton: .cancel()
             )
         }
-        .onReceive(podcastPlayer.$currentProgress) { _ in
-            if podcastPlayer.currentEpisode?.id == episode.id {
-                progress = podcastPlayer.currentProgress
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeProgressChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's progress changes instantly
+                refreshTrigger = UUID()
+                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) progress updated")
             }
         }
-        .onReceive(viewModel.$episodeProgress) { _ in
-            progress = viewModel.getProgress(for: episode)
-        }
+        // REAL-TIME PROGRESS: Added notification listener for instant progress updates to force UI refresh
     }
     
     
     private var episodeStatusChip: some View {
         Group {
-            if episode.state.isPlayed || episode.state.progress >= 0.99 {
+            // REAL-TIME STATUS FIX: Use currentProgress instead of episode.state.progress for accurate status during playback
+            if episode.state.isPlayed || (currentProgress >= 0.99 && !isPlaying) {
                 Text("Played")
                     .foregroundColor(.adaptivePrimaryText)
                     .padding(.horizontal, 6)
@@ -1146,7 +1162,7 @@ struct EpisodeRowView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue))
-            } else if episode.state.progress > 0 || podcastPlayer.getCurrentProgress(for: episode) > 0 {
+            } else if currentProgress > 0 {
                 Text("IN PROGRESS")
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
@@ -1327,6 +1343,19 @@ struct OptimizedEpisodeRowView: View, Equatable {
     private let cachedPlayButtonIcon: String
     private let cachedIsCompleted: Bool
     
+    // REAL-TIME PROGRESS: Computed property for dynamic progress updates
+    private var currentProgress: Double {
+        if isPlaying {
+            return podcastPlayer.currentProgress
+        } else {
+            // For non-playing episodes, get real-time progress from viewModel's episodeProgress cache
+            // This will update when sync notifications are received
+            return viewModel.episodeProgress[episode.id] ?? cachedProgress
+        }
+    }
+    
+
+    
     // Cache formatters to avoid recreation
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1366,9 +1395,12 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
     
+    // REAL-TIME TIME INFO: Dynamic time info that updates with progress sync
     private var currentTimeInfo: String? {
-        if isPlaying && episode.duration > 0 {
-            // Use real-time remaining time for playing episodes
+        guard episode.duration > 0 else { return nil }
+        
+        if isPlaying {
+            // Use real-time remaining time for currently playing episodes
             let remainingTime = episode.duration - podcastPlayer.currentTime
             if remainingTime > 0 {
                 let hours = Int(remainingTime) / 3600
@@ -1378,11 +1410,31 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 } else {
                     return "\(minutes)m left"
                 }
-            } else {
-                return cachedTimeInfo
             }
+        }
+        
+        // For non-playing episodes, calculate time based on current progress (from sync)
+        let progress = currentProgress
+        if progress > 0 && progress < 0.99 {
+            let remainingTime = episode.duration * (1 - progress)
+            if remainingTime > 0 {
+                let hours = Int(remainingTime) / 3600
+                let minutes = (Int(remainingTime) % 3600) / 60
+                if hours > 0 {
+                    return "\(hours)h \(minutes)m left"
+                } else {
+                    return "\(minutes)m left"
+                }
+            }
+        }
+        
+        // Show total duration if no meaningful progress
+        let hours = Int(episode.duration) / 3600
+        let minutes = (Int(episode.duration) % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
         } else {
-            return cachedTimeInfo
+            return "\(minutes)m"
         }
     }
     
@@ -1450,11 +1502,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
     }
     
     static func == (lhs: OptimizedEpisodeRowView, rhs: OptimizedEpisodeRowView) -> Bool {
-        // Simplified equality check using cached values to reduce computation
-        // For playing episodes, allow progress updates to trigger view refresh
-        let progressEqual = lhs.isPlaying || rhs.isPlaying ? 
-            abs(lhs.podcastPlayer.currentProgress - rhs.podcastPlayer.currentProgress) < 0.01 :
-            abs(lhs.cachedProgress - rhs.cachedProgress) < 0.01
+        // Use currentProgress for all progress comparisons to detect real-time sync updates
+        let progressEqual = abs(lhs.currentProgress - rhs.currentProgress) < 0.01
             
         return lhs.episode.id == rhs.episode.id &&
         lhs.isPlaying == rhs.isPlaying &&
@@ -1566,14 +1615,15 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     .multilineTextAlignment(.leading)
                     .layoutPriority(1) // Give title priority in layout
                 
-                // Progress bar for currently playing episode (embedded in content)
-                if isPlaying {
-                    ProgressView(value: podcastPlayer.currentProgress)
-                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                // Progress bar for episodes with progress (embedded in content)
+                // GRANULAR PROGRESS FIX: Show progress bar all the way to completion, not just until 99%
+                if currentProgress > 0 && currentProgress < 1.0 {
+                    ProgressView(value: currentProgress)
+                        .progressViewStyle(LinearProgressViewStyle(tint: isPlaying ? .blue : .gray))
                         .frame(height: 3)
                         .background(Color.adaptiveBorder)
                         .cornerRadius(1.5)
-                        .animation(.easeInOut(duration: 0.3), value: podcastPlayer.currentProgress)
+                        .animation(.easeInOut(duration: 0.3), value: currentProgress)
                 }
                 
                 // Compact metadata row (priority-based truncation)
@@ -1677,6 +1727,14 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .onReceive(podcastPlayer.$currentTime) { _ in
             // Force view refresh when current time changes for playing episodes
             // This ensures real-time time left updates
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeProgressChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's progress changes instantly
+                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) progress updated")
+            }
         }
     }
     
@@ -2225,6 +2283,11 @@ struct PodcastPlayerView: View {
                 
                 // Attempt scroll if episodes are already loaded
                 scrollToCurrentEpisodeIfNeeded(proxy: proxy)
+                
+                // ENHANCED: Add delayed retry for scroll to handle timing issues
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    scrollToCurrentEpisodeIfNeeded(proxy: proxy)
+                }
             }
             .onChange(of: viewModel.currentEpisodes) { _, newEpisodes in
                 // Mark that episodes have loaded
@@ -2233,11 +2296,21 @@ struct PodcastPlayerView: View {
                     
                     // Attempt scroll when episodes load
                     scrollToCurrentEpisodeIfNeeded(proxy: proxy)
+                    
+                    // ENHANCED: Add delayed retry for scroll when episodes load
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        scrollToCurrentEpisodeIfNeeded(proxy: proxy)
+                    }
                 }
             }
             .onChange(of: selectedTab) { _, _ in
                 // Reset scroll state when changing tabs so it can scroll again if needed
                 hasScrolledToCurrentEpisode = false
+                
+                // ENHANCED: Trigger scroll to current episode when switching tabs
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    scrollToCurrentEpisodeIfNeeded(proxy: proxy)
+                }
             }
         }
         .overlay(
@@ -2280,11 +2353,13 @@ struct PodcastPlayerView: View {
     private func scrollToCurrentEpisodeIfNeeded(proxy: ScrollViewProxy) {
         // Only scroll once per view session
         guard !hasScrolledToCurrentEpisode else {
+            print("📍 SCROLL SKIP: Already scrolled to current episode in this session")
             return
         }
         
         // Ensure view has appeared and episodes have loaded
         guard viewDidAppear && episodesDidLoad else {
+            print("📍 SCROLL WAIT: viewDidAppear=\(viewDidAppear), episodesDidLoad=\(episodesDidLoad)")
             return
         }
         
@@ -2292,19 +2367,20 @@ struct PodcastPlayerView: View {
         guard let currentEpisode = podcastPlayer.currentEpisode,
               currentEpisode.feedId == feed.id else {
             // No episode playing for this feed - mark as complete so we don't keep checking
+            print("📍 SCROLL SKIP: No current episode playing for this feed (current: \(podcastPlayer.currentEpisode?.feedId ?? "none"), expected: \(feed.id))")
             hasScrolledToCurrentEpisode = true
             return
         }
         
         // Check if the episode exists in the current tab
         if viewModel.currentEpisodes.contains(where: { $0.id == currentEpisode.id }) {
-            print("📍 Scrolling to currently playing episode: \(currentEpisode.title) in current tab: \(getTabName(selectedTab))")
+            print("📍 TAB SWITCH SCROLL: Scrolling to currently playing episode: \(currentEpisode.title) in tab: \(getTabName(selectedTab))")
             
             performScrollToEpisode(currentEpisode.id, proxy: proxy)
             
         } else {
             // Episode not in current tab - stay in current tab without scrolling
-            print("📍 Currently playing episode not available in current tab (\(getTabName(selectedTab))) - staying in current view")
+            print("📍 TAB SWITCH SKIP: Currently playing episode not available in tab (\(getTabName(selectedTab))) - episode may be in different tab")
             hasScrolledToCurrentEpisode = true
         }
     }
@@ -2336,8 +2412,7 @@ struct PodcastPlayerView: View {
     private func handleOnAppear() {
         let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
         
-        // Reset state for this view appearance
-        viewDidAppear = false  // Will be set to true in onAppear
+        // Initialize state for this view appearance  
         episodesDidLoad = !viewModel.currentEpisodes.isEmpty && currentEpisodesForThisFeed
         
         print("📱 PodcastPlayerView appeared for feed: \(feed.title)")

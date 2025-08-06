@@ -254,6 +254,14 @@ class PodcastViewModel: ObservableObject {
             name: .init("CloudKitDidUpdateEpisodeState"),
             object: nil
         )
+        
+        // Listen for instant episode progress changes for real-time UI updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantEpisodeProgressChange),
+            name: .init("EpisodeProgressChangedInstantly"),
+            object: nil
+        )
     }
     
     @objc private func handleInstantPodcastProgressSync(_ notification: Notification) {
@@ -270,14 +278,37 @@ class PodcastViewModel: ObservableObject {
         // Also check if this progress is newer (has a reasonable threshold)
         if abs(currentProgress - progress) > 0.01 {
             DispatchQueue.main.async {
-                // Update EpisodeStateManager as the source of truth
-                EpisodeStateManager.shared.setProgress(for: episodeId, progress: progress)
+                // CRITICAL: Don't call setProgress again to avoid loops - just update UI directly
+                // The progress has already been saved by the player or CloudKit sync
+                
+                // Update episodeProgress cache for immediate UI refresh
+                self.episodeProgress[episodeId] = progress
                 
                 // 🔄 CRITICAL FIX: Update UI immediately for automatic view refresh
                 self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: progress)
                 
-                print("📡 ✅ Applied instant podcast progress sync with UI refresh: \(episodeId) (%.2f%%)", progress * 100)
+                print("📡 ✅ Applied instant podcast progress sync with UI refresh: \(episodeId) (\(String(format: "%.2f", progress * 100))%%)")
             }
+        }
+    }
+    
+    @objc private func handleInstantEpisodeProgressChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let progress = userInfo["progress"] as? Double else {
+            return
+        }
+        
+        print("📡 ⚡ INSTANT PROGRESS UPDATE: Episode \(episodeId) progress \(String(format: "%.2f", progress * 100))%")
+        
+        DispatchQueue.main.async {
+            // Update episodeProgress cache for immediate UI refresh
+            self.episodeProgress[episodeId] = progress
+            
+            // Update UI state immediately
+            self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: progress)
+            
+            print("📡 ⚡ UI REFRESHED: Episode \(episodeId) progress updated to \(String(format: "%.2f", progress * 100))%")
         }
     }
     

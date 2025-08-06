@@ -71,6 +71,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private let lightUpdateInterval: TimeInterval = 1.0  // Set to 1.0s for smooth elapsed time display
     private let heavyUpdateInterval: TimeInterval = 15.0 // Increased from 10.0s to 15.0s to reduce CPU usage
     private let scrollingPauseInterval: TimeInterval = 30.0 // Pause heavy updates longer during scrolling
+    
+    // REAL-TIME CROSS-DEVICE SYNC: Timer for periodic progress sync during playback
+    private var crossDeviceSyncTimer: Timer?
+    private let crossDeviceSyncInterval: TimeInterval = 30.0 // Sync every 30 seconds during playback
+    private var lastCrossDeviceSyncTime = Date.distantPast
 
     // Performance optimization flags
     private var isCarPlayActive: Bool {
@@ -88,6 +93,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                // setupInterruptionHandling() - REMOVED: Now handled in setupCarPlayRouteChangeHandling
                setupTerminationHandling()
                setupCarPlayRouteChangeHandling()
+               setupCrossDeviceProgressSync()
        }
     
     private func setupAudioSession() {
@@ -190,7 +196,65 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         print("🚗 PodcastPlayer: CarPlay route change and audio interruption monitoring setup complete")
     }
     
+    private func setupCrossDeviceProgressSync() {
+        // Listen for real-time progress changes from other devices
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCrossDeviceProgressSync(_:)),
+            name: .init("EpisodeProgressChangedInstantly"),
+            object: nil
+        )
+        
+        print("🔄 PodcastPlayer: Cross-device progress sync monitoring setup complete")
+    }
+    
     // REMOVED: Old handleInterruption method replaced with handleAudioInterruption for better CarPlay support
+    
+    @objc private func handleCrossDeviceProgressSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let newProgress = userInfo["progress"] as? Double,
+              let currentEpisode = currentEpisode,
+              currentEpisode.id == episodeId,
+              isPlaying else {
+            return
+        }
+        
+        // Get the current progress threshold for sync
+        let currentPlayerProgress = currentProgress
+        let progressDifference = abs(newProgress - currentPlayerProgress)
+        
+        // Only sync if the difference is significant (more than 5 seconds worth of content)
+        let significantDifferenceThreshold = duration > 0 ? (5.0 / duration) : 0.05
+        
+        if progressDifference > significantDifferenceThreshold {
+            let newTime = newProgress * duration
+            
+            os_log("🔄 Cross-device sync: Updating playback position from %.2f%% to %.2f%% (%.1f seconds)", 
+                   log: log, type: .info, currentPlayerProgress * 100, newProgress * 100, newTime)
+            
+            // Update the player position to match the new progress from other device
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                self.currentTime = newTime
+                self.currentProgress = newProgress
+                
+                // Seek to the new position
+                self.player?.seek(to: CMTime(seconds: newTime, preferredTimescale: 1), 
+                                toleranceBefore: .zero, 
+                                toleranceAfter: .zero) { completed in
+                    if completed {
+                        DispatchQueue.main.async {
+                            self.updateNowPlayingInfo()
+                            os_log("✅ Cross-device sync: Successfully synced to %.2f%% (%.1f seconds)", 
+                                   log: self.log, type: .info, newProgress * 100, newTime)
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     @objc private func handleAppTermination(notification: Notification) {
         // Handle different app lifecycle events to ensure progress is saved
@@ -784,6 +848,25 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Initialize time and duration for the new episode
         duration = episode.duration
         
+        // CRITICAL FIX: Initialize progress immediately to match what the progress bar shows
+        // This prevents the episode from starting at 0% when the UI shows different progress
+        let episodeStateProgress = episode.state.progress
+        let stateManagerProgress = stateManager.getProgress(for: episode.id)
+        
+        // Use the highest progress value (most recent) to match the progress bar
+        // Note: viewModel.episodeProgress requires main actor access, so we'll rely on stateManager and episode state
+        let initialProgress = max(episodeStateProgress, stateManagerProgress)
+        
+        if initialProgress > 0 && initialProgress < 1.0 {
+            currentProgress = initialProgress
+            currentTime = initialProgress * duration
+            os_log("🔍 IMMEDIATE: Set initial progress to %.2f%% (%.1f seconds) for episode: %@", 
+                   log: log, type: .info, initialProgress * 100, currentTime, episode.title)
+        } else {
+            currentProgress = 0
+            currentTime = 0
+        }
+        
         // Reset position restoration flag for the new episode
         hasRestoredPositionForCurrentEpisode = false
         currentEpisodeIdForRestoration = nil
@@ -957,7 +1040,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 if playerItem.status == .readyToPlay {
                     self.duration = playerItem.duration.seconds
                     self.updatePlaybackInfo()
-                    self.seekToSavedProgress()
+                    Task {
+                        await self.seekToSavedProgress()
+                    }
                     
                     // Clear loading state when player item is ready to play
                     if let currentEpisode = self.currentEpisode, 
@@ -1008,7 +1093,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     
     
-    private func seekToSavedProgress() {
+    private func seekToSavedProgress() async {
         guard let currentEpisode = currentEpisode else { return }
         
         // Prevent repeated restoration calls for the same episode to improve scrolling performance
@@ -1020,7 +1105,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // If this is a replay action, always start from the beginning
         if shouldStartFromBeginning {
             os_log("🔄 Replay requested - starting from the beginning", log: log, type: .info)
-            player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             currentTime = 0
             currentProgress = 0
             shouldStartFromBeginning = false  // Reset the flag
@@ -1035,7 +1120,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let episodeState = EpisodeStateManager.shared.getState(for: currentEpisode.id)
         
         if episodeState == .new {
-            player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             currentTime = 0
             currentProgress = 0
             hasRestoredPositionForCurrentEpisode = true
@@ -1052,13 +1137,30 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let stateManagerProgress = stateManager.getProgress(for: currentEpisode.id)
         let stateManagerCurrentTime = stateManager.getCurrentTime(for: currentEpisode.id)
         
+        // 2. Check episode state directly
+        let episodeStateProgress = currentEpisode.state.progress
+        
+        // Note: viewModel.episodeProgress requires main actor access, so we'll use async access if needed
+        var viewModelProgress: Double = 0.0
+        if let viewModel = self.viewModel {
+            // Use Task to safely access main actor properties
+            viewModelProgress = await MainActor.run {
+                return viewModel.episodeProgress[currentEpisode.id] ?? 0.0
+            }
+        }
+        
+        os_log("🔍 Progress sources - StateManager: %.3f, ViewModel: %.3f, EpisodeState: %.3f", 
+               log: log, type: .info, stateManagerProgress, viewModelProgress, episodeStateProgress)
+        
         // PRIORITIZE CURRENT TIME OVER PROGRESS for accuracy
         if stateManagerCurrentTime > 0 && duration > 0 {
             let targetTime = stateManagerCurrentTime
             let targetProgress = targetTime / duration
             
-            currentTime = targetTime
-            currentProgress = targetProgress
+            await MainActor.run {
+                currentTime = targetTime
+                currentProgress = targetProgress
+            }
             
             // Seek to the exact saved time
             player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
@@ -1076,24 +1178,37 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
             return
         }
-        else if stateManagerProgress > 0 {
-            savedProgress = stateManagerProgress
-            progressSource = "stateManager"
+        else {
+            // CRITICAL FIX: Use the highest progress value (most recent) to match what the progress bar shows
+            // This ensures playback starts where the progress bar indicates
+            let maxProgress = max(stateManagerProgress, viewModelProgress, episodeStateProgress)
+            
+            if maxProgress > 0 {
+                savedProgress = maxProgress
+                
+                // Determine the source for logging
+                if maxProgress == viewModelProgress && viewModelProgress > 0 {
+                    progressSource = "viewModel"
+                } else if maxProgress == stateManagerProgress && stateManagerProgress > 0 {
+                    progressSource = "stateManager"
+                } else if maxProgress == episodeStateProgress && episodeStateProgress > 0 {
+                    progressSource = "episodeState"
+                }
+                
+                os_log("🔍 Using progress from %@ source: %.3f", log: log, type: .info, progressSource, savedProgress)
+            }
         }
-        // 2. Skip ViewModel's in-memory cache for now to avoid main actor issues
-        // 3. Check the episode's state directly
-        else if currentEpisode.state.progress > 0 {
-            savedProgress = currentEpisode.state.progress
-            progressSource = "episodeState"
-        }
-        // 4. Skip Core Data fallback for now to avoid main actor issues
         
         if savedProgress > 0 && savedProgress < 1.0 {
             let targetTime = savedProgress * duration
             
             // Update currentTime immediately BEFORE seeking to fix progress bar
-            currentTime = targetTime
-            currentProgress = savedProgress
+            await MainActor.run {
+                currentTime = targetTime
+                currentProgress = savedProgress
+            }
+            
+            os_log("🔍 SEEKING to %.1f seconds (%.2f%%) from %@ source", log: log, type: .info, targetTime, savedProgress * 100, progressSource)
             
             // Seek to the saved position
             player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
@@ -1121,9 +1236,11 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         } else {
             // Don't reset progress if it was already set from playEpisode - only reset if truly no progress exists
             if currentProgress == 0 && currentTime == 0 {
-                player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-                currentTime = 0
-                currentProgress = 0
+                await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                await MainActor.run {
+                    currentTime = 0
+                    currentProgress = 0
+                }
             }
             // Update Now Playing info immediately
             updateNowPlayingInfo()
@@ -1140,7 +1257,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         stopRadioPlayback()
         
-        guard let player = player, let currentEpisode = currentEpisode, let currentFeed = currentFeed else {
+        guard let player = player, let currentEpisode = currentEpisode, let _ = currentFeed else {
                 os_log("No current episode or feed available", log: OSLog.default, type: .error)
                 return
             }
@@ -1158,6 +1275,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         player.play()
                isPlaying = true
+        
+        // REAL-TIME CROSS-DEVICE SYNC: Start periodic sync timer when playback begins
+        setupCrossDeviceSyncTimer()
         
         // NOTE: Don't clear loading state here - it should only be cleared when playback actually starts
         // This will be handled by the time observer when playback begins
@@ -1226,6 +1346,9 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.pause()
         isPlaying = false
         
+        // REAL-TIME CROSS-DEVICE SYNC: Stop periodic sync timer when pausing
+        stopCrossDeviceSyncTimer()
+        
         // NOTE: Don't clear loading state when pausing - loading state should only be cleared when playback starts
         // loadingEpisodeId = nil
         
@@ -1245,6 +1368,24 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let actualCurrentTime = player.currentTime().seconds
         stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
         stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
+        
+        // REAL-TIME UI: Immediately update progress to ensure instant UI refresh
+        stateManager.setProgress(for: currentEpisode.id, progress: progress)
+        
+        // INSTANT SYNC: Sync episode progress immediately across devices when paused from player
+        print("📡 CALLING SYNC: Episode \(currentEpisode.id) progress \(progress) (paused from player)")
+        PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+            episodeId: currentEpisode.id,
+            progress: progress
+        )
+        
+        // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
+        print("📡 ⚡ LOCAL SYNC: Triggering instant local progress sync notification")
+        NotificationCenter.default.post(
+            name: .init("InstantSyncDidUpdatePodcastProgress"),
+            object: nil,
+            userInfo: ["episodeId": currentEpisode.id, "progress": progress]
+        )
         
         os_log("⏸️ User paused episode - progress saved: %@, Progress: %.2f%%", 
                log: log, type: .info, currentEpisode.title, progress * 100)
@@ -1289,11 +1430,32 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let actualCurrentTime = player.currentTime().seconds
             stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
+            
+            // REAL-TIME UI: Immediately update progress to ensure instant UI refresh
+            stateManager.setProgress(for: currentEpisode.id, progress: progress)
+            
+            // INSTANT SYNC: Sync episode progress immediately across devices when stopped from player
+            print("📡 CALLING SYNC: Episode \(currentEpisode.id) progress \(progress) (stopped from player)")
+            PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+                episodeId: currentEpisode.id,
+                progress: progress
+            )
+            
+            // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
+            print("📡 ⚡ LOCAL SYNC: Triggering instant local progress sync notification")
+            NotificationCenter.default.post(
+                name: .init("InstantSyncDidUpdatePodcastProgress"),
+                object: nil,
+                userInfo: ["episodeId": currentEpisode.id, "progress": progress]
+            )
         }
         
         player.pause()
         isPlaying = false
         userWantsToPlay = false  // Clear user intent
+        
+        // REAL-TIME CROSS-DEVICE SYNC: Stop periodic sync timer when stopping
+        stopCrossDeviceSyncTimer()
         
         // Connection state should reflect network availability, not playback state
         // Don't change connection state when stopping
@@ -1528,6 +1690,48 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
+    // MARK: - Cross-Device Sync Timer Management
+    
+    private func setupCrossDeviceSyncTimer() {
+        // Stop any existing timer
+        stopCrossDeviceSyncTimer()
+        
+        // Start timer for periodic cross-device sync during playback
+        crossDeviceSyncTimer = Timer.scheduledTimer(withTimeInterval: crossDeviceSyncInterval, repeats: true) { [weak self] _ in
+            self?.performPeriodicCrossDeviceSync()
+        }
+        
+        print("📡 ⏱️ CROSS-DEVICE SYNC: Timer started (every \(crossDeviceSyncInterval)s)")
+    }
+    
+    private func stopCrossDeviceSyncTimer() {
+        crossDeviceSyncTimer?.invalidate()
+        crossDeviceSyncTimer = nil
+        print("📡 ⏹️ CROSS-DEVICE SYNC: Timer stopped")
+    }
+    
+    @objc private func performPeriodicCrossDeviceSync() {
+        guard let currentEpisode = currentEpisode, isPlaying else {
+            // Stop timer if no longer playing
+            stopCrossDeviceSyncTimer()
+            return
+        }
+        
+        // Only sync if enough time has passed since last sync to avoid spam
+        let timeSinceLastSync = Date().timeIntervalSince(lastCrossDeviceSyncTime)
+        guard timeSinceLastSync >= crossDeviceSyncInterval - 5 else { return }
+        
+        let progress = duration > 0 ? min(max(currentTime / duration, 0), 1.0) : 0
+        
+        print("📡 ⏰ PERIODIC SYNC: Episode \(currentEpisode.id) progress \(Int(progress * 100))% (timer-based)")
+        PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+            episodeId: currentEpisode.id,
+            progress: progress
+        )
+        
+        lastCrossDeviceSyncTime = Date()
+    }
+    
     // Lightweight method that only updates time values without heavy operations
     private func updateCurrentTimeOnly() {
         guard let player = player else { return }
@@ -1581,7 +1785,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // Run heavy operations on background queue to avoid blocking UI
             Task.detached(priority: .utility) { [weak self] in
-                await self?.updatePlaybackInfo()
+                self?.updatePlaybackInfo()
             }
         }
     }
@@ -1597,7 +1801,7 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             guard let self = self, !self.isUserScrolling else { return }
             
             Task.detached(priority: .utility) { [weak self] in
-                await self?.updateNowPlayingInfo()
+                self?.updateNowPlayingInfo()
             }
         }
     }
@@ -1729,7 +1933,8 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     // PERFORMANCE: Async progress update with optimized UI updates
     private func updateProgress() async {
         guard let currentEpisode = currentEpisode, duration > 0 else { return }
-        let progress = currentTime / duration
+        // CRITICAL FIX: Clamp progress between 0 and 1 to prevent progress bar showing 100% while still playing
+        let progress = min(max(currentTime / duration, 0), 1.0)
         
         await MainActor.run {
             self.currentProgress = progress
@@ -1770,6 +1975,13 @@ class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         "currentTime": currentTime,
                         "duration": duration
                     ]
+                )
+                
+                // REAL-TIME CROSS-DEVICE SYNC: Sync progress every 10% during playback for cross-device sync
+                print("📡 ⚡ REAL-TIME SYNC: Episode \(currentEpisode.id) progress \(progressPercent)% (during playback)")
+                PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+                    episodeId: currentEpisode.id,
+                    progress: progress
                 )
                 
                 os_log("🚗 CarPlay progress update sent: %@, Progress: %.1f%% (CPU optimized)", log: log, type: .debug, currentEpisode.title, progress * 100)
