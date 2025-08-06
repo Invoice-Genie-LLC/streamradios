@@ -219,6 +219,13 @@ class PodcastViewModel: ObservableObject {
             object: nil
         )
         
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantPodcastDownloadSync),
+            name: .init("InstantSyncDidUpdatePodcastDownload"),
+            object: nil
+        )
+        
         // CloudKit automatic sync listeners
         NotificationCenter.default.addObserver(
             self,
@@ -263,12 +270,13 @@ class PodcastViewModel: ObservableObject {
         // Also check if this progress is newer (has a reasonable threshold)
         if abs(currentProgress - progress) > 0.01 {
             DispatchQueue.main.async {
-                self.episodeProgress[episodeId] = progress
-                
-                // Update EpisodeStateManager as well
+                // Update EpisodeStateManager as the source of truth
                 EpisodeStateManager.shared.setProgress(for: episodeId, progress: progress)
                 
-                print("📡 Applied instant podcast progress sync: \(episodeId) (%.2f)", progress)
+                // 🔄 CRITICAL FIX: Update UI immediately for automatic view refresh
+                self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: progress)
+                
+                print("📡 ✅ Applied instant podcast progress sync with UI refresh: \(episodeId) (%.2f%%)", progress * 100)
             }
         }
     }
@@ -281,13 +289,101 @@ class PodcastViewModel: ObservableObject {
         
         // Convert dictionary back to PodcastFeed
         if let feed = podcastFeedFromDictionary(feedData) {
-            // Check if feed already exists to avoid duplicates
-            if !podcastFeeds.contains(where: { $0.id == feed.id }) {
-                DispatchQueue.main.async {
-                    self.podcastFeeds.append(feed)
-                    self.saveFeedsToCoreData()
+            // COMPREHENSIVE DUPLICATE CHECK: Check both in-memory and Core Data to prevent race conditions
+            let isDuplicateInMemory = podcastFeeds.contains(where: { $0.id == feed.id || $0.url == feed.url })
+            
+            if isDuplicateInMemory {
+                print("📡 ⚠️ INSTANT SYNC: Duplicate detected in memory, skipping: \(feed.title)")
+                return
+            }
+            
+            // Check Core Data for duplicate (thread-safe)
+            Task {
+                let isDuplicateInCoreData = await checkForDuplicateInCoreData(feedId: feed.id, feedUrl: feed.url)
+                
+                if isDuplicateInCoreData {
+                    print("📡 ⚠️ INSTANT SYNC: Duplicate detected in Core Data, skipping: \(feed.title)")
+                    return
+                }
+                
+                // Parse RSS episodes immediately after sync with progress tracking
+                do {
+                    print("📡 🔄 INSTANT SYNC: Parsing episodes immediately for synced feed: \(feed.title)")
                     
-                    print("📡 Applied instant podcast feed addition sync: \(feed.title)")
+                    // Initialize parsing progress for instant sync
+                    await MainActor.run {
+                        DataSyncManager.shared.updateFeedParsingProgress(0.0, message: "Preparing to parse \(feed.title)...")
+                    }
+                    
+                    // Broadcast feed sync start to other devices (milestone only)
+                    PodcastCloudKitManager.shared.broadcastFeedProgress(
+                        feedId: feed.id,
+                        feedTitle: feed.title,
+                        progress: 0.0,
+                        message: "Starting feed sync from another device..."
+                    )
+                    
+                    guard let url = URL(string: feed.url) else {
+                        print("📡 ❌ INSTANT SYNC: Invalid URL for feed \(feed.title): \(feed.url)")
+                        await addFeedToUIOnly(feed)
+                        return
+                    }
+                    
+                    // Parse RSS to get episodes with progress tracking
+                    let episodes = try await parseRSSEpisodesOnly(from: url)
+                    
+                    // CRITICAL: Save feed to Core Data FIRST before adding episodes
+                    try await saveFeedToCoreData(feed)
+                    
+                    // Add episodes to Core Data for this feed
+                    try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id)
+                    
+                    await MainActor.run {
+                        // Final check before adding (prevents race conditions)
+                        if !self.podcastFeeds.contains(where: { $0.id == feed.id || $0.url == feed.url }) {
+                            // Add feed with episodes to UI
+                            var feedWithEpisodes = feed
+                            feedWithEpisodes.episodes = episodes
+                            
+                            self.podcastFeeds.append(feedWithEpisodes)
+                            self.podcastFeedOrder.append(feedWithEpisodes.id)
+                            self.throttledUIUpdate()
+                            
+                            print("📡 ✅ INSTANT SYNC: Applied instant sync with \(episodes.count) episodes: \(feed.title)")
+                        } else {
+                            print("📡 ⚠️ INSTANT SYNC: Last-second duplicate check prevented duplicate: \(feed.title)")
+                        }
+                    }
+                    
+                    // Reset parsing progress after successful completion
+                    await MainActor.run {
+                        DataSyncManager.shared.updateFeedParsingProgress(0.0, message: "")
+                    }
+                    
+                    // Broadcast completion to other devices (milestone only)
+                    PodcastCloudKitManager.shared.broadcastFeedProgress(
+                        feedId: feed.id,
+                        feedTitle: feed.title,
+                        progress: 1.0,
+                        message: "Feed sync completed - \(episodes.count) episodes added"
+                    )
+                    
+                } catch {
+                    print("📡 ❌ INSTANT SYNC: Failed to parse episodes for \(feed.title): \(error)")
+                    
+                    // Still save the feed to Core Data even without episodes
+                    do {
+                        try await saveFeedToCoreData(feed)
+                        await addFeedToUIOnly(feed)
+                        print("📡 ✅ INSTANT SYNC: Saved feed without episodes as fallback: \(feed.title)")
+                    } catch {
+                        print("📡 ❌ INSTANT SYNC: Failed to save feed as fallback: \(error)")
+                    }
+                    
+                    // Reset parsing progress after error
+                    await MainActor.run {
+                        DataSyncManager.shared.updateFeedParsingProgress(0.0, message: "")
+                    }
                 }
             }
         }
@@ -385,23 +481,132 @@ class PodcastViewModel: ObservableObject {
     }
     
     @objc private func handleInstantPodcastFavoriteSync(_ notification: Notification) {
+        print("📡 🔔 FAVORITE SYNC RECEIVED: Processing favorite sync notification...")
+        
         guard let userInfo = notification.userInfo,
               let episodeId = userInfo["episodeId"] as? String,
               let isFavorite = userInfo["isFavorite"] as? Bool else {
+            print("📡 ❌ FAVORITE SYNC FAILED: Invalid notification data")
             return
         }
         
+        print("📡 🔔 FAVORITE SYNC: Episode \(episodeId) favorite change to \(isFavorite)")
+        
         // Update episode favorite status from remote sync
         let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+        print("📡 🔔 FAVORITE SYNC: Current state: \(currentFavorite), New state: \(isFavorite)")
         
-        // Only update if the value actually changed to avoid infinite loops
-        if currentFavorite != isFavorite {
-            DispatchQueue.main.async {
-                // Update EpisodeStateManager as the source of truth
-                EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
-                
-                print("📡 Applied instant podcast favorite sync: \(episodeId) (favorite: \(isFavorite))")
+        // Always ensure UI is in sync, even if data states match
+        DispatchQueue.main.async {
+            // Update EpisodeStateManager to ensure consistency
+            EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
+            
+            // 🔄 CRITICAL FIX: ALWAYS trigger UI refresh regardless of data change
+            // The UI might be out of sync with the data state, so force refresh
+            self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
+            
+            if currentFavorite != isFavorite {
+                print("📡 ✅ Applied instant podcast favorite sync with data change: \(episodeId) (favorite: \(isFavorite))")
+            } else {
+                print("📡 🔄 FAVORITE SYNC: States matched but forced UI refresh: \(episodeId) (favorite: \(isFavorite))")
             }
+        }
+    }
+    
+    @objc private func handleInstantPodcastDownloadSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let isDownloaded = userInfo["isDownloaded"] as? Bool else {
+            return
+        }
+        
+        // Update episode download status from remote sync
+        let currentDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
+        
+        // Always ensure UI is in sync, even if data states match
+        DispatchQueue.main.async {
+            // Update EpisodeStateManager to ensure consistency
+            EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded)
+            
+            // 🔄 CRITICAL FIX: ALWAYS trigger UI refresh regardless of data change
+            // The UI might be out of sync with the data state, so force refresh
+            self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
+            
+            if currentDownloaded != isDownloaded {
+                print("📡 ✅ Applied instant podcast download sync with data change: \(episodeId) (downloaded: \(isDownloaded))")
+            } else {
+                print("📡 🔄 DOWNLOAD SYNC: States matched but forced UI refresh: \(episodeId) (downloaded: \(isDownloaded))")
+            }
+        }
+    }
+    
+    // MARK: - UI State Update Helper
+    
+    /// Update episode UI state immediately for automatic view refresh across tabs
+    private func updateEpisodeUIState(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?, progress: Double? = nil) {
+        // Update the episode in currentEpisodes array (triggers UI refresh)
+        if let index = currentEpisodes.firstIndex(where: { $0.id == episodeId }) {
+            var updatedEpisode = currentEpisodes[index]
+            
+            if let isFavorite = isFavorite {
+                updatedEpisode.state.isFavorite = isFavorite
+            }
+            
+            if let isDownloaded = isDownloaded {
+                updatedEpisode.state.isDownloaded = isDownloaded
+            }
+            
+            if let progress = progress {
+                updatedEpisode.state.progress = progress
+                // Also update the episodeProgress cache
+                episodeProgress[episodeId] = progress
+            }
+            
+            currentEpisodes[index] = updatedEpisode
+            print("🔄 UI UPDATE: Updated currentEpisodes[\\(index)] for episode \\(episodeId)")
+        }
+        
+        // Update the episode in the podcastFeeds array (triggers feed-level UI refresh)
+        for feedIndex in 0..<podcastFeeds.count {
+            if let episodeIndex = podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episodeId }) {
+                var updatedFeed = podcastFeeds[feedIndex]
+                
+                if let isFavorite = isFavorite {
+                    updatedFeed.episodes[episodeIndex].state.isFavorite = isFavorite
+                }
+                
+                if let isDownloaded = isDownloaded {
+                    updatedFeed.episodes[episodeIndex].state.isDownloaded = isDownloaded
+                }
+                
+                if let progress = progress {
+                    updatedFeed.episodes[episodeIndex].state.progress = progress
+                }
+                
+                podcastFeeds[feedIndex] = updatedFeed
+                print("🔄 UI UPDATE: Updated podcastFeeds[\\(feedIndex)].episodes[\\(episodeIndex)] for episode \\(episodeId)")
+                break
+            }
+        }
+        
+        // Apply tab filtering immediately if needed
+        let filter = EpisodeFilter(rawValue: currentTab) ?? .all
+        switch filter {
+        case .favorites:
+            // If we're on favorites tab and unfavoriting, remove the episode
+            if let isFavorite = isFavorite, !isFavorite {
+                currentEpisodes.removeAll { $0.id == episodeId }
+                print("🔄 UI UPDATE: Removed unfavorited episode from favorites tab")
+            }
+        case .downloads:
+            // If we're on downloads tab and un-downloading, remove the episode
+            if let isDownloaded = isDownloaded, !isDownloaded {
+                currentEpisodes.removeAll { $0.id == episodeId }
+                print("🔄 UI UPDATE: Removed non-downloaded episode from downloads tab")
+            }
+        case .all:
+            // All tab shows everything, no filtering needed
+            break
         }
     }
     
@@ -416,28 +621,50 @@ class PodcastViewModel: ObservableObject {
         
         print("📡 ☁️ CLOUDKIT FEED ADD: Received feed addition from CloudKit: \(feed.title)")
         
-        // Check if feed already exists to avoid duplicates
-        if !podcastFeeds.contains(where: { $0.id == feed.id }) {
+        // COMPREHENSIVE DUPLICATE CHECK: Check both in-memory and Core Data to prevent race conditions
+        let isDuplicateInMemory = podcastFeeds.contains(where: { $0.id == feed.id || $0.url == feed.url })
+        
+        if isDuplicateInMemory {
+            print("📡 ☁️ CLOUDKIT FEED ADD: ⚠️ Duplicate detected in memory, skipping: \(feed.title)")
+            return
+        }
+        
+        // Check Core Data for duplicate (thread-safe)
+        Task {
+            let isDuplicateInCoreData = await checkForDuplicateInCoreData(feedId: feed.id, feedUrl: feed.url)
             
-            // **FIX**: Only parse RSS episodes without duplicating Core Data save
-            Task {
-                do {
-                    print("📡 🔄 CLOUDKIT FEED ADD: Fetching episodes for synced feed: \(feed.title)")
-                    
-                    // Parse RSS for episodes only (don't save feed to Core Data again)
-                    guard let url = URL(string: feed.url) else {
-                        print("📡 ❌ CLOUDKIT FEED ADD: Invalid URL for feed \(feed.title): \(feed.url)")
-                        await addFeedToUIOnly(feed)
-                        return
-                    }
-                    
-                    // Parse RSS to get episodes
-                    let episodes = try await parseRSSEpisodesOnly(from: url)
-                    
-                    // Add episodes to Core Data for this feed
-                    try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id)
-                    
-                    await MainActor.run {
+            if isDuplicateInCoreData {
+                print("📡 ☁️ CLOUDKIT FEED ADD: ⚠️ Duplicate detected in Core Data, skipping: \(feed.title)")
+                return
+            }
+            
+            do {
+                print("📡 🔄 CLOUDKIT FEED ADD: Fetching episodes for synced feed: \(feed.title)")
+                
+                // Initialize parsing progress for CloudKit sync
+                await MainActor.run {
+                    DataSyncManager.shared.updateFeedParsingProgress(0.0, message: "Loading \(feed.title) from CloudKit...")
+                }
+                
+                // Parse RSS for episodes only (don't save feed to Core Data again)
+                guard let url = URL(string: feed.url) else {
+                    print("📡 ❌ CLOUDKIT FEED ADD: Invalid URL for feed \(feed.title): \(feed.url)")
+                    await addFeedToUIOnly(feed)
+                    return
+                }
+                
+                // Parse RSS to get episodes
+                let episodes = try await parseRSSEpisodesOnly(from: url)
+                
+                // CRITICAL: Save feed to Core Data FIRST before adding episodes
+                try await saveFeedToCoreData(feed)
+                
+                // Add episodes to Core Data for this feed
+                try await PodcastCoreDataManager.shared.addNewEpisodes(episodes, to: feed.id)
+                
+                await MainActor.run {
+                    // Final check before adding (prevents race conditions)
+                    if !self.podcastFeeds.contains(where: { $0.id == feed.id || $0.url == feed.url }) {
                         // Add feed with episodes to UI
                         var feedWithEpisodes = feed
                         feedWithEpisodes.episodes = episodes
@@ -447,16 +674,31 @@ class PodcastViewModel: ObservableObject {
                         self.throttledUIUpdate()
                         
                         print("📡 ☁️ CLOUDKIT FEED ADD: ✅ Added feed with \(episodes.count) episodes from CloudKit: \(feed.title)")
+                    } else {
+                        print("📡 ☁️ CLOUDKIT FEED ADD: ⚠️ Last-second duplicate check prevented duplicate: \(feed.title)")
                     }
                     
-                } catch {
-                    print("📡 ❌ CLOUDKIT FEED ADD: Failed to fetch episodes for \(feed.title): \(error)")
-                    // Still add the feed without episodes as fallback
+                    // Reset parsing progress after successful completion
+                    DataSyncManager.shared.updateFeedParsingProgress(0.0, message: "")
+                }
+                
+            } catch {
+                print("📡 ❌ CLOUDKIT FEED ADD: Failed to fetch episodes for \(feed.title): \(error)")
+                
+                // Still save the feed to Core Data even without episodes
+                do {
+                    try await saveFeedToCoreData(feed)
                     await addFeedToUIOnly(feed)
+                    print("📡 ✅ CLOUDKIT FEED ADD: Saved feed without episodes as fallback: \(feed.title)")
+                } catch {
+                    print("📡 ❌ CLOUDKIT FEED ADD: Failed to save feed as fallback: \(error)")
+                }
+                
+                // Reset parsing progress after error
+                await MainActor.run {
+                    DataSyncManager.shared.updateFeedParsingProgress(0.0, message: "")
                 }
             }
-        } else {
-            print("📡 ☁️ CLOUDKIT FEED ADD: ⚠️ Feed already exists, skipping duplicate: \(feed.title)")
         }
     }
     
@@ -467,8 +709,12 @@ class PodcastViewModel: ObservableObject {
         // Fetch RSS data
         let (feedData, _) = try await URLSession.shared.data(from: url)
         
-        // Parse RSS using the same parser as PodcastFeedManager
-        let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString)
+        // Parse RSS using the same parser as PodcastFeedManager with progress tracking
+        let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString) { [weak self] progress, message in
+            Task { @MainActor in
+                DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
+            }
+        }
         let (_, episodes) = try parser.parseComplete()
         
         print("🔍 Parsed \(episodes.count) episodes from RSS")
@@ -495,27 +741,83 @@ class PodcastViewModel: ObservableObject {
         
         print("📡 ☁️ CLOUDKIT FEED DELETE: Received feed deletion from CloudKit: \(feedId)")
         
-        // Find and remove the feed
-        if let index = podcastFeeds.firstIndex(where: { $0.id == feedId }) {
-            let feedTitle = podcastFeeds[index].title
+        // Find the feed for comprehensive cleanup
+        if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+            let feedTitle = podcastFeeds[feedIndex].title
+            let feed = podcastFeeds[feedIndex]
             
-            DispatchQueue.main.async {
-                // Remove from UI arrays
-                self.podcastFeeds.remove(at: index)
-                self.podcastFeedOrder.removeAll { $0 == feedId }
-                self.currentEpisodes.removeAll { $0.feedId == feedId }
+            print("📡 ☁️ CLOUDKIT FEED DELETE: Starting comprehensive cleanup for: \(feedTitle)")
+            
+            Task {
+                // Step 1: Get episode IDs for comprehensive cleanup
+                let episodeIds = await getEpisodeIdsForFeed(feedId)
+                print("📡 ☁️ Found \(episodeIds.count) episodes to clean up for CloudKit deletion: \(feedTitle)")
                 
-                // Clear selected feed if it's the one being deleted
-                if self.selectedFeedId == feedId {
-                    self.selectedFeedId = nil
+                // Step 2: Clean up episode data from EpisodeStateManager (prevents duplication)
+                for episodeId in episodeIds {
+                    EpisodeStateManager.shared.clearEpisodeData(episodeId)
+                }
+                print("📡 ☁️ Cleared \(episodeIds.count) episode states from EpisodeStateManager")
+                
+                // Step 3: Delete downloaded episode files (prevents storage bloat)
+                await deleteDownloadedEpisodeFiles(episodeIds)
+                print("📡 ☁️ Cleaned up downloaded files for \(episodeIds.count) episodes")
+                
+                // Step 4: Remove from UI arrays and clear local state
+                await MainActor.run {
+                    // Remove from UI arrays
+                    if let currentIndex = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+                        self.podcastFeeds.remove(at: currentIndex)
+                    }
+                    self.podcastFeedOrder.removeAll { $0 == feedId }
+                    self.currentEpisodes.removeAll { $0.feedId == feedId }
+                    
+                    // Clear selected feed if it's the one being deleted
+                    if self.selectedFeedId == feedId {
+                        self.selectedFeedId = nil
+                    }
+                    
+                    // Clear local episode state tracking (prevents stale state)
+                    for episodeId in episodeIds {
+                        self.episodeProgress.removeValue(forKey: episodeId)
+                    }
+                    
+                    // Trigger UI update
+                    self.throttledUIUpdate()
                 }
                 
-                // Trigger UI update
-                self.throttledUIUpdate()
-                print("📡 ☁️ CLOUDKIT FEED DELETE: ✅ Removed feed from CloudKit: \(feedTitle)")
+                // Step 5: Delete from Core Data (prevents duplication)
+                do {
+                    try await deleteFeedFromCoreData(feed)
+                    print("📡 ☁️ Deleted feed and episodes from Core Data: \(feedTitle)")
+                    
+                    await MainActor.run {
+                        print("📡 ☁️ CLOUDKIT FEED DELETE: ✅ Comprehensive cleanup completed for: \(feedTitle)")
+                        print("📡 ☁️ 📊 CloudKit deletion cleanup summary:")
+                        print("📡 ☁️    ✅ EpisodeStateManager: \(episodeIds.count) episode states cleared")
+                        print("📡 ☁️    ✅ Downloaded files: cleaned up")
+                        print("📡 ☁️    ✅ Core Data: feed and episodes deleted")
+                        print("📡 ☁️    ✅ UI: feed and episodes removed")
+                        print("📡 ☁️    ✅ Local state: episode progress cleared")
+                        print("📡 ☁️ 🚨 Feed can now be safely re-added without duplication!")
+                    }
+                } catch {
+                    print("📡 ☁️ ❌ Error during Core Data cleanup for CloudKit feed deletion: \(error)")
+                }
             }
         } else {
             print("📡 ☁️ CLOUDKIT FEED DELETE: ⚠️ Feed not found locally, might already be deleted: \(feedId)")
+            
+            // Even if feed not found in UI, attempt Core Data cleanup to prevent orphaned data
+            Task {
+                do {
+                    let dummyFeed = PodcastFeed(id: feedId, title: "Unknown Feed", url: "", artworkUrl: nil, description: nil)
+                    try await deleteFeedFromCoreData(dummyFeed)
+                    print("📡 ☁️ Performed orphaned data cleanup for feed ID: \(feedId)")
+                } catch {
+                    print("📡 ☁️ Note: No orphaned data found for feed ID: \(feedId)")
+                }
+            }
         }
     }
     
@@ -579,11 +881,16 @@ class PodcastViewModel: ObservableObject {
                 print("📡 🔔 REALTIME CLOUDKIT DELETE: ✅ Applied real-time deletion for: \(feedTitle)")
             }
             
-            // Delete from Core Data
+            // Delete from Core Data - but only if it still exists to prevent conflicts
             do {
-                let feedForDeletion = PodcastFeed(id: feedId, title: feedTitle, url: "", artworkUrl: nil, description: nil)
-                try await deleteFeedFromCoreData(feedForDeletion)
-                print("📡 🔔 REALTIME CLOUDKIT DELETE: ✅ Deleted from Core Data: \(feedTitle)")
+                let feedExists = await checkIfFeedExistsInCoreData(feedId: feedId)
+                if feedExists {
+                    let feedForDeletion = PodcastFeed(id: feedId, title: feedTitle, url: "", artworkUrl: nil, description: nil)
+                    try await deleteFeedFromCoreData(feedForDeletion)
+                    print("📡 🔔 REALTIME CLOUDKIT DELETE: ✅ Deleted from Core Data: \(feedTitle)")
+                } else {
+                    print("📡 🔔 REALTIME CLOUDKIT DELETE: ⚠️ Feed already deleted from Core Data, skipping: \(feedTitle)")
+                }
             } catch {
                 print("📡 🔔 REALTIME CLOUDKIT DELETE: ❌ Error deleting from Core Data: \(error)")
             }
@@ -664,6 +971,7 @@ class PodcastViewModel: ObservableObject {
     }
     
     // Helper method to convert PodcastFeed to dictionary for syncing
+    // NOTE: Only includes essential metadata to avoid NSUbiquitousKeyValueStore 1MB quota limit
     private func podcastFeedToDictionary(_ feed: PodcastFeed) -> [String: Any] {
         var data: [String: Any] = [
             "id": feed.id,
@@ -679,15 +987,59 @@ class PodcastViewModel: ObservableObject {
             data["description"] = descriptionText
         }
         
-        if let iconData = feed.iconData {
-            data["iconData"] = iconData
-        }
-        
-        if let imageData = feed.imageData {
-            data["imageData"] = imageData.base64EncodedString()
-        }
+        // NOTE: Excluding iconData and imageData from instant sync to prevent quota exceeded errors
+        // These will be synced via CloudKit instead where there's no size limit
+        // Previous issue: CNN 5 Things with 1.7MB artwork caused quota error when base64 encoded
         
         return data
+    }
+    
+    /// Thread-safe duplicate checking in Core Data
+    private func checkForDuplicateInCoreData(feedId: String, feedUrl: String) async -> Bool {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.newBackgroundContext()
+            
+            context.perform {
+                do {
+                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "id == %@ OR url == %@", feedId, feedUrl)
+                    fetchRequest.fetchLimit = 1
+                    
+                    let existingFeeds = try context.fetch(fetchRequest)
+                    let isDuplicate = !existingFeeds.isEmpty
+                    
+                    continuation.resume(returning: isDuplicate)
+                } catch {
+                    print("❌ Error checking for duplicate in Core Data: \(error)")
+                    // In case of error, assume duplicate to be safe
+                    continuation.resume(returning: true)
+                }
+            }
+        }
+    }
+    
+    /// Thread-safe existence checking in Core Data for real-time sync
+    private func checkIfFeedExistsInCoreData(feedId: String) async -> Bool {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.newBackgroundContext()
+            
+            context.perform {
+                do {
+                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "id == %@", feedId)
+                    fetchRequest.fetchLimit = 1
+                    
+                    let existingFeeds = try context.fetch(fetchRequest)
+                    let exists = !existingFeeds.isEmpty
+                    
+                    continuation.resume(returning: exists)
+                } catch {
+                    print("❌ Error checking feed existence in Core Data: \(error)")
+                    // In case of error, assume it doesn't exist to be safe
+                    continuation.resume(returning: false)
+                }
+            }
+        }
     }
     
     deinit {
@@ -1151,10 +1503,39 @@ class PodcastViewModel: ObservableObject {
             // IMPORTANT: If no explicit progress and not currently playing, DON'T modify stored progress
             
             if let isFavorite = isFavorite {
+                print("📡 UPDATE EPISODE STATE: Setting favorite \(episodeId) to \(isFavorite)")
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
+                print("📡 UPDATE EPISODE STATE: EpisodeStateManager updated successfully")
+                
+                // INSTANT SYNC: Sync episode favorite immediately across devices
+                print("📡 CALLING SYNC: Episode \(episodeId) favorite \(isFavorite)")
+                PodcastCloudKitManager.shared.syncPodcastFavoriteInstantly(
+                    episodeId: episodeId,
+                    isFavorite: isFavorite
+                )
+                print("📡 SYNC CALL COMPLETED: syncPodcastFavoriteInstantly finished")
+                
+                // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
+                await MainActor.run {
+                    print("📡 UI UPDATE: Triggering updateEpisodeUIState for \(episodeId)")
+                    self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
+                    print("📡 UI UPDATE COMPLETED: Episode UI state updated")
+                }
             }
             if let isDownloaded = isDownloaded {
                 EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded)
+                
+                // INSTANT SYNC: Sync episode download status immediately across devices
+                print("📡 CALLING SYNC: Episode \(episodeId) download \(isDownloaded)")
+                PodcastCloudKitManager.shared.syncPodcastDownloadInstantly(
+                    episodeId: episodeId,
+                    isDownloaded: isDownloaded
+                )
+                
+                // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
+                await MainActor.run {
+                    self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
+                }
             }
             
             // Update the episode state in EpisodeStateManager
@@ -1480,25 +1861,30 @@ class PodcastViewModel: ObservableObject {
             
             // Strategy 2: If no file found with standard naming, search all files for matches
             if !fileDeleted {
-                do {
-                    let fileURLs = try FileManager.default.contentsOfDirectory(at: episodesFolder, includingPropertiesForKeys: nil)
-                    
-                    for fileURL in fileURLs {
-                        let fileName = fileURL.lastPathComponent
-                        if fileName.contains(episodeId) || fileName.contains(sanitizedId) {
-                            do {
-                                try FileManager.default.removeItem(at: fileURL)
-                                deletedCount += 1
-                                print("🗑️ Deleted file found by search: \(fileName)")
-                                fileDeleted = true
-                                break
-                            } catch {
-                                print("❌ Failed to delete file found by search \(fileName): \(error)")
+                // Check if the DownloadedEpisodes folder exists before trying to access it
+                if FileManager.default.fileExists(atPath: episodesFolder.path) {
+                    do {
+                        let fileURLs = try FileManager.default.contentsOfDirectory(at: episodesFolder, includingPropertiesForKeys: nil)
+                        
+                        for fileURL in fileURLs {
+                            let fileName = fileURL.lastPathComponent
+                            if fileName.contains(episodeId) || fileName.contains(sanitizedId) {
+                                do {
+                                    try FileManager.default.removeItem(at: fileURL)
+                                    deletedCount += 1
+                                    print("🗑️ Deleted file found by search: \(fileName)")
+                                    fileDeleted = true
+                                    break
+                                } catch {
+                                    print("❌ Failed to delete file found by search \(fileName): \(error)")
+                                }
                             }
                         }
+                    } catch {
+                        print("❌ Error searching DownloadedEpisodes folder for \(episodeId): \(error)")
                     }
-                } catch {
-                    print("❌ Error searching DownloadedEpisodes folder for \(episodeId): \(error)")
+                } else {
+                    print("📁 DownloadedEpisodes folder doesn't exist, skipping file search for episode: \(episodeId)")
                 }
             }
             
@@ -2530,38 +2916,101 @@ class PodcastViewModel: ObservableObject {
     // MARK: - Delete Feed with CloudKit Integration
     
     private func deleteFeedFromCoreData(_ feed: PodcastFeed) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            let context = CoreDataStack.shared.context
-            
+        print("💾 Starting safe deletion from Core Data for feed: \(feed.title)")
+        
+        // Use main context with proper transaction handling to avoid merge conflicts
+        let context = CoreDataStack.shared.persistentContainer.viewContext
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             context.perform {
                 do {
-                    // Delete feed
-                    let fetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                    fetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
+                    // Step 1: Count episodes first for logging
+                    let episodeCountRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    episodeCountRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                    let episodeCount = try context.count(for: episodeCountRequest)
+                    print("💾 Found \(episodeCount) episodes to delete for feed: \(feed.title)")
                     
-                    let results = try context.fetch(fetchRequest)
-                    for feedModel in results {
+                    // Step 2: Fetch and delete episodes in batches to avoid memory issues
+                    var totalDeleted = 0
+                    let batchSize = 500
+                    
+                    while true {
+                        let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        episodeFetchRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
+                        episodeFetchRequest.fetchLimit = batchSize
+                        
+                        let episodes = try context.fetch(episodeFetchRequest)
+                        if episodes.isEmpty {
+                            break
+                        }
+                        
+                        // Delete this batch of episodes
+                        for episode in episodes {
+                            // Clear any relationships first
+                            episode.feed = nil
+                            context.delete(episode)
+                        }
+                        
+                        totalDeleted += episodes.count
+                        
+                        // Save periodically to prevent memory buildup
+                        if totalDeleted % (batchSize * 2) == 0 {
+                            try context.save()
+                            print("💾 Intermediate save: deleted \(totalDeleted) episodes so far")
+                        }
+                    }
+                    
+                    print("💾 Deleted \(totalDeleted) episodes from Core Data")
+                    
+                    // Step 3: Now delete the feed record
+                    let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                    feedFetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
+                    
+                    let feedResults = try context.fetch(feedFetchRequest)
+                    for feedModel in feedResults {
+                        // Clear all relationships before deletion
+                        feedModel.episodes = nil
                         context.delete(feedModel)
                     }
+                    print("💾 Deleted \(feedResults.count) feed records from Core Data")
                     
-                    // Delete associated episodes
-                    let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                    episodeRequest.predicate = NSPredicate(format: "feedId == %@", feed.id)
-                    
-                    let episodes = try context.fetch(episodeRequest)
-                    for episode in episodes {
-                        context.delete(episode)
-                    }
-                    
+                    // Step 4: Final save
                     try context.save()
+                    print("💾 ✅ Successfully completed safe deletion for feed: \(feed.title)")
                     continuation.resume()
                     
                 } catch {
-                    continuation.resume(throwing: error)
+                    print("💾 ❌ Error in Core Data deletion: \(error.localizedDescription)")
+                    
+                    // Attempt recovery by rolling back and trying a simpler approach
+                    context.rollback()
+                    
+                    do {
+                        // Try one more time with a fresh context state
+                        context.refreshAllObjects()
+                        
+                        // Simple deletion approach - just delete what we can find
+                        let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                        feedFetchRequest.predicate = NSPredicate(format: "id == %@", feed.id)
+                        
+                        let remainingFeeds = try context.fetch(feedFetchRequest)
+                        for feed in remainingFeeds {
+                            context.delete(feed)
+                        }
+                        
+                        try context.save()
+                        print("💾 ✅ Recovery successful - completed deletion")
+                        continuation.resume()
+                    } catch {
+                        print("💾 ❌ Recovery also failed: \(error)")
+                        continuation.resume(throwing: error)
+                    }
                 }
             }
         }
     }
+
     
     /// Refresh the current filtered episode list immediately
     private func refreshCurrentFilteredList() async {
@@ -2626,20 +3075,25 @@ class PodcastViewModel: ObservableObject {
                 
                 // Strategy 3: Search all files in DownloadedEpisodes folder for matches
                 if !fileDeleted {
-                    do {
-                        let fileURLs = try FileManager.default.contentsOfDirectory(at: episodesFolder, includingPropertiesForKeys: nil)
-                        
-                        for fileURL in fileURLs {
-                            let fileName = fileURL.lastPathComponent
-                            if fileName.contains(episode.id) || fileName.contains(sanitizedId) {
-                                try FileManager.default.removeItem(at: fileURL)
-                                print("📁 Successfully deleted file found by search: \(fileName)")
-                                fileDeleted = true
-                                break
+                    // Check if the DownloadedEpisodes folder exists before trying to access it
+                    if FileManager.default.fileExists(atPath: episodesFolder.path) {
+                        do {
+                            let fileURLs = try FileManager.default.contentsOfDirectory(at: episodesFolder, includingPropertiesForKeys: nil)
+                            
+                            for fileURL in fileURLs {
+                                let fileName = fileURL.lastPathComponent
+                                if fileName.contains(episode.id) || fileName.contains(sanitizedId) {
+                                    try FileManager.default.removeItem(at: fileURL)
+                                    print("📁 Successfully deleted file found by search: \(fileName)")
+                                    fileDeleted = true
+                                    break
+                                }
                             }
+                        } catch {
+                            print("❌ Error searching DownloadedEpisodes folder: \(error)")
                         }
-                    } catch {
-                        print("❌ Error searching DownloadedEpisodes folder: \(error)")
+                    } else {
+                        print("📁 DownloadedEpisodes folder doesn't exist, skipping file search for episode: \(episode.title)")
                     }
                 }
             }
@@ -2996,53 +3450,13 @@ extension PodcastViewModel {
         let newState = !currentState
         
         print("🔍 DEBUG: Toggling favorite for '\(episode.title)' from \(currentState) to \(newState) on tab \(currentTab)")
+        print("📡 FAVORITE TOGGLE: About to call updateEpisodeState with isFavorite: \(newState)")
         
-        // Update EpisodeStateManager immediately (source of truth)
-        EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: newState)
-        
-        // INSTANT SYNC: Sync podcast favorite immediately across devices
-        PodcastCloudKitManager.shared.syncPodcastFavoriteInstantly(
-            episodeId: episode.id,
-            isFavorite: newState
-        )
-        
-        // Update local state immediately for all tabs
-        Task { @MainActor in
-            // Update the episode in place across all states immediately
-            if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                var updatedEpisode = self.currentEpisodes[index]
-                updatedEpisode.state.isFavorite = newState
-                self.currentEpisodes[index] = updatedEpisode
-                print("🔍 DEBUG: Updated episode state immediately - isFavorite: \(newState)")
-            }
-            
-            // Update the episode in the feed object as well
-            if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
-               let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
-                var updatedFeed = self.podcastFeeds[feedIndex]
-                updatedFeed.episodes[episodeIndex].state.isFavorite = newState
-                self.podcastFeeds[feedIndex] = updatedFeed
-            }
-            
-            // Apply filtering immediately based on current tab without reloading
-            let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
-            switch filter {
-            case .favorites:
-                // If we're on favorites tab and unfavoriting, remove the episode
-                if !newState {
-                    self.currentEpisodes.removeAll { $0.id == episode.id }
-                }
-            case .downloads:
-                // No change needed for downloads tab when favoriting
-                break
-            case .all:
-                // All tab shows everything, no filtering needed
-                break
-            }
-        }
-        
-        // Update episode state with proper sync (background operation)
+        // Use updateEpisodeState for consistent sync and data management
+        // This will handle EpisodeStateManager updates, sync, and UI refresh automatically
         updateEpisodeState(episode.id, isFavorite: newState)
+        
+        print("🔍 DEBUG: ✅ Called updateEpisodeState for '\(episode.title)' favorite: \(newState)")
     }
     
     /// Toggle download state for an episode with proper filtering update
@@ -3054,6 +3468,12 @@ extension PodcastViewModel {
         
         // Update EpisodeStateManager immediately (source of truth)
         EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: newState)
+        
+        // INSTANT SYNC: Sync podcast download immediately across devices
+        PodcastCloudKitManager.shared.syncPodcastDownloadInstantly(
+            episodeId: episode.id,
+            isDownloaded: newState
+        )
         
         // Update local state immediately for all tabs
         Task { @MainActor in

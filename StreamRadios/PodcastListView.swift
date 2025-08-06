@@ -287,12 +287,8 @@ struct PodcastListView: View {
             
             List {
                 if viewModel.isLoading {
-                    HStack {
-                        ProgressView()
-                        Text("Loading podcast feeds...")
-                    }
-                    .foregroundColor(.adaptiveSecondaryText)
-                    .padding()
+                    PodcastLoadingProgressView()
+                        .padding()
                 } else if viewModel.podcastFeeds.isEmpty {
                     Text("No podcast feeds available")
                         .foregroundColor(.adaptiveSecondaryText)
@@ -2689,5 +2685,57 @@ struct DebouncedAction: ViewModifier {
 
 // MARK: - Notification Extensions
 // Note: Notification names are declared in RadioStationListView.swift to avoid duplication
+
+// MARK: - Podcast Loading Progress View
+struct PodcastLoadingProgressView: View {
+    @StateObject private var syncManager = DataSyncManager.shared
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                ProgressView()
+                    .scaleEffect(0.8)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(syncManager.isParsingFeeds ? "Parsing Feed Content" : "Loading Podcast Feeds")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                    
+                    if syncManager.isParsingFeeds {
+                        Text("Processing RSS episodes...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if syncManager.podcastFeedsTotalCount > 0 {
+                        Text("\(syncManager.podcastFeedsCurrentCount)/\(syncManager.podcastFeedsTotalCount) feeds")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                Text("\(Int((syncManager.isParsingFeeds ? syncManager.feedParsingProgress : syncManager.podcastFeedsProgress) * 100))%")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Progress bar
+            ProgressView(value: syncManager.isParsingFeeds ? syncManager.feedParsingProgress : syncManager.podcastFeedsProgress)
+                .progressViewStyle(LinearProgressViewStyle(tint: syncManager.isParsingFeeds ? .green : .blue))
+                .frame(height: 4)
+            
+            // Detailed operation message
+            let operationMessage = syncManager.isParsingFeeds ? syncManager.feedParsingMessage : syncManager.podcastFeedsOperation
+            if !operationMessage.isEmpty {
+                Text(operationMessage)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .foregroundColor(.adaptiveSecondaryText)
+    }
+}
 
 

@@ -45,6 +45,11 @@ class PodcastCloudKitManager: ObservableObject {
     // MARK: - Instant Sync Setup
     
     private func setupInstantSync() {
+        print("📡 🔧 SETUP: Starting instant sync setup...")
+        
+        // Test iCloud availability first
+        testICloudAvailability()
+        
         // Start observing changes from other devices via NSUbiquitousKeyValueStore
         NotificationCenter.default.addObserver(
             self,
@@ -53,13 +58,77 @@ class PodcastCloudKitManager: ObservableObject {
             object: ubiquitousStore
         )
         
+        print("📡 🔧 SETUP: Added notification observer for NSUbiquitousKeyValueStore")
+        
         // Start syncing with iCloud immediately
-        ubiquitousStore.synchronize()
+        let syncResult = ubiquitousStore.synchronize()
+        print("📡 🔧 SETUP: Initial synchronize() result: \(syncResult)")
         
         os_log("📡 Instant sync setup completed", log: log, type: .info)
         
         // Clear any existing test data from previous debug sessions
         clearTestData()
+        
+        // Run a test sync to verify everything works
+        testInstantSync()
+    }
+    
+    /// Test if iCloud is available and properly configured
+    private func testICloudAvailability() {
+        print("📡 🧪 ICLOUD TEST: Checking iCloud availability...")
+        
+        if let token = FileManager.default.ubiquityIdentityToken {
+            print("📡 ✅ ICLOUD TEST: iCloud account found - token: \(type(of: token))")
+        } else {
+            print("📡 ❌ ICLOUD TEST: No iCloud account found - user not signed in!")
+            return
+        }
+        
+        // Test writing to ubiquitous store
+        let testKey = "test_connectivity"
+        let testValue = ["timestamp": Date().timeIntervalSince1970, "test": true] as [String: Any]
+        
+        print("📡 🧪 ICLOUD TEST: Writing test data...")
+        ubiquitousStore.set(testValue, forKey: testKey)
+        let syncResult = ubiquitousStore.synchronize()
+        print("📡 🧪 ICLOUD TEST: Write sync result: \(syncResult)")
+        
+        // Try to read it back
+        if let readBack = ubiquitousStore.object(forKey: testKey) as? [String: Any] {
+            print("📡 ✅ ICLOUD TEST: Successfully read back test data: \(readBack)")
+        } else {
+            print("📡 ❌ ICLOUD TEST: Failed to read back test data!")
+        }
+        
+        // Clean up test data
+        ubiquitousStore.removeObject(forKey: testKey)
+        ubiquitousStore.synchronize()
+    }
+    
+    /// Test the instant sync mechanism with a dummy sync
+    private func testInstantSync() {
+        print("📡 🧪 SYNC TEST: Testing instant sync mechanism...")
+        
+        let testEpisodeId = "test-episode-\(Date().timeIntervalSince1970)"
+        
+        // This should trigger the sync and we should see logs
+        print("📡 🧪 SYNC TEST: Calling syncPodcastFavoriteInstantly with test data...")
+        syncPodcastFavoriteInstantly(episodeId: testEpisodeId, isFavorite: true)
+        
+        // Wait a moment and check if we can read it back
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if let storedData = self.ubiquitousStore.object(forKey: "instant_podcast_episode_favorite") as? [String: Any],
+               let storedEpisodeId = storedData["episodeId"] as? String,
+               storedEpisodeId == testEpisodeId {
+                print("📡 ✅ SYNC TEST: Test sync data found in store!")
+            } else {
+                print("📡 ❌ SYNC TEST: Test sync data NOT found in store!")
+            }
+            
+            // Clean up test data
+            self.ubiquitousStore.removeObject(forKey: "instant_podcast_episode_favorite")
+            self.ubiquitousStore.synchronize()
+        }
     }
     
     // MARK: - Account Validation
@@ -73,8 +142,17 @@ class PodcastCloudKitManager: ObservableObject {
         return nil
     }
     
+    /// Debug flag to bypass account validation for testing
+    private let debugBypassAccountValidation = false
+    
     /// Validates that sync data is from the same iCloud account
     private func validateSyncAccount(syncData: [String: Any]) -> Bool {
+        
+        // DEBUG: Temporarily bypass validation for testing
+        if debugBypassAccountValidation {
+            print("📡 🧪 DEBUG: Bypassing account validation for testing")
+            return true
+        }
         guard let currentAccountID = getCurrentiCloudAccountID() else {
             print("📡 ❌ ACCOUNT VALIDATION: No current iCloud account available")
             return false
@@ -87,6 +165,21 @@ class PodcastCloudKitManager: ObservableObject {
                 print("📡 ❌ ACCOUNT VALIDATION: Cross-account sync detected - ignoring data from different account")
                 print("📡 🆔 Current account: \(currentAccountID.prefix(16))...")
                 print("📡 🆔 Sync account: \(syncAccountID.prefix(16))...")
+                
+                // Additional debugging: Check if it's potentially the same account with different tokens
+                if let currentToken = FileManager.default.ubiquityIdentityToken {
+                    print("📡 🔍 DEBUG: Current ubiquity token available: \(type(of: currentToken))")
+                    print("📡 🔍 DEBUG: Full current account ID length: \(currentAccountID.count)")
+                    print("📡 🔍 DEBUG: Full sync account ID length: \(syncAccountID.count)")
+                }
+                
+                // For debugging: Allow admin override (remove in production)
+                if let allowCrossAccount = syncData["allow_cross_account"] as? Bool, allowCrossAccount {
+                    print("📡 ⚠️ ADMIN OVERRIDE: Allowing cross-account sync due to debug flag")
+                    return true
+                }
+            } else {
+                print("📡 ✅ ACCOUNT VALIDATION: Same account confirmed")
             }
             return isValid
         }
@@ -113,6 +206,87 @@ class PodcastCloudKitManager: ObservableObject {
         
         ubiquitousStore.synchronize()
         print("📡 ✅ All test sync data cleared")
+    }
+    
+    /// Diagnostic method to help troubleshoot account validation issues
+    func diagnoseiCloudAccountIssues() {
+        print("📡 🔍 DIAGNOSTICS: iCloud Account Validation Status")
+        print("📡 " + String(repeating: "=", count: 50))
+        
+        // Check current account status
+        if let currentAccountID = getCurrentiCloudAccountID() {
+            print("📡 ✅ Current iCloud account ID: \(currentAccountID.prefix(16))...")
+            print("📡 📊 Account ID length: \(currentAccountID.count) characters")
+            
+            if let token = FileManager.default.ubiquityIdentityToken {
+                print("📡 ✅ Ubiquity identity token available")
+                print("📡 📊 Token type: \(type(of: token))")
+            } else {
+                print("📡 ❌ No ubiquity identity token available")
+            }
+        } else {
+            print("📡 ❌ No current iCloud account ID available")
+            print("📡 💡 Possible causes:")
+            print("📡    - Not signed into iCloud")
+            print("📡    - iCloud Drive not enabled")
+            print("📡    - CloudKit not available")
+        }
+        
+        // Check pending sync data
+        let syncKeys = ["instant_podcast_feed_removed", "instant_podcast_feed_added"]
+        for key in syncKeys {
+            if let data = ubiquitousStore.object(forKey: key) as? [String: Any] {
+                print("📡 📝 Found pending sync data for key: \(key)")
+                if let syncAccountID = data["icloud_account_id"] as? String {
+                    print("📡 🆔 Sync data account ID: \(syncAccountID.prefix(16))...")
+                } else {
+                    print("📡 ⚠️ Sync data missing account ID")
+                }
+            }
+        }
+        
+        print("📡 " + String(repeating: "=", count: 50))
+        print("📡 💡 TROUBLESHOOTING TIPS:")
+        print("📡    1. Ensure same iCloud account on all devices")
+        print("📡    2. Ensure iCloud Drive is enabled")
+        print("📡    3. Check Settings > [Your Name] > iCloud > iCloud Drive")
+        print("📡    4. Try signing out and back into iCloud if issues persist")
+        print("📡    5. Call clearStaleAccountSyncData() to remove old sync data")
+    }
+    
+    /// Clears stale sync data that might be from a different account
+    func clearStaleAccountSyncData() {
+        print("📡 🧹 Clearing stale account sync data...")
+        
+        let allSyncKeys = [
+            "instant_podcast_feed_removed",
+            "instant_podcast_feed_added", 
+            "instant_podcast_progress",
+            "instant_podcast_episode_favorite",
+            "instant_radio_favorite",
+            "instant_radio_station_added",
+            "instant_radio_station_removed"
+        ]
+        
+        var clearedCount = 0
+        for key in allSyncKeys {
+            if let data = ubiquitousStore.object(forKey: key) as? [String: Any] {
+                if !validateSyncAccount(syncData: data) {
+                    print("📡 🗑️ Removing stale sync data for key: \(key)")
+                    ubiquitousStore.removeObject(forKey: key)
+                    clearedCount += 1
+                } else {
+                    print("📡 ✅ Keeping valid sync data for key: \(key)")
+                }
+            }
+        }
+        
+        if clearedCount > 0 {
+            ubiquitousStore.synchronize()
+            print("📡 ✅ Cleared \(clearedCount) stale sync data entries")
+        } else {
+            print("📡 ✅ No stale sync data found to clear")
+        }
     }
     
     // MARK: - CloudKit Push Notifications Setup
@@ -393,16 +567,35 @@ class PodcastCloudKitManager: ObservableObject {
     }
     
     @objc private func ubiquitousKeyValueStoreDidChange(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let keys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] else {
+        print("📡 🔔 NOTIFICATION TRIGGERED: ubiquitousKeyValueStoreDidChange called!")
+        print("📡 🔔 NOTIFICATION INFO: \(notification)")
+        
+        guard let userInfo = notification.userInfo else {
+            print("📡 ❌ NOTIFICATION: No userInfo in notification")
+            return
+        }
+        
+        print("📡 🔔 NOTIFICATION: UserInfo keys: \(userInfo.keys)")
+        
+        guard let keys = userInfo[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String] else {
             os_log("📡 SYNC RECEIVE FAILED: No keys in notification", log: log, type: .error)
             print("📡 SYNC RECEIVE FAILED: No keys in notification")
+            print("📡 SYNC RECEIVE FAILED: UserInfo: \(userInfo)")
             return
         }
         
         os_log("📡 🚨 SYNC NOTIFICATION RECEIVED: Keys changed: %@", log: log, type: .info, keys.joined(separator: ", "))
         print("📡 🚨 SYNC NOTIFICATION RECEIVED: Keys changed: \(keys.joined(separator: ", "))")
         print("📡 📝 Full notification userInfo: \(userInfo)")
+        
+        // Log what data is available for each key
+        for key in keys {
+            if let data = ubiquitousStore.object(forKey: key) {
+                print("📡 📂 DATA FOR KEY '\(key)': \(data)")
+            } else {
+                print("📡 ❌ NO DATA FOR KEY '\(key)'")
+            }
+        }
         
         // Check if we have the critical deletion key
         if keys.contains("instant_podcast_feed_removed") {
@@ -429,12 +622,19 @@ class PodcastCloudKitManager: ObservableObject {
                 case "instant_podcast_feed_added":
                     print("📡 🔔 Processing instant podcast feed added sync")
                     self.handleInstantPodcastFeedAddedSync()
+                case "instant_podcast_feed_progress":
+                    print("📡 🔔 Processing instant podcast feed progress sync")
+                    self.handleInstantPodcastFeedProgressSync()
                 case "instant_podcast_feed_removed":
                     print("📡 🔔 CRITICAL: Processing instant podcast feed DELETION sync")
                     self.handleInstantPodcastFeedRemovedSync()
                 case "instant_podcast_episode_favorite":
-                    print("📡 🔔 Processing instant podcast episode favorite sync")
+                    print("📡 🔔 FAVORITE SYNC TRIGGER: Processing instant podcast episode favorite sync")
+                    print("📡 🔔 FAVORITE SYNC TRIGGER: This device received a favorite change from another device")
                     self.handleInstantPodcastFavoriteSync()
+                case "instant_podcast_episode_download":
+                    print("📡 🔔 Processing instant podcast episode download sync")
+                    self.handleInstantPodcastDownloadSync()
                 default:
                     print("📡 ⚠️ Unknown sync key received: \(key)")
                     break
@@ -534,6 +734,39 @@ class PodcastCloudKitManager: ObservableObject {
         )
     }
     
+    private func handleInstantPodcastFeedProgressSync() {
+        guard let progressData = ubiquitousStore.object(forKey: "instant_podcast_feed_progress") as? [String: Any] else {
+            print("📡 ⚠️ No progress data found for instant_podcast_feed_progress")
+            return
+        }
+        
+        // Validate iCloud account to prevent cross-account contamination
+        if !validateSyncAccount(syncData: progressData) {
+            return
+        }
+        
+        guard let feedId = progressData["feedId"] as? String,
+              let progress = progressData["progress"] as? Double,
+              let message = progressData["message"] as? String,
+              let feedTitle = progressData["feedTitle"] as? String else {
+            print("📡 ❌ Invalid progress data format")
+            return
+        }
+        
+        os_log("📡 📊 Received feed progress update: %@ - %.1f%% - %@", log: log, type: .info, feedTitle, progress * 100, message)
+        print("📡 📊 REAL-TIME PROGRESS: \(feedTitle) - \(Int(progress * 100))% - \(message)")
+        
+        // Update DataSyncManager with cross-device progress
+        DispatchQueue.main.async {
+            DataSyncManager.shared.updateCrossDeviceFeedProgress(
+                feedId: feedId,
+                feedTitle: feedTitle,
+                progress: progress,
+                message: message
+            )
+        }
+    }
+    
     private func handleInstantPodcastFeedRemovedSync() {
         print("📡 🔄 FEED DELETION RECEIVE: Handling incoming feed removal sync")
         
@@ -597,19 +830,55 @@ class PodcastCloudKitManager: ObservableObject {
     }
     
     private func handleInstantPodcastFavoriteSync() {
-        guard let favoriteData = ubiquitousStore.object(forKey: "instant_podcast_episode_favorite") as? [String: Any],
-              let episodeId = favoriteData["episodeId"] as? String,
-              let isFavorite = favoriteData["isFavorite"] as? Bool else {
+        print("📡 🔔 FAVORITE SYNC HANDLER: Starting podcast favorite sync processing...")
+        
+        guard let favoriteData = ubiquitousStore.object(forKey: "instant_podcast_episode_favorite") as? [String: Any] else {
+            print("📡 ❌ FAVORITE SYNC FAILED: No data found for instant_podcast_episode_favorite")
             return
         }
+        
+        print("📡 🔔 FAVORITE SYNC DATA: Raw data received: \(favoriteData)")
+        
+        // Validate iCloud account to prevent cross-account contamination
+        if !validateSyncAccount(syncData: favoriteData) {
+            print("📡 ❌ FAVORITE SYNC BLOCKED: Cross-account sync validation failed")
+            return
+        }
+        
+        guard let episodeId = favoriteData["episodeId"] as? String,
+              let isFavorite = favoriteData["isFavorite"] as? Bool else {
+            print("📡 ❌ FAVORITE SYNC FAILED: Missing episodeId or isFavorite in data")
+            return
+        }
+        
+        print("📡 🔔 FAVORITE SYNC VALID: Episode \(episodeId) favorite \(isFavorite)")
         
         os_log("📡 Received instant podcast favorite sync: %@ (favorite: %@)", log: log, type: .info, episodeId, isFavorite ? "YES" : "NO")
         
         // Notify PodcastViewModel to update the episode favorite status
+        print("📡 🔔 FAVORITE SYNC NOTIFICATION: Sending InstantSyncDidUpdatePodcastFavorite notification...")
         NotificationCenter.default.post(
             name: .init("InstantSyncDidUpdatePodcastFavorite"),
             object: nil,
             userInfo: ["episodeId": episodeId, "isFavorite": isFavorite]
+        )
+        print("📡 ✅ FAVORITE SYNC NOTIFICATION SENT: Notification posted successfully")
+    }
+    
+    private func handleInstantPodcastDownloadSync() {
+        guard let downloadData = ubiquitousStore.object(forKey: "instant_podcast_episode_download") as? [String: Any],
+              let episodeId = downloadData["episodeId"] as? String,
+              let isDownloaded = downloadData["isDownloaded"] as? Bool else {
+            return
+        }
+        
+        os_log("📡 Received instant podcast download sync: %@ (downloaded: %@)", log: log, type: .info, episodeId, isDownloaded ? "YES" : "NO")
+        
+        // Notify PodcastViewModel to update the episode download status
+        NotificationCenter.default.post(
+            name: .init("InstantSyncDidUpdatePodcastDownload"),
+            object: nil,
+            userInfo: ["episodeId": episodeId, "isDownloaded": isDownloaded]
         )
     }
     
@@ -628,6 +897,29 @@ class PodcastCloudKitManager: ObservableObject {
         
         os_log("📡 SYNC ATTEMPT: Podcast progress for %@ (%.2f) - Sync result: %@", log: log, type: .info, episodeId, progress, syncResult ? "SUCCESS" : "FAILED")
         print("📡 SYNC ATTEMPT: Podcast progress for \(episodeId) (\(progress)) - Sync result: \(syncResult)")
+    }
+    
+    /// Broadcast feed parsing progress to all devices in real-time
+    func broadcastFeedProgress(feedId: String, feedTitle: String, progress: Double, message: String) {
+        guard let currentAccountID = getCurrentiCloudAccountID() else {
+            print("📡 ❌ Cannot broadcast progress - no iCloud account available")
+            return
+        }
+        
+        let progressData: [String: Any] = [
+            "feedId": feedId,
+            "feedTitle": feedTitle,
+            "progress": progress,
+            "message": message,
+            "timestamp": Date().timeIntervalSince1970,
+            "icloud_account_id": currentAccountID
+        ]
+        
+        ubiquitousStore.set(progressData, forKey: "instant_podcast_feed_progress")
+        ubiquitousStore.synchronize()
+        
+        print("📡 📊 BROADCAST PROGRESS: \(feedTitle) - \(Int(progress * 100))% - \(message)")
+        os_log("📡 📊 Broadcasting feed progress: %@ - %.1f%% - %@", log: log, type: .info, feedTitle, progress * 100, message)
     }
     
     /// Instantly sync radio station favorite status across devices
@@ -731,16 +1023,49 @@ class PodcastCloudKitManager: ObservableObject {
     
     /// Instantly sync podcast episode favorite status across devices
     func syncPodcastFavoriteInstantly(episodeId: String, isFavorite: Bool) {
+        print("📡 🚀 FAVORITE SYNC SEND: Starting favorite sync for episode \(episodeId) -> \(isFavorite)")
+        
+        // Add iCloud account info for validation
+        let currentToken = FileManager.default.ubiquityIdentityToken
+        let accountInfo = currentToken != nil ? "\(type(of: currentToken!))" : "nil"
+        
         let favoriteData: [String: Any] = [
             "episodeId": episodeId,
             "isFavorite": isFavorite,
+            "timestamp": Date().timeIntervalSince1970,
+            "accountId": accountInfo
+        ]
+        
+        print("📡 🚀 FAVORITE SYNC DATA: Sending data: \(favoriteData)")
+        
+        ubiquitousStore.set(favoriteData, forKey: "instant_podcast_episode_favorite")
+        let syncResult = ubiquitousStore.synchronize()
+        
+        print("📡 🚀 FAVORITE SYNC RESULT: iCloud sync result: \(syncResult ? "✅ SUCCESS" : "❌ FAILED")")
+        
+        os_log("📡 Instantly synced podcast favorite: %@ (favorite: %@) - Result: %@", log: log, type: .info, episodeId, isFavorite ? "YES" : "NO", syncResult ? "SUCCESS" : "FAILED")
+        
+        // Also log the ubiquitous store status
+        if let storedData = ubiquitousStore.object(forKey: "instant_podcast_episode_favorite") as? [String: Any] {
+            print("📡 🚀 FAVORITE SYNC VERIFY: Data successfully stored in iCloud: \(storedData)")
+        } else {
+            print("📡 ❌ FAVORITE SYNC ERROR: Failed to verify data storage in iCloud")
+        }
+    }
+    
+    /// Instantly sync podcast episode download status across devices
+    func syncPodcastDownloadInstantly(episodeId: String, isDownloaded: Bool) {
+        let downloadData: [String: Any] = [
+            "episodeId": episodeId,
+            "isDownloaded": isDownloaded,
             "timestamp": Date().timeIntervalSince1970
         ]
         
-        ubiquitousStore.set(favoriteData, forKey: "instant_podcast_episode_favorite")
+        ubiquitousStore.set(downloadData, forKey: "instant_podcast_episode_download")
         ubiquitousStore.synchronize()
         
-        os_log("📡 Instantly synced podcast favorite: %@ (favorite: %@)", log: log, type: .info, episodeId, isFavorite ? "YES" : "NO")
+        os_log("📡 Instantly synced podcast download: %@ (downloaded: %@)", log: log, type: .info, episodeId, isDownloaded ? "YES" : "NO")
+        print("📡 SYNC ATTEMPT: Podcast download for \(episodeId) (\(isDownloaded))")
     }
     
     // MARK: - Episode State CloudKit Sync
@@ -1143,15 +1468,61 @@ class PodcastCloudKitManager: ObservableObject {
         )
     }
     
-    /// Save podcast feed to CloudKit
+    /// Save podcast feed to CloudKit with best-effort duplicate prevention
     func savePodcastFeedToCloudKit(_ feed: PodcastFeed) async throws {
         let recordID = CKRecord.ID(recordName: feed.id)
         
-        // Try to fetch existing record first
+        // Step 1: Best-effort duplicate check - if successful and finds duplicates, update instead
+        // If duplicate check fails due to network issues, proceed with normal save
+        do {
+            os_log("🔍 Checking for duplicate feeds by URL: %@", log: log, type: .info, feed.url)
+            
+            let urlPredicate = NSPredicate(format: "url == %@", feed.url)
+            let query = CKQuery(recordType: RecordType.podcastFeed, predicate: urlPredicate)
+            // Note: Removed sortDescriptors because modificationDate is not marked as sortable in CloudKit schema
+            
+            let (matchResults, _) = try await privateDatabase.records(matching: query)
+            
+            // If we found existing feeds with the same URL, update the first one instead
+            if let existingMatch = matchResults.first,
+               case .success(let existingRecord) = existingMatch.1 {
+                os_log("🔄 Found existing feed with same URL, updating instead of creating: %@", log: log, type: .info, feed.title)
+                
+                // Update the existing record
+                existingRecord["title"] = feed.title as CKRecordValue
+                existingRecord["url"] = feed.url as CKRecordValue
+                existingRecord["artworkUrl"] = feed.artworkUrl as CKRecordValue?
+                existingRecord["descriptionText"] = feed.descriptionText as CKRecordValue?
+                existingRecord["lastUpdated"] = Date() as CKRecordValue
+                
+                // Handle image data
+                if let imageData = feed.imageData {
+                    let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+                    try imageData.write(to: tempURL)
+                    existingRecord["iconData"] = CKAsset(fileURL: tempURL)
+                }
+                
+                // Save the updated existing record
+                _ = try await privateDatabase.save(existingRecord)
+                os_log("✅ Updated existing podcast feed in CloudKit: %@", log: log, type: .info, feed.title)
+                return
+            }
+            
+            os_log("✅ No duplicate feeds found by URL, proceeding with new record: %@", log: log, type: .info, feed.title)
+            
+        } catch {
+            // If duplicate check fails (network issues, etc.), proceed with normal save
+            // This ensures feeds can still be saved even if CloudKit is having issues
+            os_log("⚠️ Duplicate check failed, proceeding with normal save anyway: %@", log: log, type: .default, error.localizedDescription)
+        }
+        
+        // Step 2: Try to fetch record by ID or create new
         var record: CKRecord
         do {
             record = try await privateDatabase.record(for: recordID)
+            os_log("🔄 Found existing feed by ID, updating: %@", log: log, type: .info, feed.title)
         } catch CKError.unknownItem {
+            os_log("✅ Creating new feed record: %@", log: log, type: .info, feed.title)
             record = CKRecord(recordType: RecordType.podcastFeed, recordID: recordID)
         }
         
@@ -1492,30 +1863,54 @@ class PodcastCloudKitManager: ObservableObject {
             return 0
         }
         
-        os_log("🔍 CloudKit: Found %d episode IDs in Core Data for feed %@, searching CloudKit", log: log, type: .info, episodeIds.count, feedId)
+        os_log("🔍 CloudKit: Found %d episode IDs in Core Data for feed %@, using batch queries", log: log, type: .info, episodeIds.count, feedId)
         
         var recordIDsToDelete: [CKRecord.ID] = []
         var actualFeedIds: Set<String> = []
         
-        // Search for episode states by episode ID
-        for episodeId in episodeIds {
-            let recordID = CKRecord.ID(recordName: "episode_state_\(episodeId)")
+        // Batch the episode lookups to avoid individual queries
+        let batchSize = 200 // Conservative batch size for individual record lookups
+        let batches = episodeIds.chunked(into: batchSize)
+        
+        for (batchIndex, batch) in batches.enumerated() {
+            os_log("🔍 CloudKit: Processing episode lookup batch %d/%d (%d episode IDs)", log: log, type: .debug, batchIndex + 1, batches.count, batch.count)
             
+            // Create record IDs for this batch
+            let batchRecordIDs = batch.map { CKRecord.ID(recordName: "episode_state_\($0)") }
+            
+            // Use batch fetch operation
             do {
-                let record = try await privateDatabase.record(for: recordID)
-                recordIDsToDelete.append(record.recordID)
+                let results = try await privateDatabase.records(for: batchRecordIDs)
                 
-                // Track what feedIds these episode states actually have
-                if let actualFeedId = record["feedId"] as? String {
-                    actualFeedIds.insert(actualFeedId)
+                for (recordID, recordResult) in results {
+                    switch recordResult {
+                    case .success(let record):
+                        recordIDsToDelete.append(record.recordID)
+                        
+                        // Track what feedIds these episode states actually have
+                        if let actualFeedId = record["feedId"] as? String {
+                            actualFeedIds.insert(actualFeedId)
+                        }
+                        
+                        if let episodeId = record["episodeId"] as? String {
+                            os_log("🗑️ CloudKit: Will delete episode state by episodeId: %@ (actual feedId: %@)", log: log, type: .debug, episodeId, record["feedId"] as? String ?? "unknown")
+                        }
+                        
+                    case .failure(let error):
+                        if let ckError = error as? CKError, ckError.code == .unknownItem {
+                            // Episode state doesn't exist - that's fine
+                            continue
+                        } else {
+                            os_log("⚠️ CloudKit: Error fetching episode state %@: %@", log: log, type: .default, recordID.recordName, error.localizedDescription)
+                        }
+                    }
                 }
                 
-                os_log("🗑️ CloudKit: Will delete episode state by episodeId: %@ (actual feedId: %@)", log: log, type: .debug, episodeId, record["feedId"] as? String ?? "unknown")
-            } catch CKError.unknownItem {
-                // Episode state doesn't exist - that's fine
-                continue
+                os_log("✅ CloudKit: Processed batch %d/%d - found %d existing episode states", log: log, type: .debug, batchIndex + 1, batches.count, results.keys.count)
+                
             } catch {
-                os_log("⚠️ CloudKit: Error checking episode state %@: %@", log: log, type: .default, episodeId, error.localizedDescription)
+                os_log("⚠️ CloudKit: Error in batch episode lookup %d/%d: %@", log: log, type: .default, batchIndex + 1, batches.count, error.localizedDescription)
+                // Continue with next batch on error
                 continue
             }
         }
@@ -1526,6 +1921,7 @@ class PodcastCloudKitManager: ObservableObject {
         }
         
         if !recordIDsToDelete.isEmpty {
+            os_log("🗑️ CloudKit: Starting batch deletion of %d episode states", log: log, type: .info, recordIDsToDelete.count)
             try await deleteRecordsInBatches(recordIDsToDelete)
         }
         

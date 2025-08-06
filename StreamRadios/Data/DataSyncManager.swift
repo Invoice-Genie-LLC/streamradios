@@ -4,6 +4,16 @@ import SwiftUI
 import CoreData
 import UIKit
 
+// MARK: - Cross-Device Progress Model
+
+struct CrossDeviceFeedProgress {
+    let feedId: String
+    let feedTitle: String
+    let progress: Double
+    let message: String
+    let lastUpdated: Date
+}
+
 class DataSyncManager: ObservableObject {
     static let shared = DataSyncManager()
     
@@ -15,22 +25,40 @@ class DataSyncManager: ObservableObject {
     // Radio Stations
     @Published var radioStationsStatus: DataSyncStatus = .pending
     @Published var radioStationsProgress: Double = 0.0
+    @Published var radioStationsOperation = ""
+    @Published var radioStationsCurrentCount = 0
+    @Published var radioStationsTotalCount = 0
     
     // Podcast Feeds
     @Published var podcastFeedsStatus: DataSyncStatus = .pending
     @Published var podcastFeedsProgress: Double = 0.0
+    @Published var podcastFeedsOperation = ""
+    @Published var podcastFeedsCurrentCount = 0
+    @Published var podcastFeedsTotalCount = 0
     
     // Artwork Downloads
     @Published var artworkDownloadsStatus: DataSyncStatus = .pending
     @Published var artworkDownloadsProgress: Double = 0.0
+    @Published var artworkDownloadsOperation = ""
+    @Published var artworkDownloadsCurrentCount = 0
+    @Published var artworkDownloadsTotalCount = 0
     
     // Episode States
     @Published var episodeStatesStatus: DataSyncStatus = .pending
     @Published var episodeStatesProgress: Double = 0.0
+    @Published var episodeStatesOperation = ""
+    @Published var episodeStatesCurrentCount = 0
+    @Published var episodeStatesTotalCount = 0
     
     // User Preferences
     @Published var userPreferencesStatus: DataSyncStatus = .pending
     @Published var userPreferencesProgress: Double = 0.0
+    @Published var userPreferencesOperation = ""
+    
+    // Feed Parsing Progress (after CloudKit sync)
+    @Published var feedParsingProgress: Double = 0.0
+    @Published var feedParsingMessage = ""
+    @Published var isParsingFeeds = false
     
     // MARK: - Artwork Download Tracking
     private var totalArtworkDownloads = 0
@@ -117,8 +145,10 @@ class DataSyncManager: ObservableObject {
     @MainActor
     private func syncRadioStations() async {
         radioStationsStatus = .inProgress
-        currentOperation = "Initializing radio stations sync..."
+        radioStationsOperation = "Initializing radio stations sync..."
         radioStationsProgress = 0.0
+        radioStationsCurrentCount = 0
+        radioStationsTotalCount = 0
         
         do {
             // PERFORMANCE FIX: Only sync radio stations from CloudKit on fresh installs
@@ -130,16 +160,20 @@ class DataSyncManager: ObservableObject {
             
             if isFreshInstall || !hasRadioStationsSynced {
                 print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
-                currentOperation = "Fetching radio stations from iCloud..."
+                radioStationsOperation = "Fetching radio stations from iCloud..."
                 await syncRadioStationsFromCloudKitWithProgress()
                 // Mark radio stations as synced
                 UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
             } else {
                 print("⚡ Skipping CloudKit radio station sync - loading from local storage only for better performance")
-                currentOperation = "Loading radio stations from local storage..."
-                // Simulate quick progress for local loading
+                radioStationsOperation = "Loading radio stations from local storage..."
+                radioStationsTotalCount = await getLocalStationCount()
+                
+                // Simulate quick progress for local loading with realistic counts
                 for progress in stride(from: 0.0, through: 1.0, by: 0.25) {
                     radioStationsProgress = progress
+                    radioStationsCurrentCount = Int(Double(radioStationsTotalCount) * progress)
+                    radioStationsOperation = "Loading \(radioStationsCurrentCount) of \(radioStationsTotalCount) stations..."
                     if progress < 1.0 {
                         try await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
                     }
@@ -147,17 +181,18 @@ class DataSyncManager: ObservableObject {
                 // Load from Core Data instead of CloudKit
                 await MainActor.run {
                     viewModel.loadStationsFromCoreData()
+                    radioStationsCurrentCount = radioStationsTotalCount
                 }
             }
             
             radioStationsStatus = .completed
             radioStationsProgress = 1.0
-            currentOperation = "Radio stations loaded successfully"
+            radioStationsOperation = "✅ \(radioStationsCurrentCount) radio stations loaded"
             print("✅ Radio stations sync completed")
             
         } catch {
             radioStationsStatus = .failed
-            currentOperation = "Failed to load radio stations"
+            radioStationsOperation = "❌ Failed to load radio stations"
             print("❌ Radio stations sync failed: \(error)")
         }
     }
@@ -165,42 +200,70 @@ class DataSyncManager: ObservableObject {
     @MainActor
     private func syncPodcastFeeds() async {
         podcastFeedsStatus = .inProgress
-        currentOperation = "Loading podcast feeds..."
+        podcastFeedsOperation = "Initializing podcast feeds..."
+        podcastFeedsProgress = 0.0
+        podcastFeedsCurrentCount = 0
+        podcastFeedsTotalCount = 0
         
         do {
             // Get or create PodcastViewModel instance
             let podcastViewModel = PodcastViewModel.shared
             
+            // Check how many feeds we expect to sync
+            podcastFeedsTotalCount = await getExpectedPodcastFeedCount()
+            
             // Start podcast loading with progress updates
             for progress in stride(from: 0.0, through: 0.3, by: 0.1) {
                 podcastFeedsProgress = progress
-                currentOperation = "Initializing podcast feeds..."
+                podcastFeedsCurrentCount = Int(Double(podcastFeedsTotalCount) * progress * 0.3)
+                podcastFeedsOperation = "Initializing \(podcastFeedsCurrentCount) of \(podcastFeedsTotalCount) podcast feeds..."
                 try await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
             }
             
             // Wait for podcast feeds to actually load
-            currentOperation = "Syncing podcast feeds from iCloud..."
+            podcastFeedsOperation = "Syncing podcast feeds from iCloud..."
+            
+            // Start monitoring podcast feed loading progress
+            let progressTask = Task { @MainActor in
+                while podcastFeedsProgress < 0.8 && !Task.isCancelled {
+                    let currentFeeds = podcastViewModel.podcastFeeds.count
+                    if podcastFeedsTotalCount > 0 {
+                        let feedProgress = Double(currentFeeds) / Double(podcastFeedsTotalCount)
+                        podcastFeedsProgress = 0.3 + (feedProgress * 0.5) // 30% to 80% range
+                        podcastFeedsCurrentCount = currentFeeds
+                        podcastFeedsOperation = "Synced \(currentFeeds) of \(podcastFeedsTotalCount) podcast feeds..."
+                    }
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                }
+            }
+            
             await podcastViewModel.waitForDataSyncCompletion()
+            progressTask.cancel()
             
             // Update progress as feeds are loaded
-            for progress in stride(from: 0.3, through: 0.8, by: 0.1) {
+            for progress in stride(from: 0.8, through: 0.95, by: 0.05) {
                 podcastFeedsProgress = progress
-                currentOperation = "Processing podcast feeds..."
+                let currentFeeds = podcastViewModel.podcastFeeds.count
+                podcastFeedsCurrentCount = currentFeeds
+                podcastFeedsOperation = "Processing \(currentFeeds) podcast feeds..."
                 try await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
             }
             
             // Final verification that feeds are loaded
-            currentOperation = "Finalizing podcast feeds..."
+            podcastFeedsOperation = "Finalizing podcast feeds..."
             await podcastViewModel.ensureFeedsAreLoaded()
             
+            let finalCount = podcastViewModel.podcastFeeds.count
+            podcastFeedsCurrentCount = finalCount
+            podcastFeedsTotalCount = max(podcastFeedsTotalCount, finalCount)
             podcastFeedsProgress = 1.0
             podcastFeedsStatus = .completed
-            currentOperation = "Podcast feeds loaded successfully"
-            print("✅ Podcast feeds sync completed - feeds actually loaded")
+            podcastFeedsOperation = "✅ \(finalCount) podcast feeds loaded"
+            print("✅ Podcast feeds sync completed - \(finalCount) feeds actually loaded")
             
         } catch {
             podcastFeedsStatus = .failed
-            currentOperation = "Failed to load podcast feeds"
+            podcastFeedsOperation = "❌ Failed to load podcast feeds"
             print("❌ Podcast feeds sync failed: \(error)")
         }
     }
@@ -208,24 +271,31 @@ class DataSyncManager: ObservableObject {
     @MainActor
     private func syncEpisodeStates() async {
         episodeStatesStatus = .inProgress
-        currentOperation = "Syncing episode progress and favorites..."
+        episodeStatesOperation = "Initializing episode states sync..."
+        episodeStatesProgress = 0.0
+        episodeStatesCurrentCount = 0
+        episodeStatesTotalCount = 0
         
         do {
-            // Simulate progressive sync of episode states
+            // Get estimated episode count for progress tracking
+            episodeStatesTotalCount = await getEstimatedEpisodeCount()
+            
+            // Simulate progressive sync of episode states with detailed tracking
             for progress in stride(from: 0.0, through: 1.0, by: 0.25) {
                 episodeStatesProgress = progress
+                episodeStatesCurrentCount = Int(Double(episodeStatesTotalCount) * progress)
                 
                 switch progress {
                 case 0.25:
-                    currentOperation = "Loading episode progress..."
+                    episodeStatesOperation = "Loading episode progress... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
                 case 0.5:
-                    currentOperation = "Syncing favorites..."
+                    episodeStatesOperation = "Syncing favorites... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
                 case 0.75:
-                    currentOperation = "Syncing downloads..."
+                    episodeStatesOperation = "Syncing downloads... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
                 case 1.0:
-                    currentOperation = "Episode states synced"
+                    episodeStatesOperation = "✅ \(episodeStatesTotalCount) episode states synced"
                 default:
-                    break
+                    episodeStatesOperation = "Processing episode states... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
                 }
                 
                 if progress < 1.0 {
@@ -244,11 +314,13 @@ class DataSyncManager: ObservableObject {
             
             episodeStatesStatus = .completed
             episodeStatesProgress = 1.0
+            episodeStatesCurrentCount = episodeStatesTotalCount
+            episodeStatesOperation = "✅ \(episodeStatesTotalCount) episode states completed"
             print("✅ Episode states sync completed")
             
         } catch {
             episodeStatesStatus = .failed
-            currentOperation = "Failed to sync episode states"
+            episodeStatesOperation = "❌ Failed to sync episode states"
             print("❌ Episode states sync failed: \(error)")
         }
     }
@@ -256,7 +328,7 @@ class DataSyncManager: ObservableObject {
     @MainActor
     private func syncUserPreferences() async {
         userPreferencesStatus = .inProgress
-        currentOperation = "Loading user preferences..."
+        userPreferencesOperation = "Loading user preferences..."
         
         do {
             // Simulate loading preferences
@@ -265,11 +337,11 @@ class DataSyncManager: ObservableObject {
                 
                 switch progress {
                 case 0.33:
-                    currentOperation = "Loading app settings..."
+                    userPreferencesOperation = "Loading app settings..."
                 case 0.66:
-                    currentOperation = "Configuring notifications..."
+                    userPreferencesOperation = "Configuring notifications..."
                 case 1.0:
-                    currentOperation = "Preferences loaded"
+                    userPreferencesOperation = "✅ Preferences loaded"
                 default:
                     break
                 }
@@ -281,11 +353,12 @@ class DataSyncManager: ObservableObject {
             
             userPreferencesStatus = .completed
             userPreferencesProgress = 1.0
+            userPreferencesOperation = "✅ User preferences completed"
             print("✅ User preferences sync completed")
             
         } catch {
             userPreferencesStatus = .failed
-            currentOperation = "Failed to load preferences"
+            userPreferencesOperation = "❌ Failed to load preferences"
             print("❌ User preferences sync failed: \(error)")
         }
     }
@@ -296,24 +369,117 @@ class DataSyncManager: ObservableObject {
         overallProgress = 0.0
         currentOperation = "Initializing sync..."
         
+        // Radio Stations
         radioStationsStatus = .pending
         radioStationsProgress = 0.0
+        radioStationsOperation = ""
+        radioStationsCurrentCount = 0
+        radioStationsTotalCount = 0
         
+        // Podcast Feeds
         podcastFeedsStatus = .pending
         podcastFeedsProgress = 0.0
+        podcastFeedsOperation = ""
+        podcastFeedsCurrentCount = 0
+        podcastFeedsTotalCount = 0
         
+        // Artwork Downloads
         artworkDownloadsStatus = .pending
         artworkDownloadsProgress = 0.0
+        artworkDownloadsOperation = ""
+        artworkDownloadsCurrentCount = 0
+        artworkDownloadsTotalCount = 0
         
+        // Episode States
         episodeStatesStatus = .pending
         episodeStatesProgress = 0.0
+        episodeStatesOperation = ""
+        episodeStatesCurrentCount = 0
+        episodeStatesTotalCount = 0
         
+        // User Preferences
         userPreferencesStatus = .pending
         userPreferencesProgress = 0.0
+        userPreferencesOperation = ""
         
         // Reset artwork tracking
         totalArtworkDownloads = 0
         completedArtworkDownloads = 0
+        
+        // Reset feed parsing progress
+        feedParsingProgress = 0.0
+        feedParsingMessage = ""
+        isParsingFeeds = false
+    }
+    
+    // MARK: - Feed Parsing Progress
+    
+    @MainActor
+    func updateFeedParsingProgress(_ progress: Double, message: String) {
+        feedParsingProgress = progress
+        feedParsingMessage = message
+        isParsingFeeds = progress > 0.0 && progress < 1.0
+        
+        // Also update podcast feeds operation if parsing is active
+        if isParsingFeeds {
+            podcastFeedsOperation = message
+        }
+    }
+    
+    // MARK: - Cross-Device Progress Tracking
+    
+    // Cross-device feed progress tracking
+    @Published var crossDeviceFeedProgress: [String: CrossDeviceFeedProgress] = [:]
+    @Published var isReceivingCrossDeviceProgress = false
+    
+    @MainActor
+    func updateCrossDeviceFeedProgress(feedId: String, feedTitle: String, progress: Double, message: String) {
+        let feedProgress = CrossDeviceFeedProgress(
+            feedId: feedId,
+            feedTitle: feedTitle,
+            progress: progress,
+            message: message,
+            lastUpdated: Date()
+        )
+        
+        crossDeviceFeedProgress[feedId] = feedProgress
+        isReceivingCrossDeviceProgress = progress > 0.0 && progress < 1.0
+        
+        // Also update the general feed parsing progress for UI consistency
+        if isReceivingCrossDeviceProgress {
+            feedParsingProgress = progress
+            feedParsingMessage = "📡 \(feedTitle): \(message)"
+            isParsingFeeds = true
+            podcastFeedsOperation = "📡 Syncing from other device: \(message)"
+        }
+        
+        // Clean up completed or old progress entries
+        cleanupOldCrossDeviceProgress()
+        
+        print("📡 📊 CROSS-DEVICE PROGRESS UPDATED: \(feedTitle) - \(Int(progress * 100))% - \(message)")
+    }
+    
+    @MainActor
+    private func cleanupOldCrossDeviceProgress() {
+        let cutoffDate = Date().addingTimeInterval(-60) // Remove progress older than 1 minute
+        
+        crossDeviceFeedProgress = crossDeviceFeedProgress.filter { _, progress in
+            // Keep if recent or still in progress
+            progress.lastUpdated > cutoffDate || (progress.progress > 0.0 && progress.progress < 1.0)
+        }
+        
+        // Update overall state
+        isReceivingCrossDeviceProgress = crossDeviceFeedProgress.values.contains { progress in
+            progress.progress > 0.0 && progress.progress < 1.0
+        }
+    }
+    
+    @MainActor
+    func clearCrossDeviceProgress(for feedId: String) {
+        crossDeviceFeedProgress.removeValue(forKey: feedId)
+        isReceivingCrossDeviceProgress = crossDeviceFeedProgress.values.contains { progress in
+            progress.progress > 0.0 && progress.progress < 1.0
+        }
     }
     
     private func setupProgressCalculation() {
@@ -525,26 +691,87 @@ class DataSyncManager: ObservableObject {
                 progressCallback: { [weak self] progress, count, message in
                     Task { @MainActor in
                         self?.radioStationsProgress = progress
-                        self?.currentOperation = message
-                        print("📊 Radio stations progress: \(Int(progress * 100))% - \(message)")
+                        self?.radioStationsCurrentCount = count
+                        self?.radioStationsOperation = message
+                        // Estimate total based on current progress and count
+                        if progress > 0.1 && count > 0 {
+                            let estimatedTotal = Int(Double(count) / progress)
+                            self?.radioStationsTotalCount = max(self?.radioStationsTotalCount ?? 0, estimatedTotal)
+                        }
+                        print("📊 Radio stations progress: \(Int(progress * 100))% - \(count) stations - \(message)")
                     }
                 },
-                completion: { stations, error in
+                completion: { [weak self] stations, error in
                     if let stations = stations {
                         DispatchQueue.main.async {
                             viewModel.stations = stations
                             viewModel.saveStationsToCoreData()
+                            
+                            // Update final counts
+                            Task { @MainActor in
+                                self?.radioStationsCurrentCount = stations.count
+                                self?.radioStationsTotalCount = stations.count
+                                self?.radioStationsOperation = "✅ \(stations.count) radio stations synced from iCloud"
+                            }
+                            
                             print("✅ Synced \(stations.count) radio stations with progress tracking")
                             
                             // Mark radio stations as synced to prevent future CloudKit syncing on app launches
                             UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
                         }
                     } else if let error = error {
+                        Task { @MainActor in
+                            self?.radioStationsOperation = "❌ Failed to sync radio stations: \(error.localizedDescription)"
+                        }
                         print("❌ Failed to sync radio stations: \(error)")
                     }
                     continuation.resume()
                 }
             )
+        }
+    }
+    
+    private func getLocalStationCount() async -> Int {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    let request = NSFetchRequest<CDStation>(entityName: "CDStation")
+                    let count = try context.count(for: request)
+                    continuation.resume(returning: count)
+                } catch {
+                    print("❌ Error counting local stations: \(error)")
+                    continuation.resume(returning: 0)
+                }
+            }
+        }
+    }
+    
+    private func getExpectedPodcastFeedCount() async -> Int {
+        // First check local Core Data
+        let localCount = await countExistingPodcastFeeds()
+        if localCount > 0 {
+            return localCount
+        }
+        
+        // If no local feeds, estimate based on CloudKit (this would be a more complex implementation)
+        // For now, return a conservative estimate
+        return 10 // Conservative estimate for progress display
+    }
+    
+    private func getEstimatedEpisodeCount() async -> Int {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                do {
+                    let request = NSFetchRequest<PodcastModel>(entityName: "PodcastModel")
+                    let count = try context.count(for: request)
+                    continuation.resume(returning: count)
+                } catch {
+                    print("❌ Error counting episodes: \(error)")
+                    continuation.resume(returning: 100) // Conservative estimate
+                }
+            }
         }
     }
     

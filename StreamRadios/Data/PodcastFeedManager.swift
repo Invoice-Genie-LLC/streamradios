@@ -36,9 +36,13 @@ class PodcastFeedManager {
     func addFeed(from url: URL, customTitle: String? = nil, forceRefresh: Bool = false) async throws -> PodcastFeed {
         os_log("🆕 Adding new feed from: %@", log: log, type: .info, url.absoluteString)
         
-        // Parse RSS feed in background
+        // Parse RSS feed in background with progress tracking
         let feedData = try await URLSession.shared.data(from: url).0
-        let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString)
+        let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString) { progress, message in
+            Task { @MainActor in
+                DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
+            }
+        }
         let (parsedFeed, episodes) = try parser.parseComplete()
         
         // Use custom title if provided, otherwise use RSS feed title
@@ -87,9 +91,13 @@ class PodcastFeedManager {
         
         os_log("🔄 Refreshing feed: %@", log: log, type: .info, existingFeed.title)
         
-        // Parse RSS feed
+        // Parse RSS feed with progress tracking
         let feedData = try await URLSession.shared.data(from: URL(string: existingFeed.url)!).0
-        let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url)
+        let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url) { progress, message in
+            Task { @MainActor in
+                DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
+            }
+        }
         let (updatedFeed, newEpisodes) = try parser.parseComplete()
         
         // CRITICAL: Download artwork if URL changed or if we don't have artwork yet
@@ -407,6 +415,7 @@ enum FeedError: Error, LocalizedError {
 class RSSFeedParser: NSObject, XMLParserDelegate {
     private let parser: XMLParser
     private let feedUrl: String
+    private let totalDataSize: Int
     
     // Feed-level properties
     private var feedTitle: String?
@@ -420,14 +429,22 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     private var isParsingItem = false
     private var characterBuffer = ""
     
-    init(data: Data, feedUrl: String) {
+    // Progress tracking
+    private var bytesProcessed: Int = 0
+    private var progressCallback: ((Double, String) -> Void)?
+    
+    init(data: Data, feedUrl: String, progressCallback: ((Double, String) -> Void)? = nil) {
         self.parser = XMLParser(data: data)
         self.feedUrl = feedUrl
+        self.totalDataSize = data.count
+        self.progressCallback = progressCallback
         super.init()
         self.parser.delegate = self
     }
     
     func parseComplete() throws -> (PodcastFeed, [PodcastEpisode]) {
+        progressCallback?(0.1, "Starting RSS parsing...")
+        
         guard parser.parse() else {
             throw FeedError.parsingFailed
         }
@@ -443,6 +460,9 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
             artworkUrl: feedArtworkUrl,
             description: feedDescription ?? ""
         )
+        
+        // Report completion
+        progressCallback?(1.0, "Parsing complete - \(episodes.count) episodes found")
         
         return (feed, episodes)
     }
@@ -475,6 +495,10 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         characterBuffer += string
+        
+        // Update progress tracking
+        bytesProcessed += string.utf8.count
+        updateProgress()
     }
     
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
@@ -511,12 +535,30 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
             case "item":
                 if let episode = currentEpisode?.build() {
                     episodes.append(episode)
+                    // Report episode parsing progress
+                    let progress = min(0.9, Double(bytesProcessed) / Double(totalDataSize))
+                    progressCallback?(progress, "Parsed \(episodes.count) episodes...")
                 }
                 isParsingItem = false
                 currentEpisode = nil
             default:
                 break
             }
+        }
+    }
+    
+    // MARK: - Progress Tracking
+    
+    private func updateProgress() {
+        guard let progressCallback = progressCallback else { return }
+        
+        let bytesProgress = min(0.8, Double(bytesProcessed) / Double(totalDataSize))
+        let episodeCount = episodes.count
+        
+        if episodeCount == 0 {
+            progressCallback(bytesProgress, "Parsing feed structure...")
+        } else {
+            progressCallback(bytesProgress, "Parsing episodes (\(episodeCount) found)...")
         }
     }
 }
