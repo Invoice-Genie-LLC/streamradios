@@ -2378,7 +2378,7 @@ struct InternalDataManagementView: View {
             self.podcastViewModel.clearPodcastFeedsFromUI()
         }
         
-        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all app data using enhanced batch processing...")
+        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all app data...")
         
         let group = DispatchGroup()
         var allSuccess = true
@@ -2458,7 +2458,7 @@ struct InternalDataManagementView: View {
                         self.appDataDeletionPhase = "Deleting \(recordIDs.count) station records from iCloud... (\(Int(progress * 100))%)"
                     }
                 }
-                print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) station records using enhanced batching")
+                print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) station records")
                 group.leave()
                 
             } catch {
@@ -2515,7 +2515,7 @@ struct InternalDataManagementView: View {
                             self.appDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud... (\(Int(progress * 100))%)"
                         }
                     }
-                    print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records using enhanced batching")
+                    print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records")
                     group.leave()
                     
                 } catch {
@@ -2556,7 +2556,7 @@ struct InternalDataManagementView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if allSuccess {
                     print("✅ App Data Deletion: All operations completed successfully")
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All app data has been successfully deleted using enhanced batch processing.")
+                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All app data has been successfully deleted.")
                 } else {
                     let errorMessage = lastError ?? "An unknown error occurred"
                     print("❌ App Data Deletion: Operations failed - \(errorMessage)")
@@ -2584,7 +2584,7 @@ struct InternalDataManagementView: View {
             self.viewModel.clearStationsFromUI()
         }
         
-        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all radio station data using enhanced batch processing...")
+        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all radio station data...")
         
         let group = DispatchGroup()
         var allSuccess = true
@@ -2648,7 +2648,7 @@ struct InternalDataManagementView: View {
                         self.stationDataDeletionPhase = "Deleting \(recordIDs.count) station records from iCloud... (\(Int(progress * 100))%)"
                     }
                 }
-                print("✅ Station Data Deletion: Successfully deleted \(recordIDs.count) records using enhanced batching")
+                print("✅ Station Data Deletion: Successfully deleted \(recordIDs.count) records")
                 group.leave()
                 
             } catch {
@@ -2680,7 +2680,7 @@ struct InternalDataManagementView: View {
                 if let error = lastError {
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "Station data deletion failed: \(error)")
                 } else {
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All station data has been successfully deleted using enhanced batch processing.")
+                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All station data has been successfully deleted.")
                 }
                 
                 // Reset completion states after 5 seconds for clean UI
@@ -2705,7 +2705,7 @@ struct InternalDataManagementView: View {
             self.podcastViewModel.clearPodcastFeedsFromUI()
         }
         
-        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all podcast data using enhanced batch processing...")
+        notificationManager.notifyUser(title: "Deletion Started", message: "Deleting all podcast data...")
         
         let group = DispatchGroup()
         var allSuccess = true
@@ -2775,7 +2775,7 @@ struct InternalDataManagementView: View {
                             self.podcastDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud... (\(Int(progress * 100))%)"
                         }
                     }
-                    print("✅ Podcast Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records using enhanced batching")
+                    print("✅ Podcast Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records")
                     group.leave()
                     
                 } catch {
@@ -2808,7 +2808,7 @@ struct InternalDataManagementView: View {
                 if let error = lastError {
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "Podcast data deletion failed: \(error)")
                 } else {
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All podcast data has been successfully deleted using enhanced batch processing.")
+                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All podcast data has been successfully deleted.")
                 }
                 
                 // Reset completion states after 5 seconds for clean UI
