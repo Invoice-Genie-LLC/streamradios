@@ -265,7 +265,7 @@ struct AddPodcastView: View {
     @State private var alertMessage: String = ""
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var permissionManager: PermissionManager
-    @StateObject private var podcastViewModel = PodcastViewModel()
+    @EnvironmentObject private var podcastViewModel: PodcastViewModel
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @State private var selectedPodcast: PodcastFeed?
     @State private var scrollToEpisodeID: String?
@@ -675,11 +675,11 @@ struct AddPodcastView: View {
         Task {
             do {
                 // Stage 1: Validate URL
-                await updateProgress(0.1, "Connecting to podcast...")
+                await updateProgress(0.1, "Connecting to podcast feed...")
                 try await Task.sleep(nanoseconds: 200_000_000) // Brief pause for UI
                 
-                // Stage 2: Download feed
-                await updateProgress(0.3, "Fetching podcast information...")
+                // Stage 2: Download and parse RSS feed
+                await updateProgress(0.3, "Downloading podcast RSS feed...")
                 
                 // Add the podcast feed using the ViewModel with custom title
                 let customTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -687,22 +687,32 @@ struct AddPodcastView: View {
                 let success = await podcastViewModel.addPodcastFeed(url: url, customTitle: customTitleToUse)
                 
                 if success {
-                    // Stage 3: Processing episodes
-                    await updateProgress(0.7, "Processing episodes and content...")
-                    try await Task.sleep(nanoseconds: 500_000_000) // Pause for parsing
+                    // Stage 3: Processing episodes and artwork
+                    await updateProgress(0.6, "Processing episodes and downloading artwork...")
+                    try await Task.sleep(nanoseconds: 800_000_000) // Allow time for RSS parsing and artwork download
                     
-                    // Stage 4: Saving to device
-                    await updateProgress(0.9, "Adding to your podcast library...")
-                    try await Task.sleep(nanoseconds: 300_000_000) // Pause for saving
+                    // Stage 4: Saving to Core Data and CloudKit
+                    await updateProgress(0.8, "Saving to your podcast library...")
+                    try await Task.sleep(nanoseconds: 400_000_000) // Allow time for Core Data and CloudKit sync
                     
-                    // Stage 5: Complete
+                    // Stage 5: Finalizing and updating UI
+                    await updateProgress(0.95, "Finalizing podcast import...")
+                    try await Task.sleep(nanoseconds: 300_000_000) // Allow background operations to complete
+                    
+                    // Stage 6: Complete - Feed should now be visible
                     await updateProgress(1.0, "Podcast added successfully!")
                     try await Task.sleep(nanoseconds: 500_000_000) // Show completion briefly
                     
                     await MainActor.run {
-                        onAdd()
+                        // Don't call onAdd() since podcastViewModel.addPodcastFeed() already added the feed
+                        // The feed is already in the main podcast list view due to immediate UI update
+                        // Just close the sheet and reset state
                         isPresented = false
                         isAddingPodcast = false
+                        
+                        // Clear the input fields for next time
+                        title = ""
+                        url = ""
                     }
                 } else {
                     await MainActor.run {

@@ -5,9 +5,12 @@
 //
 
 import SwiftUI
+import UIKit
+import Foundation
 import Combine
 import CoreData
 import UniformTypeIdentifiers
+import CloudKit
 
 // MARK: - Import Error Types
 enum ImportError: Error {
@@ -868,52 +871,80 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Set up observer for app entering background
         setupBackgroundObserver()
         
-        // Fetch all record IDs for 'streamingRadios' from CloudKit
-        DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { [weak self] recordIDs, error in
-            guard let self = self, !isTaskCompleted else {
+        // First clear Core Data efficiently using batch deletion
+        DispatchQueue.main.async {
+            self.clearCoreData { coreDataSuccess, coreDataError in
                 if !isTaskCompleted {
-                    isTaskCompleted = true
-                    DispatchQueue.main.async {
-                        self?.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
-                    }
-                }
-                return
-            }
-            
-            guard let recordIDs = recordIDs else {
-                if !isTaskCompleted {
-                    isTaskCompleted = true
-                    DispatchQueue.main.async {
-                        self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
-                    }
-                }
-                return
-            }
-            
-            // Proceed with batch deletion of records
-            DataStore.shared.deleteRecordsInBatches(recordIDs: recordIDs) { success, error in
-                guard !isTaskCompleted else { return }
-                
-                DispatchQueue.main.async {
-                    if success {
-                        self.clearCoreData { coreDataSuccess, coreDataError in
-                            if !isTaskCompleted {
-                                isTaskCompleted = true
-                                                    if coreDataSuccess {
+                    if coreDataSuccess {
+                        // Clear in-memory data immediately after successful Core Data deletion
                         self.stations.removeAll()
-                        // Clear deleted stations list since all data is being removed
                         self.clearDeletedStationsList()
-                    }
-                    self.cleanupAfterDeletion(success: coreDataSuccess, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
+                        
+                        // Now handle CloudKit deletion in background
+                        Task {
+                            await self.performCloudKitBatchDeletion(
+                                backgroundTaskID: backgroundTaskID,
+                                completion: completion
+                            ) { completed in
+                                isTaskCompleted = completed
                             }
                         }
                     } else {
-                        if !isTaskCompleted {
-                            isTaskCompleted = true
-                            self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
-                        }
+                        isTaskCompleted = true
+                        self.cleanupAfterDeletion(success: false, error: coreDataError, backgroundTaskID: backgroundTaskID, completion: completion)
                     }
                 }
+            }
+        }
+    }
+    
+    /// Perform optimized CloudKit batch deletion with minimal sync notifications
+    private func performCloudKitBatchDeletion(
+        backgroundTaskID: UIBackgroundTaskIdentifier,
+        completion: @escaping (Bool, Error?) -> Void,
+        taskCompletionHandler: @escaping (Bool) -> Void
+    ) async {
+        do {
+            // Fetch all record IDs for 'streamingRadios' from CloudKit
+            let recordIDs = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
+                DataStore.shared.fetchAllRecordIDs(ofType: "streamingRadios") { recordIDs, error in
+                    if let error = error {
+                        continuation.resume(throwing: error)
+                    } else if let recordIDs = recordIDs {
+                        continuation.resume(returning: recordIDs)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "RadioStationDeletion", code: -1, userInfo: [NSLocalizedDescriptionKey: "No record IDs found"]))
+                    }
+                }
+            }
+            
+            guard !recordIDs.isEmpty else {
+                print("✅ No radio stations found in CloudKit to delete")
+                DispatchQueue.main.async {
+                    taskCompletionHandler(true)
+                    self.cleanupAfterDeletion(success: true, error: nil, backgroundTaskID: backgroundTaskID, completion: completion)
+                }
+                return
+            }
+            
+            // Extract station IDs from record IDs
+            let stationIds = recordIDs.map { $0.recordName }
+            print("🗑️ Starting optimized batch deletion of \(stationIds.count) stations from CloudKit")
+            
+            // Use the new batch deletion method that sends only one sync notification
+            try await RadioStationCloudKitManager.shared.deleteRadioStationsFromCloudKitBatch(stationIds)
+            
+            print("✅ Successfully completed batch deletion of \(stationIds.count) stations")
+            DispatchQueue.main.async {
+                taskCompletionHandler(true)
+                self.cleanupAfterDeletion(success: true, error: nil, backgroundTaskID: backgroundTaskID, completion: completion)
+            }
+            
+        } catch {
+            print("❌ CloudKit batch deletion failed: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                taskCompletionHandler(true)
+                self.cleanupAfterDeletion(success: false, error: error, backgroundTaskID: backgroundTaskID, completion: completion)
             }
         }
     }
@@ -945,26 +976,33 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func clearCoreData(completion: @escaping (Bool, Error?) -> Void) {
-        // Create a private context for deletion to avoid merge conflicts
+        // Use batch deletion for much faster performance
         let privateMOC = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
         privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
-        
-        // Set merge policy to handle conflicts
         privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
         
         privateMOC.perform {
             do {
-                // Fetch and delete stations
-                let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
-                let stations = try privateMOC.fetch(fetchRequest)
-                for station in stations {
-                    privateMOC.delete(station)
+                // Use NSBatchDeleteRequest for efficient bulk deletion
+                let fetchRequest: NSFetchRequest<NSFetchRequestResult> = CDStation.fetchRequest()
+                let batchDeleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+                batchDeleteRequest.resultType = .resultTypeObjectIDs
+                
+                // Execute batch delete
+                let result = try privateMOC.execute(batchDeleteRequest) as? NSBatchDeleteResult
+                let objectIDArray = result?.result as? [NSManagedObjectID]
+                
+                // Merge changes into view context to ensure UI updates
+                if let objectIDs = objectIDArray {
+                    let changes = [NSDeletedObjectsKey: objectIDs]
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [CoreDataStack.shared.persistentContainer.viewContext])
+                    print("✅ Batch deleted \(objectIDs.count) stations from Core Data")
                 }
                 
-                // Save private context first
+                // Save the context after batch deletion
                 try privateMOC.save()
                 
-                // Then save main context
+                // Update main context and UI on main thread
                 DispatchQueue.main.async {
                     do {
                         try CoreDataStack.shared.persistentContainer.viewContext.save()
@@ -975,15 +1013,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         self.clearDeletedStationsList()
                         self.isDeletingData = false
                         self.deletionComplete = true
+                        print("✅ Radio station Core Data cleared successfully using batch deletion")
                         completion(true, nil)
                     } catch {
-                        print("Error saving main context after station deletion: \(error.localizedDescription)")
+                        print("❌ Error saving main context after station batch deletion: \(error.localizedDescription)")
                         self.isDeletingData = false
                         completion(false, error)
                     }
                 }
             } catch {
-                print("Error deleting stations from CoreData: \(error.localizedDescription)")
+                print("❌ Error performing batch deletion of stations from CoreData: \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     self.isDeletingData = false
                     completion(false, error)

@@ -544,6 +544,32 @@ class RadioStationCloudKitManager: ObservableObject {
         }
     }
     
+    /// Delete multiple radio stations from CloudKit in batches without individual sync notifications
+    /// Used for bulk deletion operations like "Delete All Station Data"
+    func deleteRadioStationsFromCloudKitBatch(_ stationIds: [String]) async throws {
+        guard !stationIds.isEmpty else {
+            os_log("🗑️ RADIO Batch deletion called with empty station list", log: log, type: .debug)
+            return
+        }
+        
+        os_log("🗑️ RADIO Starting batch deletion of %d stations from CloudKit", log: log, type: .info, stationIds.count)
+        
+        // Convert station IDs to CloudKit record IDs
+        let recordIDs = stationIds.map { CKRecord.ID(recordName: $0) }
+        
+        // Use DataStore's optimized batch deletion
+        let dataStore = DataStore.shared
+        
+        try await dataStore.deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
+            os_log("🗑️ RADIO Batch deletion progress: %d%%", log: self.log, type: .debug, Int(progress * 100))
+        }
+        
+        os_log("✅ RADIO Completed batch deletion of %d stations from CloudKit", log: log, type: .info, stationIds.count)
+        
+        // Send a single bulk deletion notification instead of individual ones
+        await triggerCrossDeviceBulkDeletionSync(stationIds: stationIds)
+    }
+    
     /// Update favorite status and trigger cross-device sync
     func updateFavoriteStatus(stationId: String, isFavorite: Bool, favoritedAt: Date?, favoriteOrder: Int?) async throws {
         let recordID = CKRecord.ID(recordName: stationId)
@@ -609,6 +635,29 @@ class RadioStationCloudKitManager: ObservableObject {
             
             self.ubiquitousStore.synchronize()
             os_log("📡 🚨 RADIO CRITICAL: Posted deletion sync notification for station: %@", log: self.log, type: .info, stationId)
+        }
+    }
+    
+    /// Trigger cross-device sync for bulk station deletion (sends one notification for all stations)
+    private func triggerCrossDeviceBulkDeletionSync(stationIds: [String]) async {
+        os_log("📡 🚨 RADIO BULK DELETION: Triggering cross-device bulk deletion sync for %d stations", log: log, type: .info, stationIds.count)
+        
+        let iCloudAccountID = getCurrentiCloudAccountID()
+        
+        await MainActor.run {
+            self.ubiquitousStore.set(
+                [
+                    "stationIds": stationIds,
+                    "actionId": "cloudkit-bulk-deletion-\(Date().timeIntervalSince1970)",
+                    "timestamp": Date().timeIntervalSince1970,
+                    "icloud_account_id": iCloudAccountID,
+                    "type": "bulk_deletion"
+                ],
+                forKey: "instant_stations_bulk_deleted"
+            )
+            
+            self.ubiquitousStore.synchronize()
+            os_log("📡 🚨 RADIO BULK DELETION: Posted bulk deletion sync notification for %d stations", log: self.log, type: .info, stationIds.count)
         }
     }
     

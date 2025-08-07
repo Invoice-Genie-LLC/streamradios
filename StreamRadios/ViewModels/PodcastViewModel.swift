@@ -4104,7 +4104,7 @@ extension PodcastViewModel {
                 }
             }
             
-            // Now delete from local Core Data
+            // Now delete from local Core Data using efficient batch deletion
             let privateMOC = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
             privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
             privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
@@ -4112,26 +4112,44 @@ extension PodcastViewModel {
             await withCheckedContinuation { continuation in
                 privateMOC.perform {
                     do {
-                        // Fetch and delete episodes first
-                        let episodeFetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                        let episodes = try privateMOC.fetch(episodeFetchRequest)
-                        for episode in episodes {
-                            privateMOC.delete(episode)
+                        // Use NSBatchDeleteRequest for efficient bulk deletion of episodes
+                        let episodeFetchRequest: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
+                        let episodeBatchDeleteRequest = NSBatchDeleteRequest(fetchRequest: episodeFetchRequest)
+                        episodeBatchDeleteRequest.resultType = .resultTypeObjectIDs
+                        
+                        let episodeResult = try privateMOC.execute(episodeBatchDeleteRequest) as? NSBatchDeleteResult
+                        let episodeObjectIDArray = episodeResult?.result as? [NSManagedObjectID]
+                        
+                        // Use NSBatchDeleteRequest for efficient bulk deletion of feeds
+                        let feedFetchRequest: NSFetchRequest<NSFetchRequestResult> = FeedModel.fetchRequest()
+                        let feedBatchDeleteRequest = NSBatchDeleteRequest(fetchRequest: feedFetchRequest)
+                        feedBatchDeleteRequest.resultType = .resultTypeObjectIDs
+                        
+                        let feedResult = try privateMOC.execute(feedBatchDeleteRequest) as? NSBatchDeleteResult
+                        let feedObjectIDArray = feedResult?.result as? [NSManagedObjectID]
+                        
+                        // Merge changes into view context to ensure UI updates
+                        var allObjectIDs: [NSManagedObjectID] = []
+                        if let episodeIDs = episodeObjectIDArray {
+                            allObjectIDs.append(contentsOf: episodeIDs)
+                            print("✅ Batch deleted \(episodeIDs.count) episodes from Core Data")
+                        }
+                        if let feedIDs = feedObjectIDArray {
+                            allObjectIDs.append(contentsOf: feedIDs)
+                            print("✅ Batch deleted \(feedIDs.count) feeds from Core Data")
                         }
                         
-                        // Fetch and delete feeds
-                        let feedFetchRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
-                        let feeds = try privateMOC.fetch(feedFetchRequest)
-                        for feed in feeds {
-                            privateMOC.delete(feed)
+                        if !allObjectIDs.isEmpty {
+                            let changes = [NSDeletedObjectsKey: allObjectIDs]
+                            NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [CoreDataStack.shared.persistentContainer.viewContext])
                         }
                         
-                        // Save private context first
+                        // Save private context after batch deletion
                         try privateMOC.save()
                         
                         continuation.resume()
                     } catch {
-                        print("❌ Error deleting podcast data from CoreData: \(error.localizedDescription)")
+                        print("❌ Error performing batch deletion of podcast data from CoreData: \(error.localizedDescription)")
                         allSuccess = false
                         lastError = error
                         continuation.resume()
