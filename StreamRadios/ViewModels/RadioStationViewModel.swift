@@ -1563,13 +1563,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Sync station order changes to CloudKit
     func syncOrderChangesToCloudKit() async {
-        print("📡 🚨 RADIO ORDER SYNC: Starting order sync to CloudKit...")
+        print("📡 🚨 RADIO ORDER SYNC: Starting batch order sync to CloudKit...")
         
         do {
-            // Sync all affected stations to CloudKit
-            for station in stations {
-                try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(station)
-            }
+            // **OPTIMIZED**: Sync all stations to CloudKit in batches instead of individually
+            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(stations)
+            print("📡 ✅ RADIO ORDER SYNC: Successfully saved \(stations.count) stations in batches")
             
             // Trigger cross-device order sync notification
             await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "order_changed")
@@ -1582,14 +1581,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Sync favorite order changes to CloudKit
     func syncFavoriteOrderChangesToCloudKit() async {
-        print("📡 🚨 RADIO FAVORITE ORDER SYNC: Starting favorite order sync to CloudKit...")
+        print("📡 🚨 RADIO FAVORITE ORDER SYNC: Starting batch favorite order sync to CloudKit...")
         
         do {
-            // Only sync favorite stations to CloudKit
+            // **OPTIMIZED**: Sync all favorite stations to CloudKit in batches instead of individually
             let favorites = favoriteStations()
-            for station in favorites {
-                try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(station)
+            guard !favorites.isEmpty else {
+                print("📡 ⚠️ RADIO FAVORITE ORDER SYNC: No favorite stations to sync")
+                return
             }
+            
+            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(favorites)
+            print("📡 ✅ RADIO FAVORITE ORDER SYNC: Successfully saved \(favorites.count) favorite stations in batches")
             
             // Trigger cross-device favorite order sync notification
             await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "favorite_order_changed")
