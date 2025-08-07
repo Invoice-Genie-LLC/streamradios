@@ -1353,12 +1353,16 @@ class PodcastViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                // Update current episodes with filtered results (duplicates prevented at source)
-                self.currentEpisodes = filteredEpisodes
+                // CRITICAL FIX: Remove duplicates and merge states before displaying
+                let uniqueFilteredEpisodes = self.removeDuplicatesFromEpisodes(filteredEpisodes)
+                self.currentEpisodes = uniqueFilteredEpisodes
                 self.isLoadingEpisodes = false
                 self.hasMoreEpisodes = false
                 // Reduce logging during scrolling for better performance
                 if !self.isUserScrolling {
+                    if filteredEpisodes.count != uniqueFilteredEpisodes.count {
+                        print("📊 ⚡ Deduplicated \(filteredEpisodes.count) to \(uniqueFilteredEpisodes.count) episodes before display")
+                    }
                     print("📊 ⚡ Using pre-loaded episodes with filter: \(self.currentEpisodes.count) episodes displayed instantly")
                 }
             }
@@ -1945,11 +1949,20 @@ class PodcastViewModel: ObservableObject {
             
             await MainActor.run {
                 if isAppending {
-                    // Simply append new episodes (duplicates prevented at source)
-                    self.currentEpisodes.append(contentsOf: result.episodes)
+                    // CRITICAL FIX: Merge and deduplicate when appending
+                    let combinedEpisodes = self.currentEpisodes + result.episodes
+                    let uniqueEpisodes = self.removeDuplicatesFromEpisodes(combinedEpisodes)
+                    self.currentEpisodes = uniqueEpisodes
+                    if combinedEpisodes.count != uniqueEpisodes.count {
+                        print("🔄 APPEND DEDUP: Combined \(combinedEpisodes.count) episodes, deduped to \(uniqueEpisodes.count)")
+                    }
                 } else {
-                    // Replace with new episodes (duplicates prevented at source)
-                    self.currentEpisodes = result.episodes
+                    // CRITICAL FIX: Deduplicate episodes before replacing
+                    let uniqueEpisodes = self.removeDuplicatesFromEpisodes(result.episodes)
+                    self.currentEpisodes = uniqueEpisodes
+                    if result.episodes.count != uniqueEpisodes.count {
+                        print("🔄 REPLACE DEDUP: Loaded \(result.episodes.count) episodes, deduped to \(uniqueEpisodes.count)")
+                    }
                 }
                 
                 self.hasMoreEpisodes = result.hasMore
@@ -3946,8 +3959,11 @@ extension PodcastViewModel {
                 
                 do {
                     let episodeModels = try context.fetch(episodeRequest)
-                    episodes = episodeModels.compactMap { $0.toPodcastEpisode() }
-                    print("📡 Loaded \(episodes.count) episodes for feed: \(feedModel.title ?? "Unknown")")
+                    let loadedEpisodes = episodeModels.compactMap { $0.toPodcastEpisode() }
+                    
+                    // CRITICAL FIX: Remove duplicates and merge with EpisodeStateManager
+                    episodes = self.removeDuplicatesFromEpisodes(loadedEpisodes)
+                    print("📡 Loaded \(loadedEpisodes.count) episodes for feed: \(feedModel.title ?? "Unknown"), \(episodes.count) after deduplication")
                 } catch {
                     print("❌ Failed to load episodes for feed \(feedModel.title ?? "Unknown"): \(error)")
                 }
@@ -4105,12 +4121,24 @@ extension PodcastViewModel {
             }
             
             // Now delete from local Core Data using efficient batch deletion
+            // Debug: Check what data exists before deletion
+            print("🔍 CORE DATA DEBUG: Checking data before deletion...")
+            do {
+                let mainContext = CoreDataStack.shared.persistentContainer.viewContext
+                let episodeCount = try mainContext.count(for: PodcastModel.fetchRequest())
+                let feedCount = try mainContext.count(for: FeedModel.fetchRequest())
+                print("🔍 CORE DATA DEBUG: Before deletion - Episodes: \(episodeCount), Feeds: \(feedCount)")
+            } catch {
+                print("❌ CORE DATA DEBUG: Error counting records before deletion: \(error)")
+            }
+            
             let privateMOC = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
             privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
             privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
             
             await withCheckedContinuation { continuation in
                 privateMOC.perform {
+                    print("🔍 CORE DATA DEBUG: Private context is performing deletion...")
                     do {
                         // Use NSBatchDeleteRequest for efficient bulk deletion of episodes
                         let episodeFetchRequest: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
@@ -4146,6 +4174,7 @@ extension PodcastViewModel {
                         
                         // Save private context after batch deletion
                         try privateMOC.save()
+                        print("🔍 CORE DATA DEBUG: Private context saved successfully")
                         
                         continuation.resume()
                     } catch {
@@ -4158,9 +4187,45 @@ extension PodcastViewModel {
             }
             
             // Then save main context and clear in-memory data
-            DispatchQueue.main.async {
+            await MainActor.run {
                 do {
+                    print("🔍 CORE DATA DEBUG: Saving main context...")
                     try CoreDataStack.shared.persistentContainer.viewContext.save()
+                    print("🔍 CORE DATA DEBUG: Main context saved successfully")
+                    
+                    // **CRITICAL**: Force refresh all contexts to clear cached objects
+                    print("🔄 CONTEXT REFRESH: Starting comprehensive context refresh...")
+                    let mainContext = CoreDataStack.shared.persistentContainer.viewContext
+                    
+                    // Reset the main context to clear all cached objects
+                    mainContext.reset()
+                    print("🔄 CONTEXT REFRESH: Main context reset completed")
+                    
+                    // Refresh all objects in the context (in case any are still cached)
+                    mainContext.refreshAllObjects()
+                    print("🔄 CONTEXT REFRESH: All objects refreshed")
+                    
+                    // Also refresh any background contexts
+                    CoreDataStack.shared.persistentContainer.performBackgroundTask { backgroundContext in
+                        backgroundContext.reset()
+                        print("🔄 CONTEXT REFRESH: Background context reset completed")
+                    }
+                    
+                    // Debug: Check what data exists after deletion and context refresh
+                    do {
+                        let mainContext = CoreDataStack.shared.persistentContainer.viewContext
+                        let episodeCountAfter = try mainContext.count(for: PodcastModel.fetchRequest())
+                        let feedCountAfter = try mainContext.count(for: FeedModel.fetchRequest())
+                        print("🔍 CORE DATA DEBUG: After deletion and context refresh - Episodes: \(episodeCountAfter), Feeds: \(feedCountAfter)")
+                        
+                        if episodeCountAfter > 0 || feedCountAfter > 0 {
+                            print("❌ CORE DATA ERROR: Data still exists after deletion! Episodes: \(episodeCountAfter), Feeds: \(feedCountAfter)")
+                        } else {
+                            print("✅ CORE DATA SUCCESS: All data successfully deleted from Core Data and contexts refreshed")
+                        }
+                    } catch {
+                        print("❌ CORE DATA DEBUG: Error counting records after deletion: \(error)")
+                    }
                     
                     // Ensure in-memory data is cleared after successful Core Data deletion
                     self.podcastFeeds.removeAll()
@@ -4171,40 +4236,44 @@ extension PodcastViewModel {
                     print("📡 ✅ Cleared in-memory data after Core Data deletion")
                     print("🔍 DEBUG: After clearing - podcastFeeds count: \(self.podcastFeeds.count)")
                     print("🔍 DEBUG: After clearing - podcastFeedOrder count: \(self.podcastFeedOrder.count)")
-                    
-                    // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup
-                    if allSuccess {
-                        print("🎯 ✅ Successfully deleted all podcast data from both CloudKit and Core Data")
-                        
-                        // Trigger cross-device sync for each deleted feed to ensure CoreData cleanup on all devices
-                        Task {
-                            for (feedId, feedTitle) in feedDataForSync {
-                                // Get episode IDs for comprehensive cleanup
-                                let episodeIds = await self.getEpisodeIdsForFeed(feedId)
-                                
-                                print("📡 🚨 DATA MANAGEMENT: Syncing deletion of '\(feedTitle)' (\(feedId)) across devices")
-                                PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
-                                    feedId: feedId,
-                                    feedTitle: feedTitle,
-                                    episodeIds: episodeIds
-                                )
-                            }
-                            print("📡 ✅ DATA MANAGEMENT: Cross-device sync triggered for \(feedDataForSync.count) deleted feeds")
-                        }
-                        
-                        NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "All podcast data has been successfully deleted across all devices.")
-                    } else {
-                        print("⚠️ Partial success: Local deletion completed, but some CloudKit deletions failed")
-                        NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Podcast data deletion completed with some warnings.")
-                    }
-                    
-                    completion(allSuccess, lastError)
                 } catch {
                     print("❌ Error saving main context after podcast deletion: \(error.localizedDescription)")
-                    NotificationManager.shared.notifyUserImmediate(title: "Deletion Failed", message: "Failed to complete podcast data deletion: \(error.localizedDescription)")
                     completion(false, error)
+                    return
                 }
             }
+            
+            // **CRITICAL**: Clear all episode states from EpisodeStateManager (progress, favorites, downloads)
+            await clearAllEpisodeStatesFromManager()
+            print("📡 ✅ CRITICAL FIX: Cleared all episode states from EpisodeStateManager")
+            
+            // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup  
+            if allSuccess {
+                print("🎯 ✅ Successfully deleted all podcast data from both CloudKit and Core Data")
+                
+                // Trigger cross-device sync for each deleted feed to ensure CoreData cleanup on all devices
+                Task {
+                    for (feedId, feedTitle) in feedDataForSync {
+                        // Get episode IDs for comprehensive cleanup
+                        let episodeIds = await self.getEpisodeIdsForFeed(feedId)
+                        
+                        print("📡 🚨 DATA MANAGEMENT: Syncing deletion of '\(feedTitle)' (\(feedId)) across devices")
+                        PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
+                            feedId: feedId,
+                            feedTitle: feedTitle,
+                            episodeIds: episodeIds
+                        )
+                    }
+                    print("📡 ✅ DATA MANAGEMENT: Cross-device sync triggered for \(feedDataForSync.count) deleted feeds")
+                }
+                
+                NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "All podcast data has been successfully deleted across all devices.")
+            } else {
+                print("⚠️ Partial success: Local deletion completed, but some CloudKit deletions failed")
+                NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Podcast data deletion completed with some warnings.")
+            }
+            
+            completion(allSuccess, lastError)
         }
     }
     
@@ -4225,5 +4294,103 @@ extension PodcastViewModel {
         saveFeedsToCoreData()
     }
     
+    /// Clear all episode states from EpisodeStateManager during bulk deletion
+    private func clearAllEpisodeStatesFromManager() async {
+        print("🧹 EPISODE STATE CLEARING: Starting comprehensive EpisodeStateManager cleanup...")
+        
+        // Clear all episode states using EpisodeStateManager's bulk clear methods
+        EpisodeStateManager.shared.clearAllStates()
+        print("🧹 EPISODE STATE CLEARING: Cleared all episode states from EpisodeStateManager")
+        
+        // Also force a save to ensure UserDefaults are updated immediately
+        EpisodeStateManager.shared.forceSave()
+        print("🧹 EPISODE STATE CLEARING: Forced save completed - all local episode data cleared")
+    }
+    
+    /// Remove duplicate episodes while intelligently merging episode states and preserving progress
+    private func removeDuplicatesFromEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+        guard !episodes.isEmpty else { return [] }
+        
+        var uniqueEpisodes: [String: PodcastEpisode] = [:]
+        var seenIds = Set<String>()
+        
+        // Sort episodes by publication date (newest first) to prioritize recent versions
+        let sortedEpisodes = episodes.sorted { $0.publicationDate > $1.publicationDate }
+        
+        for episode in sortedEpisodes {
+            if seenIds.contains(episode.id) {
+                // This is a duplicate - merge state data from EpisodeStateManager
+                if var existingEpisode = uniqueEpisodes[episode.id] {
+                    // Get the most accurate state from EpisodeStateManager
+                    let currentProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                    let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                    let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                    let isPlayed = currentProgress >= 0.99
+                    
+                    // Preserve the highest progress value
+                    let maxProgress = max(existingEpisode.state.progress, episode.state.progress, currentProgress)
+                    
+                    // Merge favorite states (true if either is true)
+                    let mergedFavorite = existingEpisode.state.isFavorite || episode.state.isFavorite || isFavorite
+                    
+                    // Merge download states (true if either is true)
+                    let mergedDownloaded = existingEpisode.state.isDownloaded || episode.state.isDownloaded || isDownloaded
+                    
+                    // Merge played states (true if either is true or progress is complete)
+                    let mergedPlayed = existingEpisode.state.isPlayed || episode.state.isPlayed || isPlayed || maxProgress >= 1.0
+                    
+                    // Update the existing episode with merged state
+                    existingEpisode.state = EpisodeState(
+                        isPlayed: mergedPlayed,
+                        isFavorite: mergedFavorite,
+                        progress: maxProgress,
+                        isDownloaded: mergedDownloaded
+                    )
+                    
+                    // Keep the episode with the most recent publication date or the one with complete metadata
+                    if episode.publicationDate > existingEpisode.publicationDate || 
+                       (episode.title.count > existingEpisode.title.count && episode.descriptionText.count > existingEpisode.descriptionText.count) {
+                        // Keep the newer/more complete episode but with merged state
+                        var updatedEpisode = episode
+                        updatedEpisode.state = existingEpisode.state
+                        uniqueEpisodes[episode.id] = updatedEpisode
+                    } else {
+                        // Keep the existing episode with merged state
+                        uniqueEpisodes[episode.id] = existingEpisode
+                    }
+                    
+                    print("🔄 DUPLICATE MERGE: Merged duplicate episode '\(episode.title)' - Progress: \(maxProgress), Favorite: \(mergedFavorite), Downloaded: \(mergedDownloaded)")
+                }
+            } else {
+                // First occurrence of this episode - sync with EpisodeStateManager
+                var episodeWithState = episode
+                
+                // Always sync with EpisodeStateManager as the source of truth for cross-device state
+                let currentProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                let isPlayed = currentProgress >= 0.99
+                
+                // Use EpisodeStateManager data if it's more recent than episode data
+                episodeWithState.state = EpisodeState(
+                    isPlayed: isPlayed || episode.state.isPlayed || currentProgress >= 1.0,
+                    isFavorite: isFavorite || episode.state.isFavorite,
+                    progress: max(currentProgress, episode.state.progress),
+                    isDownloaded: isDownloaded || episode.state.isDownloaded
+                )
+                
+                uniqueEpisodes[episode.id] = episodeWithState
+                seenIds.insert(episode.id)
+            }
+        }
+        
+        let result = Array(uniqueEpisodes.values).sorted { $0.publicationDate > $1.publicationDate }
+        
+        if episodes.count != result.count {
+            print("🧹 DUPLICATE REMOVAL: Removed \(episodes.count - result.count) duplicate episodes (from \(episodes.count) to \(result.count))")
+        }
+        
+        return result
+    }
 
 }

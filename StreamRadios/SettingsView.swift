@@ -2297,11 +2297,15 @@ struct InternalDataManagementView: View {
         alertManager.showCustomAlert(for: alertType, deleteAction: {
             switch alertType {
             case .deleteAllAppData:
-                initiateAppDataDeletion()
+                                                    Task {
+                                        await initiateAppDataDeletion()
+                                    }
             case .deleteStationData:
                 initiateStationDataDeletion()
             case .deletePodcastData:
-                initiatePodcastDataDeletion()
+                Task {
+                    await initiatePodcastDataDeletion()
+                }
             case .confirmImportWithDataClear:
                 showDocumentPicker = true
             default:
@@ -2365,7 +2369,7 @@ struct InternalDataManagementView: View {
     
     // MARK: - Deletion Methods
     
-    private func initiateAppDataDeletion() {
+    private func initiateAppDataDeletion() async {
         // Reset all states immediately on main queue
         DispatchQueue.main.async {
             self.isDeletingAllAppData = true
@@ -2394,6 +2398,15 @@ struct InternalDataManagementView: View {
             if !success {
                 allSuccess = false
                 lastError = errorMessage?.localizedDescription ?? "Station deletion failed"
+            } else {
+                // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
+                print("🔄 DATA MANAGEMENT: Station Core Data deletion completed successfully")
+                print("🔄 DATA MANAGEMENT: Forcing immediate UI refresh to show empty state")
+                
+                // IMMEDIATE UI REFRESH: Clear in-memory data and force UI update
+                self.viewModel.stations.removeAll()
+                
+                print("✅ DATA MANAGEMENT: Local station data cleared and UI immediately refreshed")
             }
             DispatchQueue.main.async {
                 self.appDataDeletionProgress = 0.2
@@ -2411,6 +2424,18 @@ struct InternalDataManagementView: View {
             if !success {
                 allSuccess = false
                 lastError = error?.localizedDescription ?? "Failed to clear local podcast data"
+            } else {
+                // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
+                print("🔄 DATA MANAGEMENT: Podcast Core Data deletion completed successfully")
+                print("🔄 DATA MANAGEMENT: Forcing immediate UI refresh to show empty state")
+                
+                // IMMEDIATE UI REFRESH: Clear in-memory data and force UI update
+                self.podcastViewModel.podcastFeeds.removeAll()
+                self.podcastViewModel.podcastFeedOrder.removeAll()
+                self.podcastViewModel.currentEpisodes.removeAll()
+                self.podcastViewModel.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+                
+                print("✅ DATA MANAGEMENT: Local podcast data cleared and UI immediately refreshed")
             }
             DispatchQueue.main.async {
                 self.appDataDeletionProgress = 0.35
@@ -2469,62 +2494,19 @@ struct InternalDataManagementView: View {
             }
         }
         
-        // Delete all podcast-related records from CloudKit using enhanced async batch deletion
-        let podcastRecordTypes = ["PodcastFeed", "EpisodeState"]
+        // **FIXED**: Podcast CloudKit deletion is already handled by podcastViewModel.clearPodcastCoreData() above
+        // Removing duplicate deletion to prevent sync conflicts and race conditions
+        // podcastViewModel.clearPodcastCoreData() properly handles:
+        // 1. CloudKit deletion with proper feed data collection
+        // 2. Cross-device sync notifications with complete feed information  
+        // 3. Core Data cleanup in correct sequence
+        print("📡 ✅ SYNC FIX: Skipping duplicate podcast CloudKit deletion - already handled by clearPodcastCoreData()")
+        print("📡 ✅ This prevents sync conflicts and ensures proper cross-device deletion notifications")
         
-        for (index, recordType) in podcastRecordTypes.enumerated() {
-            group.enter()
-            Task {
-                do {
-                    // Progress ranges: PodcastFeed (0.5-0.75), EpisodeState (0.75-1.0)
-                    let progressStart = 0.5 + Double(index) * 0.25
-                    let progressEnd = progressStart + 0.25
-                    
-                    await MainActor.run {
-                        self.appDataDeletionPhase = "Fetching \(recordType) records..."
-                        self.appDataDeletionProgress = progressStart
-                    }
-                    
-                    let recordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
-                        DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
-                            if let error = error {
-                                continuation.resume(throwing: error)
-                            } else {
-                                continuation.resume(returning: recordIDs ?? [])
-                            }
-                        }
-                    }
-                    
-                    guard !recordIDs.isEmpty else {
-                        print("✅ App Data Deletion: No \(recordType) records to delete")
-                        await MainActor.run {
-                            self.appDataDeletionProgress = progressEnd
-                        }
-                        group.leave()
-                        return
-                    }
-                    
-                    await MainActor.run {
-                        self.appDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud..."
-                    }
-                    
-                    print("🔄 App Data Deletion: Starting enhanced deletion of \(recordIDs.count) \(recordType) records")
-                    try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
-                        Task { @MainActor in
-                            self.appDataDeletionProgress = progressStart + (progress * 0.25)
-                            self.appDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud... (\(Int(progress * 100))%)"
-                        }
-                    }
-                    print("✅ App Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records")
-                    group.leave()
-                    
-                } catch {
-                    allSuccess = false
-                    lastError = "Enhanced \(recordType) deletion failed: \(error.localizedDescription)"
-                    print("❌ App Data Deletion: Enhanced \(recordType) records deletion failed - \(error.localizedDescription)")
-                    group.leave()
-                }
-            }
+        // Update progress to reflect completed podcast deletion step
+        await MainActor.run {
+            self.appDataDeletionProgress = 1.0
+            self.appDataDeletionPhase = "Podcast deletion completed via clearPodcastCoreData()"
         }
         
         group.notify(queue: .main) {
@@ -2535,6 +2517,27 @@ struct InternalDataManagementView: View {
                 UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
                 UserDefaults.standard.synchronize()
                 print("✅ App Data Deletion: UserDefaults cleared")
+                
+                // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup
+                print("🎯 ✅ Successfully deleted all app data from both CloudKit and Core Data")
+                
+                // Trigger cross-device sync to ensure all data is removed from all devices
+                Task {
+                    print("📡 🚨 DATA MANAGEMENT: Triggering bulk deletion sync across all devices")
+                    
+                    // Trigger station deletion sync
+                    print("📡 🔄 Syncing station deletion across devices...")
+                    await RadioStationCloudKitManager.shared.triggerCrossDeviceBulkDeletionSync(
+                        stationIds: [] // Empty since we deleted all stations
+                    )
+                    
+                    // Note: Podcast feed deletion sync is already handled by podcastViewModel.clearPodcastCoreData()
+                    // which includes the comprehensive sync logic around lines 4180-4192 in PodcastViewModel
+                    
+                    print("📡 ✅ DATA MANAGEMENT: Cross-device deletion sync triggered for all data types")
+                }
+                
+                NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "All app data has been successfully deleted across all devices.")
             } else {
                 print("⚠️ App Data Deletion: Skipping UserDefaults cleanup due to errors")
             }
@@ -2556,16 +2559,25 @@ struct InternalDataManagementView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if allSuccess {
                     print("✅ App Data Deletion: All operations completed successfully")
-                    self.notificationManager.notifyUser(title: "Deletion Complete", message: "All app data has been successfully deleted.")
+                    // Notification already sent above with cross-device message
                 } else {
                     let errorMessage = lastError ?? "An unknown error occurred"
                     print("❌ App Data Deletion: Operations failed - \(errorMessage)")
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "App data deletion failed: \(errorMessage)")
                 }
                 
-                // Reset completion state after 5 seconds for clean UI
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                    self.appDataDeletionComplete = false
+                // **CRITICAL**: Restart app after successful deletion for clean state
+                if allSuccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        self.restartApp()
+                    }
+                }
+                
+                // Reset completion state after 5 seconds for clean UI (if not restarting)
+                if !allSuccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                        self.appDataDeletionComplete = false
+                    }
                 }
             }
         }
@@ -2600,6 +2612,15 @@ struct InternalDataManagementView: View {
             if !success {
                 allSuccess = false
                 lastError = errorMessage?.localizedDescription ?? "Station deletion failed"
+            } else {
+                // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
+                print("🔄 DATA MANAGEMENT: Station Core Data deletion completed successfully")
+                print("🔄 DATA MANAGEMENT: Forcing immediate UI refresh to show empty state")
+                
+                // IMMEDIATE UI REFRESH: Clear in-memory data and force UI update
+                self.viewModel.stations.removeAll()
+                
+                print("✅ DATA MANAGEMENT: Local station data cleared and UI immediately refreshed")
             }
             DispatchQueue.main.async {
                 self.stationDataDeletionProgress = 0.3
@@ -2660,6 +2681,24 @@ struct InternalDataManagementView: View {
         }
         
         group.notify(queue: .main) {
+            print("🔄 Station Data Deletion: All operations completed - Success: \(allSuccess)")
+            
+            // **CRITICAL**: Trigger cross-device sync for comprehensive cleanup
+            if allSuccess {
+                print("🎯 ✅ Successfully deleted all station data from both CloudKit and Core Data")
+                
+                // Trigger cross-device sync to ensure station data is removed from all devices
+                Task {
+                    print("📡 🚨 DATA MANAGEMENT: Triggering bulk station deletion sync across devices")
+                    await RadioStationCloudKitManager.shared.triggerCrossDeviceBulkDeletionSync(
+                        stationIds: [] // Empty since we deleted all stations
+                    )
+                    print("📡 ✅ DATA MANAGEMENT: Cross-device station deletion sync triggered")
+                }
+                
+                NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "All station data has been successfully deleted across all devices.")
+            }
+            
             // Update UI states immediately
             self.isDeletingStationData = false
             self.stationDataDeletionComplete = allSuccess
@@ -2679,20 +2718,29 @@ struct InternalDataManagementView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if let error = lastError {
                     self.notificationManager.notifyUser(title: "Deletion Failed", message: "Station data deletion failed: \(error)")
-                } else {
+                } else if !allSuccess {
                     self.notificationManager.notifyUser(title: "Deletion Complete", message: "All station data has been successfully deleted.")
                 }
                 
-                // Reset completion states after 5 seconds for clean UI
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                    self.stationDataDeletionComplete = false
-                    self.stationDataDeletionError = nil
+                // **CRITICAL**: Restart app after successful deletion for clean state
+                if allSuccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        self.restartApp()
+                    }
+                }
+                
+                // Reset completion states after 5 seconds for clean UI (if not restarting)
+                if !allSuccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                        self.stationDataDeletionComplete = false
+                        self.stationDataDeletionError = nil
+                    }
                 }
             }
         }
     }
     
-    private func initiatePodcastDataDeletion() {
+    private func initiatePodcastDataDeletion() async {
         // Reset all states immediately on main queue
         DispatchQueue.main.async {
             self.isDeletingPodcastData = true
@@ -2721,6 +2769,18 @@ struct InternalDataManagementView: View {
             if !success { 
                 allSuccess = false
                 lastError = error?.localizedDescription ?? "Failed to clear local podcast data"
+            } else {
+                // **CRITICAL**: Force immediate UI refresh on the initiating device AFTER deletion completes
+                print("🔄 DATA MANAGEMENT: Podcast Core Data deletion completed successfully")
+                print("🔄 DATA MANAGEMENT: Forcing immediate UI refresh to show empty state")
+                
+                // IMMEDIATE UI REFRESH: Clear in-memory data and force UI update
+                self.podcastViewModel.podcastFeeds.removeAll()
+                self.podcastViewModel.podcastFeedOrder.removeAll()
+                self.podcastViewModel.currentEpisodes.removeAll()
+                self.podcastViewModel.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+                
+                print("✅ DATA MANAGEMENT: Local podcast data cleared and UI immediately refreshed")
             }
             DispatchQueue.main.async {
                 self.podcastDataDeletionProgress = 0.3
@@ -2728,63 +2788,19 @@ struct InternalDataManagementView: View {
             group.leave()
         }
         
-        // Delete from CloudKit using enhanced async batch deletion (podcast feeds, episodes, etc.)
-        let podcastRecordTypes = ["PodcastFeed", "EpisodeState"]
+        // **FIXED**: Podcast CloudKit deletion is already handled by podcastViewModel.clearPodcastCoreData() above
+        // Removing duplicate deletion to prevent sync conflicts and race conditions
+        // podcastViewModel.clearPodcastCoreData() properly handles:
+        // 1. CloudKit deletion with proper feed data collection
+        // 2. Cross-device sync notifications with complete feed information  
+        // 3. Core Data cleanup in correct sequence
+        print("📡 ✅ SYNC FIX: Skipping duplicate podcast CloudKit deletion - already handled by clearPodcastCoreData()")
+        print("📡 ✅ This prevents sync conflicts and ensures proper cross-device deletion notifications")
         
-        for (index, recordType) in podcastRecordTypes.enumerated() {
-            group.enter()
-            Task {
-                do {
-                    // Progress ranges: PodcastFeed (0.3-0.65), EpisodeState (0.65-1.0)
-                    let progressStart = 0.3 + Double(index) * 0.35
-                    let progressEnd = progressStart + 0.35
-                    
-                    await MainActor.run {
-                        self.podcastDataDeletionPhase = "Fetching \(recordType) records from iCloud..."
-                        self.podcastDataDeletionProgress = progressStart
-                    }
-                    
-                    let recordIDs: [CKRecord.ID] = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in
-                        DataStore.shared.fetchAllRecordIDs(ofType: recordType) { recordIDs, error in
-                            if let error = error {
-                                continuation.resume(throwing: error)
-                            } else {
-                                continuation.resume(returning: recordIDs ?? [])
-                            }
-                        }
-                    }
-                    
-                    guard !recordIDs.isEmpty else {
-                        print("✅ Podcast Data Deletion: No \(recordType) records to delete")
-                        await MainActor.run {
-                            self.podcastDataDeletionProgress = progressEnd
-                            self.podcastDataDeletionPhase = "No \(recordType) records found in iCloud"
-                        }
-                        group.leave()
-                        return
-                    }
-                    
-                    await MainActor.run {
-                        self.podcastDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud..."
-                    }
-                    
-                    print("🔄 Podcast Data Deletion: Starting enhanced deletion of \(recordIDs.count) \(recordType) records")
-                    try await DataStore.shared.deleteRecordsInBatchesAsync(recordIDs: recordIDs) { progress in
-                        Task { @MainActor in
-                            self.podcastDataDeletionProgress = progressStart + (progress * 0.35)
-                            self.podcastDataDeletionPhase = "Deleting \(recordIDs.count) \(recordType) records from iCloud... (\(Int(progress * 100))%)"
-                        }
-                    }
-                    print("✅ Podcast Data Deletion: Successfully deleted \(recordIDs.count) \(recordType) records")
-                    group.leave()
-                    
-                } catch {
-                    allSuccess = false
-                    lastError = "Enhanced CloudKit deletion failed for \(recordType): \(error.localizedDescription)"
-                    print("❌ Podcast Data Deletion: Enhanced deletion failed for \(recordType) - \(error.localizedDescription)")
-                    group.leave()
-                }
-            }
+        // Update progress to reflect completed podcast deletion step
+        await MainActor.run {
+            self.podcastDataDeletionProgress = 1.0
+            self.podcastDataDeletionPhase = "Podcast deletion completed via clearPodcastCoreData()"
         }
         
         group.notify(queue: .main) {
@@ -2811,13 +2827,141 @@ struct InternalDataManagementView: View {
                     self.notificationManager.notifyUser(title: "Deletion Complete", message: "All podcast data has been successfully deleted.")
                 }
                 
-                // Reset completion states after 5 seconds for clean UI
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
-                    self.podcastDataDeletionComplete = false
-                    self.podcastDataDeletionError = nil
+                // **CRITICAL**: Restart app after successful deletion for clean state
+                if allSuccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        self.restartApp()
+                    }
+                }
+                
+                // Reset completion states after 5 seconds for clean UI (if not restarting)
+                if !allSuccess {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                        self.podcastDataDeletionComplete = false
+                        self.podcastDataDeletionError = nil
+                    }
                 }
             }
         }
+    }
+    
+    // MARK: - App Restart Functionality
+    
+    /// Reset app to fresh state after data deletion completion
+    private func restartApp() {
+        print("🔄 APP RESET: Initiating app state reset after data deletion...")
+        
+        // Show final notification before reset
+        NotificationManager.shared.notifyUserImmediate(
+            title: "Resetting App", 
+            message: "App will reset to fresh state..."
+        )
+        
+        // Delay slightly to ensure notification is shown
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            print("🔄 APP RESET: Executing comprehensive app state reset...")
+            
+            Task { @MainActor in
+                // 1. Reset all ViewModels to initial state
+                self.resetAllViewModels()
+                
+                // 2. Clear all UI states
+                self.resetAllUIStates()
+                
+                // 3. Reset navigation and dismiss current view
+                self.resetNavigationState()
+                
+                print("✅ APP RESET: App state reset completed successfully")
+                
+                // Show completion notification and then close app
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NotificationManager.shared.notifyUserImmediate(
+                        title: "Reset Complete", 
+                        message: "App will close to complete the reset..."
+                    )
+                    
+                    // Close app after brief delay to ensure notification is seen
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        print("🔄 APP RESET: Closing app to complete clean reset process...")
+                        exit(0)
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Reset all ViewModels to their initial state
+    @MainActor
+    private func resetAllViewModels() {
+        print("🔄 Resetting all ViewModels...")
+        
+        // Reset RadioStationViewModel
+        viewModel.stations.removeAll()
+        viewModel.isDeletingData = false
+        viewModel.deletionComplete = false
+        viewModel.loadStationsFromCoreData()
+        
+        // Reset PodcastViewModel  
+        podcastViewModel.podcastFeeds.removeAll()
+        podcastViewModel.podcastFeedOrder.removeAll()
+        podcastViewModel.currentEpisodes.removeAll()
+        podcastViewModel.episodeCounts = (all: 0, favorites: 0, downloads: 0)
+        podcastViewModel.isLoading = false
+        podcastViewModel.loadFeedsFromCoreData()
+        
+        print("✅ All ViewModels reset to initial state")
+    }
+    
+    /// Reset all UI states to initial values
+    @MainActor
+    private func resetAllUIStates() {
+        print("🔄 Resetting all UI states...")
+        
+        // Reset all deletion states
+        isDeletingAllAppData = false
+        appDataDeletionComplete = false
+        appDataDeletionProgress = 0.0
+        appDataDeletionPhase = ""
+        
+        isDeletingStationData = false
+        stationDataDeletionComplete = false
+        stationDataDeletionProgress = 0.0
+        stationDataDeletionPhase = ""
+        stationDataDeletionError = nil
+        
+        isDeletingPodcastData = false
+        podcastDataDeletionComplete = false
+        podcastDataDeletionProgress = 0.0
+        podcastDataDeletionPhase = ""
+        podcastDataDeletionError = nil
+        
+        // Reset other UI states
+        showExportSheet = false
+        showDocumentPicker = false
+        importURL = nil
+        
+        print("✅ All UI states reset to initial values")
+    }
+    
+    /// Reset navigation state and dismiss current view
+    @MainActor
+    private func resetNavigationState() {
+        print("🔄 Resetting navigation state...")
+        
+        // Dismiss the current settings view to go back to main app
+        // This simulates returning to app launch state
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first {
+            
+            // Find the root view controller and reset navigation
+            if let rootViewController = window.rootViewController {
+                rootViewController.dismiss(animated: true, completion: {
+                    print("✅ Navigation state reset - returned to root")
+                })
+            }
+        }
+        
+        print("✅ Navigation reset completed")
     }
 }
 

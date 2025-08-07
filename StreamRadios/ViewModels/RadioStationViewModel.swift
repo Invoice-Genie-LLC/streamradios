@@ -981,7 +981,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
         privateMOC.parent = CoreDataStack.shared.persistentContainer.viewContext
         privateMOC.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy
         
+        // Debug: Check what data exists before deletion
+        do {
+            let stationCount = try CoreDataStack.shared.persistentContainer.viewContext.count(for: CDStation.fetchRequest())
+            print("🔍 STATION DEBUG: Before deletion - Stations: \(stationCount)")
+        } catch {
+            print("❌ STATION DEBUG: Error counting stations before deletion: \(error)")
+        }
+        
         privateMOC.perform {
+            print("🔍 STATION DEBUG: Private context is performing station deletion...")
             do {
                 // Use NSBatchDeleteRequest for efficient bulk deletion
                 let fetchRequest: NSFetchRequest<NSFetchRequestResult> = CDStation.fetchRequest()
@@ -1001,11 +1010,46 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // Save the context after batch deletion
                 try privateMOC.save()
+                print("🔍 STATION DEBUG: Private context saved successfully")
                 
                 // Update main context and UI on main thread
                 DispatchQueue.main.async {
                     do {
+                        print("🔍 STATION DEBUG: Saving main context...")
                         try CoreDataStack.shared.persistentContainer.viewContext.save()
+                        print("🔍 STATION DEBUG: Main context saved successfully")
+                        
+                        // **CRITICAL**: Force refresh all contexts to clear cached objects
+                        print("🔄 STATION CONTEXT REFRESH: Starting comprehensive context refresh...")
+                        let mainContext = CoreDataStack.shared.persistentContainer.viewContext
+                        
+                        // Reset the main context to clear all cached objects
+                        mainContext.reset()
+                        print("🔄 STATION CONTEXT REFRESH: Main context reset completed")
+                        
+                        // Refresh all objects in the context (in case any are still cached)
+                        mainContext.refreshAllObjects()
+                        print("🔄 STATION CONTEXT REFRESH: All objects refreshed")
+                        
+                        // Also refresh any background contexts
+                        CoreDataStack.shared.persistentContainer.performBackgroundTask { backgroundContext in
+                            backgroundContext.reset()
+                            print("🔄 STATION CONTEXT REFRESH: Background context reset completed")
+                        }
+                        
+                        // Debug: Check what data exists after deletion and context refresh
+                        do {
+                            let stationCountAfter = try CoreDataStack.shared.persistentContainer.viewContext.count(for: CDStation.fetchRequest())
+                            print("🔍 STATION DEBUG: After deletion and context refresh - Stations: \(stationCountAfter)")
+                            
+                            if stationCountAfter > 0 {
+                                print("❌ STATION ERROR: \(stationCountAfter) stations still exist after deletion!")
+                            } else {
+                                print("✅ STATION SUCCESS: All stations successfully deleted from Core Data and contexts refreshed")
+                            }
+                        } catch {
+                            print("❌ STATION DEBUG: Error counting stations after deletion: \(error)")
+                        }
                         
                         // Clear in-memory data after successful save
                         self.stations.removeAll()

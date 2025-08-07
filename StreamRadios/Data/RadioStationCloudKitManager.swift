@@ -639,7 +639,7 @@ class RadioStationCloudKitManager: ObservableObject {
     }
     
     /// Trigger cross-device sync for bulk station deletion (sends one notification for all stations)
-    private func triggerCrossDeviceBulkDeletionSync(stationIds: [String]) async {
+    public func triggerCrossDeviceBulkDeletionSync(stationIds: [String]) async {
         os_log("📡 🚨 RADIO BULK DELETION: Triggering cross-device bulk deletion sync for %d stations", log: log, type: .info, stationIds.count)
         
         let iCloudAccountID = getCurrentiCloudAccountID()
