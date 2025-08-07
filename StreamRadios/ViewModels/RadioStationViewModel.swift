@@ -931,8 +931,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let stationIds = recordIDs.map { $0.recordName }
             print("🗑️ Starting optimized batch deletion of \(stationIds.count) stations from CloudKit")
             
-            // Use the new batch deletion method that sends only one sync notification
-            try await RadioStationCloudKitManager.shared.deleteRadioStationsFromCloudKitBatch(stationIds)
+            // **OPTIMIZED**: Use the new batch deletion method that sends only one sync notification
+            try await RadioStationCloudKitManager.shared.deleteRadioStationsBatchFromCloudKit(stationIds)
             
             print("✅ Successfully completed batch deletion of \(stationIds.count) stations")
             DispatchQueue.main.async {
