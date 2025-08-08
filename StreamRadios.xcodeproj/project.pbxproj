@@ -26,7 +26,6 @@
 		7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */; };
 		7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */; };
 		771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */; };
-
 		7727D7E82C616A6A004549C9 /* MusicAuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */; };
 		77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */; };
 		77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */; };
@@ -143,7 +142,6 @@
 		7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveSheet.swift; sourceTree = "<group>"; };
 		7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertManager.swift; sourceTree = "<group>"; };
 		771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeumorphicShadow.swift; sourceTree = "<group>"; };
-
 		7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicAuthorizationManager.swift; sourceTree = "<group>"; };
 		77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStore.swift; sourceTree = "<group>"; };
 		77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
@@ -302,7 +300,6 @@
 				77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */,
 				7778807B2CAF31320013AA62 /* ScrollOffsetTracker.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
-
 				7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */,
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
 				77F50BC82C64725600187488 /* AddPodcastView.swift */,
@@ -589,7 +586,6 @@
 				77DD9D182C96698000C7BA3C /* NotificationCenterProtocol.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
 				77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */,
-
 				77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
@@ -768,7 +764,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadios.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -789,7 +785,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.0.1;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -808,7 +804,7 @@
 				CODE_SIGN_ENTITLEMENTS = StreamRadios/StreamRadiosRelease.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"StreamRadios/Preview Content\"";
 				DEVELOPMENT_TEAM = LH5V67498N;
 				ENABLE_PREVIEWS = YES;
@@ -829,7 +825,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.0.1;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";

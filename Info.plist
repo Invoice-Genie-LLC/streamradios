@@ -31,7 +31,7 @@
         <key>CFBundleVersion</key>
         <string>7</string>
         <key>CFBundleShortVersionString</key>
-        <string>2.0.0</string>
+        <string>2.0.1</string>
         <key>NSAppleMusicUsageDescription</key>
         <string>StreamRadios needs access to your Apple Music library to add Shazam-identified songs to your playlists</string>
         <key>CFBundleURLTypes</key>
@@ -108,10 +108,6 @@
         <key>UISupportedExternalAccessoryProtocols</key>
         <array>
             <string>com.apple.IAP.Radio</string>
-        </array>
-        <key>MKDirectionsApplicationSupportedModes</key>
-        <array>
-            <string>MKDirectionsModeCar</string>
         </array>
         <key>NSMicrophoneUsageDescription</key>
         <string>StreamRadios needs access to your microphone to identify songs.</string>

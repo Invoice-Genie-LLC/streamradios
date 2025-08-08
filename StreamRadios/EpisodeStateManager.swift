@@ -131,7 +131,7 @@ class EpisodeStateManager: ObservableObject {
         setupDebugLogging()
         
         // Mark successful initialization
-        userDefaults.set(Date(), forKey: lastSuccessfulInitKey)
+        userDefaults.set(Date().timeIntervalSince1970, forKey: lastSuccessfulInitKey)
     }
     
     // MARK: - Upgrade Protection Methods
@@ -209,21 +209,21 @@ class EpisodeStateManager: ObservableObject {
     private func backupDownloadStates() {
         var backupData: [String: Any] = [:]
         
-        // Backup all episode-related data
+        // Backup all episode-related data (convert Data to base64 strings for JSON serialization)
         if let progressData = userDefaults.data(forKey: progressKey) {
-            backupData["progress"] = progressData
+            backupData["progress"] = progressData.base64EncodedString()
         }
         
         if let favoritesData = userDefaults.data(forKey: favoritesKey) {
-            backupData["favorites"] = favoritesData
+            backupData["favorites"] = favoritesData.base64EncodedString()
         }
         
         if let downloadsData = userDefaults.data(forKey: downloadsKey) {
-            backupData["downloads"] = downloadsData
+            backupData["downloads"] = downloadsData.base64EncodedString()
         }
         
         if let statesData = userDefaults.data(forKey: statesKey) {
-            backupData["states"] = statesData
+            backupData["states"] = statesData.base64EncodedString()
         }
         
         // Store backup with timestamp
@@ -271,21 +271,25 @@ class EpisodeStateManager: ObservableObject {
         
         print("🔄 EpisodeStateManager: Restoring download states from backup")
         
-        // Restore each data type from backup
-        if let progressData = backup["progress"] as? Data {
+        // Restore each data type from backup (convert from base64 strings back to Data)
+        if let progressString = backup["progress"] as? String,
+           let progressData = Data(base64Encoded: progressString) {
             userDefaults.set(progressData, forKey: progressKey)
         }
         
-        if let favoritesData = backup["favorites"] as? Data {
+        if let favoritesString = backup["favorites"] as? String,
+           let favoritesData = Data(base64Encoded: favoritesString) {
             userDefaults.set(favoritesData, forKey: favoritesKey)
         }
         
-        if let downloadsData = backup["downloads"] as? Data {
+        if let downloadsString = backup["downloads"] as? String,
+           let downloadsData = Data(base64Encoded: downloadsString) {
             userDefaults.set(downloadsData, forKey: downloadsKey)
             print("✅ EpisodeStateManager: Restored download states from backup")
         }
         
-        if let statesData = backup["states"] as? Data {
+        if let statesString = backup["states"] as? String,
+           let statesData = Data(base64Encoded: statesString) {
             userDefaults.set(statesData, forKey: statesKey)
         }
     }
