@@ -1338,25 +1338,25 @@ struct UnifiedRadioProgressBanner: View {
     
     var body: some View {
         if shouldShowBanner {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 // Top row with icon, title and percentage
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
                     // Progress icon with animation
                     progressIcon
-                        .font(.title2)
+                        .font(.headline)
                         .foregroundColor(iconColor)
-                        .frame(width: 24)
+                        .frame(width: 20)
                     
                     // Progress message
                     VStack(alignment: .leading, spacing: 2) {
                         Text(bannerTitle)
-                            .font(.headline)
+                            .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
                         
                         if !currentCountryInfo.isEmpty {
                             Text(currentCountryInfo)
-                                .font(.subheadline)
+                                .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -1365,8 +1365,8 @@ struct UnifiedRadioProgressBanner: View {
                     
                     // Percentage
                     Text("\(Int(currentProgress * 100))%")
-                        .font(.title)
-                        .fontWeight(.bold)
+                        .font(.headline)
+                        .fontWeight(.semibold)
                         .foregroundColor(iconColor)
                 }
                 
@@ -1376,36 +1376,36 @@ struct UnifiedRadioProgressBanner: View {
                         // Background track
                         Rectangle()
                             .fill(Color.gray.opacity(0.3))
-                            .frame(height: 8)
-                            .cornerRadius(4)
+                            .frame(height: 4)
+                            .cornerRadius(2)
                         
                         // Progress fill
                         Rectangle()
                             .fill(iconColor)
-                            .frame(width: geometry.size.width * currentProgress, height: 8)
-                            .cornerRadius(4)
+                            .frame(width: geometry.size.width * currentProgress, height: 4)
+                            .cornerRadius(2)
                             .animation(.easeInOut(duration: 0.3), value: currentProgress)
                     }
                 }
-                .frame(height: 8)
+                .frame(height: 4)
                 
                 // Operation status
                 if !operationStatus.isEmpty {
                     HStack {
                         Text(operationStatus)
-                            .font(.subheadline)
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                         Spacer()
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .background(bannerBackgroundColor)
-            .cornerRadius(12)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 4)
+            .cornerRadius(10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 2)
             .transition(.asymmetric(
                 insertion: .opacity.combined(with: .move(edge: .top)),
                 removal: .opacity.combined(with: .move(edge: .top))
