@@ -68,7 +68,7 @@ struct EditStationView: View {
                     .padding(.bottom, 40)
                 }
             }
-            .background(Color.adaptiveBackground.ignoresSafeArea())
+            .background(Color.adaptiveSheetBackground.ignoresSafeArea())
         }
         .overlay(simpleNavigationBar, alignment: .top)
         .overlay(
@@ -390,7 +390,6 @@ struct SimpleAlertView: View {
         .padding(24)
         .background(Color(UIColor.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)

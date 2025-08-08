@@ -82,7 +82,9 @@ struct AddStationView: View {
                         .scrollDisabled(false) // Disable automatic scrolling
                         .scrollDismissesKeyboard(.never)
                     }
-                    .background(Color.adaptiveBackground.ignoresSafeArea())
+                    // Use a slightly different background for sheets to avoid
+                    // blending with the underlying list on iPad
+                    .background(Color.adaptiveSheetBackground.ignoresSafeArea())
                     .contentShape(Rectangle())
                     .simultaneousGesture(
                         TapGesture().onEnded { _ in
@@ -482,7 +484,6 @@ struct AddSimpleAlertView: View {
         .padding(24)
         .background(Color(UIColor.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color.gray.opacity(colorScheme == .dark ? 0.3 : 0.2), lineWidth: 0.5)

@@ -64,5 +64,16 @@ extension Color {
     static let adaptiveFieldBackground = Color(UIColor { traitCollection in
         traitCollection.userInterfaceStyle == .dark ? UIColor(red: 0.15, green: 0.15, blue: 0.17, alpha: 1.0) : UIColor.systemGray6
     })
+
+    // Sheet/modal background used to distinguish overlays on iPad
+    static let adaptiveSheetBackground = Color(UIColor { traitCollection in
+        if traitCollection.userInterfaceStyle == .dark {
+            // Slightly lighter than pure black to avoid blending with dimmed content
+            return UIColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
+        } else {
+            // Slightly darker than the default background to create separation
+            return UIColor.secondarySystemBackground
+        }
+    })
 }
 
