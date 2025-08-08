@@ -650,6 +650,65 @@ class RadioStationViewModel: NSObject, ObservableObject {
         print("🔄 Forced CloudKit check for next launch")
     }
     
+    /// Merge CloudKit stations with local state to preserve Recent, Favorites, and other local data
+    private func mergeCloudKitStationsWithLocalState(_ cloudKitStations: [RadioStation]) {
+        print("🔀 Merging \(cloudKitStations.count) CloudKit stations with local state...")
+        
+        // Create a dictionary of current local stations by ID for fast lookup
+        var localStationsById: [String: RadioStation] = [:]
+        for station in stations {
+            localStationsById[station.id] = station
+        }
+        
+        // Merge CloudKit stations with preserved local state
+        var mergedStations: [RadioStation] = []
+        
+        for cloudKitStation in cloudKitStations {
+            if let localStation = localStationsById[cloudKitStation.id] {
+                // Station exists locally - merge CloudKit data with local state
+                var mergedStation = cloudKitStation
+                
+                // PRESERVE LOCAL STATE: These fields should never be overwritten by CloudKit
+                mergedStation.lastPlayed = localStation.lastPlayed  // Preserve Recent stations
+                
+                // For favorites, use CloudKit data unless local is more recent
+                // (This handles cross-device sync while preserving local changes)
+                if let localFavoritedAt = localStation.favoritedAt,
+                   let cloudKitFavoritedAt = cloudKitStation.favoritedAt {
+                    // Use the more recent favorite data
+                    if localFavoritedAt > cloudKitFavoritedAt {
+                        mergedStation.isFavorite = localStation.isFavorite
+                        mergedStation.favoritedAt = localStation.favoritedAt
+                        mergedStation.favoriteOrder = localStation.favoriteOrder
+                        print("💾 Preserved newer local favorite state for: \(mergedStation.name)")
+                    }
+                } else if localStation.favoritedAt != nil && cloudKitStation.favoritedAt == nil {
+                    // Local has favorite data but CloudKit doesn't - preserve local
+                    mergedStation.isFavorite = localStation.isFavorite
+                    mergedStation.favoritedAt = localStation.favoritedAt
+                    mergedStation.favoriteOrder = localStation.favoriteOrder
+                    print("💾 Preserved local-only favorite state for: \(mergedStation.name)")
+                }
+                
+                mergedStations.append(mergedStation)
+                print("🔀 Merged station: \(mergedStation.name) (Recent: \(mergedStation.lastPlayed != nil ? "✅" : "❌"), Favorite: \(mergedStation.isFavorite ? "✅" : "❌"))")
+            } else {
+                // New station from CloudKit - add as-is
+                mergedStations.append(cloudKitStation)
+                print("🆕 Added new station from CloudKit: \(cloudKitStation.name)")
+            }
+        }
+        
+        // Update the stations array with merged data
+        stations = mergedStations
+        print("✅ Merge completed: \(stations.count) total stations with local state preserved")
+        
+        // Log recent stations count for verification
+        let recentCount = stations.filter { $0.lastPlayed != nil }.count
+        let favoriteCount = stations.filter { $0.isFavorite }.count
+        print("📊 After merge - Recent: \(recentCount), Favorites: \(favoriteCount), Total: \(stations.count)")
+    }
+    
     /// Sync stations from CloudKit with progress tracking for automatic sync
     private func syncStationsFromCloudKitWithProgress() async {
         print("🔄 Starting automatic CloudKit sync with progress tracking...")
@@ -672,16 +731,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         }
                     },
                     completion: { [weak self] stations, error in
-                        if let stations = stations {
+                        if let cloudKitStations = stations {
                             DispatchQueue.main.async {
-                                self?.stations = stations
+                                // CRITICAL: Merge CloudKit data with local state instead of replacing
+                                // This preserves Recent stations (lastPlayed), local favorites, and other local state
+                                self?.mergeCloudKitStationsWithLocalState(cloudKitStations)
                                 self?.saveStationsToCoreData()
                                 
                                 // Update final progress
                                 Task { @MainActor in
-                                    DataSyncManager.shared.radioStationsCurrentCount = stations.count
-                                    DataSyncManager.shared.radioStationsTotalCount = stations.count
-                                    DataSyncManager.shared.radioStationsOperation = "✅ \(stations.count) stations synced from other devices"
+                                    DataSyncManager.shared.radioStationsCurrentCount = self?.stations.count ?? cloudKitStations.count
+                                    DataSyncManager.shared.radioStationsTotalCount = self?.stations.count ?? cloudKitStations.count
+                                    DataSyncManager.shared.radioStationsOperation = "✅ \(self?.stations.count ?? cloudKitStations.count) stations synced from other devices"
                                     DataSyncManager.shared.radioStationsStatus = .completed
                                     DataSyncManager.shared.radioStationsProgress = 1.0
                                     
@@ -689,7 +750,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                                     UserDefaults.standard.set(Date(), forKey: "LastCloudKitSyncTime")
                                 }
                                 
-                                print("✅ Auto-synced \(stations.count) stations from CloudKit")
+                                print("✅ Auto-synced \(self?.stations.count ?? cloudKitStations.count) stations from CloudKit with local state preserved")
                             }
                         } else if let error = error {
                             Task { @MainActor in
@@ -1277,22 +1338,29 @@ class RadioStationViewModel: NSObject, ObservableObject {
             return
         }
         
-        CoreDataStack.shared.syncStationsFromCloudKit { [weak self] error in
-            if let error = error {
-                print("Error syncing with CloudKit: \(error.localizedDescription)")
-            } else {
-                print("Stations successfully synchronized with CloudKit.")
-                
-                // Mark radio stations as synced to prevent future CloudKit syncing on app launches
-                UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
-                
-                DispatchQueue.main.async {
-                    self?.loadStationsFromCoreData() // Reload stations from CoreData after sync
-                    NotificationCenter.default.post(name: .stationsUpdated, object: nil)
-                    // StationsLoaded notification will be posted by loadStationsFromCoreData()
+        // Use the same approach as the banner sync to preserve local state
+        DataStore.shared.fetchRadioStationsWithProgress(
+            progressCallback: { progress, count, message in
+                // No progress tracking needed for this method
+            },
+            completion: { [weak self] stations, error in
+                if let cloudKitStations = stations {
+                    DispatchQueue.main.async {
+                        // CRITICAL: Merge CloudKit data with local state instead of replacing
+                        self?.mergeCloudKitStationsWithLocalState(cloudKitStations)
+                        self?.saveStationsToCoreData()
+                        
+                        // Mark radio stations as synced to prevent future CloudKit syncing on app launches
+                        UserDefaults.standard.set(true, forKey: "HasRadioStationsSynced")
+                        
+                        NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                        print("✅ Regular CloudKit sync completed with local state preserved")
+                    }
+                } else if let error = error {
+                    print("❌ Error syncing with CloudKit: \(error.localizedDescription)")
                 }
             }
-        }
+        )
     }
     
     private func initializeStationsForFirstTime() {
