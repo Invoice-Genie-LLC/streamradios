@@ -169,6 +169,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 syncStationsWithCloudKit()
             } else {
                 print("⚡ Skipping CloudKit radio station sync in ViewModel - loading from local storage only for better performance")
+                
+                // Check for CloudKit changes on subsequent launches and trigger automatic sync
+                Task {
+                    await checkForCloudKitChangesOnLaunch()
+                }
             }
     
             loadStationsFromCoreData()
@@ -507,6 +512,135 @@ class RadioStationViewModel: NSObject, ObservableObject {
         default:
             print("📡 🔔 INSTANT ORDER CHANGE: Unknown action '\(action)', doing full refresh")
             await refreshStationsFromCloudKit()
+        }
+    }
+    
+    // MARK: - Automatic CloudKit Change Detection
+    
+    /// Check for CloudKit changes on app launch and trigger sync banner if needed
+    private func checkForCloudKitChangesOnLaunch() async {
+        print("🔍 Checking for CloudKit changes on app launch...")
+        
+        do {
+            // Get the count of stations in CloudKit
+            let cloudKitStationCount = try await RadioStationCloudKitManager.shared.getCloudKitStationCount()
+            let localStationCount = stations.count
+            
+            print("📊 Station count comparison - CloudKit: \(cloudKitStationCount), Local: \(localStationCount)")
+            
+            // Check if there are more stations in CloudKit than locally (new stations added on other devices)
+            if cloudKitStationCount > localStationCount {
+                let newStationsCount = cloudKitStationCount - localStationCount
+                print("🆕 Detected \(newStationsCount) new stations in CloudKit, triggering automatic sync...")
+                
+                await MainActor.run {
+                    // Update DataSyncManager to show sync banner
+                    DataSyncManager.shared.radioStationsStatus = .inProgress
+                    DataSyncManager.shared.radioStationsOperation = "Syncing \(newStationsCount) new stations from other devices..."
+                    DataSyncManager.shared.radioStationsProgress = 0.0
+                    DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
+                    DataSyncManager.shared.radioStationsCurrentCount = localStationCount
+                }
+                
+                // Trigger the sync with progress tracking
+                await syncStationsFromCloudKitWithProgress()
+                
+            } else if cloudKitStationCount < localStationCount {
+                // More stations locally than in CloudKit (stations deleted on other devices)
+                let deletedStationsCount = localStationCount - cloudKitStationCount
+                print("🗑️ Detected \(deletedStationsCount) stations deleted on other devices, triggering sync...")
+                
+                await MainActor.run {
+                    // Update DataSyncManager to show sync banner  
+                    DataSyncManager.shared.radioStationsStatus = .inProgress
+                    DataSyncManager.shared.radioStationsOperation = "Syncing station deletions from other devices..."
+                    DataSyncManager.shared.radioStationsProgress = 0.0
+                    DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
+                    DataSyncManager.shared.radioStationsCurrentCount = localStationCount
+                }
+                
+                // Trigger the sync with progress tracking
+                await syncStationsFromCloudKitWithProgress()
+                
+            } else {
+                // Station counts match, but check for modifications by comparing timestamps
+                print("📊 Station counts match, checking for modifications...")
+                let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations)
+                
+                if hasModifications {
+                    print("📝 Detected station modifications on other devices, triggering sync...")
+                    
+                    await MainActor.run {
+                        // Update DataSyncManager to show sync banner
+                        DataSyncManager.shared.radioStationsStatus = .inProgress
+                        DataSyncManager.shared.radioStationsOperation = "Syncing station updates from other devices..."
+                        DataSyncManager.shared.radioStationsProgress = 0.0
+                        DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
+                        DataSyncManager.shared.radioStationsCurrentCount = 0
+                    }
+                    
+                    // Trigger the sync with progress tracking
+                    await syncStationsFromCloudKitWithProgress()
+                } else {
+                    print("✅ No CloudKit changes detected, staying with local data")
+                }
+            }
+            
+        } catch {
+            print("❌ Failed to check CloudKit changes: \(error)")
+            // Don't trigger sync on error to avoid unnecessary network requests
+        }
+    }
+    
+    /// Sync stations from CloudKit with progress tracking for automatic sync
+    private func syncStationsFromCloudKitWithProgress() async {
+        print("🔄 Starting automatic CloudKit sync with progress tracking...")
+        
+        do {
+            // Use DataStore's fetchRadioStationsWithProgress for banner integration
+            await withCheckedContinuation { continuation in
+                DataStore.shared.fetchRadioStationsWithProgress(
+                    progressCallback: { [weak self] progress, count, message in
+                        Task { @MainActor in
+                            DataSyncManager.shared.radioStationsProgress = progress
+                            DataSyncManager.shared.radioStationsCurrentCount = count
+                            DataSyncManager.shared.radioStationsOperation = message
+                            // Estimate total based on current progress and count
+                            if progress > 0.1 && count > 0 {
+                                let estimatedTotal = Int(Double(count) / progress)
+                                DataSyncManager.shared.radioStationsTotalCount = max(DataSyncManager.shared.radioStationsTotalCount, estimatedTotal)
+                            }
+                            print("📊 Auto-sync progress: \(Int(progress * 100))% - \(count) stations - \(message)")
+                        }
+                    },
+                    completion: { [weak self] stations, error in
+                        if let stations = stations {
+                            DispatchQueue.main.async {
+                                self?.stations = stations
+                                self?.saveStationsToCoreData()
+                                
+                                // Update final progress
+                                Task { @MainActor in
+                                    DataSyncManager.shared.radioStationsCurrentCount = stations.count
+                                    DataSyncManager.shared.radioStationsTotalCount = stations.count
+                                    DataSyncManager.shared.radioStationsOperation = "✅ \(stations.count) stations synced from other devices"
+                                    DataSyncManager.shared.radioStationsStatus = .completed
+                                    DataSyncManager.shared.radioStationsProgress = 1.0
+                                }
+                                
+                                print("✅ Auto-synced \(stations.count) stations from CloudKit")
+                            }
+                        } else if let error = error {
+                            Task { @MainActor in
+                                DataSyncManager.shared.radioStationsOperation = "❌ Failed to sync stations from other devices"
+                                DataSyncManager.shared.radioStationsStatus = .failed
+                            }
+                            print("❌ Auto-sync failed: \(error)")
+                        }
+                        continuation.resume()
+                    }
+                )
+            }
         }
     }
     

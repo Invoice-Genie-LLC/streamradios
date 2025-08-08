@@ -708,6 +708,69 @@ class RadioStationCloudKitManager: ObservableObject {
         }
     }
     
+    // MARK: - CloudKit Change Detection Methods
+    
+    /// Get the count of radio stations in CloudKit
+    func getCloudKitStationCount() async throws -> Int {
+        let query = CKQuery(recordType: RecordType.radioStation, predicate: NSPredicate(value: true))
+        
+        do {
+            let (records, _) = try await privateDatabase.records(matching: query)
+            let count = records.count
+            
+            print("📊 CloudKit station count: \(count)")
+            return count
+            
+        } catch {
+            print("❌ Failed to get CloudKit station count: \(error)")
+            throw error
+        }
+    }
+    
+    /// Check for station modifications by comparing timestamps
+    func checkForStationModifications(localStations: [RadioStation]) async throws -> Bool {
+        let query = CKQuery(recordType: RecordType.radioStation, predicate: NSPredicate(value: true))
+        
+        do {
+            let (records, _) = try await privateDatabase.records(matching: query)
+            
+            // Get the most recent modification date from CloudKit
+            var mostRecentCloudKitModification: Date?
+            
+            for (_, recordResult) in records {
+                switch recordResult {
+                case .success(let record):
+                    if let modificationDate = record.modificationDate {
+                        if mostRecentCloudKitModification == nil || modificationDate > mostRecentCloudKitModification! {
+                            mostRecentCloudKitModification = modificationDate
+                        }
+                    }
+                case .failure:
+                    continue
+                }
+            }
+            
+            // Get the most recent local modification (use app launch time as a proxy)
+            let lastAppLaunch = UserDefaults.standard.object(forKey: "LastAppLaunchTime") as? Date ?? Date.distantPast
+            
+            // Update the last app launch time for next check
+            UserDefaults.standard.set(Date(), forKey: "LastAppLaunchTime")
+            
+            // Check if CloudKit has newer modifications
+            if let cloudKitDate = mostRecentCloudKitModification, cloudKitDate > lastAppLaunch {
+                print("📝 CloudKit modifications detected - CloudKit: \(cloudKitDate), Last Launch: \(lastAppLaunch)")
+                return true
+            }
+            
+            print("✅ No recent CloudKit modifications detected")
+            return false
+            
+        } catch {
+            print("❌ Failed to check CloudKit modifications: \(error)")
+            throw error
+        }
+    }
+    
     // MARK: - Public API Methods
     
     /// Save multiple radio stations to CloudKit in batches for improved performance
