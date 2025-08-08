@@ -671,23 +671,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // PRESERVE LOCAL STATE: These fields should never be overwritten by CloudKit
                 mergedStation.lastPlayed = localStation.lastPlayed  // Preserve Recent stations
                 
-                // For favorites, use CloudKit data unless local is more recent
-                // (This handles cross-device sync while preserving local changes)
-                if let localFavoritedAt = localStation.favoritedAt,
-                   let cloudKitFavoritedAt = cloudKitStation.favoritedAt {
-                    // Use the more recent favorite data
-                    if localFavoritedAt > cloudKitFavoritedAt {
-                        mergedStation.isFavorite = localStation.isFavorite
-                        mergedStation.favoritedAt = localStation.favoritedAt
-                        mergedStation.favoriteOrder = localStation.favoriteOrder
-                        print("💾 Preserved newer local favorite state for: \(mergedStation.name)")
-                    }
-                } else if localStation.favoritedAt != nil && cloudKitStation.favoritedAt == nil {
-                    // Local has favorite data but CloudKit doesn't - preserve local
+                // Favorites priority policy:
+                // - If CloudKit has favorite metadata, always prefer CloudKit's favoriteOrder to avoid
+                //   local UserDefaults/UI sorting from overriding the server source of truth.
+                // - If CloudKit lacks favorite metadata but local has it (offline/new device), preserve local state.
+                if cloudKitStation.favoritedAt != nil || cloudKitStation.favoriteOrder != nil {
+                    mergedStation.isFavorite = cloudKitStation.isFavorite
+                    mergedStation.favoritedAt = cloudKitStation.favoritedAt
+                    mergedStation.favoriteOrder = cloudKitStation.favoriteOrder
+                } else if localStation.favoritedAt != nil || localStation.favoriteOrder != nil {
                     mergedStation.isFavorite = localStation.isFavorite
                     mergedStation.favoritedAt = localStation.favoritedAt
                     mergedStation.favoriteOrder = localStation.favoriteOrder
-                    print("💾 Preserved local-only favorite state for: \(mergedStation.name)")
                 }
                 
                 mergedStations.append(mergedStation)
@@ -1456,21 +1451,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func favoriteStations() -> [RadioStation] {
+        // Always respect favoriteOrder if present to match CloudKit ordering across devices.
+        // Fallback to favoritedAt only when no favoriteOrder exists for either station.
         return stations.filter { $0.isFavorite }
             .sorted { station1, station2 in
-                // Sort by favoriteOrder if both have it, otherwise by favoritedAt
                 if let order1 = station1.favoriteOrder, let order2 = station2.favoriteOrder {
                     return order1 < order2
-                } else if station1.favoriteOrder != nil {
-                    return true  // station1 has order, station2 doesn't, so station1 comes first
-                } else if station2.favoriteOrder != nil {
-                    return false // station2 has order, station1 doesn't, so station2 comes first
-                } else {
-                    // Neither has favoriteOrder, sort by favoritedAt with most recent first
-                    let date1 = station1.favoritedAt ?? Date.distantPast
-                    let date2 = station2.favoritedAt ?? Date.distantPast
-                    return date1 > date2
                 }
+                if station1.favoriteOrder != nil { return true }
+                if station2.favoriteOrder != nil { return false }
+                let date1 = station1.favoritedAt ?? Date.distantPast
+                let date2 = station2.favoritedAt ?? Date.distantPast
+                return date1 > date2
             }
     }
     
@@ -1930,6 +1922,28 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             print("📡 ❌ RADIO FAVORITE ORDER SYNC: Failed to sync favorite order to CloudKit: \(error)")
         }
+    }
+
+    // MARK: - Favorites Sorting
+
+    /// Apply alphabetical sorting to favorites by updating favoriteOrder values, then persist to Core Data and CloudKit
+    @MainActor
+    func applyAlphabeticalSortToFavoritesAndPersist(ascending: Bool) async {
+        var favorites = favoriteStations()
+        favorites.sort { a, b in
+            let comparison = a.name.localizedCaseInsensitiveCompare(b.name)
+            return ascending ? (comparison == .orderedAscending) : (comparison == .orderedDescending)
+        }
+        // Update favoriteOrder based on sorted positions
+        for (index, fav) in favorites.enumerated() {
+            if let i = stations.firstIndex(where: { $0.id == fav.id }) {
+                stations[i].favoriteOrder = index
+            }
+        }
+        // Persist locally
+        saveStationsToCoreData()
+        // Push to CloudKit
+        await syncFavoriteOrderChangesToCloudKit()
     }
     
     // MARK: - Radio Browser API Integration

@@ -546,10 +546,22 @@ struct ContentView: View {
             .background(Color.adaptiveSectionBackground)
             .cornerRadius(10)
             
-            // Sorting arrow - show for all radio sub-tabs when not editing
+            // Sorting arrow - enabled for all radio sub-tabs when not editing
             if selectedTab == .radio && !isEditingMode {
-                Button(action: { 
-                    viewModel.sortStationsAlphabetically() 
+                Button(action: {
+                    // If on Favorites, warn that custom order will be replaced
+                    if viewModel.selectedSubTab == .favorites {
+                        alertManager.showCustomAlert(for: .confirmFavoritesSortChange, deleteAction: { 
+                            // Toggle direction and apply alphabetical ordering to favorites, then persist to CloudKit
+                            viewModel.sortStationsAlphabetically()
+                            Task { @MainActor in
+                                await viewModel.applyAlphabeticalSortToFavoritesAndPersist(ascending: viewModel.isAscendingSort)
+                            }
+                        })
+                    } else {
+                        // Non-favorites tabs: just toggle alphabetical sort preference
+                        viewModel.sortStationsAlphabetically()
+                    }
                 }) {
                     Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
                         .font(.title2)

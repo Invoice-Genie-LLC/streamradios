@@ -860,17 +860,9 @@ struct RadioStationListView: View {
                 stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
             }
         case .favorites:
-            // FIXED: Favorites tab should always respect favoriteOrder, not alphabetical sorting
-            // This ensures favorite order is preserved and displayed correctly in UI
+            // Favorites must always respect CloudKit-synced favoriteOrder.
+            // Do NOT apply alphabetical sorting here, otherwise it overrides the persisted order.
             stations = viewModel.favoriteStations()
-            // Apply alphabetical sorting only when not editing (to preserve manual favorite order during edits)
-            if !isEditing {
-                if viewModel.isAscendingSort {
-                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                } else {
-                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
-                }
-            }
         }
         
         // Apply search filter if search text is not empty

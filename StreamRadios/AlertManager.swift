@@ -33,11 +33,14 @@ class AlertManager: ObservableObject {
                 self?.dismissAlert()
             }
             customAlertSecondaryAction = nil
-        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear, .confirmFavoritesSortChange:
             customAlertPrimaryAction = deleteAction
             customAlertSecondaryAction = { [weak self] in
                 self?.dismissAlert()
             }
+        @unknown default:
+            customAlertPrimaryAction = { [weak self] in self?.dismissAlert() }
+            customAlertSecondaryAction = nil
         }
         
         showCustomAlert = true
@@ -66,6 +69,7 @@ enum AlertType: Identifiable {
     case deleteStationData
     case deletePodcastData
     case confirmImportWithDataClear
+    case confirmFavoritesSortChange
     
     var id: Int {
         switch self {
@@ -80,6 +84,7 @@ enum AlertType: Identifiable {
         case .deleteStationData: return 8
         case .deletePodcastData: return 9
         case .confirmImportWithDataClear: return 10
+        case .confirmFavoritesSortChange: return 11
         }
     }
     
@@ -103,6 +108,8 @@ enum AlertType: Identifiable {
             return "Delete Podcast Data"
         case .confirmImportWithDataClear:
             return "Import Station Playlist"
+        case .confirmFavoritesSortChange:
+            return "Change Sorting?"
         }
     }
     
@@ -130,6 +137,8 @@ enum AlertType: Identifiable {
             return "Important: You're about to delete all podcast data. This will remove all podcast feeds, episodes, downloads, progress, and favorites from both iCloud and your device's local storage. Podcast data will be deleted in batches according to Apple best practices. This action is permanent and cannot be reversed."
         case .confirmImportWithDataClear:
             return "Are you sure you want to import stations from this file? New stations will be added to your existing collection. Duplicate URLs will be skipped."
+        case .confirmFavoritesSortChange:
+            return "Sorting Favorites alphabetically will replace your custom order. This change will be saved to iCloud and affect your other devices."
         }
     }
     
@@ -141,12 +150,14 @@ enum AlertType: Identifiable {
             return "Delete"
         case .confirmImportWithDataClear:
             return "Import"
+        case .confirmFavoritesSortChange:
+            return "Sort Now"
         }
     }
     
     var secondaryButtonText: String? {
         switch self {
-        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear, .confirmFavoritesSortChange:
             return "Cancel"
         default:
             return nil
