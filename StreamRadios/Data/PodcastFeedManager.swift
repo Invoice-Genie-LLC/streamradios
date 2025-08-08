@@ -7,6 +7,42 @@ class PodcastFeedManager {
     private let log = OSLog(subsystem: "StreamRadios", category: "FeedManager")
     private let context = CoreDataStack.shared.context
     
+    // MARK: - Artwork Download Optimization
+    
+    /// Download artwork with timeout to prevent hanging
+    private func downloadArtworkWithTimeout(from url: URL, timeout: TimeInterval) async throws -> Data {
+        // Create URLRequest with timeout
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.cachePolicy = .returnCacheDataElseLoad // Use cache when available
+        
+        // Use async timeout to ensure we don't hang
+        return try await withThrowingTaskGroup(of: Data.self) { group in
+            // Add download task
+            group.addTask {
+                let (data, _) = try await URLSession.shared.data(for: request)
+                return data
+            }
+            
+            // Add timeout task
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw URLError(.timedOut)
+            }
+            
+            // Return first completed task and cancel others
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+    
+
+    
+
+    
+
+    
     // MARK: - Public Interface
     
     /// Load all saved feeds efficiently
@@ -45,6 +81,11 @@ class PodcastFeedManager {
         }
         let (parsedFeed, episodes) = try parser.parseComplete()
         
+        // Report episode parsing progress
+        Task { @MainActor in
+            DataSyncManager.shared.updateFeedParsingProgress(0.8, message: "Saving \(episodes.count) episodes to database...")
+        }
+        
         // Use custom title if provided, otherwise use RSS feed title
         var feed = parsedFeed
         if let customTitle = customTitle, !customTitle.isEmpty {
@@ -52,7 +93,7 @@ class PodcastFeedManager {
             os_log("🏷️ Using custom title: %@ (RSS title was: %@)", log: log, type: .info, customTitle, parsedFeed.title)
         }
         
-        // CRITICAL: Download artwork immediately and save to Core Data for fast app restart
+        // Download artwork during RSS processing (original implementation)
         var feedWithArtwork = feed
         if let artworkUrlString = feed.artworkUrl, !artworkUrlString.isEmpty,
            let artworkUrl = URL(string: artworkUrlString) {
@@ -76,7 +117,10 @@ class PodcastFeedManager {
                 }
             }
         } else {
-            os_log("ℹ️ No artwork URL found for feed: %@", log: log, type: .info, feed.title)
+            // No artwork to download, still report completion
+            await MainActor.run {
+                DataSyncManager.shared.reportArtworkDownloadCompleted(feedTitle: feed.title)
+            }
         }
         
         return try await saveFeedWithEpisodes(feed: feedWithArtwork, episodes: episodes, forceRefresh: forceRefresh)
@@ -100,7 +144,7 @@ class PodcastFeedManager {
         }
         let (updatedFeed, newEpisodes) = try parser.parseComplete()
         
-        // CRITICAL: Download artwork if URL changed or if we don't have artwork yet
+        // Download artwork if URL changed or if we don't have artwork yet (original implementation)
         var feedWithArtwork = updatedFeed
         if let artworkUrlString = updatedFeed.artworkUrl, !artworkUrlString.isEmpty,
            let artworkUrl = URL(string: artworkUrlString),
@@ -233,10 +277,15 @@ class PodcastFeedManager {
                     let managedFeed = FeedModel(context: backgroundContext)
                     managedFeed.update(from: feed)
                     
-                    // Save episodes in batches for performance
-                    try self.saveEpisodesInBatches(episodes, for: managedFeed, in: backgroundContext)
+                    // Save episodes using optimized batch insert for maximum performance
+                    try self.saveEpisodesOptimized(episodes, for: managedFeed, in: backgroundContext)
                     
                     try backgroundContext.save()
+                    
+                    // Report completion of episode saving
+                    Task { @MainActor in
+                        DataSyncManager.shared.updateFeedParsingProgress(0.95, message: "✅ Saved \(episodes.count) episodes for \(feed.title)")
+                    }
                     
                     // CRITICAL: Ensure main context sees the changes immediately for fresh install
                     DispatchQueue.main.async {
@@ -329,6 +378,127 @@ class PodcastFeedManager {
     private func getExistingEpisodeIds(for feedId: String, in context: NSManagedObjectContext) throws -> Set<String> {
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+        fetchRequest.propertiesToFetch = ["id"]
+        fetchRequest.resultType = .managedObjectResultType
+        
+        let episodes = try context.fetch(fetchRequest)
+        return Set(episodes.compactMap { $0.id })
+    }
+    
+    /// Optimized episode saving using batch operations for maximum performance
+    private func saveEpisodesOptimized(
+        _ episodes: [PodcastEpisode],
+        for feed: FeedModel,
+        in context: NSManagedObjectContext
+    ) throws {
+        guard !episodes.isEmpty else { return }
+        
+        let feedId = feed.id ?? ""
+        
+        // Get all existing episode IDs in one batch query (much faster than individual queries)
+        let episodeIds = episodes.map { $0.id }
+        let existingEpisodeIds = try getExistingEpisodeIdsBatch(episodeIds, in: context)
+        
+        // Separate new and existing episodes
+        let newEpisodes = episodes.filter { !existingEpisodeIds.contains($0.id) }
+        let existingEpisodes = episodes.filter { existingEpisodeIds.contains($0.id) }
+        
+        // Batch insert new episodes using NSBatchInsertRequest (fastest method)
+        if !newEpisodes.isEmpty {
+            try batchInsertNewEpisodes(newEpisodes, feedId: feedId, in: context)
+        }
+        
+        // Update existing episodes to preserve download data (only if there are any)
+        if !existingEpisodes.isEmpty {
+            try updateExistingEpisodes(existingEpisodes, feedId: feedId, in: context)
+        }
+        
+        os_log("📦 Episode save completed: %d new, %d updated", log: log, type: .info, newEpisodes.count, existingEpisodes.count)
+    }
+    
+    /// Batch insert new episodes using NSBatchInsertRequest for maximum performance
+    private func batchInsertNewEpisodes(
+        _ episodes: [PodcastEpisode],
+        feedId: String,
+        in context: NSManagedObjectContext
+    ) throws {
+        var insertIndex = 0
+        
+        let batchInsert = NSBatchInsertRequest(entity: PodcastModel.entity()) { (managedObject: NSManagedObject) -> Bool in
+            guard let episodeModel = managedObject as? PodcastModel else { return true }
+            
+            if insertIndex < episodes.count {
+                let episode = episodes[insertIndex]
+                episodeModel.id = episode.id
+                episodeModel.title = episode.title
+                episodeModel.audioUrl = episode.audioUrl
+                episodeModel.descriptionText = episode.descriptionText
+                episodeModel.publicationDate = episode.publicationDate
+                episodeModel.duration = episode.duration
+                episodeModel.fileSize = episode.fileSize ?? 0
+                episodeModel.feedId = feedId
+                episodeModel.progress = 0.0
+                episodeModel.isPlayed = false
+                episodeModel.isFavorite = false
+                episodeModel.isDownloaded = false
+                
+                insertIndex += 1
+                return false
+            }
+            return true
+        }
+        
+        batchInsert.resultType = .objectIDs
+        try context.execute(batchInsert)
+        
+        os_log("⚡ Batch inserted %d new episodes", log: log, type: .info, episodes.count)
+    }
+    
+    /// Update existing episodes while preserving download data
+    private func updateExistingEpisodes(
+        _ episodes: [PodcastEpisode],
+        feedId: String,
+        in context: NSManagedObjectContext
+    ) throws {
+        // Fetch existing episodes in one batch query
+        let episodeIds = episodes.map { $0.id }
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
+        
+        let existingEpisodes = try context.fetch(fetchRequest)
+        let existingEpisodesById: [String: PodcastModel] = Dictionary(uniqueKeysWithValues: existingEpisodes.compactMap { 
+            guard let id = $0.id else { return nil }
+            return (id, $0)
+        })
+        
+        // Update episodes while preserving download data
+        for episode in episodes {
+            guard let managedEpisode = existingEpisodesById[episode.id] else { continue }
+            
+            // Preserve download data
+            let preservedLocalFilePath = managedEpisode.localFilePath
+            let preservedFileSize = managedEpisode.fileSize
+            
+            // Update episode data
+            var episodeWithFeedId = episode
+            episodeWithFeedId.feedId = feedId
+            managedEpisode.update(from: episodeWithFeedId)
+            
+            // Restore preserved download data
+            managedEpisode.localFilePath = preservedLocalFilePath
+            managedEpisode.fileSize = preservedFileSize
+        }
+        
+        os_log("🔄 Updated %d existing episodes", log: log, type: .info, episodes.count)
+    }
+    
+    /// Get existing episode IDs in a single batch query
+    private func getExistingEpisodeIdsBatch(
+        _ episodeIds: [String],
+        in context: NSManagedObjectContext
+    ) throws -> Set<String> {
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
         fetchRequest.propertiesToFetch = ["id"]
         fetchRequest.resultType = .managedObjectResultType
         
@@ -432,6 +602,7 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     // Progress tracking
     private var bytesProcessed: Int = 0
     private var progressCallback: ((Double, String) -> Void)?
+    private var lastReportedProgress: Double?
     
     init(data: Data, feedUrl: String, progressCallback: ((Double, String) -> Void)? = nil) {
         self.parser = XMLParser(data: data)
@@ -535,9 +706,15 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
             case "item":
                 if let episode = currentEpisode?.build() {
                     episodes.append(episode)
-                    // Report episode parsing progress
-                    let progress = min(0.9, Double(bytesProcessed) / Double(totalDataSize))
-                    progressCallback?(progress, "Parsed \(episodes.count) episodes...")
+                    // Report episode parsing progress with more granular updates
+                    let baseProgress = Double(bytesProcessed) / Double(totalDataSize)
+                    let episodeProgress = min(0.9, baseProgress)
+                    
+                    // Update progress every 50 episodes or every 10% to avoid UI spam
+                    if episodes.count % 50 == 0 || episodeProgress - (lastReportedProgress ?? 0) >= 0.1 {
+                        progressCallback?(episodeProgress, "Parsed \(episodes.count) episodes...")
+                        lastReportedProgress = episodeProgress
+                    }
                 }
                 isParsingItem = false
                 currentEpisode = nil

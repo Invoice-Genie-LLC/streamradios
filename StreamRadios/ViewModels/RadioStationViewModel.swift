@@ -1565,16 +1565,45 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func syncOrderChangesToCloudKit() async {
         print("📡 🚨 RADIO ORDER SYNC: Starting batch order sync to CloudKit...")
         
+        // Update DataSyncManager to show we're starting a save operation
+        await MainActor.run {
+            DataSyncManager.shared.radioStationsStatus = .inProgress
+            DataSyncManager.shared.radioStationsOperation = "Saving station order to CloudKit..."
+            DataSyncManager.shared.radioStationsProgress = 0.0
+            DataSyncManager.shared.radioStationsTotalCount = stations.count
+            DataSyncManager.shared.radioStationsCurrentCount = 0
+        }
+        
         do {
-            // **OPTIMIZED**: Sync all stations to CloudKit in batches instead of individually
-            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(stations)
+            // **OPTIMIZED**: Sync all stations to CloudKit in batches instead of individually with progress tracking
+            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(stations) { [weak self] progress, count, message in
+                Task { @MainActor in
+                    DataSyncManager.shared.radioStationsProgress = progress
+                    DataSyncManager.shared.radioStationsCurrentCount = count
+                    DataSyncManager.shared.radioStationsOperation = message
+                }
+            }
             print("📡 ✅ RADIO ORDER SYNC: Successfully saved \(stations.count) stations in batches")
             
             // Trigger cross-device order sync notification
             await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "order_changed")
             
+            // Mark operation as completed
+            await MainActor.run {
+                DataSyncManager.shared.radioStationsStatus = .completed
+                DataSyncManager.shared.radioStationsOperation = "Saved \(stations.count) stations to CloudKit"
+                DataSyncManager.shared.radioStationsProgress = 1.0
+            }
+            
             print("📡 ✅ RADIO ORDER SYNC: Successfully synced station order to CloudKit")
         } catch {
+            // Mark operation as failed
+            await MainActor.run {
+                DataSyncManager.shared.radioStationsStatus = .failed
+                DataSyncManager.shared.radioStationsOperation = "Failed to save stations: \(error.localizedDescription)"
+                DataSyncManager.shared.radioStationsProgress = 0.0
+            }
+            
             print("📡 ❌ RADIO ORDER SYNC: Failed to sync order to CloudKit: \(error)")
         }
     }
@@ -1583,22 +1612,51 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func syncFavoriteOrderChangesToCloudKit() async {
         print("📡 🚨 RADIO FAVORITE ORDER SYNC: Starting batch favorite order sync to CloudKit...")
         
+        // **OPTIMIZED**: Sync all favorite stations to CloudKit in batches instead of individually
+        let favorites = favoriteStations()
+        guard !favorites.isEmpty else {
+            print("📡 ⚠️ RADIO FAVORITE ORDER SYNC: No favorite stations to sync")
+            return
+        }
+        
+        // Update DataSyncManager to show we're starting a save operation
+        await MainActor.run {
+            DataSyncManager.shared.radioStationsStatus = .inProgress
+            DataSyncManager.shared.radioStationsOperation = "Saving favorite stations to CloudKit..."
+            DataSyncManager.shared.radioStationsProgress = 0.0
+            DataSyncManager.shared.radioStationsTotalCount = favorites.count
+            DataSyncManager.shared.radioStationsCurrentCount = 0
+        }
+        
         do {
-            // **OPTIMIZED**: Sync all favorite stations to CloudKit in batches instead of individually
-            let favorites = favoriteStations()
-            guard !favorites.isEmpty else {
-                print("📡 ⚠️ RADIO FAVORITE ORDER SYNC: No favorite stations to sync")
-                return
+            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(favorites) { [weak self] progress, count, message in
+                Task { @MainActor in
+                    DataSyncManager.shared.radioStationsProgress = progress
+                    DataSyncManager.shared.radioStationsCurrentCount = count
+                    DataSyncManager.shared.radioStationsOperation = message
+                }
             }
-            
-            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(favorites)
             print("📡 ✅ RADIO FAVORITE ORDER SYNC: Successfully saved \(favorites.count) favorite stations in batches")
             
             // Trigger cross-device favorite order sync notification
             await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "favorite_order_changed")
             
+            // Mark operation as completed
+            await MainActor.run {
+                DataSyncManager.shared.radioStationsStatus = .completed
+                DataSyncManager.shared.radioStationsOperation = "Saved \(favorites.count) favorite stations to CloudKit"
+                DataSyncManager.shared.radioStationsProgress = 1.0
+            }
+            
             print("📡 ✅ RADIO FAVORITE ORDER SYNC: Successfully synced favorite order to CloudKit")
         } catch {
+            // Mark operation as failed
+            await MainActor.run {
+                DataSyncManager.shared.radioStationsStatus = .failed
+                DataSyncManager.shared.radioStationsOperation = "Failed to save favorites: \(error.localizedDescription)"
+                DataSyncManager.shared.radioStationsProgress = 0.0
+            }
+            
             print("📡 ❌ RADIO FAVORITE ORDER SYNC: Failed to sync favorite order to CloudKit: \(error)")
         }
     }
@@ -1850,14 +1908,32 @@ class RadioStationViewModel: NSObject, ObservableObject {
             await MainActor.run {
                 loadingPhase = "Initiating cloud sync..."
                 loadingProgress = 0.93
+                
+                // Update DataSyncManager to show CloudKit save progress
+                DataSyncManager.shared.radioStationsStatus = .inProgress
+                DataSyncManager.shared.radioStationsOperation = "Saving \(uniqueNewStations.count) new stations to CloudKit..."
+                DataSyncManager.shared.radioStationsProgress = 0.95
+                DataSyncManager.shared.radioStationsTotalCount = uniqueNewStations.count
+                DataSyncManager.shared.radioStationsCurrentCount = 0
             }
             
             DataStore.shared.saveNewStationsToCloudKit(stations: uniqueNewStations) { success, recordIDs in
                 DispatchQueue.main.async {
                     if success {
                         print("📡 ✅ Successfully saved \(uniqueNewStations.count) API-fetched stations to CloudKit for \(country.name)")
+                        
+                        // Update DataSyncManager on success
+                        DataSyncManager.shared.radioStationsStatus = .completed
+                        DataSyncManager.shared.radioStationsOperation = "Saved \(uniqueNewStations.count) new stations to CloudKit"
+                        DataSyncManager.shared.radioStationsProgress = 1.0
+                        DataSyncManager.shared.radioStationsCurrentCount = uniqueNewStations.count
                     } else {
                         print("📡 ⚠️ Failed to save some API-fetched stations to CloudKit for \(country.name)")
+                        
+                        // Update DataSyncManager on failure
+                        DataSyncManager.shared.radioStationsStatus = .failed
+                        DataSyncManager.shared.radioStationsOperation = "Failed to save new stations to CloudKit"
+                        DataSyncManager.shared.radioStationsProgress = 0.0
                     }
                 }
             }

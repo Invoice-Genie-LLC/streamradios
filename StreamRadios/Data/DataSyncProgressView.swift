@@ -257,6 +257,10 @@ struct DetailedSyncStatusItem: View {
                 // Progress indicator
                 Group {
                     switch status {
+                    case .none:
+                        Text("Ready")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     case .pending:
                         Text("Pending")
                             .font(.caption)
@@ -309,6 +313,9 @@ struct DetailedSyncStatusItem: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch status {
+        case .none:
+            Image(systemName: "checkmark.circle")
+                .foregroundColor(.green)
         case .pending:
             Image(systemName: "clock")
                 .foregroundColor(.secondary)
@@ -348,8 +355,12 @@ struct SyncStatusItem: View {
             
             // Progress indicator
             Group {
-                switch status {
-                case .pending:
+                                switch status {
+                    case .none:
+                        Text("Ready")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    case .pending:
                     Text("Pending")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -380,6 +391,9 @@ struct SyncStatusItem: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch status {
+        case .none:
+            Image(systemName: "checkmark.circle")
+                .foregroundColor(.green)
         case .pending:
             Image(systemName: "clock")
                 .foregroundColor(.secondary)
@@ -423,6 +437,7 @@ struct CustomProgressViewStyle: ProgressViewStyle {
 }
 
 enum DataSyncStatus {
+    case none
     case pending
     case inProgress
     case completed

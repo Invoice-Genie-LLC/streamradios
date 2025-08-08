@@ -797,7 +797,24 @@ class DataStore {
                 // Report progress for every 50 records or so to avoid too many updates
                 if fetchedRecords.count % 50 == 0 || fetchedRecords.count - startingCount == 1 {
                     let currentCount = fetchedRecords.count
-                    let progressMessage = "Fetched \(currentCount) radio stations..."
+                    
+                    // Extract country information from recent records for more detailed progress
+                    let recentCountries = fetchedRecords.suffix(50).compactMap { record in
+                        record["country"] as? String
+                    }
+                    
+                    let uniqueCountries = Array(Set(recentCountries)).sorted()
+                    let countryInfo = uniqueCountries.count > 0 ? " from \(uniqueCountries.count) countries" : ""
+                    let currentCountry = uniqueCountries.last ?? ""
+                    
+                    let progressMessage: String
+                    if !currentCountry.isEmpty && currentCount > 100 {
+                        progressMessage = "Loading \(currentCount) stations - processing \(currentCountry)..."
+                    } else if uniqueCountries.count > 1 {
+                        progressMessage = "Loading \(currentCount) stations\(countryInfo)..."
+                    } else {
+                        progressMessage = "Loading \(currentCount) radio stations..."
+                    }
                     
                     // Estimate progress - if we have a total estimate, use it, otherwise estimate based on current batch
                     let estimatedProgress: Double
@@ -827,8 +844,20 @@ class DataStore {
                     // More records available, continue fetching
                     print("Fetched \(batchSize) records in this batch (\(currentCount) total), continuing with pagination...")
                     
-                    // Update progress for this batch completion
-                    let progressMessage = "Loaded \(currentCount) stations, fetching more..."
+                    // Update progress for this batch completion with country info
+                    let allCountries = fetchedRecords.compactMap { record in
+                        record["country"] as? String
+                    }
+                    let uniqueCountries = Array(Set(allCountries)).sorted()
+                    let countryCount = uniqueCountries.count
+                    
+                    let progressMessage: String
+                    if countryCount > 1 {
+                        progressMessage = "Loaded \(currentCount) stations from \(countryCount) countries, fetching more..."
+                    } else {
+                        progressMessage = "Loaded \(currentCount) stations, fetching more..."
+                    }
+                    
                     let estimatedProgress = min(0.9, Double(currentCount) / 1000.0) // Conservative estimate
                     
                     DispatchQueue.main.async {
@@ -841,15 +870,27 @@ class DataStore {
                     // All records fetched
                     print("Completed fetching all \(currentCount) records from CloudKit.")
                     
-                    // Report final progress
+                    // Report final progress with country breakdown
+                    let allCountries = fetchedRecords.compactMap { record in
+                        record["country"] as? String
+                    }
+                    let uniqueCountries = Array(Set(allCountries)).sorted()
+                    let countryCount = uniqueCountries.count
+                    
                     DispatchQueue.main.async {
-                        progressCallback(0.95, currentCount, "Processing \(currentCount) stations...")
+                        let processingMessage = countryCount > 1 ? 
+                            "Processing \(currentCount) stations from \(countryCount) countries..." :
+                            "Processing \(currentCount) stations..."
+                        progressCallback(0.95, currentCount, processingMessage)
                     }
                     
                     self.processAndReturnStations(from: fetchedRecords) { stations, error in
                         DispatchQueue.main.async {
                             if let stations = stations {
-                                progressCallback(1.0, stations.count, "Completed! Loaded \(stations.count) stations")
+                                let completionMessage = countryCount > 1 ?
+                                    "✅ Completed! Loaded \(stations.count) stations from \(countryCount) countries" :
+                                    "✅ Completed! Loaded \(stations.count) stations"
+                                progressCallback(1.0, stations.count, completionMessage)
                             }
                         }
                         completion(stations, error)

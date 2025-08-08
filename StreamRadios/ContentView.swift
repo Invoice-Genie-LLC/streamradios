@@ -262,8 +262,9 @@ struct ContentView: View {
                 .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
             )
             
-            // Data Sync Progress Overlay
+            // Full-screen data sync progress overlay for fresh installs
             DataSyncProgressView()
+
         }
     }
     
@@ -354,6 +355,12 @@ struct ContentView: View {
                         
                         // Search box for filtering stations
                         searchBar
+                        
+                        // Unified radio station progress banner
+                        if selectedTab == .radio {
+                            UnifiedRadioProgressBanner()
+                        }
+
                     }
                     .padding(.top, topPadding)
                     .padding(.bottom, 10)
@@ -1322,6 +1329,245 @@ enum DeviceType {
     case other
 }
 
+// MARK: - Unified Radio Progress Banner
+
+struct UnifiedRadioProgressBanner: View {
+    @StateObject private var radioViewModel = RadioStationViewModel.shared
+    @StateObject private var syncManager = DataSyncManager.shared
+    @State private var hideCompletedBanner = false
+    
+    var body: some View {
+        if shouldShowBanner {
+            VStack(spacing: 8) {
+                // Top row with icon, title and percentage
+                HStack(spacing: 12) {
+                    // Progress icon with animation
+                    progressIcon
+                        .font(.title2)
+                        .foregroundColor(iconColor)
+                        .frame(width: 24)
+                    
+                    // Progress message
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(bannerTitle)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        if !currentCountryInfo.isEmpty {
+                            Text(currentCountryInfo)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    // Percentage
+                    Text("\(Int(currentProgress * 100))%")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .foregroundColor(iconColor)
+                }
+                
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        // Background track
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(height: 8)
+                            .cornerRadius(4)
+                        
+                        // Progress fill
+                        Rectangle()
+                            .fill(iconColor)
+                            .frame(width: geometry.size.width * currentProgress, height: 8)
+                            .cornerRadius(4)
+                            .animation(.easeInOut(duration: 0.3), value: currentProgress)
+                    }
+                }
+                .frame(height: 8)
+                
+                // Operation status
+                if !operationStatus.isEmpty {
+                    HStack {
+                        Text(operationStatus)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(bannerBackgroundColor)
+            .cornerRadius(12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+            .transition(.asymmetric(
+                insertion: .opacity.combined(with: .move(edge: .top)),
+                removal: .opacity.combined(with: .move(edge: .top))
+            ))
+            .animation(.easeInOut(duration: 0.3), value: shouldShowBanner)
+            .onChange(of: syncManager.radioStationsStatus) { status in
+                if status == .completed {
+                    // Show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                            // Reset CloudKit status to .none after showing completion
+                            syncManager.radioStationsStatus = .none
+                            syncManager.radioStationsProgress = 0.0
+                            syncManager.radioStationsOperation = ""
+
+                        }
+                    }
+                } else if status == .inProgress || status == .pending {
+                    // Reset the hide flag when new operations start
+                    hideCompletedBanner = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Components
+    
+    @ViewBuilder
+    private var progressIcon: some View {
+        if currentOperationType == .cloudKitSave {
+            Image(systemName: "icloud.and.arrow.up")
+        } else if currentOperationType == .cloudKitFetch {
+            Image(systemName: "icloud.and.arrow.down")
+        } else {
+            // API fetching
+            Image(systemName: "arrow.down.circle")
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var shouldShowBanner: Bool {
+        // Show for active API fetching (show as soon as loading starts)
+        let hasAPIFetching = radioViewModel.isLoading
+        
+        // Show for active CloudKit operations
+        let hasActiveCloudKitSync = syncManager.radioStationsStatus == .inProgress
+        
+        // Show for completed CloudKit state briefly (unless manually hidden)
+        let hasRecentCloudKitCompletion = syncManager.radioStationsStatus == .completed && 
+                                         !hideCompletedBanner && 
+                                         syncManager.radioStationsProgress > 0
+        
+        return hasAPIFetching || hasActiveCloudKitSync || hasRecentCloudKitCompletion
+    }
+    
+    private var currentOperationType: OperationType {
+        // Priority: Show CloudKit operations first (both active and completed)
+        if syncManager.radioStationsStatus == .inProgress || 
+           (syncManager.radioStationsStatus == .completed && !hideCompletedBanner && syncManager.radioStationsProgress > 0) {
+            if syncManager.radioStationsOperation.contains("Saving") {
+                return .cloudKitSave
+            } else if syncManager.radioStationsOperation.contains("Fetching") || 
+                      syncManager.radioStationsOperation.contains("Loading") {
+                return .cloudKitFetch
+            }
+        }
+        
+        // Otherwise show API fetching
+        return .apiFetch
+    }
+    
+    private var currentProgress: Double {
+        // Use CloudKit progress if available, otherwise use API progress
+        if syncManager.radioStationsStatus == .inProgress && syncManager.radioStationsProgress > 0 {
+            return syncManager.radioStationsProgress
+        } else if radioViewModel.isLoading {
+            return radioViewModel.loadingProgress
+        } else if syncManager.radioStationsStatus == .completed {
+            return 1.0
+        }
+        return 0.0
+    }
+    
+    private var bannerTitle: String {
+        switch currentOperationType {
+        case .cloudKitSave:
+            return "Saving stations to iCloud"
+        case .cloudKitFetch:
+            return "Loading stations from iCloud"
+        case .apiFetch:
+            return "Fetching stations from API"
+        }
+    }
+    
+    private var currentCountryInfo: String {
+        // For API fetching, use the selected country
+        if radioViewModel.isLoading && currentOperationType == .apiFetch {
+            return "Loading \(radioViewModel.selectedCountry)"
+        }
+        
+        // For CloudKit operations, extract country from operation string
+        let operation = syncManager.radioStationsOperation
+        if operation.contains("processing") {
+            if let processingIndex = operation.range(of: "processing ")?.upperBound,
+               let endIndex = operation.range(of: "...", range: processingIndex..<operation.endIndex)?.lowerBound {
+                let countryName = String(operation[processingIndex..<endIndex])
+                return "Processing \(countryName)"
+            }
+        }
+        
+        return ""
+    }
+    
+    private var operationStatus: String {
+        // For API fetching, use the loading phase
+        if radioViewModel.isLoading && currentOperationType == .apiFetch {
+            if radioViewModel.totalStationsToLoad > 0 {
+                return "Converting \(radioViewModel.totalStationsToLoad) stations..."
+            } else {
+                return radioViewModel.loadingPhase
+            }
+        }
+        
+        // For CloudKit operations, use the operation string
+        return syncManager.radioStationsOperation
+    }
+    
+    private var bannerBackgroundColor: Color {
+        switch currentOperationType {
+        case .cloudKitSave:
+            return Color.blue.opacity(0.1)
+        case .cloudKitFetch:
+            return Color.green.opacity(0.1)
+        case .apiFetch:
+            return Color.orange.opacity(0.1)
+        }
+    }
+    
+    private var iconColor: Color {
+        switch currentOperationType {
+        case .cloudKitSave:
+            return .blue
+        case .cloudKitFetch:
+            return .green
+        case .apiFetch:
+            return .orange
+        }
+    }
+    
+    // MARK: - Types
+    
+    private enum OperationType {
+        case apiFetch
+        case cloudKitSave
+        case cloudKitFetch
+    }
+}
+
 // MARK: - Previews
 
 struct ContentView_Previews: PreviewProvider {
@@ -1332,3 +1578,4 @@ struct ContentView_Previews: PreviewProvider {
             .environmentObject(RadioStationViewModel())
     }
 }
+

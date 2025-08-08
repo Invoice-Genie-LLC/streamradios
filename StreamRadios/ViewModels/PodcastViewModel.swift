@@ -2312,27 +2312,77 @@ class PodcastViewModel: ObservableObject {
             DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: feedsToProcess.count)
         }
         
-        // Process only new feeds to prevent duplicates
-        for feed in feedsToProcess {
-            do {
-                print("📡 Processing feed: \(feed.title)")
-                
-                // Use public FeedManager to properly add feed with RSS parsing
-                guard let url = URL(string: feed.url) else {
-                    print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
-                    continue
+        // Process feeds in batches for better performance
+        let batchSize = 5 // Process 5 feeds concurrently
+        let batches = feedsToProcess.chunked(into: batchSize)
+        var processedCount = 0
+        
+        print("📊 Processing \(feedsToProcess.count) feeds in \(batches.count) batches of \(batchSize)")
+        
+        for (batchIndex, batch) in batches.enumerated() {
+            print("🔄 Processing batch \(batchIndex + 1)/\(batches.count) with \(batch.count) feeds")
+            
+            // Update progress for batch start
+            let batchProgress = Double(processedCount) / Double(feedsToProcess.count)
+            await MainActor.run {
+                DataSyncManager.shared.updateFeedParsingProgress(
+                    batchProgress, 
+                    message: "Processing batch \(batchIndex + 1) of \(batches.count)..."
+                )
+            }
+            
+            // Process feeds in this batch concurrently
+            await withTaskGroup(of: Void.self) { group in
+                for feed in batch {
+                    group.addTask {
+                        do {
+                            print("📡 Processing feed: \(feed.title)")
+                            
+                            // Use public FeedManager to properly add feed with RSS parsing
+                            guard let url = URL(string: feed.url) else {
+                                print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
+                                return
+                            }
+                            
+                            let feedManager = PodcastFeedManager()
+                            let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true)
+                            print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+                            
+                        } catch {
+                            print("❌ Failed to process feed \(feed.title): \(error)")
+                            
+                            // Save feed without episodes if RSS parsing fails
+                            try? await self.saveFeedToCoreData(feed)
+                        }
+                    }
                 }
                 
-                let feedManager = PodcastFeedManager()
-                let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true)
-                print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
-                
-            } catch {
-                print("❌ Failed to process feed \(feed.title): \(error)")
-                
-                // Save feed without episodes if RSS parsing fails
-                try? await saveFeedToCoreData(feed)
+                // Wait for all feeds in this batch to complete
+                for await _ in group {}
             }
+            
+            processedCount += batch.count
+            
+            // Update progress after batch completion
+            let completedProgress = Double(processedCount) / Double(feedsToProcess.count)
+            await MainActor.run {
+                DataSyncManager.shared.updateFeedParsingProgress(
+                    completedProgress, 
+                    message: "Completed \(processedCount)/\(feedsToProcess.count) feeds..."
+                )
+            }
+            
+            print("✅ Completed batch \(batchIndex + 1)/\(batches.count) - \(processedCount)/\(feedsToProcess.count) feeds processed")
+            
+            // Brief pause between batches to prevent overwhelming the system
+            if batchIndex < batches.count - 1 {
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            }
+        }
+        
+        // Complete RSS processing progress
+        await MainActor.run {
+            DataSyncManager.shared.updateFeedParsingProgress(1.0, message: "RSS processing completed - \(feedsToProcess.count) feeds processed")
         }
         
         print("🎉 Fresh install RSS processing complete")
@@ -2402,24 +2452,51 @@ class PodcastViewModel: ObservableObject {
             DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: feedsToProcess.count)
         }
         
-        for feed in feedsToProcess {
-            do {
-                print("📡 Processing feed: \(feed.title)")
-                
-                // Use FeedManager to properly add feed with RSS parsing
-                guard let url = URL(string: feed.url) else {
-                    print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
-                    continue
+        // Process feeds in batches for better performance (private method version)
+        let batchSize = 5 // Process 5 feeds concurrently
+        let batches = feedsToProcess.chunked(into: batchSize)
+        var processedCount = 0
+        
+        print("📊 Processing \(feedsToProcess.count) feeds in \(batches.count) batches of \(batchSize)")
+        
+        for (batchIndex, batch) in batches.enumerated() {
+            print("🔄 Processing batch \(batchIndex + 1)/\(batches.count) with \(batch.count) feeds")
+            
+            // Process feeds in this batch concurrently
+            await withTaskGroup(of: Void.self) { group in
+                for feed in batch {
+                    group.addTask {
+                        do {
+                            print("📡 Processing feed: \(feed.title)")
+                            
+                            // Use FeedManager to properly add feed with RSS parsing
+                            guard let url = URL(string: feed.url) else {
+                                print("❌ Invalid URL for feed \(feed.title): \(feed.url)")
+                                return
+                            }
+                            
+                            let addedFeed = try await self.feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true)
+                            print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
+                            
+                        } catch {
+                            print("❌ Failed to process feed \(feed.title): \(error)")
+                            
+                            // Save feed without episodes if RSS parsing fails
+                            try? await self.saveFeedToCoreData(feed)
+                        }
+                    }
                 }
                 
-                let addedFeed = try await feedManager.addFeed(from: url, customTitle: nil, forceRefresh: true)
-                print("✅ Added feed with \(addedFeed.episodes.count) episodes: \(addedFeed.title)")
-                
-            } catch {
-                print("❌ Failed to process feed \(feed.title): \(error)")
-                
-                // Save feed without episodes if RSS parsing fails
-                try? await saveFeedToCoreData(feed)
+                // Wait for all feeds in this batch to complete
+                for await _ in group {}
+            }
+            
+            processedCount += batch.count
+            print("✅ Completed batch \(batchIndex + 1)/\(batches.count) - \(processedCount)/\(feedsToProcess.count) feeds processed")
+            
+            // Brief pause between batches to prevent overwhelming the system
+            if batchIndex < batches.count - 1 {
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             }
         }
         
@@ -2810,10 +2887,15 @@ class PodcastViewModel: ObservableObject {
             // CRITICAL: Final UI refresh after all initialization is complete
             await MainActor.run {
                 print("🔄 Final UI refresh after complete initialization...")
-                self.loadFeedsFromCoreData()
+                // Don't call loadFeedsFromCoreData() again - feeds are already loaded!
+                // This was causing the loading state to show again after sync completed
+                
+                // Just ensure loading flags are cleared and trigger UI update
+                self.isLoading = false
+                self.isLoadingFeeds = false
                 
                 // Force UI update for any view controllers observing this environment object
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     self.throttledUIUpdate()
                     print("🎯 FINAL: Triggered final UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
                 }
@@ -3926,6 +4008,7 @@ extension PodcastViewModel {
         }
         
         isLoadingFromCoreData = true
+        isLoading = true  // Set main loading flag for UI coordination
         let context = CoreDataStack.shared.persistentContainer.viewContext
         let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
         
@@ -3947,6 +4030,7 @@ extension PodcastViewModel {
                 }
                 // PERFORMANCE: Reset flag before early return
                 isLoadingFromCoreData = false
+                isLoading = false  // Clear main loading flag
                 return
             }
             
@@ -3987,6 +4071,11 @@ extension PodcastViewModel {
                 self.podcastFeedOrder = loadedFeeds.map { $0.id }
                 print("📡 ✅ MAIN THREAD: Updated podcastFeeds with \(loadedFeeds.count) feeds")
                 print("📡 ✅ MAIN THREAD: Updated podcastFeedOrder with \(self.podcastFeedOrder.count) items")
+                
+                // Clear loading flags
+                self.isLoading = false
+                self.isLoadingFeeds = false
+                print("📡 ✅ MAIN THREAD: Cleared loading flags - isLoading: false, isLoadingFeeds: false")
                 
                 // Single UI refresh after all properties are updated
                 self.throttledUIUpdate()
@@ -4031,6 +4120,11 @@ extension PodcastViewModel {
             
         } catch {
             print("❌ Failed to load podcast feeds from CoreData: \(error)")
+            // Clear loading flags on error
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.isLoadingFeeds = false
+            }
         }
         
         // PERFORMANCE: Reset flag after operation completes

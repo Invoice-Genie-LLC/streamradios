@@ -2215,7 +2215,7 @@ struct InternalDataManagementView: View {
                         )
                     }
                     
-                    WarningText(text: "This will permanently erase ALL app data including stations, podcasts, episodes, downloads, progress, favorites, and settings from both iCloud and local storage.")
+                    WarningText(text: "This will permanently erase ALL app data including stations, podcasts, episodes, downloads, progress, favorites, and settings from both iCloud and local storage. Please do not close the app during this process.")
                 }
             }
             
@@ -2250,7 +2250,7 @@ struct InternalDataManagementView: View {
                         )
                     }
                     
-                    WarningText(text: "This will permanently remove all radio stations and their favorites from both iCloud and local storage.")
+                    WarningText(text: "This will permanently remove all radio stations and their favorites from both iCloud and local storage. Please do not close the app during this process.")
                 }
             }
             
@@ -2285,7 +2285,7 @@ struct InternalDataManagementView: View {
                         )
                     }
                     
-                    WarningText(text: "This will permanently remove all podcast feeds, episodes, downloads, progress, and favorites from both iCloud and local storage.")
+                    WarningText(text: "This will permanently remove all podcast feeds, episodes, downloads, progress, and favorites from both iCloud and local storage. Please do not close the app during this process.")
                 }
             }
         }

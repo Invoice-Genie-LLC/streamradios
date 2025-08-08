@@ -49,34 +49,8 @@ struct RadioStationListView: View {
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
+                // Show simple loading message - detailed progress is in the banner
                 VStack(spacing: 20) {
-                    // Progress ring
-                    ZStack {
-                        Circle()
-                            .stroke(Color.adaptiveSecondaryText.opacity(0.2), lineWidth: 8)
-                            .frame(width: 120, height: 120)
-                        
-                        Circle()
-                            .trim(from: 0, to: viewModel.loadingProgress)
-                            .stroke(Color.blue, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                            .frame(width: 120, height: 120)
-                            .rotationEffect(.degrees(-90))
-                            .animation(.easeInOut(duration: 0.3), value: viewModel.loadingProgress)
-                        
-                        VStack(spacing: 4) {
-                            Text("\(Int(viewModel.loadingProgress * 100))%")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.adaptivePrimaryText)
-                            
-                            if viewModel.totalStationsToLoad > 0 {
-                                Text("\(viewModel.loadingStationsCount)/\(viewModel.totalStationsToLoad)")
-                                    .font(.caption)
-                                    .foregroundColor(.adaptiveSecondaryText)
-                            }
-                        }
-                    }
-                    
                     VStack(spacing: 8) {
                         Text("Loading Stations")
                             .font(.headline)

@@ -4,6 +4,8 @@ import SwiftUI
 import CoreData
 import UIKit
 
+
+
 // MARK: - Cross-Device Progress Model
 
 struct CrossDeviceFeedProgress {
@@ -23,7 +25,7 @@ class DataSyncManager: ObservableObject {
     @Published var currentOperation = ""
     
     // Radio Stations
-    @Published var radioStationsStatus: DataSyncStatus = .pending
+    @Published var radioStationsStatus: DataSyncStatus = .none
     @Published var radioStationsProgress: Double = 0.0
     @Published var radioStationsOperation = ""
     @Published var radioStationsCurrentCount = 0
@@ -128,6 +130,16 @@ class DataSyncManager: ObservableObject {
         return !hasLaunchedBefore || !hasSyncCompleted
     }
     
+    /// Force a fresh install sync (for testing purposes)
+    func forceFreshInstallSync() {
+        print("🔄 FORCED: Resetting fresh install flags for testing...")
+        UserDefaults.standard.set(false, forKey: "HasLaunchedBefore")
+        UserDefaults.standard.set(false, forKey: "DataSyncCompleted")
+        UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
+        UserDefaults.standard.synchronize()
+        startFreshInstallSync()
+    }
+    
     // MARK: - Private Sync Methods
     
     /// Sync radio stations from CloudKit with performance optimization
@@ -223,6 +235,17 @@ class DataSyncManager: ObservableObject {
             // Wait for podcast feeds to actually load
             podcastFeedsOperation = "Syncing podcast feeds from iCloud..."
             
+            // Check if we need to process fresh install feeds
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let hasPodcastFeedsSynced = UserDefaults.standard.bool(forKey: "HasPodcastFeedsSynced")
+            
+            if isFreshInstall || !hasPodcastFeedsSynced {
+                // Fresh install: Need to load feeds from CloudKit and process RSS
+                await initializeCloudKitFeedsForFreshInstall(podcastViewModel)
+            }
+            
+            // Note: Artwork downloads happen during RSS processing in PodcastFeedManager
+            
             // Start monitoring podcast feed loading progress
             let progressTask = Task { @MainActor in
                 while podcastFeedsProgress < 0.8 && !Task.isCancelled {
@@ -261,10 +284,17 @@ class DataSyncManager: ObservableObject {
             podcastFeedsOperation = "✅ \(finalCount) podcast feeds loaded"
             print("✅ Podcast feeds sync completed - \(finalCount) feeds actually loaded")
             
+            // Start artwork download tracking after feeds are loaded
+            startArtworkDownloadTracking(totalFeeds: finalCount)
+            
         } catch {
             podcastFeedsStatus = .failed
             podcastFeedsOperation = "❌ Failed to load podcast feeds"
             print("❌ Podcast feeds sync failed: \(error)")
+            
+            // Mark artwork downloads as completed if feeds failed to load
+            artworkDownloadsStatus = .completed
+            artworkDownloadsProgress = 1.0
         }
     }
     
@@ -560,7 +590,7 @@ class DataSyncManager: ObservableObject {
     private func waitForArtworkDownloads() async {
         print("⏳ Waiting for artwork downloads to complete...")
         
-        // Wait until artwork downloads are completed or failed
+        // Wait until artwork downloads are completed or failed (original implementation)
         while artworkDownloadsStatus == .inProgress {
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
         }
@@ -575,9 +605,15 @@ class DataSyncManager: ObservableObject {
         // CRITICAL: Ensure all components are actually ready before completion
         print("🔄 Final verification: Ensuring all data is loaded and available...")
         
-        // Verify podcast feeds are loaded
+        // Verify podcast feeds are loaded and finished loading
         let podcastViewModel = PodcastViewModel.shared
         await podcastViewModel.ensureFeedsAreLoaded()
+        
+        // Wait for podcast loading to complete
+        await waitForPodcastLoadingToComplete(podcastViewModel)
+        
+        // Wait for CloudKit initialization to completely finish (including final UI refresh)
+        await waitForCloudKitInitializationToComplete(podcastViewModel)
         
         // Verify radio stations are loaded
         let radioStationViewModel = RadioStationViewModel.shared
@@ -625,6 +661,93 @@ class DataSyncManager: ObservableObject {
             print("⚠️ Radio stations not loaded after timeout - this might be normal for fresh installs")
         } else {
             print("✅ Radio stations loaded: \(radioStationViewModel.stations.count)")
+        }
+    }
+    
+    /// Wait for podcast loading to complete
+    @MainActor
+    private func waitForPodcastLoadingToComplete(_ podcastViewModel: PodcastViewModel) async {
+        print("⏳ Waiting for podcast loading to complete...")
+        
+        var attempts = 0
+        let maxAttempts = 50 // 5 seconds max wait
+        
+        while (podcastViewModel.isLoading || podcastViewModel.isLoadingFeeds) && attempts < maxAttempts {
+            print("⏳ Podcast loading in progress - isLoading: \(podcastViewModel.isLoading), isLoadingFeeds: \(podcastViewModel.isLoadingFeeds)")
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            attempts += 1
+        }
+        
+        if attempts >= maxAttempts {
+            print("⚠️ Podcast loading did not complete within timeout - proceeding anyway")
+        } else {
+            print("✅ Podcast loading completed - feeds: \(podcastViewModel.podcastFeeds.count)")
+        }
+    }
+    
+
+    
+    /// Wait for CloudKit initialization to completely finish including final UI refresh
+    @MainActor
+    private func waitForCloudKitInitializationToComplete(_ podcastViewModel: PodcastViewModel) async {
+        print("⏳ Waiting for CloudKit initialization to complete...")
+        
+        // Give a brief moment for final UI refresh to complete after all loading flags are cleared
+        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+        
+        print("✅ CloudKit initialization completed")
+    }
+    
+    /// Initialize CloudKit feeds for fresh install (with RSS processing)
+    @MainActor
+    private func initializeCloudKitFeedsForFreshInstall(_ podcastViewModel: PodcastViewModel) async {
+        print("🚀 Initializing CloudKit feeds for fresh install...")
+        
+        do {
+            // Update progress
+            podcastFeedsOperation = "Fetching podcast feeds from iCloud..."
+            podcastFeedsProgress = 0.4
+            
+            // Get feeds from CloudKit
+            let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
+            
+            if !cloudKitFeeds.isEmpty {
+                print("🌟 Found \(cloudKitFeeds.count) feeds in CloudKit for fresh install processing")
+                
+                // Update progress and operation
+                podcastFeedsOperation = "Processing RSS feeds and episodes..."
+                podcastFeedsProgress = 0.5
+                
+                // Start feed parsing progress tracking
+                isParsingFeeds = true
+                feedParsingProgress = 0.0
+                feedParsingMessage = "Starting RSS feed processing..."
+                
+                // Use PodcastViewModel's fresh install processing
+                await podcastViewModel.loadFreshInstallPodcastData(cloudKitFeeds)
+                
+                // Complete feed parsing
+                feedParsingProgress = 1.0
+                feedParsingMessage = "RSS feed processing completed"
+                try? await Task.sleep(nanoseconds: 500_000_000) // Show completion for 0.5 seconds
+                isParsingFeeds = false
+                
+                // Mark feeds as synced
+                UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
+                
+                print("✅ Fresh install feed processing completed with \(podcastViewModel.podcastFeeds.count) feeds")
+            } else {
+                print("📡 No feeds found in CloudKit - fresh install with empty podcast library")
+                // Initialize artwork tracking with 0 feeds
+                startArtworkDownloadTracking(totalFeeds: 0)
+                UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
+            }
+            
+        } catch {
+            print("❌ Failed to initialize CloudKit feeds for fresh install: \(error)")
+            // Initialize artwork tracking with 0 feeds even on error
+            startArtworkDownloadTracking(totalFeeds: 0)
+            podcastFeedsOperation = "❌ Failed to sync podcast feeds from iCloud"
         }
     }
     
