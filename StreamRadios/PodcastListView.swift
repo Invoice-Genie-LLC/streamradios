@@ -781,6 +781,7 @@ struct PodcastRowView: View {
                         .font(.title3)
                         .foregroundColor(.adaptiveSecondaryText)
                         .frame(width: arrowSize, height: iconSize)
+                        .padding(.trailing, 12)
                         .onTapGesture {
                             onTap()
                         }
@@ -791,18 +792,19 @@ struct PodcastRowView: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            // Enhanced background that covers the entire available space - similar to radio station styling
-            Rectangle()
+            // Rounded card with matching rounded stroke so borders are not visually clipped
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(isPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7))
-                .frame(maxWidth: .infinity)
                 .overlay(
-                    // Border highlight for currently playing episode - matching radio station style
-                    Rectangle()
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(isPlaying ? Color.blue.opacity(0.2) : Color.clear, lineWidth: 1)
                 )
         )
-        .cornerRadius(8)
-        .padding(.trailing, 16)
+        .padding(.trailing, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
     }
     
     private func checkAndPlayEpisode() {
