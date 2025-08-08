@@ -546,8 +546,8 @@ struct ContentView: View {
             .background(Color.adaptiveSectionBackground)
             .cornerRadius(10)
             
-            // Sorting arrow - shows only for All and Favorites tabs when not editing
-            if selectedTab == .radio && (viewModel.selectedSubTab == .all || viewModel.selectedSubTab == .favorites) && !isEditingMode {
+            // Sorting arrow - show for all radio sub-tabs when not editing
+            if selectedTab == .radio && !isEditingMode {
                 Button(action: { 
                     viewModel.sortStationsAlphabetically() 
                 }) {
