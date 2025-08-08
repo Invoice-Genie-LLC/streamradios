@@ -854,19 +854,9 @@ struct RadioStationListView: View {
             // Recent tab shows recent stations from ALL countries
             stations = viewModel.recentStations()
         case .favorites:
-            // Favorites tab shows favorites from ALL countries
-            if isEditing {
-                // When editing, use favoriteOrder for manual reordering
-                stations = viewModel.favoriteStations()
-            } else {
-                // When not editing, sort alphabetically by name
-                stations = viewModel.favoriteStations()
-                if viewModel.isAscendingSort {
-                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                } else {
-                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
-                }
-            }
+            // FIXED: Favorites tab should always respect favoriteOrder, not alphabetical sorting
+            // This ensures favorite order is preserved and displayed correctly in UI
+            stations = viewModel.favoriteStations()
         }
         
         // Apply search filter if search text is not empty
@@ -1089,24 +1079,10 @@ struct RadioStationListView: View {
             return
             
         case .favorites:
-            // ENHANCED CLOUDKIT SYNC: Use ViewModel method for proper CloudKit sync
-            print("📡 🔄 UI: Moving stations in Favorites tab with CloudKit sync")
-            
-            // Move within favorites (all countries)
-            var favoriteStations = filteredStations
-            favoriteStations.move(fromOffsets: source, toOffset: destination)
-            
-            // Update favorite order
-            for (index, favStation) in favoriteStations.enumerated() {
-                if let stationIndex = viewModel.stations.firstIndex(where: { $0.id == favStation.id }) {
-                    viewModel.stations[stationIndex].favoriteOrder = index
-                }
-            }
-            
-            // CRITICAL: Use ViewModel method to trigger CloudKit sync for favorites
-            Task {
-                await viewModel.syncFavoriteOrderChangesToCloudKit()
-            }
+            // FIXED: Use the ViewModel's moveFavoriteStation method for proper CloudKit sync
+            print("📡 🔄 UI: Moving stations in Favorites tab using ViewModel method")
+            viewModel.moveFavoriteStation(from: source, to: destination)
+            return // ViewModel handles CoreData saving and player index updates
             
         case .recent:
             // Recent stations can't be reordered manually (they're sorted by play time across all countries)
