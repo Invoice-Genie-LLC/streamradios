@@ -893,6 +893,9 @@ struct RadioStationListView: View {
                         self.viewModel.stations.remove(at: index)
                         self.viewModel.deleteStationFromCoreData(station)
                         
+                        // Mark that changes are expected on other devices after deletion
+                        self.viewModel.forceCloudKitCheckOnNextLaunch()
+                        
                         // INSTANT SYNC: Sync station removal immediately across devices
                         PodcastCloudKitManager.shared.syncRadioStationRemovedInstantly(
                             stationId: station.id,

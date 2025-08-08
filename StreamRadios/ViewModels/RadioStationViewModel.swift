@@ -64,6 +64,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var selectedSubTab: RadioSubTab = .recent
     @Published var activeSheet: ActiveSheet? = nil
     @Published var isLoading = false
+    @Published var isLoadingFromAPI = false
     @Published var isDeletingData: Bool = false
     @Published var deletionComplete: Bool = false
     @Published var isCloudKitOperationRunning = false
@@ -170,9 +171,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
             } else {
                 print("⚡ Skipping CloudKit radio station sync in ViewModel - loading from local storage only for better performance")
                 
-                // Check for CloudKit changes on subsequent launches and trigger automatic sync
+                // Only check for CloudKit changes if we haven't done a complete check recently or if changes are expected
                 Task {
-                    await checkForCloudKitChangesOnLaunch()
+                    await checkForCloudKitChangesIfNeeded()
                 }
             }
     
@@ -517,6 +518,31 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     // MARK: - Automatic CloudKit Change Detection
     
+    /// Smart CloudKit change detection that only runs when needed
+    private func checkForCloudKitChangesIfNeeded() async {
+        print("🔍 Checking if CloudKit change detection is needed...")
+        
+        // Check if we've already done a complete sync check recently
+        let lastSyncCheckTime = UserDefaults.standard.object(forKey: "LastSyncCheckTime") as? Date ?? Date.distantPast
+        let timeSinceLastCheck = Date().timeIntervalSince(lastSyncCheckTime)
+        let minimumCheckInterval: TimeInterval = 3600 // 1 hour between automatic checks
+        
+        // Only run sync check if:
+        // 1. It's been more than 1 hour since last check, OR
+        // 2. There's a flag indicating changes are expected, OR  
+        // 3. We've never done a sync check before
+        let shouldPerformCheck = timeSinceLastCheck > minimumCheckInterval || 
+                                UserDefaults.standard.bool(forKey: "ExpectingCloudKitChanges") ||
+                                lastSyncCheckTime == Date.distantPast
+        
+        if shouldPerformCheck {
+            print("✅ Performing CloudKit change detection - last check: \(Int(timeSinceLastCheck))s ago")
+            await checkForCloudKitChangesOnLaunch()
+        } else {
+            print("⏭️ Skipping CloudKit change detection - checked recently (\(Int(timeSinceLastCheck))s ago)")
+        }
+    }
+    
     /// Check for CloudKit changes on app launch and trigger sync banner if needed
     private func checkForCloudKitChangesOnLaunch() async {
         print("🔍 Checking for CloudKit changes on app launch...")
@@ -536,7 +562,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 await MainActor.run {
                     // Update DataSyncManager to show sync banner
                     DataSyncManager.shared.radioStationsStatus = .inProgress
-                    DataSyncManager.shared.radioStationsOperation = "Syncing \(newStationsCount) new stations from other devices..."
+                    DataSyncManager.shared.radioStationsOperation = "Loading \(newStationsCount) new stations from other devices..."
                     DataSyncManager.shared.radioStationsProgress = 0.0
                     DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
                     DataSyncManager.shared.radioStationsCurrentCount = localStationCount
@@ -553,7 +579,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 await MainActor.run {
                     // Update DataSyncManager to show sync banner  
                     DataSyncManager.shared.radioStationsStatus = .inProgress
-                    DataSyncManager.shared.radioStationsOperation = "Syncing station deletions from other devices..."
+                    DataSyncManager.shared.radioStationsOperation = "Loading station deletions from other devices..."
                     DataSyncManager.shared.radioStationsProgress = 0.0
                     DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
                     DataSyncManager.shared.radioStationsCurrentCount = localStationCount
@@ -563,26 +589,38 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 await syncStationsFromCloudKitWithProgress()
                 
             } else {
-                // Station counts match, but check for modifications by comparing timestamps
-                print("📊 Station counts match, checking for modifications...")
-                let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations)
+                // Station counts match - only sync if there are significant changes worth showing to user
+                print("📊 Station counts match (\(localStationCount)), checking for significant modifications...")
                 
-                if hasModifications {
-                    print("📝 Detected station modifications on other devices, triggering sync...")
+                // Be more conservative: only check for modifications if the user hasn't synced recently
+                let lastSyncTime = UserDefaults.standard.object(forKey: "LastCloudKitSyncTime") as? Date ?? Date.distantPast
+                let timeSinceLastSync = Date().timeIntervalSince(lastSyncTime)
+                let minimumSyncInterval: TimeInterval = 300 // 5 minutes
+                
+                if timeSinceLastSync > minimumSyncInterval {
+                    let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations)
                     
-                    await MainActor.run {
-                        // Update DataSyncManager to show sync banner
-                        DataSyncManager.shared.radioStationsStatus = .inProgress
-                        DataSyncManager.shared.radioStationsOperation = "Syncing station updates from other devices..."
-                        DataSyncManager.shared.radioStationsProgress = 0.0
-                        DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
-                        DataSyncManager.shared.radioStationsCurrentCount = 0
+                    if hasModifications {
+                        print("📝 Detected station modifications on other devices, triggering sync...")
+                        
+                        await MainActor.run {
+                            // Update DataSyncManager to show sync banner
+                            DataSyncManager.shared.radioStationsStatus = .inProgress
+                            DataSyncManager.shared.radioStationsOperation = "Loading station updates from other devices..."
+                            DataSyncManager.shared.radioStationsProgress = 0.0
+                            DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
+                            DataSyncManager.shared.radioStationsCurrentCount = 0
+                        }
+                        
+                        // Trigger the sync with progress tracking
+                        await syncStationsFromCloudKitWithProgress()
+                    } else {
+                        print("✅ No significant CloudKit changes detected - station counts and modification times match")
+                        print("ℹ️ Skipping sync banner - no changes needed")
                     }
-                    
-                    // Trigger the sync with progress tracking
-                    await syncStationsFromCloudKitWithProgress()
                 } else {
-                    print("✅ No CloudKit changes detected, staying with local data")
+                    print("⏭️ Skipping modification check - synced recently (\(Int(timeSinceLastSync))s ago)")
+                    print("ℹ️ Skipping sync banner - no changes needed")
                 }
             }
             
@@ -590,6 +628,26 @@ class RadioStationViewModel: NSObject, ObservableObject {
             print("❌ Failed to check CloudKit changes: \(error)")
             // Don't trigger sync on error to avoid unnecessary network requests
         }
+        
+        // Mark that we've completed a sync check and clear any expectation flags
+        UserDefaults.standard.set(Date(), forKey: "LastSyncCheckTime")
+        UserDefaults.standard.set(false, forKey: "ExpectingCloudKitChanges")
+        print("📝 Sync check completed and timestamp saved")
+    }
+    
+    /// Mark that CloudKit changes are expected and should be checked on next launch
+    @MainActor
+    func markCloudKitChangesExpected() {
+        UserDefaults.standard.set(true, forKey: "ExpectingCloudKitChanges")
+        print("🔔 Marked CloudKit changes as expected - will check on next sync opportunity")
+    }
+    
+    /// Force a CloudKit change check on the next app launch (useful after manual changes)
+    @MainActor  
+    func forceCloudKitCheckOnNextLaunch() {
+        UserDefaults.standard.set(Date.distantPast, forKey: "LastSyncCheckTime")
+        UserDefaults.standard.set(true, forKey: "ExpectingCloudKitChanges")
+        print("🔄 Forced CloudKit check for next launch")
     }
     
     /// Sync stations from CloudKit with progress tracking for automatic sync
@@ -626,6 +684,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                                     DataSyncManager.shared.radioStationsOperation = "✅ \(stations.count) stations synced from other devices"
                                     DataSyncManager.shared.radioStationsStatus = .completed
                                     DataSyncManager.shared.radioStationsProgress = 1.0
+                                    
+                                    // Update the last sync time to prevent false positives on next check
+                                    UserDefaults.standard.set(Date(), forKey: "LastCloudKitSyncTime")
                                 }
                                 
                                 print("✅ Auto-synced \(stations.count) stations from CloudKit")
@@ -1412,6 +1473,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         return imageData.base64EncodedString()
     }
     
+    @MainActor 
     func addStation(name: String, url: String, iconData: String?, country: String) -> Bool {
         // Check if a station with the same URL already exists
         if stations.contains(where: { $0.url == url }) {
@@ -1437,6 +1499,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
         stations.append(newStation)
         print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
+        
+        // Mark that changes are expected on other devices after manual addition
+        forceCloudKitCheckOnNextLaunch()
         
         // ENHANCED CLOUDKIT SYNC: Save new station to CloudKit and sync across all devices
         Task {
@@ -1616,6 +1681,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
+    @MainActor
     func moveStation(from source: IndexSet, to destination: Int) {
         // Move the station in the array
         stations.move(fromOffsets: source, toOffset: destination)
@@ -1625,6 +1691,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         // Save to CoreData
         saveStationsToCoreData()
+        
+        // Mark that changes are expected on other devices after reordering
+        forceCloudKitCheckOnNextLaunch()
         
         // ENHANCED CLOUDKIT SYNC: Sync order changes to CloudKit
         Task {
@@ -1799,6 +1868,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @MainActor
     func fetchStationsFromAPI(for country: Country) async {
+        isLoadingFromAPI = true
         isLoading = true
         loadingProgress = 0.0
         totalStationsToLoad = 0
@@ -1849,6 +1919,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             guard !apiStations.isEmpty else {
                 print("📡 RadioBrowserAPI: No stations found for \(country.name)")
+                isLoadingFromAPI = false
                 isLoading = false
                 loadingProgress = 0.0
                 loadingPhase = ""
@@ -1994,6 +2065,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             guard !uniqueNewStations.isEmpty else {
                 print("📡 RadioBrowserAPI: All fetched stations already exist for \(country.name)")
                 await MainActor.run {
+                    isLoadingFromAPI = false
                     isLoading = false
                     loadingProgress = 0.0
                     loadingPhase = ""
@@ -2125,7 +2197,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         await MainActor.run {
+            isLoadingFromAPI = false
             isLoading = false
+            
+            // Mark that changes might be expected on other devices after API fetch
+            forceCloudKitCheckOnNextLaunch()
         }
         
         // Reset progress values after a short delay

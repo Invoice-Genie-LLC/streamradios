@@ -1451,8 +1451,8 @@ struct UnifiedRadioProgressBanner: View {
     // MARK: - Computed Properties
     
     private var shouldShowBanner: Bool {
-        // Show for active API fetching (show as soon as loading starts)
-        let hasAPIFetching = radioViewModel.isLoading
+        // Show for active API fetching (only when actually fetching from API, not Core Data loading)
+        let hasAPIFetching = radioViewModel.isLoadingFromAPI
         
         // Show for active CloudKit operations
         let hasActiveCloudKitSync = syncManager.radioStationsStatus == .inProgress

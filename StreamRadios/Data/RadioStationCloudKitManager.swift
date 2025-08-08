@@ -750,15 +750,15 @@ class RadioStationCloudKitManager: ObservableObject {
                 }
             }
             
-            // Get the most recent local modification (use app launch time as a proxy)
-            let lastAppLaunch = UserDefaults.standard.object(forKey: "LastAppLaunchTime") as? Date ?? Date.distantPast
+            // Get the timestamp of the last known CloudKit sync
+            let lastSyncTime = UserDefaults.standard.object(forKey: "LastCloudKitSyncTime") as? Date ?? Date.distantPast
             
-            // Update the last app launch time for next check
-            UserDefaults.standard.set(Date(), forKey: "LastAppLaunchTime")
+            // Only update sync time if we're not just checking (we'll update after successful sync)
+            // This prevents false positives on subsequent checks
             
-            // Check if CloudKit has newer modifications
-            if let cloudKitDate = mostRecentCloudKitModification, cloudKitDate > lastAppLaunch {
-                print("📝 CloudKit modifications detected - CloudKit: \(cloudKitDate), Last Launch: \(lastAppLaunch)")
+            // Check if CloudKit has newer modifications than our last sync
+            if let cloudKitDate = mostRecentCloudKitModification, cloudKitDate > lastSyncTime {
+                print("📝 CloudKit modifications detected - CloudKit: \(cloudKitDate), Last Sync: \(lastSyncTime)")
                 return true
             }
             
