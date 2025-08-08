@@ -585,17 +585,36 @@ class DataSyncManager: ObservableObject {
         }
     }
     
-    /// Wait for artwork downloads to complete
+    /// Wait for artwork downloads to complete with timeout
     @MainActor
     private func waitForArtworkDownloads() async {
         print("⏳ Waiting for artwork downloads to complete...")
         
-        // Wait until artwork downloads are completed or failed (original implementation)
-        while artworkDownloadsStatus == .inProgress {
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        // Set a maximum wait time of 30 seconds for artwork downloads
+        let maxWaitTime: TimeInterval = 30.0
+        let checkInterval: TimeInterval = 0.5
+        let maxChecks = Int(maxWaitTime / checkInterval)
+        var checks = 0
+        
+        // Wait until artwork downloads are completed, failed, or timeout
+        while artworkDownloadsStatus == .inProgress && checks < maxChecks {
+            try? await Task.sleep(nanoseconds: UInt64(checkInterval * 1_000_000_000))
+            checks += 1
+            
+            // Log progress every 10 seconds
+            if checks % 20 == 0 {
+                print("⏳ Still waiting for artwork downloads... (\(completedArtworkDownloads)/\(totalArtworkDownloads)) - \(Double(checks) * checkInterval)s elapsed")
+            }
         }
         
-        print("✅ Artwork downloads completed, proceeding with app initialization")
+        if checks >= maxChecks {
+            print("⚠️ Artwork downloads timed out after \(maxWaitTime)s - proceeding anyway")
+            artworkDownloadsStatus = .completed
+            artworkDownloadsProgress = 1.0
+            currentOperation = "Artwork downloads completed (some may have timed out)"
+        } else {
+            print("✅ Artwork downloads completed, proceeding with app initialization")
+        }
     }
     
     @MainActor

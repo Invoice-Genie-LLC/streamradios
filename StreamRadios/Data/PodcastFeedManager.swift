@@ -9,8 +9,24 @@ class PodcastFeedManager {
     
     // MARK: - Artwork Download Optimization
     
+    /// Concurrent artwork downloads semaphore (limit to 5 simultaneous downloads)
+    private static let artworkSemaphore = DispatchSemaphore(value: 5)
+    
     /// Download artwork with timeout to prevent hanging
     private func downloadArtworkWithTimeout(from url: URL, timeout: TimeInterval) async throws -> Data {
+        // Wait for semaphore to limit concurrent downloads
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                PodcastFeedManager.artworkSemaphore.wait()
+                continuation.resume()
+            }
+        }
+        
+        defer {
+            // Always release the semaphore
+            PodcastFeedManager.artworkSemaphore.signal()
+        }
+        
         // Create URLRequest with timeout
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
@@ -93,14 +109,15 @@ class PodcastFeedManager {
             os_log("🏷️ Using custom title: %@ (RSS title was: %@)", log: log, type: .info, customTitle, parsedFeed.title)
         }
         
-        // Download artwork during RSS processing (original implementation)
+        // Download artwork with timeout and optimization
         var feedWithArtwork = feed
         if let artworkUrlString = feed.artworkUrl, !artworkUrlString.isEmpty,
            let artworkUrl = URL(string: artworkUrlString) {
             os_log("🖼️ Downloading artwork for feed: %@", log: log, type: .info, feed.title)
             
             do {
-                let (artworkData, _) = try await URLSession.shared.data(from: artworkUrl)
+                // Use optimized download with 5 second timeout
+                let artworkData = try await downloadArtworkWithTimeout(from: artworkUrl, timeout: 5.0)
                 feedWithArtwork.imageData = artworkData
                 os_log("✅ Downloaded artwork (%d bytes) for feed: %@", log: log, type: .info, artworkData.count, feed.title)
                 
@@ -152,7 +169,8 @@ class PodcastFeedManager {
             os_log("🖼️ Downloading updated artwork for feed: %@", log: log, type: .info, updatedFeed.title)
             
             do {
-                let (artworkData, _) = try await URLSession.shared.data(from: artworkUrl)
+                // Use optimized download with 5 second timeout
+                let artworkData = try await downloadArtworkWithTimeout(from: artworkUrl, timeout: 5.0)
                 feedWithArtwork.imageData = artworkData
                 os_log("✅ Downloaded updated artwork (%d bytes) for feed: %@", log: log, type: .info, artworkData.count, updatedFeed.title)
                 
