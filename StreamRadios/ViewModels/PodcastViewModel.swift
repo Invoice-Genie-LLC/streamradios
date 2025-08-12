@@ -1302,13 +1302,12 @@ class PodcastViewModel: ObservableObject {
         let hasEpisodesInMemory = feed?.episodes.isEmpty == false
         
         await MainActor.run {
-            // Only show loading if we don't have episodes cached
-            if !hasEpisodesInMemory {
+            // Only show loading if we don't have episodes cached AND we don't have current episodes
+            if !hasEpisodesInMemory && self.currentEpisodes.isEmpty {
                 self.isLoadingEpisodes = true
             }
-            if isInitialLoad {
-                self.currentEpisodes = []
-            }
+            // SMOOTH LOADING: Don't clear currentEpisodes to prevent UI jump
+            // Let the new episodes replace them naturally to avoid flickering
         }
         
         // CRITICAL: Refresh episode states from local storage before displaying
@@ -1318,31 +1317,50 @@ class PodcastViewModel: ObservableObject {
         // AUTO-REFRESH: Check if feed needs RSS refresh for new episodes
         let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
         if shouldAutoRefresh {
-            do {
-                print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
-                let (updatedFeed, newEpisodes) = try await feedManager.refreshFeed(feedId)
-                
-                if !newEpisodes.isEmpty {
-                    print("✅ Found \(newEpisodes.count) new episodes - updating Core Data")
-                    try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+            // PERFORMANCE: Do RSS refresh in background to not block UI loading
+            // Add a small delay to ensure UI is fully loaded first
+            Task.detached(priority: .background) {
+                // Wait a moment for UI to settle before starting background refresh
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
+                do {
+                    print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
+                    let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
                     
-                    // Update the feed in memory with new episodes
-                    if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+                    if !newEpisodes.isEmpty {
+                        print("✅ Found \(newEpisodes.count) new episodes - updating Core Data")
+                        try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                        
+                        // Update the feed in memory with new episodes on main thread
                         await MainActor.run {
-                            var updatedFeedWithEpisodes = self.podcastFeeds[feedIndex]
-                            // Merge existing episodes with new ones, avoiding duplicates
-                            let existingEpisodeIds = Set(updatedFeedWithEpisodes.episodes.map { $0.id })
-                            let uniqueNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
-                            updatedFeedWithEpisodes.episodes.append(contentsOf: uniqueNewEpisodes)
-                            updatedFeedWithEpisodes.episodes.sort { $0.publicationDate > $1.publicationDate }
-                            self.podcastFeeds[feedIndex] = updatedFeedWithEpisodes
+                            if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+                                var updatedFeedWithEpisodes = self.podcastFeeds[feedIndex]
+                                // Merge existing episodes with new ones, avoiding duplicates
+                                let existingEpisodeIds = Set(updatedFeedWithEpisodes.episodes.map { $0.id })
+                                let uniqueNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
+                                
+                                // Only update if there are actually new episodes to avoid unnecessary UI jumps
+                                if !uniqueNewEpisodes.isEmpty {
+                                    print("🔄 Adding \(uniqueNewEpisodes.count) new episodes to UI for feed \(feedId)")
+                                    updatedFeedWithEpisodes.episodes.append(contentsOf: uniqueNewEpisodes)
+                                    updatedFeedWithEpisodes.episodes.sort { $0.publicationDate > $1.publicationDate }
+                                    self.podcastFeeds[feedIndex] = updatedFeedWithEpisodes
+                                    
+                                    // SMOOTH UPDATE: Only refresh if this is the currently selected feed AND user isn't scrolling
+                                    if self.selectedFeedId == feedId && !self.isUserScrolling {
+                                        // Use a gentle update instead of full refresh to prevent jumping
+                                        self.objectWillChange.send()
+                                    }
+                                } else {
+                                    print("ℹ️ No new episodes to add for feed \(feedId) - UI stays stable")
+                                }
+                            }
                         }
+                    } else {
+                        print("ℹ️ No new episodes found for feed \(feedId)")
                     }
-                } else {
-                    print("ℹ️ No new episodes found for feed \(feedId)")
+                } catch {
+                    print("❌ Failed to auto-refresh feed \(feedId): \(error)")
                 }
-            } catch {
-                print("❌ Failed to auto-refresh feed \(feedId): \(error)")
             }
         }
         
@@ -1445,7 +1463,10 @@ class PodcastViewModel: ObservableObject {
                 os_log("🔄 Refreshing feed from RSS: %@", log: log, type: .info, feedId)
                 
                 await MainActor.run {
-                    self.isLoadingEpisodes = true
+                    // Only show loading if we don't have episodes to prevent UI jump
+                    if self.currentEpisodes.isEmpty {
+                        self.isLoadingEpisodes = true
+                    }
                 }
                 
                 // CRITICAL FIX: Actually refresh from RSS feed to get new episodes
@@ -3021,34 +3042,46 @@ class PodcastViewModel: ObservableObject {
     
     /// Check if a feed should be refreshed from RSS for new episodes
     private func shouldRefreshFeedFromRSS(feedId: String, isInitialLoad: Bool) async -> Bool {
-        // Always refresh on initial load (when user opens a feed)
-        guard !isInitialLoad else {
-            print("🔄 Feed \(feedId) needs refresh: initial load")
-            return true
-        }
-        
-        // Check last refresh time
+        // Check last refresh time first
         let lastRefreshKey = "LastRSSRefresh_\(feedId)"
         let lastRefreshTime = UserDefaults.standard.double(forKey: lastRefreshKey)
         let currentTime = Date().timeIntervalSince1970
-        
-        // Refresh if it's been more than 1 hour since last refresh
         let hoursSinceLastRefresh = (currentTime - lastRefreshTime) / 3600
-        if hoursSinceLastRefresh >= 1.0 {
+        
+        // Check if feed has episodes in Core Data
+        let episodeCount = await getEpisodeCountForFeed(feedId)
+        
+        // CRITICAL: Only refresh from RSS if really needed to avoid delays
+        
+        // 1. If feed has no episodes at all, definitely refresh
+        if episodeCount == 0 {
+            print("🔄 Feed \(feedId) needs refresh: no episodes found")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            return true
+        }
+        
+        // 2. If it's been more than 4 hours since last refresh, do background refresh
+        if hoursSinceLastRefresh >= 4.0 {
             print("🔄 Feed \(feedId) needs refresh: \(Int(hoursSinceLastRefresh)) hours since last refresh")
             UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         
-        // Check if feed has very few episodes (might need a refresh)
-        let episodeCount = await getEpisodeCountForFeed(feedId)
-        if episodeCount < 5 {
+        // 3. If feed has very few episodes (< 3), might need refresh
+        if episodeCount < 3 {
             print("🔄 Feed \(feedId) needs refresh: only \(episodeCount) episodes available")
             UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         
-        print("ℹ️ Feed \(feedId) doesn't need refresh: \(episodeCount) episodes, last refreshed \(Int(hoursSinceLastRefresh * 60)) minutes ago")
+        // 4. For initial loads, only refresh if it's been more than 6 hours (reduced frequency)
+        if isInitialLoad && hoursSinceLastRefresh >= 6.0 {
+            print("🔄 Feed \(feedId) needs refresh on initial load: \(Int(hoursSinceLastRefresh)) hours since last refresh")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            return true
+        }
+        
+        print("⚡ Feed \(feedId) loading from Core Data: \(episodeCount) episodes available, last refreshed \(Int(hoursSinceLastRefresh * 60)) minutes ago")
         return false
     }
     
