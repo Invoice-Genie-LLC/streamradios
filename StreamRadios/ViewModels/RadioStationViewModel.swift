@@ -2015,15 +2015,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             // DEDUPLICATION: Filter out stations with identical URLs from the API response
-            // Only keep the first occurrence of each unique URL (usually the one with highest click count)
+            // Prioritize HTTPS URLs over HTTP when same URL exists with both protocols
             await MainActor.run {
                 loadingPhase = "Checking for duplicates..."
                 loadingProgress = 0.35
             }
             
-            var seenURLs = Set<String>()
+            var urlToStationMap = [String: RadioBrowserStation]()
             var processedCount = 0
-            let deduplicatedStations = apiStations.filter { apiStation in
+            
+            // First pass: collect all stations and handle HTTP/HTTPS duplicates
+            for apiStation in apiStations {
                 processedCount += 1
                 
                 // Update progress during deduplication
@@ -2035,16 +2037,49 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     }
                 }
                 
-                guard !apiStation.url.isEmpty else { return false }
+                guard !apiStation.url.isEmpty else { continue }
                 
-                if seenURLs.contains(apiStation.url) {
-                    print("🔄 Skipping duplicate URL: \(apiStation.url) (Station: \(apiStation.name))")
-                    return false
+                let url = apiStation.url.lowercased()
+                
+                // Create normalized URL by removing protocol to check for HTTP/HTTPS duplicates
+                let normalizedURL: String
+                if url.hasPrefix("https://") {
+                    normalizedURL = String(url.dropFirst(8)) // Remove "https://"
+                } else if url.hasPrefix("http://") {
+                    normalizedURL = String(url.dropFirst(7)) // Remove "http://"
+                } else {
+                    normalizedURL = url
                 }
                 
-                seenURLs.insert(apiStation.url)
-                return true
+                // Check if we already have this URL with a different protocol
+                let httpsURL = "https://" + normalizedURL
+                let httpURL = "http://" + normalizedURL
+                
+                let currentURL = apiStation.url
+                
+                if let existingStation = urlToStationMap[normalizedURL] {
+                    // We have a duplicate - prioritize HTTPS
+                    let existingIsHTTPS = existingStation.url.lowercased().hasPrefix("https://")
+                    let currentIsHTTPS = currentURL.lowercased().hasPrefix("https://")
+                    
+                    if currentIsHTTPS && !existingIsHTTPS {
+                        // Current is HTTPS, existing is HTTP - replace with HTTPS
+                        print("🔄 Replacing HTTP with HTTPS: \(existingStation.url) -> \(currentURL) (Station: \(apiStation.name))")
+                        urlToStationMap[normalizedURL] = apiStation
+                    } else if !currentIsHTTPS && existingIsHTTPS {
+                        // Current is HTTP, existing is HTTPS - keep existing
+                        print("🔄 Skipping HTTP (keeping HTTPS): \(currentURL) (Station: \(apiStation.name))")
+                    } else {
+                        // Both same protocol or both non-standard - keep first (usually higher click count)
+                        print("🔄 Skipping duplicate URL: \(currentURL) (Station: \(apiStation.name))")
+                    }
+                } else {
+                    // New URL - add it
+                    urlToStationMap[normalizedURL] = apiStation
+                }
             }
+            
+            let deduplicatedStations = Array(urlToStationMap.values)
             
             let duplicatesSkippedFromAPI = apiStations.count - deduplicatedStations.count
             if duplicatesSkippedFromAPI > 0 {
@@ -2096,9 +2131,21 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     cachedFaviconCount += 1
                 }
                 
+                // Clean station name by trimming whitespace and ALL leading special characters
+                var cleanedName = apiStation.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Remove all leading special characters (non-alphanumeric)
+                while !cleanedName.isEmpty && !cleanedName.first!.isLetter && !cleanedName.first!.isNumber {
+                    cleanedName.removeFirst()
+                    cleanedName = cleanedName.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                
+                // Final trim to ensure no trailing whitespace
+                cleanedName = cleanedName.trimmingCharacters(in: .whitespacesAndNewlines)
+                
                 return RadioStation(
                     id: apiStation.stationuuid,
-                    name: apiStation.name,
+                    name: cleanedName,
                     url: apiStation.url,
                     iconData: existingIconData, // Use cached favicon if available
                     country: country.name,
@@ -2199,7 +2246,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // Update DataSyncManager to show CloudKit save progress
                 DataSyncManager.shared.radioStationsStatus = .inProgress
-                DataSyncManager.shared.radioStationsOperation = "Saving \(uniqueNewStations.count) new stations to CloudKit..."
+                DataSyncManager.shared.radioStationsOperation = "Saving \(uniqueNewStations.count) new stations to iCloud.\nWait for iCloud sync to complete before importing other stations."
                 DataSyncManager.shared.radioStationsProgress = 0.95
                 DataSyncManager.shared.radioStationsTotalCount = uniqueNewStations.count
                 DataSyncManager.shared.radioStationsCurrentCount = 0
@@ -2212,7 +2259,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         
                         // Update DataSyncManager on success
                         DataSyncManager.shared.radioStationsStatus = .completed
-                        DataSyncManager.shared.radioStationsOperation = "Saved \(uniqueNewStations.count) new stations to CloudKit"
+                        DataSyncManager.shared.radioStationsOperation = "Saved \(uniqueNewStations.count) new stations to iCloud"
                         DataSyncManager.shared.radioStationsProgress = 1.0
                         DataSyncManager.shared.radioStationsCurrentCount = uniqueNewStations.count
                     } else {
@@ -2220,7 +2267,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         
                         // Update DataSyncManager on failure
                         DataSyncManager.shared.radioStationsStatus = .failed
-                        DataSyncManager.shared.radioStationsOperation = "Failed to save new stations to CloudKit"
+                        DataSyncManager.shared.radioStationsOperation = "Failed to save new stations to iCloud"
                         DataSyncManager.shared.radioStationsProgress = 0.0
                     }
                 }

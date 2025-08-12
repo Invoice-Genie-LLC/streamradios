@@ -1407,7 +1407,7 @@ struct UnifiedRadioProgressBanner: View {
                         Text(operationStatus)
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
                         Spacer()
                     }
                 }
