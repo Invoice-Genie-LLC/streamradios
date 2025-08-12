@@ -2273,6 +2273,10 @@ struct PodcastPlayerView: View {
                     )
             }
             }
+            .refreshable {
+                // Pull to refresh - fetch new episodes from RSS
+                await viewModel.refreshCurrentFeed()
+            }
             .background(Color.adaptiveBackground)
             .onAppear {
                 // Start end indicator animation

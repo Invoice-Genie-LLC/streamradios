@@ -1315,6 +1315,37 @@ class PodcastViewModel: ObservableObject {
         // This ensures any locally available states are shown immediately
         await refreshLocalEpisodeStates()
         
+        // AUTO-REFRESH: Check if feed needs RSS refresh for new episodes
+        let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
+        if shouldAutoRefresh {
+            do {
+                print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
+                let (updatedFeed, newEpisodes) = try await feedManager.refreshFeed(feedId)
+                
+                if !newEpisodes.isEmpty {
+                    print("✅ Found \(newEpisodes.count) new episodes - updating Core Data")
+                    try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                    
+                    // Update the feed in memory with new episodes
+                    if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+                        await MainActor.run {
+                            var updatedFeedWithEpisodes = self.podcastFeeds[feedIndex]
+                            // Merge existing episodes with new ones, avoiding duplicates
+                            let existingEpisodeIds = Set(updatedFeedWithEpisodes.episodes.map { $0.id })
+                            let uniqueNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
+                            updatedFeedWithEpisodes.episodes.append(contentsOf: uniqueNewEpisodes)
+                            updatedFeedWithEpisodes.episodes.sort { $0.publicationDate > $1.publicationDate }
+                            self.podcastFeeds[feedIndex] = updatedFeedWithEpisodes
+                        }
+                    }
+                } else {
+                    print("ℹ️ No new episodes found for feed \(feedId)")
+                }
+            } catch {
+                print("❌ Failed to auto-refresh feed \(feedId): \(error)")
+            }
+        }
+        
         // First check if episodes are already loaded in the feed object
         if let feed = podcastFeeds.first(where: { $0.id == feedId }),
            !feed.episodes.isEmpty {
@@ -1403,7 +1434,7 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Refresh episodes for current feed
+    /// Refresh episodes for current feed by fetching from RSS
     func refreshCurrentFeed() async {
         guard let feedId = selectedFeedId else { return }
         
@@ -1411,14 +1442,33 @@ class PodcastViewModel: ObservableObject {
         
         refreshTask = Task {
             do {
-                os_log("🔄 Refreshing feed: %@", log: log, type: .info, feedId)
+                os_log("🔄 Refreshing feed from RSS: %@", log: log, type: .info, feedId)
                 
-                // Reload episodes to show new ones
+                await MainActor.run {
+                    self.isLoadingEpisodes = true
+                }
+                
+                // CRITICAL FIX: Actually refresh from RSS feed to get new episodes
+                let (updatedFeed, newEpisodes) = try await feedManager.refreshFeed(feedId)
+                print("✅ RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
+                
+                // Update Core Data with new episodes
+                if !newEpisodes.isEmpty {
+                    try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                    print("💾 Saved \(newEpisodes.count) new episodes to Core Data")
+                }
+                
+                // Reload episodes from Core Data to show updated list including new episodes
                 await loadEpisodesForFeed(feedId)
+                
+                await MainActor.run {
+                    self.isLoadingEpisodes = false
+                }
                 
             } catch {
                 await MainActor.run {
                     self.error = "Failed to refresh feed: \(error.localizedDescription)"
+                    self.isLoadingEpisodes = false
                     os_log("❌ Failed to refresh feed: %@", log: self.log, type: .error, error.localizedDescription)
                 }
             }
@@ -2967,6 +3017,39 @@ class PodcastViewModel: ObservableObject {
                 print("📊 No episodes found for state sync")
             }
         }
+    }
+    
+    /// Check if a feed should be refreshed from RSS for new episodes
+    private func shouldRefreshFeedFromRSS(feedId: String, isInitialLoad: Bool) async -> Bool {
+        // Always refresh on initial load (when user opens a feed)
+        guard !isInitialLoad else {
+            print("🔄 Feed \(feedId) needs refresh: initial load")
+            return true
+        }
+        
+        // Check last refresh time
+        let lastRefreshKey = "LastRSSRefresh_\(feedId)"
+        let lastRefreshTime = UserDefaults.standard.double(forKey: lastRefreshKey)
+        let currentTime = Date().timeIntervalSince1970
+        
+        // Refresh if it's been more than 1 hour since last refresh
+        let hoursSinceLastRefresh = (currentTime - lastRefreshTime) / 3600
+        if hoursSinceLastRefresh >= 1.0 {
+            print("🔄 Feed \(feedId) needs refresh: \(Int(hoursSinceLastRefresh)) hours since last refresh")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            return true
+        }
+        
+        // Check if feed has very few episodes (might need a refresh)
+        let episodeCount = await getEpisodeCountForFeed(feedId)
+        if episodeCount < 5 {
+            print("🔄 Feed \(feedId) needs refresh: only \(episodeCount) episodes available")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            return true
+        }
+        
+        print("ℹ️ Feed \(feedId) doesn't need refresh: \(episodeCount) episodes, last refreshed \(Int(hoursSinceLastRefresh * 60)) minutes ago")
+        return false
     }
     
     /// Refresh any feeds that don't have episodes by re-parsing their RSS
