@@ -647,12 +647,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func forceCloudKitCheckOnNextLaunch() {
         UserDefaults.standard.set(Date.distantPast, forKey: "LastSyncCheckTime")
         UserDefaults.standard.set(true, forKey: "ExpectingCloudKitChanges")
-        print("🔄 Forced CloudKit check for next launch")
     }
     
     /// Merge CloudKit stations with local state to preserve Recent, Favorites, and other local data
     private func mergeCloudKitStationsWithLocalState(_ cloudKitStations: [RadioStation]) {
-        print("🔀 Merging \(cloudKitStations.count) CloudKit stations with local state...")
         
         // Create a dictionary of current local stations by ID for fast lookup
         var localStationsById: [String: RadioStation] = [:]
@@ -686,22 +684,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
                 
                 mergedStations.append(mergedStation)
-                print("🔀 Merged station: \(mergedStation.name) (Recent: \(mergedStation.lastPlayed != nil ? "✅" : "❌"), Favorite: \(mergedStation.isFavorite ? "✅" : "❌"))")
             } else {
                 // New station from CloudKit - add as-is
                 mergedStations.append(cloudKitStation)
-                print("🆕 Added new station from CloudKit: \(cloudKitStation.name)")
             }
         }
         
         // Update the stations array with merged data
         stations = mergedStations
-        print("✅ Merge completed: \(stations.count) total stations with local state preserved")
         
         // Log recent stations count for verification
         let recentCount = stations.filter { $0.lastPlayed != nil }.count
         let favoriteCount = stations.filter { $0.isFavorite }.count
-        print("📊 After merge - Recent: \(recentCount), Favorites: \(favoriteCount), Total: \(stations.count)")
     }
     
     /// Sync stations from CloudKit with progress tracking for automatic sync

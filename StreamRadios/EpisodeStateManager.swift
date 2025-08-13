@@ -132,6 +132,9 @@ class EpisodeStateManager: ObservableObject {
         
         // Mark successful initialization
         userDefaults.set(Date().timeIntervalSince1970, forKey: lastSuccessfulInitKey)
+        
+        // CRITICAL FIX: Check current UserDefaults size and clean if needed
+        checkAndCleanUserDefaultsSize()
     }
     
     // MARK: - Upgrade Protection Methods
@@ -359,25 +362,63 @@ class EpisodeStateManager: ObservableObject {
     }
     
     private func saveCurrentStates() {
-        // Save episode states
+        // CRITICAL FIX: Limit data size to prevent UserDefaults overflow
+        // Clean up old data if we have too many entries
+        cleanupOldDataIfNeeded()
+        
+        // Save episode states with size check
         let statesForSaving = episodeStates.mapValues { $0.rawValue }
         if let statesData = try? JSONEncoder().encode(statesForSaving) {
-            userDefaults.set(statesData, forKey: statesKey)
+            if statesData.count < 3_000_000 { // 3MB limit
+                userDefaults.set(statesData, forKey: statesKey)
+            } else {
+                print("⚠️ EpisodeStateManager: States data too large (\(statesData.count) bytes), cleaning up")
+                cleanupLargeDatasets()
+                // Try again with cleaned data
+                let cleanedStatesForSaving = episodeStates.mapValues { $0.rawValue }
+                if let cleanedStatesData = try? JSONEncoder().encode(cleanedStatesForSaving) {
+                    userDefaults.set(cleanedStatesData, forKey: statesKey)
+                }
+            }
         }
         
-        // Save episode progress
+        // Save episode progress with size check
         if let progressData = try? JSONEncoder().encode(episodeProgress) {
-            userDefaults.set(progressData, forKey: progressKey)
+            if progressData.count < 3_000_000 { // 3MB limit
+                userDefaults.set(progressData, forKey: progressKey)
+            } else {
+                print("⚠️ EpisodeStateManager: Progress data too large (\(progressData.count) bytes), cleaning up")
+                cleanupLargeDatasets()
+                if let cleanedProgressData = try? JSONEncoder().encode(episodeProgress) {
+                    userDefaults.set(cleanedProgressData, forKey: progressKey)
+                }
+            }
         }
         
-        // Save episode favorites
+        // Save episode favorites with size check
         if let favoritesData = try? JSONEncoder().encode(episodeFavorites) {
-            userDefaults.set(favoritesData, forKey: favoritesKey)
+            if favoritesData.count < 3_000_000 { // 3MB limit
+                userDefaults.set(favoritesData, forKey: favoritesKey)
+            } else {
+                print("⚠️ EpisodeStateManager: Favorites data too large (\(favoritesData.count) bytes), cleaning up")
+                cleanupLargeDatasets()
+                if let cleanedFavoritesData = try? JSONEncoder().encode(episodeFavorites) {
+                    userDefaults.set(cleanedFavoritesData, forKey: favoritesKey)
+                }
+            }
         }
         
-        // Save episode downloads
+        // Save episode downloads with size check
         if let downloadsData = try? JSONEncoder().encode(episodeDownloads) {
-            userDefaults.set(downloadsData, forKey: downloadsKey)
+            if downloadsData.count < 3_000_000 { // 3MB limit
+                userDefaults.set(downloadsData, forKey: downloadsKey)
+            } else {
+                print("⚠️ EpisodeStateManager: Downloads data too large (\(downloadsData.count) bytes), cleaning up")
+                cleanupLargeDatasets()
+                if let cleanedDownloadsData = try? JSONEncoder().encode(episodeDownloads) {
+                    userDefaults.set(cleanedDownloadsData, forKey: downloadsKey)
+                }
+            }
         }
         
         // Save currently playing episode
@@ -385,6 +426,136 @@ class EpisodeStateManager: ObservableObject {
             userDefaults.set(playingId, forKey: currentlyPlayingKey)
         } else {
             userDefaults.removeObject(forKey: currentlyPlayingKey)
+        }
+    }
+    
+    // MARK: - Data Cleanup Methods
+    
+    /// Clean up old data if we have too many entries to prevent UserDefaults overflow
+    private func cleanupOldDataIfNeeded() {
+        let maxEntries = 10_000 // Maximum number of episodes to keep in UserDefaults
+        
+        // Clean up episode states if too many
+        if episodeStates.count > maxEntries {
+            print("🧹 EpisodeStateManager: Cleaning up episode states (\(episodeStates.count) > \(maxEntries))")
+            let sortedStates = episodeStates.sorted { $0.key < $1.key }
+            let keepStates = Dictionary(uniqueKeysWithValues: sortedStates.suffix(maxEntries * 3 / 4)) // Keep 75% of max
+            episodeStates = keepStates
+        }
+        
+        // Clean up episode progress if too many
+        if episodeProgress.count > maxEntries {
+            print("🧹 EpisodeStateManager: Cleaning up episode progress (\(episodeProgress.count) > \(maxEntries))")
+            let sortedProgress = episodeProgress.sorted { $0.key < $1.key }
+            let keepProgress = Dictionary(uniqueKeysWithValues: sortedProgress.suffix(maxEntries * 3 / 4))
+            episodeProgress = keepProgress
+        }
+        
+        // Clean up favorites and downloads similarly
+        if episodeFavorites.count > maxEntries {
+            let sortedFavorites = episodeFavorites.sorted { $0.key < $1.key }
+            let keepFavorites = Dictionary(uniqueKeysWithValues: sortedFavorites.suffix(maxEntries * 3 / 4))
+            episodeFavorites = keepFavorites
+        }
+        
+        if episodeDownloads.count > maxEntries {
+            let sortedDownloads = episodeDownloads.sorted { $0.key < $1.key }
+            let keepDownloads = Dictionary(uniqueKeysWithValues: sortedDownloads.suffix(maxEntries * 3 / 4))
+            episodeDownloads = keepDownloads
+        }
+    }
+    
+    /// Clean up datasets when they become too large
+    private func cleanupLargeDatasets() {
+        let targetSize = 5_000 // Target maximum entries
+        
+        // Only keep the most recent entries for each dataset
+        if episodeStates.count > targetSize {
+            let sortedStates = episodeStates.sorted { $0.key < $1.key }
+            episodeStates = Dictionary(uniqueKeysWithValues: sortedStates.suffix(targetSize))
+            print("🧹 EpisodeStateManager: Cleaned episode states to \(episodeStates.count) entries")
+        }
+        
+        if episodeProgress.count > targetSize {
+            let sortedProgress = episodeProgress.sorted { $0.key < $1.key }
+            episodeProgress = Dictionary(uniqueKeysWithValues: sortedProgress.suffix(targetSize))
+            print("🧹 EpisodeStateManager: Cleaned episode progress to \(episodeProgress.count) entries")
+        }
+        
+        if episodeFavorites.count > targetSize {
+            let sortedFavorites = episodeFavorites.sorted { $0.key < $1.key }
+            episodeFavorites = Dictionary(uniqueKeysWithValues: sortedFavorites.suffix(targetSize))
+            print("🧹 EpisodeStateManager: Cleaned episode favorites to \(episodeFavorites.count) entries")
+        }
+        
+        if episodeDownloads.count > targetSize {
+            let sortedDownloads = episodeDownloads.sorted { $0.key < $1.key }
+            episodeDownloads = Dictionary(uniqueKeysWithValues: sortedDownloads.suffix(targetSize))
+            print("🧹 EpisodeStateManager: Cleaned episode downloads to \(episodeDownloads.count) entries")
+        }
+    }
+    
+    /// Check and clean UserDefaults size if it's getting too large
+    private func checkAndCleanUserDefaultsSize() {
+        let maxDataSize = 2_000_000 // 2MB limit to stay well under 4MB
+        
+        // Check each data set size
+        var totalSize = 0
+        var oversizedKeys: [String] = []
+        
+        if let statesData = userDefaults.data(forKey: statesKey) {
+            totalSize += statesData.count
+            if statesData.count > maxDataSize {
+                oversizedKeys.append(statesKey)
+            }
+        }
+        
+        if let progressData = userDefaults.data(forKey: progressKey) {
+            totalSize += progressData.count
+            if progressData.count > maxDataSize {
+                oversizedKeys.append(progressKey)
+            }
+        }
+        
+        if let favoritesData = userDefaults.data(forKey: favoritesKey) {
+            totalSize += favoritesData.count
+            if favoritesData.count > maxDataSize {
+                oversizedKeys.append(favoritesKey)
+            }
+        }
+        
+        if let downloadsData = userDefaults.data(forKey: downloadsKey) {
+            totalSize += downloadsData.count
+            if downloadsData.count > maxDataSize {
+                oversizedKeys.append(downloadsKey)
+            }
+        }
+        
+        if totalSize > 3_500_000 || !oversizedKeys.isEmpty { // 3.5MB total limit
+            print("⚠️ EpisodeStateManager: UserDefaults too large (\(totalSize) bytes), cleaning up keys: \(oversizedKeys)")
+            
+            // Emergency cleanup - remove oversized data and reload from Core Data
+            for key in oversizedKeys {
+                userDefaults.removeObject(forKey: key)
+            }
+            
+            // Clear in-memory dictionaries to force reload from smaller dataset
+            if oversizedKeys.contains(statesKey) {
+                episodeStates.removeAll()
+            }
+            if oversizedKeys.contains(progressKey) {
+                episodeProgress.removeAll()
+            }
+            if oversizedKeys.contains(favoritesKey) {
+                episodeFavorites.removeAll()
+            }
+            if oversizedKeys.contains(downloadsKey) {
+                episodeDownloads.removeAll()
+            }
+            
+            print("✅ EpisodeStateManager: Cleaned up UserDefaults, will sync from Core Data")
+        } else if totalSize > 0 {
+            print("✅ EpisodeStateManager: UserDefaults size OK (\(totalSize) bytes)")
         }
     }
     
