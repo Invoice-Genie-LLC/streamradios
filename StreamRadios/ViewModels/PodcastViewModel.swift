@@ -52,6 +52,8 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     var feedId: String
     var localFilePath: String?
     var fileSize: Int64? // File size in bytes
+    var chapters: [PodcastChapter]? // Optional chapters
+    var notes: PodcastNotes? // Optional show notes
     
     /// Deterministic composite ID for duplicate detection and stable identification
     var compositeID: String {
@@ -67,7 +69,7 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
         return "det_\(abs(content.hashValue))"
     }
     
-    init(id: String = UUID().uuidString, title: String, descriptionText: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil) {
+    init(id: String = UUID().uuidString, title: String, descriptionText: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil, chapters: [PodcastChapter]? = nil, notes: PodcastNotes? = nil) {
         self.id = id
         self.title = title
         self.descriptionText = descriptionText
@@ -78,6 +80,8 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
         self.feedId = feedId
         self.localFilePath = localFilePath
         self.fileSize = fileSize
+        self.chapters = chapters
+        self.notes = notes
     }
     
     // Implement Hashable
@@ -90,6 +94,47 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     // Equatable based on unique identifier
     static func == (lhs: PodcastEpisode, rhs: PodcastEpisode) -> Bool {
         return lhs.id == rhs.id
+    }
+}
+
+/// Represents a chapter in a podcast episode
+struct PodcastChapter: Identifiable, Codable, Equatable, Hashable {
+    var id = UUID()
+    var title: String
+    var startTime: TimeInterval // in seconds
+    var url: String? // optional URL link
+    var imageUrl: String? // optional chapter-specific artwork
+    
+    init(title: String, startTime: TimeInterval, url: String? = nil, imageUrl: String? = nil) {
+        self.title = title
+        self.startTime = startTime
+        self.url = url
+        self.imageUrl = imageUrl
+    }
+}
+
+/// Represents notes/show notes for a podcast episode
+struct PodcastNotes: Codable, Equatable, Hashable {
+    var content: String // HTML or plain text content
+    var links: [PodcastLink] // extracted links from the notes
+    
+    init(content: String, links: [PodcastLink] = []) {
+        self.content = content
+        self.links = links
+    }
+}
+
+/// Represents a link in podcast notes
+struct PodcastLink: Identifiable, Codable, Equatable, Hashable {
+    var id = UUID()
+    var title: String
+    var url: String
+    var timeStamp: TimeInterval? // optional timestamp for time-linked notes
+    
+    init(title: String, url: String, timeStamp: TimeInterval? = nil) {
+        self.title = title
+        self.url = url
+        self.timeStamp = timeStamp
     }
 }
 

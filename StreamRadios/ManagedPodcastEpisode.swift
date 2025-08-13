@@ -47,6 +47,31 @@ extension PodcastModel {
            self.feedId = episode.feedId
            self.localFilePath = episode.localFilePath
            self.fileSize = episode.fileSize ?? 0
+           
+           // Store chapters and notes as JSON in Core Data
+           if let chapters = episode.chapters {
+               do {
+                   let chaptersData = try JSONEncoder().encode(chapters)
+                   self.chaptersData = chaptersData
+               } catch {
+                   print("❌ Failed to encode chapters: \(error)")
+                   self.chaptersData = nil
+               }
+           } else {
+               self.chaptersData = nil
+           }
+           
+           if let notes = episode.notes {
+               do {
+                   let notesData = try JSONEncoder().encode(notes)
+                   self.notesData = notesData
+               } catch {
+                   print("❌ Failed to encode notes: \(error)")
+                   self.notesData = nil
+               }
+           } else {
+               self.notesData = nil
+           }
        }
     
     func toPodcastEpisode() -> PodcastEpisode {
@@ -180,6 +205,26 @@ extension PodcastModel {
                 }
             }
             
+            // Decode chapters and notes from stored JSON data in Core Data
+            var chapters: [PodcastChapter]? = nil
+            var notes: PodcastNotes? = nil
+            
+            if let chaptersData = self.chaptersData {
+                do {
+                    chapters = try JSONDecoder().decode([PodcastChapter].self, from: chaptersData)
+                } catch {
+                    print("❌ Failed to decode chapters: \(error)")
+                }
+            }
+            
+            if let notesData = self.notesData {
+                do {
+                    notes = try JSONDecoder().decode(PodcastNotes.self, from: notesData)
+                } catch {
+                    print("❌ Failed to decode notes: \(error)")
+                }
+            }
+            
             let finalEpisode = PodcastEpisode(
                 id: episodeId,
                 title: self.title ?? "",
@@ -195,7 +240,9 @@ extension PodcastModel {
                 ),
                 feedId: self.feedId ?? "",
                 localFilePath: resolvedLocalFilePath,
-                fileSize: self.fileSize
+                fileSize: self.fileSize,
+                chapters: chapters,
+                notes: notes
             )
             
             // Only log final state for episodes with downloads or issues

@@ -366,9 +366,15 @@ class PodcastFeedManager {
                     // Filter truly new episodes (not already in database)
                     let existingEpisodeIds = try self.getExistingEpisodeIds(for: existingFeed.id, in: backgroundContext)
                     let actuallyNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
+                    let parsedExistingEpisodes = newEpisodes.filter { existingEpisodeIds.contains($0.id) }
                     
                     // Save new episodes
                     try self.saveEpisodesInBatches(actuallyNewEpisodes, for: managedFeed, in: backgroundContext)
+                    
+                    // Update existing episodes with newly parsed metadata (chapters/notes)
+                    if !parsedExistingEpisodes.isEmpty {
+                        try self.updateExistingEpisodes(parsedExistingEpisodes, feedId: existingFeed.id, in: backgroundContext)
+                    }
                     
                     try backgroundContext.save()
                     
@@ -382,7 +388,7 @@ class PodcastFeedManager {
                         }
                     }
                     
-                    os_log("🔄 Updated feed with %d new episodes", log: self.log, type: .info, actuallyNewEpisodes.count)
+                    os_log("🔄 Updated feed with %d new episodes and %d updated episodes", log: self.log, type: .info, actuallyNewEpisodes.count, parsedExistingEpisodes.count)
                     continuation.resume(returning: (updatedFeed, actuallyNewEpisodes))
                     
                 } catch {
@@ -459,6 +465,13 @@ class PodcastFeedManager {
                 episodeModel.isPlayed = false
                 episodeModel.isFavorite = false
                 episodeModel.isDownloaded = false
+                // Persist chapters and notes on first insert so they survive app relaunch
+                if let chapters = episode.chapters, let data = try? JSONEncoder().encode(chapters) {
+                    episodeModel.chaptersData = data
+                }
+                if let notes = episode.notes, let data = try? JSONEncoder().encode(notes) {
+                    episodeModel.notesData = data
+                }
                 
                 insertIndex += 1
                 return false
@@ -673,6 +686,16 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
                     currentEpisode?.fileSize = length
                 }
             }
+        case "podcast:chapters":
+            // Podcasting 2.0 external chapters reference
+            if isParsingItem, let url = attributeDict["url"], !url.isEmpty {
+                currentEpisode?.chaptersJSONURL = url
+            }
+        case "psc:chapters":
+            // Some feeds use "psc" namespace
+            if isParsingItem, let url = attributeDict["url"], !url.isEmpty {
+                currentEpisode?.chaptersJSONURL = url
+            }
         case "itunes:image":
             if !isParsingItem, let href = attributeDict["href"] {
                 feedArtworkUrl = href
@@ -715,6 +738,10 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
                 currentEpisode?.title = trimmedContent
             case "description":
                 currentEpisode?.description = trimmedContent
+            case "content:encoded":
+                currentEpisode?.contentEncoded = trimmedContent
+            case "itunes:summary":
+                currentEpisode?.itunesSummary = trimmedContent
             case "pubDate":
                 currentEpisode?.pubDate = trimmedContent
             case "guid":
@@ -768,6 +795,10 @@ private class EpisodeBuilder {
     var guid: String?
     var duration: String?
     var fileSize: Int64?
+    var contentEncoded: String? // For richer show notes
+    var itunesSummary: String? // iTunes-specific summary
+    var chapters: [PodcastChapter] = []
+    var chaptersJSONURL: String?
     let feedUrl: String
     
     init(feedUrl: String) {
@@ -801,6 +832,26 @@ private class EpisodeBuilder {
             )
         }
         
+        // Create show notes from available content and try to extract chapters
+        let (showNotes, extractedChapters) = createShowNotesAndChapters(
+            description: description,
+            contentEncoded: contentEncoded,
+            itunesSummary: itunesSummary
+        )
+        
+        // Use extracted chapters if no explicit chapters were found
+        if chapters.isEmpty && !extractedChapters.isEmpty {
+            chapters = extractedChapters
+        }
+        
+        // Try Podcasting 2.0 external JSON if still empty
+        if chapters.isEmpty, let jsonURL = chaptersJSONURL, !jsonURL.isEmpty {
+            if let external = fetchChaptersFromJSON(urlString: jsonURL), !external.isEmpty {
+                chapters = external
+            }
+        }
+        
+
         return PodcastEpisode(
             id: episodeId,
             title: title,
@@ -810,8 +861,261 @@ private class EpisodeBuilder {
             duration: episodeDuration,
             state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
             feedId: "", // Will be set when saving
-            fileSize: fileSize
+            fileSize: fileSize,
+            chapters: chapters.isEmpty ? nil : chapters,
+            notes: showNotes
         )
+    }
+    
+    // MARK: - Show Notes Creation
+    
+    private func createShowNotesAndChapters(description: String, contentEncoded: String?, itunesSummary: String?) -> (PodcastNotes?, [PodcastChapter]) {
+        // Use the richest content available: content:encoded > itunes:summary > description
+        let content = contentEncoded?.isEmpty == false ? contentEncoded! :
+                     itunesSummary?.isEmpty == false ? itunesSummary! : description
+        
+        guard !content.isEmpty else { return (nil, []) }
+        
+        // Extract links from the content
+        let links = extractLinksFromHTML(content)
+        
+        // Try to extract chapters from the content
+        let extractedChapters = parseChapters(from: content)
+        
+        let notes = PodcastNotes(content: content, links: links)
+        return (notes, extractedChapters)
+    }
+    
+    // MARK: - Link Extraction
+    
+    private func extractLinksFromHTML(_ html: String) -> [PodcastLink] {
+        var links: [PodcastLink] = []
+        
+        // Simple regex to find <a href="url">text</a> patterns
+        let pattern = #"<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>"#
+        
+        do {
+            let regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+            let nsString = html as NSString
+            let results = regex.matches(in: html, options: [], range: NSRange(location: 0, length: nsString.length))
+            
+            for result in results {
+                if result.numberOfRanges >= 3 {
+                    let urlRange = result.range(at: 1)
+                    let titleRange = result.range(at: 2)
+                    
+                    if urlRange.location != NSNotFound && titleRange.location != NSNotFound {
+                        let url = nsString.substring(with: urlRange)
+                        let title = nsString.substring(with: titleRange)
+                        
+                        // Skip empty or invalid URLs
+                        if !url.isEmpty && !title.isEmpty {
+                            links.append(PodcastLink(title: title, url: url))
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("Error extracting links: \(error)")
+        }
+        
+        return links
+    }
+    
+    // MARK: - Chapter Parsing
+    
+    private func parseChapters(from content: String) -> [PodcastChapter] {
+        var chapters: [PodcastChapter] = []
+        
+        // Normalize HTML into plain text lines
+        var normalized = content
+        let lineBreakTags = ["<br>", "<br/>", "<br />", "</p>", "</li>", "</div>"]
+        for tag in lineBreakTags {
+            normalized = normalized.replacingOccurrences(of: tag, with: "\n", options: [.caseInsensitive])
+        }
+        normalized = normalized.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        normalized = normalized
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+        
+        // Enhanced patterns to detect various chapter formats
+        let patterns = [
+            // Timestamp at end: "Chapter Title 4:12"
+            #"(.+?)\s+(\d{1,2}):(\d{2})(?:\s*$|\s*\n)"#,
+            // Timestamp at end with negative time: "Chapter Title -0:38"
+            #"(.+?)\s+(-?\d{1,2}):(\d{2})(?:\s*$|\s*\n)"#,
+            // Traditional formats: [MM:SS] or (MM:SS)
+            #"\[(\d{1,2}):(\d{2})\]\s*(.+?)(?=\n|\[|$)"#,
+            #"\((\d{1,2}):(\d{2})\)\s*(.+?)(?=\n|\(|$)"#,
+            // HH:MM:SS formats
+            #"\[(\d{1,2}):(\d{2}):(\d{2})\]\s*(.+?)(?=\n|\[|$)"#,
+            #"\((\d{1,2}):(\d{2}):(\d{2})\)\s*(.+?)(?=\n|\(|$)"#,
+            // Time at beginning: "4:12 Chapter Title"
+            #"^(\d{1,2}):(\d{2})\s+(.+?)(?=\n|$)"#,
+            // Time at beginning with hours: "1:23:45 Chapter Title"
+            #"^(\d{1,2}):(\d{2}):(\d{2})\s+(.+?)(?=\n|$)"#
+        ]
+        
+        for (patternIndex, pattern) in patterns.enumerated() {
+            do {
+                let regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .anchorsMatchLines])
+                let nsString = normalized as NSString
+                let results = regex.matches(in: normalized, options: [], range: NSRange(location: 0, length: nsString.length))
+                
+                for result in results {
+                    var startTime: TimeInterval = 0
+                    var title: String = ""
+                    
+                    // Pattern specific parsing
+                    if patternIndex == 0 || patternIndex == 1 { // "Chapter Title 4:12" or "Chapter Title -0:38"
+                        if result.numberOfRanges == 4 {
+                            let titleRange = result.range(at: 1)
+                            let minutesRange = result.range(at: 2)
+                            let secondsRange = result.range(at: 3)
+                            
+                            if titleRange.location != NSNotFound && minutesRange.location != NSNotFound && secondsRange.location != NSNotFound {
+                                title = nsString.substring(with: titleRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                                let minutes = Double(nsString.substring(with: minutesRange)) ?? 0
+                                let seconds = Double(nsString.substring(with: secondsRange)) ?? 0
+                                startTime = abs(minutes * 60 + seconds) // Handle negative times
+                            }
+                        }
+                    } else if patternIndex >= 2 && patternIndex <= 5 { // Traditional formats and HH:MM:SS
+                        if result.numberOfRanges == 4 { // MM:SS format
+                            let minutesRange = result.range(at: 1)
+                            let secondsRange = result.range(at: 2)
+                            let titleRange = result.range(at: 3)
+                            
+                            if minutesRange.location != NSNotFound && secondsRange.location != NSNotFound && titleRange.location != NSNotFound {
+                                let minutes = Double(nsString.substring(with: minutesRange)) ?? 0
+                                let seconds = Double(nsString.substring(with: secondsRange)) ?? 0
+                                title = nsString.substring(with: titleRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                                startTime = minutes * 60 + seconds
+                            }
+                        } else if result.numberOfRanges == 5 { // HH:MM:SS format
+                            let hoursRange = result.range(at: 1)
+                            let minutesRange = result.range(at: 2)
+                            let secondsRange = result.range(at: 3)
+                            let titleRange = result.range(at: 4)
+                            
+                            if hoursRange.location != NSNotFound && minutesRange.location != NSNotFound && 
+                               secondsRange.location != NSNotFound && titleRange.location != NSNotFound {
+                                let hours = Double(nsString.substring(with: hoursRange)) ?? 0
+                                let minutes = Double(nsString.substring(with: minutesRange)) ?? 0
+                                let seconds = Double(nsString.substring(with: secondsRange)) ?? 0
+                                title = nsString.substring(with: titleRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                                startTime = hours * 3600 + minutes * 60 + seconds
+                            }
+                        }
+                    } else { // Time at beginning formats
+                        if result.numberOfRanges == 4 { // MM:SS format
+                            let minutesRange = result.range(at: 1)
+                            let secondsRange = result.range(at: 2)
+                            let titleRange = result.range(at: 3)
+                            
+                            if minutesRange.location != NSNotFound && secondsRange.location != NSNotFound && titleRange.location != NSNotFound {
+                                let minutes = Double(nsString.substring(with: minutesRange)) ?? 0
+                                let seconds = Double(nsString.substring(with: secondsRange)) ?? 0
+                                title = nsString.substring(with: titleRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                                startTime = minutes * 60 + seconds
+                            }
+                        } else if result.numberOfRanges == 5 { // HH:MM:SS format
+                            let hoursRange = result.range(at: 1)
+                            let minutesRange = result.range(at: 2)
+                            let secondsRange = result.range(at: 3)
+                            let titleRange = result.range(at: 4)
+                            
+                            if hoursRange.location != NSNotFound && minutesRange.location != NSNotFound && 
+                               secondsRange.location != NSNotFound && titleRange.location != NSNotFound {
+                                let hours = Double(nsString.substring(with: hoursRange)) ?? 0
+                                let minutes = Double(nsString.substring(with: minutesRange)) ?? 0
+                                let seconds = Double(nsString.substring(with: secondsRange)) ?? 0
+                                title = nsString.substring(with: titleRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                                startTime = hours * 3600 + minutes * 60 + seconds
+                            }
+                        }
+                    }
+                    
+                    // Clean up title and add chapter
+                    if !title.isEmpty {
+                        // Remove common prefixes and clean up
+                        title = title.replacingOccurrences(of: "^\\d+\\.", with: "", options: .regularExpression)
+                        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        
+                        // Skip very short titles that are likely false positives
+                        if title.count > 2 {
+                            chapters.append(PodcastChapter(title: title, startTime: startTime))
+                        }
+                    }
+                }
+                
+                // If we found chapters with this pattern, stop trying other patterns
+                if !chapters.isEmpty { break }
+            } catch {
+                print("Error parsing chapters with pattern \(pattern): \(error)")
+            }
+        }
+        
+        // Sort chapters by start time
+        chapters.sort { $0.startTime < $1.startTime }
+        
+
+        return chapters
+    }
+}
+
+// MARK: - Podcasting 2.0 external chapters helpers
+private extension EpisodeBuilder {
+    func fetchChaptersFromJSON(urlString: String) -> [PodcastChapter]? {
+        guard let url = URL(string: urlString) else { return nil }
+        var result: [PodcastChapter]? = nil
+        let semaphore = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            defer { semaphore.signal() }
+            guard error == nil, let data = data else { return }
+            result = self.decodeChaptersJSON(data: data)
+        }.resume()
+        _ = semaphore.wait(timeout: .now() + 5.0)
+        return result
+    }
+    
+    struct ChaptersJSONRoot: Decodable { let chapters: [ChaptersJSONItem]? }
+    struct ChaptersJSONItem: Decodable {
+        let startTime: Double?
+        let start: String?
+        let title: String?
+        let url: String?
+        let img: String?
+        let imageUrl: String?
+    }
+    
+    func decodeChaptersJSON(data: Data) -> [PodcastChapter]? {
+        if let root = try? JSONDecoder().decode(ChaptersJSONRoot.self, from: data), let items = root.chapters {
+            let mapped: [PodcastChapter] = items.compactMap { item in
+                let title = (item.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return nil }
+                var startSeconds: TimeInterval = 0
+                if let s = item.startTime { startSeconds = s }
+                else if let startStr = item.start, !startStr.isEmpty { startSeconds = parseDuration(startStr) }
+                return PodcastChapter(title: title, startTime: startSeconds, url: item.url, imageUrl: item.img ?? item.imageUrl)
+            }
+            return mapped.isEmpty ? nil : mapped.sorted { $0.startTime < $1.startTime }
+        }
+        if let items = try? JSONDecoder().decode([ChaptersJSONItem].self, from: data) {
+            let mapped: [PodcastChapter] = items.compactMap { item in
+                let title = (item.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { return nil }
+                var startSeconds: TimeInterval = 0
+                if let s = item.startTime { startSeconds = s }
+                else if let startStr = item.start, !startStr.isEmpty { startSeconds = parseDuration(startStr) }
+                return PodcastChapter(title: title, startTime: startSeconds, url: item.url, imageUrl: item.img ?? item.imageUrl)
+            }
+            return mapped.isEmpty ? nil : mapped.sorted { $0.startTime < $1.startTime }
+        }
+        return nil
     }
 }
 

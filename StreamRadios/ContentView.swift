@@ -894,6 +894,8 @@ struct UnifiedPodcastPlayerView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.horizontalSizeClass) var sizeClass
     
+    @State private var showChaptersNotes = false
+    
     // Responsive sizing that scales with Dynamic Type
     private var artworkSize: CGFloat {
         sizeClass == .compact ? 50 : 60
@@ -941,8 +943,10 @@ struct UnifiedPodcastPlayerView: View {
             
             // Compact single-row layout with center alignment for Dynamic Type support
             HStack(alignment: .center, spacing: 10) {
-                // Tappable artwork area - center aligned
-                Button(action: navigateToCurrentEpisode) {
+                // Tappable artwork area - opens chapters/notes sheet
+                Button(action: {
+                    showChaptersNotes = true
+                }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 6)
                             .fill(Color.adaptiveBorder)
@@ -1042,6 +1046,14 @@ struct UnifiedPodcastPlayerView: View {
             Color.adaptiveSecondaryBackground
         )
         .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
+        .sheet(isPresented: $showChaptersNotes) {
+            PodcastChaptersNotesView(
+                episode: currentEpisode,
+                feed: currentFeed,
+                podcastPlayer: podcastPlayer,
+                isPresented: $showChaptersNotes
+            )
+        }
     }
 
     

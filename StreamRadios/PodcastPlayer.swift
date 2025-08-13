@@ -22,7 +22,7 @@ enum PodcastConnectionState {
     case error
 }
 
-class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
+public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var currentEpisode: PodcastEpisode?
     @Published var isPlaying: Bool = false
     @Published var userWantsToPlay: Bool = false  // CRITICAL: Persistent user intent flag like RadioPlayer

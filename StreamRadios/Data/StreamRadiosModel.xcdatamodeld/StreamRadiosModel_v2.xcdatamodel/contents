@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23231" systemVersion="24A335" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithSwiftData="YES" userDefinedModelVersionIdentifier="">
+    <entity name="CDStation" representedClassName="CDStation" syncable="YES" codeGenerationType="class">
+        <attribute name="country" optional="YES" attributeType="String"/>
+        <attribute name="favoriteOrder" optional="YES" attributeType="Integer 32" usesScalarValueType="YES"/>
+        <attribute name="favoritedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="iconData" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="isFavorite" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="isRecent" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="lastPlayed" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="name" optional="YES" attributeType="String"/>
+        <attribute name="order" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="url" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="FeedModel" representedClassName="FeedModel" syncable="YES" codeGenerationType="class">
+        <attribute name="artworkUrl" optional="YES" attributeType="String"/>
+        <attribute name="descriptionText" optional="YES" attributeType="String"/>
+        <attribute name="iconData" optional="YES" attributeType="String"/>
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="imageData" optional="YES" attributeType="Binary"/>
+        <attribute name="sortOrder" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
+        <attribute name="url" optional="YES" attributeType="String"/>
+        <relationship name="episodes" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="PodcastModel" inverseName="feed" inverseEntity="PodcastModel"/>
+    </entity>
+    <entity name="PodcastModel" representedClassName="PodcastModel" syncable="YES" codeGenerationType="class">
+        <attribute name="audioUrl" optional="YES" attributeType="String"/>
+        <attribute name="chaptersData" optional="YES" attributeType="Binary"/>
+        <attribute name="descriptionText" optional="YES" attributeType="String"/>
+        <attribute name="downloadProgress" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="duration" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="feedId" optional="YES" attributeType="String"/>
+        <attribute name="fileSize" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="id" optional="YES" attributeType="String"/>
+        <attribute name="isDownloaded" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="isFavorite" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="isPlayed" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="localFilePath" optional="YES" attributeType="String"/>
+        <attribute name="notesData" optional="YES" attributeType="Binary"/>
+        <attribute name="progress" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <attribute name="publicationDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
+        <relationship name="feed" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="FeedModel" inverseName="episodes" inverseEntity="FeedModel"/>
+    </entity>
+</model>
