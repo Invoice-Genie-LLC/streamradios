@@ -376,6 +376,9 @@ class PodcastFeedManager {
                         try self.updateExistingEpisodes(parsedExistingEpisodes, feedId: existingFeed.id, in: backgroundContext)
                     }
                     
+                    // Clean up any duplicates that might have been created during the refresh
+                    try self.cleanupDuplicateEpisodes(in: backgroundContext)
+                    
                     try backgroundContext.save()
                     
                     // CRITICAL: Ensure main context sees the changes immediately
@@ -446,13 +449,26 @@ class PodcastFeedManager {
         feedId: String,
         in context: NSManagedObjectContext
     ) throws {
+        guard !episodes.isEmpty else { return }
+        
+        // CRITICAL FIX: Double-check for duplicates before batch insert
+        // This prevents the duplicate issue that causes crashes
+        let episodeIds = episodes.map { $0.id }
+        let existingIds = try getExistingEpisodeIdsBatch(episodeIds, in: context)
+        let trulyNewEpisodes = episodes.filter { !existingIds.contains($0.id) }
+        
+        guard !trulyNewEpisodes.isEmpty else {
+            os_log("⚡ No new episodes to batch insert - all %d episodes already exist", log: log, type: .debug, episodes.count)
+            return
+        }
+        
         var insertIndex = 0
         
         let batchInsert = NSBatchInsertRequest(entity: PodcastModel.entity()) { (managedObject: NSManagedObject) -> Bool in
             guard let episodeModel = managedObject as? PodcastModel else { return true }
             
-            if insertIndex < episodes.count {
-                let episode = episodes[insertIndex]
+            if insertIndex < trulyNewEpisodes.count {
+                let episode = trulyNewEpisodes[insertIndex]
                 episodeModel.id = episode.id
                 episodeModel.title = episode.title
                 episodeModel.audioUrl = episode.audioUrl
@@ -482,7 +498,7 @@ class PodcastFeedManager {
         batchInsert.resultType = .objectIDs
         try context.execute(batchInsert)
         
-        os_log("⚡ Batch inserted %d new episodes", log: log, type: .info, episodes.count)
+        os_log("⚡ Batch inserted %d new episodes (filtered from %d)", log: log, type: .info, trulyNewEpisodes.count, episodes.count)
     }
     
     /// Update existing episodes while preserving download data
@@ -497,10 +513,28 @@ class PodcastFeedManager {
         fetchRequest.predicate = NSPredicate(format: "id IN %@", episodeIds)
         
         let existingEpisodes = try context.fetch(fetchRequest)
-        let existingEpisodesById: [String: PodcastModel] = Dictionary(uniqueKeysWithValues: existingEpisodes.compactMap { 
-            guard let id = $0.id else { return nil }
-            return (id, $0)
-        })
+        
+        // CRITICAL FIX: Handle duplicate episode IDs gracefully
+        // Use the first occurrence of each ID and log duplicates
+        var existingEpisodesById: [String: PodcastModel] = [:]
+        var duplicateCount = 0
+        
+        for episode in existingEpisodes {
+            guard let id = episode.id else { continue }
+            
+            if existingEpisodesById[id] != nil {
+                // Found duplicate - log it and skip
+                duplicateCount += 1
+                os_log("⚠️ Duplicate episode ID found in Core Data: %@", log: log, type: .error, id)
+                continue
+            }
+            
+            existingEpisodesById[id] = episode
+        }
+        
+        if duplicateCount > 0 {
+            os_log("⚠️ Found %d duplicate episodes in Core Data - using first occurrence only", log: log, type: .error, duplicateCount)
+        }
         
         // Update episodes while preserving download data
         for episode in episodes {
@@ -523,6 +557,38 @@ class PodcastFeedManager {
         os_log("🔄 Updated %d existing episodes", log: log, type: .info, episodes.count)
     }
     
+    /// Clean up duplicate episodes in Core Data (removes all but the most recent for each ID)
+    private func cleanupDuplicateEpisodes(in context: NSManagedObjectContext) throws {
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+        
+        let allEpisodes = try context.fetch(fetchRequest)
+        var seenIds = Set<String>()
+        var duplicatesToDelete: [PodcastModel] = []
+        
+        for episode in allEpisodes {
+            guard let id = episode.id else { continue }
+            
+            if seenIds.contains(id) {
+                // This is a duplicate - mark for deletion
+                duplicatesToDelete.append(episode)
+                os_log("🗑️ Marking duplicate episode for deletion: %@", log: log, type: .info, id)
+            } else {
+                seenIds.insert(id)
+            }
+        }
+        
+        // Delete duplicates
+        for duplicate in duplicatesToDelete {
+            context.delete(duplicate)
+        }
+        
+        if !duplicatesToDelete.isEmpty {
+            try context.save()
+            os_log("✅ Cleaned up %d duplicate episodes", log: log, type: .info, duplicatesToDelete.count)
+        }
+    }
+
     /// Get existing episode IDs in a single batch query
     private func getExistingEpisodeIdsBatch(
         _ episodeIds: [String],
