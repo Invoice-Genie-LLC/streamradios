@@ -20,6 +20,25 @@ struct PodcastChaptersNotesView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.presentationMode) var presentationMode
     
+    init(episode: PodcastEpisode, feed: PodcastFeed, podcastPlayer: PodcastPlayer, isPresented: Binding<Bool>) {
+        self.episode = episode
+        self.feed = feed
+        self.podcastPlayer = podcastPlayer
+        self._isPresented = isPresented
+        // Always default to Chapters on open
+        self._selectedTab = State(initialValue: 0)
+        // Pre-derive chapters from notes synchronously to avoid any initial delay
+        var derived: [PodcastChapter] = []
+        if (episode.chapters == nil || episode.chapters?.isEmpty == true), let content = episode.notes?.content, !content.isEmpty {
+            derived = parseChaptersFromContent(content)
+        }
+        self._fallbackChapters = State(initialValue: derived)
+        if !derived.isEmpty {
+            // Persist immediately so subsequent opens have chapters available
+            persistFallbackChapters(derived)
+        }
+    }
+    
     // Check if episode has chapters or notes
 	private var hasChapters: Bool {
 		if let chapters = episode.chapters, !chapters.isEmpty { return true }
@@ -86,24 +105,10 @@ struct PodcastChaptersNotesView: View {
             )
         }
 		.onAppear {
-            // Set default tab based on available content
-            if hasChapters && !hasNotes {
-                selectedTab = 0
-            } else if hasNotes && !hasChapters {
-                selectedTab = 1
-            }
-				// Fallback: derive chapters from notes when missing, and persist
-				if (episode.chapters == nil || episode.chapters?.isEmpty == true), let content = episode.notes?.content, !content.isEmpty {
-					let derived = parseChaptersFromContent(content)
-					if !derived.isEmpty {
-						self.fallbackChapters = derived
-						persistFallbackChapters(derived)
-					}
-				}
-				// Attempt to read embedded chapters from the audio asset as a last resort
-				if (episode.chapters == nil || episode.chapters?.isEmpty == true) && self.fallbackChapters.isEmpty {
-					Task { await loadChaptersFromAsset() }
-				}
+			// Attempt to read embedded chapters from the audio asset as a background enhancement
+			if (episode.chapters == nil || episode.chapters?.isEmpty == true) && self.fallbackChapters.isEmpty {
+				Task { await loadChaptersFromAsset() }
+			}
         }
     }
     
