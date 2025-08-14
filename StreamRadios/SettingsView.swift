@@ -34,6 +34,7 @@ struct ExceptionInfo: Identifiable {
 
 struct SettingsView: View {
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
+    @AppStorage("stopAfterEpisode") private var stopAfterEpisode = false
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.colorScheme) var colorScheme
@@ -227,6 +228,13 @@ struct SettingsView: View {
                 subtitle: "Automatically resume the last played station when opening the app",
                 isOn: $autoPlayLastStation,
                 icon: "play.circle.fill"
+            )
+
+            ToggleRow(
+                title: "Stop After Episode",
+                subtitle: "When an episode finishes, stop playback instead of playing the next one",
+                isOn: $stopAfterEpisode,
+                icon: "stop.circle.fill"
             )
         }
     }

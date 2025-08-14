@@ -1070,25 +1070,53 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 // Mark episode as completed (deprecated method for compatibility)
                 self.viewModel?.markEpisodeAsCompleted(currentEpisode)
-                
-                // Pause playback
-                self.pause()
-                
-                // Update playback info and Now Playing
-                self.updatePlaybackInfo()
-                self.updateNowPlayingInfo()
-                
-                // Notify CarPlay of episode completion
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("EpisodeCompleted"),
-                    object: nil,
-                    userInfo: [
-                        "episodeId": currentEpisode.id,
-                        "isCompleted": true
-                    ]
-                )
-                
-                os_log("🚗 Episode completion notification sent to CarPlay: %@", log: self.log, type: .info, currentEpisode.title)
+
+                // Determine behavior based on user preference
+                let stopAfter = UserDefaults.standard.bool(forKey: "stopAfterEpisode")
+
+                if stopAfter {
+                    // Stop playback entirely
+                    self.pause()
+                    self.updatePlaybackInfo()
+                    self.updateNowPlayingInfo()
+                    
+                    // Notify CarPlay of episode completion
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeCompleted"),
+                        object: nil,
+                        userInfo: [
+                            "episodeId": currentEpisode.id,
+                            "isCompleted": true
+                        ]
+                    )
+                    os_log("⏹️ Stopped after episode as per setting", log: self.log, type: .info)
+                } else {
+                    // Try to advance to next episode in the feed sequence
+                    if let currentIndex = self.currentEpisodeIndex,
+                       currentIndex + 1 < self.allEpisodesInFeed.count,
+                       let feed = self.currentFeed {
+                        let nextEpisode = self.allEpisodesInFeed[currentIndex + 1]
+                        os_log("▶️ Auto-advancing to next episode: %@", log: self.log, type: .info, nextEpisode.title)
+                        self.playEpisode(nextEpisode, feed: feed)
+                    } else {
+                        // No next episode; just pause and update
+                        self.pause()
+                        self.updatePlaybackInfo()
+                        self.updateNowPlayingInfo()
+                        os_log("⏹️ No next episode available; stopping", log: self.log, type: .info)
+                    }
+                    
+                    // Notify CarPlay of episode completion regardless
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeCompleted"),
+                        object: nil,
+                        userInfo: [
+                            "episodeId": currentEpisode.id,
+                            "isCompleted": true
+                        ]
+                    )
+                    os_log("🚗 Episode completion notification sent to CarPlay: %@", log: self.log, type: .info, currentEpisode.title)
+                }
             }
         }
     
