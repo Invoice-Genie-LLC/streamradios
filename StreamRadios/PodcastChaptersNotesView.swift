@@ -699,20 +699,21 @@ struct FormattedNoteItem: View {
             FormattedTextView(htmlContent: item.textHTML)
                 .font(fontForHeader(level))
                 .foregroundColor(.adaptivePrimaryText)
-                .padding(.top, 6)
+                .padding(.top, 10)
+                .padding(.bottom, 2)
         case .bullet:
-            HStack(alignment: .top, spacing: 8) {
-                Text(bulletSymbol(for: item.level))
-                    .font(.body)
-                    .foregroundColor(.adaptivePrimaryText)
-                    .padding(.top, 1)
+            HStack(alignment: .top, spacing: 10) {
+                BulletView(level: item.level)
+                    .padding(.top, 6)
                 FormattedTextView(htmlContent: item.textHTML)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.leading, CGFloat(max(0, item.level - 1)) * 16)
+            .padding(.leading, CGFloat(max(0, item.level - 1)) * 18)
+            .padding(.vertical, 2)
         case .paragraph:
             FormattedTextView(htmlContent: item.textHTML)
                 .foregroundColor(.adaptivePrimaryText)
+                .padding(.vertical, 2)
         }
     }
     
@@ -741,8 +742,8 @@ struct FormattedTextView: View {
         VStack(alignment: .leading, spacing: 4) {
             let components = parseHTMLLinks(htmlContent)
             
-            // Create a flow layout for mixed text and links
-            FlowTextView(components: components)
+            // Render mixed text and links inline with natural wrapping
+            InlineAttributedTextView(components: components)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -777,7 +778,8 @@ struct FormattedTextView: View {
                     
                     if urlRange.location != NSNotFound && textRange.location != NSNotFound {
                         let url = nsString.substring(with: urlRange)
-                        let linkText = nsString.substring(with: textRange)
+                        let rawLinkText = nsString.substring(with: textRange)
+                        let linkText = cleanHTMLText(rawLinkText)
                         components.append(TextComponent(text: linkText, isLink: true, url: url))
                     }
                 }
@@ -812,7 +814,7 @@ struct FormattedTextView: View {
     }
     
     private func cleanHTMLText(_ html: String) -> String {
-        return html
+        let stripped = html
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
@@ -820,6 +822,30 @@ struct FormattedTextView: View {
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&#39;", with: "'")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        return decodeNumericHTMLEntities(in: stripped)
+    }
+
+    private func decodeNumericHTMLEntities(in text: String) -> String {
+        let pattern = "&#(\\d+);"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return text }
+        let nsString = text as NSString
+        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+        var result = text
+        // Replace from end to start to keep ranges valid
+        for match in matches.reversed() {
+            if match.numberOfRanges == 2 {
+                let numRange = match.range(at: 1)
+                let numString = nsString.substring(with: numRange)
+                if let code = Int(numString), let scalar = UnicodeScalar(code) {
+                    let char = String(scalar)
+                    let fullRange = match.range(at: 0)
+                    if let swiftRange = Range(fullRange, in: result) {
+                        result.replaceSubrange(swiftRange, with: char)
+                    }
+                }
+            }
+        }
+        return result
     }
 }
 
@@ -833,7 +859,7 @@ struct FlowTextView: View {
     let components: [TextComponent]
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(components.enumerated()), id: \.offset) { index, component in
                 if component.isLink, let url = component.url {
                     Button(action: {
@@ -855,6 +881,81 @@ struct FlowTextView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Bullet View for Notes
+struct BulletView: View {
+    let level: Int
+    
+    var body: some View {
+        let size: CGFloat = level == 1 ? 6 : (level == 2 ? 5 : 4)
+        let color: Color = level == 1 ? .blue : .adaptivePrimaryText.opacity(0.7)
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+    }
+}
+
+// MARK: - Inline Attributed Text View
+struct InlineAttributedTextView: View {
+    let components: [TextComponent]
+    
+    var body: some View {
+        Text(makeAttributedString())
+            .font(.body)
+            .foregroundColor(.adaptivePrimaryText)
+            .textSelection(.enabled)
+    }
+    
+    private func makeAttributedString() -> AttributedString {
+        var out = AttributedString()
+        func collapseSpaces(_ s: String) -> String {
+            let collapsed = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            return collapsed
+        }
+        func needsSpaceBeforeAppending(to current: AttributedString) -> Bool {
+            guard let last = current.characters.last else { return false }
+            return !last.isWhitespace
+        }
+        func firstChar(of text: String) -> Character? { text.first }
+        func isNoLeadingSpacePunctuation(_ c: Character) -> Bool {
+            return ",[\\].:;!?)}]".contains(c)
+        }
+        let count = components.count
+        for (idx, component) in components.enumerated() {
+            let isLast = idx == count - 1
+            // Normalize interior spaces of this segment
+            var cleanText = collapseSpaces(component.text).trimmingCharacters(in: .whitespacesAndNewlines)
+            if component.isLink, let urlString = component.url, let url = URL(string: urlString) {
+                // Single space before link if needed
+                if needsSpaceBeforeAppending(to: out) { out.append(AttributedString(" ")) }
+                var seg = AttributedString(cleanText)
+                seg.link = url
+                seg.foregroundColor = .blue
+                seg.underlineStyle = .single
+                out.append(seg)
+                // Add one space after link unless followed by punctuation that shouldn't have a leading space
+                if !isLast {
+                    let next = components[idx + 1]
+                    let nextFirst = firstChar(of: next.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    if let nf = nextFirst, isNoLeadingSpacePunctuation(nf) {
+                        // No trailing space before punctuation
+                    } else {
+                        out.append(AttributedString(" "))
+                    }
+                }
+            } else {
+                // Non-link text: avoid double-spacing across boundaries
+                if let last = out.characters.last, last.isWhitespace {
+                    cleanText = cleanText.trimmingCharacters(in: .whitespaces)
+                }
+                out.append(AttributedString(cleanText))
+            }
+        }
+        // Trim trailing whitespace
+        while let last = out.characters.last, last.isWhitespace { _ = out.characters.popLast() }
+        return out
     }
 }
 
