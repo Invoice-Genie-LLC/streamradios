@@ -615,7 +615,8 @@ struct FormattedNotesView: View {
             let before = ns.substring(to: index).lowercased()
             let opens = (before.components(separatedBy: "<ul").count - 1) + (before.components(separatedBy: "<ol").count - 1)
             let closes = (before.components(separatedBy: "</ul>").count - 1) + (before.components(separatedBy: "</ol>").count - 1)
-            return max(0, opens - closes)
+            // Clamp to 0...5 so we support up to 5 levels deep consistently
+            return min(5, max(0, opens - closes))
         }
         
         regex.enumerateMatches(in: content, options: [], range: NSRange(location: 0, length: ns.length)) { match, _, _ in
@@ -708,7 +709,7 @@ struct FormattedNoteItem: View {
                 FormattedTextView(htmlContent: item.textHTML)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.leading, CGFloat(max(0, item.level - 1)) * 18)
+            .padding(.leading, CGFloat(max(0, item.level - 1)) * 16)
             .padding(.vertical, 2)
         case .paragraph:
             FormattedTextView(htmlContent: item.textHTML)
@@ -730,7 +731,8 @@ struct FormattedNoteItem: View {
         case 1: return "•"
         case 2: return "◦"
         case 3: return "▪︎"
-        default: return "–"
+        case 4: return "–"
+        default: return "·"
         }
     }
 }
@@ -740,14 +742,59 @@ struct FormattedTextView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            let components = parseHTMLLinks(htmlContent)
-            
-            // Render mixed text and links inline with natural wrapping
-            InlineAttributedTextView(components: components)
+            if let code = extractCodeBlock(from: htmlContent) {
+                CodeBlockView(code: code)
+            } else {
+                let components = parseHTMLLinks(htmlContent)
+                InlineAttributedTextView(components: components)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
+    private func extractCodeBlock(from html: String) -> String? {
+        let prePattern = #"<pre[^>]*>([\s\S]*?)</pre>"#
+        if let regex = try? NSRegularExpression(pattern: prePattern, options: [.caseInsensitive]) {
+            let ns = html as NSString
+            if let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: ns.length)) {
+                let inner = ns.substring(with: match.range(at: 1))
+                return cleanCodeHTML(inner)
+            }
+        }
+        let tickPattern = #"```([\s\S]*?)```"#
+        if let regex = try? NSRegularExpression(pattern: tickPattern, options: []) {
+            let ns = html as NSString
+            if let match = regex.firstMatch(in: html, options: [], range: NSRange(location: 0, length: ns.length)) {
+                let inner = ns.substring(with: match.range(at: 1))
+                return cleanCodeHTML(inner)
+            }
+        }
+        // Heuristic: treat as code block when text looks like command + multi-line parameters/JSON
+        // or contains special markers requested by the user
+        let raw = cleanCodeHTML(html)
+        let lower = raw.lowercased()
+        let commandKeywords = ["xattr ", "sudo ", "git ", "curl ", "defaults ", "brew ", "npm ", "pod ", "plutil ", "xcodebuild "]
+        let hasCommand = commandKeywords.contains(where: { lower.contains($0) })
+        let hasMultiLine = raw.contains("\n")
+        let hasJsonish = raw.contains("{") && raw.contains("}") && (raw.contains(":") || raw.contains("\"") )
+        let hasUserMarkers = lower.contains("sfsymbol:") || lower.contains("com.apple.icon") || lower.contains("xattr -w")
+        if (hasMultiLine && (hasCommand || hasJsonish)) || hasUserMarkers {
+            return raw
+        }
+        return nil
+    }
+    
+    private func cleanCodeHTML(_ html: String) -> String {
+        return html
+            .replacingOccurrences(of: #"<br\s*/?>"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"</p>"#, with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+    }
     private func parseHTMLLinks(_ html: String) -> [TextComponent] {
         var components: [TextComponent] = []
         
@@ -814,7 +861,18 @@ struct FormattedTextView: View {
     }
     
     private func cleanHTMLText(_ html: String) -> String {
-        let stripped = html
+        // Insert a space before certain special operators/punctuations when missing using regex replacement with capture
+        // e.g. "!=" -> " !=", "+=" -> " +=", ">=" -> " >="
+        let operatorPattern = #"(?<!\s)([!+\-*/%=<>]{1,2})"#
+        let withOperatorSpacing: String
+        if let regex = try? NSRegularExpression(pattern: operatorPattern, options: []) {
+            let ns = html as NSString
+            let range = NSRange(location: 0, length: ns.length)
+            withOperatorSpacing = regex.stringByReplacingMatches(in: html, options: [], range: range, withTemplate: " $1")
+        } else {
+            withOperatorSpacing = html
+        }
+        let stripped = withOperatorSpacing
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "&amp;", with: "&")
             .replacingOccurrences(of: "&lt;", with: "<")
@@ -853,6 +911,7 @@ struct TextComponent {
     let text: String
     let isLink: Bool
     let url: String?
+    var isCode: Bool = false
 }
 
 struct FlowTextView: View {
@@ -889,8 +948,9 @@ struct BulletView: View {
     let level: Int
     
     var body: some View {
-        let size: CGFloat = level == 1 ? 6 : (level == 2 ? 5 : 4)
-        let color: Color = level == 1 ? .blue : .adaptivePrimaryText.opacity(0.7)
+        let clamped = max(1, min(5, level))
+        let size: CGFloat = [0,6,5,5,4,4][clamped]
+        let color: Color = clamped == 1 ? .blue : .adaptivePrimaryText.opacity(0.7)
         Circle()
             .fill(color)
             .frame(width: size, height: size)
@@ -946,16 +1006,64 @@ struct InlineAttributedTextView: View {
                     }
                 }
             } else {
-                // Non-link text: avoid double-spacing across boundaries
+                // Non-link text or inline code
                 if let last = out.characters.last, last.isWhitespace {
                     cleanText = cleanText.trimmingCharacters(in: .whitespaces)
                 }
-                out.append(AttributedString(cleanText))
+                var seg = AttributedString(cleanText)
+                if component.isCode {
+                    seg.font = .system(.body, design: .monospaced)
+                    // Light background for inline code
+                    seg.backgroundColor = Color.adaptiveSecondaryBackground
+                }
+                out.append(seg)
             }
         }
         // Trim trailing whitespace
         while let last = out.characters.last, last.isWhitespace { _ = out.characters.popLast() }
         return out
+    }
+}
+
+// MARK: - Code Block View
+struct CodeBlockView: View {
+    let code: String
+    @Environment(\.colorScheme) private var colorScheme
+    
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .textSelection(.enabled)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.adaptivePrimaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+            Button(action: copy) {
+                Image(systemName: "doc.on.doc")
+                    .font(.caption)
+                    .foregroundColor(.blue)
+                    .padding(8)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(codeBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.adaptiveBorder, lineWidth: 1)
+                )
+        )
+        .padding(.vertical, 4)
+    }
+    
+    private var codeBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04)
+    }
+    
+    private func copy() {
+        UIPasteboard.general.string = code
     }
 }
 
