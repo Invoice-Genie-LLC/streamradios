@@ -117,7 +117,8 @@ class RadioPlayer: NSObject, ObservableObject {
             self.podcastPlayer?.setRadioPlayer(self)
         }
         
-        autoPlayLastStationSetup()
+        // Do not auto-restore on init; wait until user explicitly presses play
+        // Start-up UI/auto-restore will be handled explicitly by the app only when desired
     }
     
     // MARK: - Network Reconnection Setup
@@ -251,22 +252,34 @@ class RadioPlayer: NSObject, ObservableObject {
             .sink { [weak self] health in
                 guard let self = self else { return }
                 
-                // Only show buffering if buffer health is critically low AND player is actually having issues
-                // High-quality streams (like 320kbps) can have temporary buffer fluctuations that are normal
-                if health < 0.05 && (self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate || !self.isPlaying) {
-                    // Only set buffering state if player is actually waiting or not playing
-                    self.connectionState = .buffering
-                } else if self.isPlaying && self.player?.timeControlStatus == .playing {
-                    // Only set connected state if actively playing
-                    self.connectionState = .connected
+                // When paused or not playing, never show buffering; keep paused/disconnected UI
+                if !self.isPlaying || self.connectionState == .paused {
+                    self.isBuffering = false
+                    return
                 }
-                // Ignore buffer health fluctuations when audio is playing smoothly
+                
+                // Only show buffering if actively trying to play and the player is waiting
+                if health < 0.05, self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                    self.connectionState = .buffering
+                    self.isBuffering = true
+                } else if self.player?.timeControlStatus == .playing {
+                    // Actively playing
+                    self.connectionState = .connected
+                    self.isBuffering = false
+                }
+                // Ignore minor fluctuations otherwise
             }
             .store(in: &cancellables)
     }
     
     func autoPlayLastStationSetup() {
         print("🔄 Auto-play setup initiated - autoPlayLastStation: \(autoPlayLastStation)")
+        // If app requested suppression of global player on next launch, skip any UI/auto-restore once
+        if UserDefaults.standard.bool(forKey: "SuppressGlobalPlayerOnNextLaunch") {
+            print("🧹 SuppressGlobalPlayerOnNextLaunch active - skipping radio UI/auto-restore on launch")
+            UserDefaults.standard.set(false, forKey: "SuppressGlobalPlayerOnNextLaunch")
+            return
+        }
         
         // CRITICAL: Check if CarPlay is currently playing to avoid conflicts
         if CarPlayManager.shared.isCarPlayConnected && isPlaying {
@@ -558,12 +571,8 @@ class RadioPlayer: NSObject, ObservableObject {
                     case .paused:
                         self?.isPlaying = false
                         self?.isBuffering = false
-                        
-                        if self?.userWantsToPlay == true {
-                            self?.connectionState = .connecting
-                        } else {
-                            self?.connectionState = .paused
-                        }
+                        // If user paused, stay in paused state; do not show connecting/buffering
+                        self?.connectionState = .paused
                         
                     @unknown default:
                         break
@@ -673,12 +682,8 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.isPlaying = false
                         self?.isBuffering = false
                         print("⏸️ Station Transition: Player PAUSED")
-                        
-                        if self?.userWantsToPlay == true {
-                            self?.connectionState = .connecting
-                        } else {
-                            self?.connectionState = .paused
-                        }
+                        // Always show paused for a paused status; never connecting
+                        self?.connectionState = .paused
                         
                     @unknown default:
                         print("❓ Station Transition: Unknown player status")
@@ -757,6 +762,8 @@ class RadioPlayer: NSObject, ObservableObject {
             pause()
         } else {
             // Use our main play() method to ensure proper startup
+            // Ensure the UI reflects a non-buffering paused state before starting
+            connectionState = .paused
             play()
         }
         // Note: updateNowPlayingInfo() and updateWidget() are called within pause() and play()
@@ -862,12 +869,14 @@ class RadioPlayer: NSObject, ObservableObject {
     func pause() {
         guard let player = player else { return }
         
-        // User explicitly paused - clear intent
-        userWantsToPlay = false
+        // User explicitly paused - keep intent so UI remains visible
         
         player.pause()
         isPlaying = false
         connectionState = .paused
+        isBuffering = false
+        updateNowPlayingInfo()
+        updateWidget()
         
         // Track elapsed time when pausing
         if let startTime = playbackStartTime {

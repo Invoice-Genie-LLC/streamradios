@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var showPodcastListView: Bool
     @State private var seekPosition: Double
     @State private var showingSubscriptionView = false
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showAllEpisodes = false
     @State private var scrollToEpisodeID: String?
@@ -261,6 +262,17 @@ struct ContentView: View {
                 .allowsHitTesting(true) // Allow interaction with player
                 .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
             )
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+                // App is closing: dismiss the player UI overlay
+                isPlayerSheetPresented = false
+                // Clear intent so overlay condition reevaluates to false when next launched
+                podcastPlayer.userWantsToPlay = false
+                radioPlayer.userWantsToPlay = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                // When app is moving to background (potential close), dismiss the player UI
+                isPlayerSheetPresented = false
+            }
             
             // Full-screen data sync progress overlay for fresh installs
             DataSyncProgressView()
@@ -286,8 +298,13 @@ struct ContentView: View {
             return true
         }
         
-        // Show if user wants to play radio (regardless of current network status)
-        return radioPlayer.userWantsToPlay
+        // Show radio global player only when app is active
+        // and user wants radio OR radio is playing/paused with a station
+        if scenePhase == .active, radioPlayer.userWantsToPlay { return true }
+        if scenePhase == .active, (radioPlayer.isPlaying || radioPlayer.connectionState == .paused) && radioPlayer.currentlyPlayingStation != nil, radioPlayer.userWantsToPlay {
+            return true
+        }
+        return false
     }
     
     // MARK: - Radio Tab Content with Full Original Functionality
@@ -796,9 +813,8 @@ struct CompactPlayerView: View {
                                 .scaleEffect(0.8)
                                 .tint(.white)
                         } else {
-                            // Show pause if user wants to play (regardless of actual playback state)
-                            // Show play if user doesn't want to play
-                            Image(systemName: radioPlayer.userWantsToPlay ? "pause.fill" : "play.fill")
+                            // Show pause when actually playing; show play when paused or stopped
+                            Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.headline)
                                 .foregroundColor(.white)
                         }

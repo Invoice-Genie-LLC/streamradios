@@ -2359,13 +2359,13 @@ struct PodcastPlayerView: View {
     private func scrollToCurrentEpisodeIfNeeded(proxy: ScrollViewProxy) {
         // Only scroll once per view session
         guard !hasScrolledToCurrentEpisode else {
-            print("📍 SCROLL SKIP: Already scrolled to current episode in this session")
+            
             return
         }
         
         // Ensure view has appeared and episodes have loaded
         guard viewDidAppear && episodesDidLoad else {
-            print("📍 SCROLL WAIT: viewDidAppear=\(viewDidAppear), episodesDidLoad=\(episodesDidLoad)")
+            
             return
         }
         
@@ -2373,20 +2373,18 @@ struct PodcastPlayerView: View {
         guard let currentEpisode = podcastPlayer.currentEpisode,
               currentEpisode.feedId == feed.id else {
             // No episode playing for this feed - mark as complete so we don't keep checking
-            print("📍 SCROLL SKIP: No current episode playing for this feed (current: \(podcastPlayer.currentEpisode?.feedId ?? "none"), expected: \(feed.id))")
             hasScrolledToCurrentEpisode = true
             return
         }
         
         // Check if the episode exists in the current tab
         if viewModel.currentEpisodes.contains(where: { $0.id == currentEpisode.id }) {
-            print("📍 TAB SWITCH SCROLL: Scrolling to currently playing episode: \(currentEpisode.title) in tab: \(getTabName(selectedTab))")
             
             performScrollToEpisode(currentEpisode.id, proxy: proxy)
             
         } else {
             // Episode not in current tab - stay in current tab without scrolling
-            print("📍 TAB SWITCH SKIP: Currently playing episode not available in tab (\(getTabName(selectedTab))) - episode may be in different tab")
+            
             hasScrolledToCurrentEpisode = true
         }
     }
@@ -2420,9 +2418,7 @@ struct PodcastPlayerView: View {
         
         // Initialize state for this view appearance  
         episodesDidLoad = !viewModel.currentEpisodes.isEmpty && currentEpisodesForThisFeed
-        
-        print("📱 PodcastPlayerView appeared for feed: \(feed.title)")
-        
+                
         // Synchronize viewModel.currentTab with selectedTab to ensure proper filtering
         viewModel.currentTab = selectedTab
         

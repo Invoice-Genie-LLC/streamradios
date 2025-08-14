@@ -1522,7 +1522,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func togglePlayPause() {
         if isPlaying {
-            stop()  // Stops player and removes from UI when pausing
+            // Pause without clearing current episode/feed so GlobalPlayer remains visible
+            pause()
         } else {
             stopRadioPlayback()
             play()

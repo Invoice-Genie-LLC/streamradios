@@ -99,6 +99,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // Save radio state
         RadioPlayer.shared.saveLastPlayedStation()
+        // Request that global player be suppressed on next launch
+        UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
         
         // Force synchronize UserDefaults
         UserDefaults.standard.synchronize()

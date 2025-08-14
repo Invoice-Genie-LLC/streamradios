@@ -54,8 +54,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 // App was launched due to an alarm, play the alarm station
                 radioPlayer.playFavoriteStationForAlarm()
             } else {
-                // Normal app launch, load the last played station
-                radioPlayer.autoPlayLastStationSetup()
+                // Normal app launch: Do not auto-load or display the last station; wait for user action
+                // If previously requested, ensure suppression flag is cleared after honoring it
+                if UserDefaults.standard.bool(forKey: "SuppressGlobalPlayerOnNextLaunch") {
+                    UserDefaults.standard.set(false, forKey: "SuppressGlobalPlayerOnNextLaunch")
+                }
             }
             
             return true
@@ -66,6 +69,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         updatePodcastStateAndSave()
         PodcastPlayer.shared.handleAppWillTerminate()
         podcastViewModel.saveContextIfNeeded()
+        // Request that global player be suppressed on next launch
+        UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
         
         // Force synchronize UserDefaults to ensure data persistence
         UserDefaults.standard.synchronize()
@@ -75,6 +80,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Save state immediately when app resigns active status (might be force closed)
         updatePodcastStateAndSave()
         PodcastPlayer.shared.handleAppWillTerminate()
+        // Prepare to suppress global player if the app is swiped away shortly after
+        UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
         
         // Force synchronize to persist data
         UserDefaults.standard.synchronize()

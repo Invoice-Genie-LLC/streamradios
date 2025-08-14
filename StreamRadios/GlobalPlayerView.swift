@@ -41,8 +41,8 @@ struct GlobalPlayerView: View {
                         selectedTab = .podcast
                     },
                     onCloseButtonTap: {
-                        // Use stop() instead of pause() to clear user intent
-                        podcastPlayer.stop()
+                        // Do not dismiss the player when closing; just pause and keep it visible
+                        podcastPlayer.pause()
                     }
                 )
                 .onTapGesture {
@@ -98,11 +98,15 @@ struct GlobalPlayerView: View {
     }
     
     /// Determines if radio player should be shown
-    /// Shows radio player when:
-    /// - On radio tab, OR
-    /// - User wants to play radio (regardless of current network status or tab)
+    /// Show only when:
+    /// - User wants to play radio, OR
+    /// - Radio is actively playing or paused and a station is set
     private var shouldShowRadioPlayer: Bool {
-        return selectedTab == .radio || radioPlayer.userWantsToPlay
+        if radioPlayer.userWantsToPlay { return true }
+        if (radioPlayer.isPlaying || radioPlayer.connectionState == .paused) && radioPlayer.currentlyPlayingStation != nil {
+            return true
+        }
+        return false
     }
 }
 
