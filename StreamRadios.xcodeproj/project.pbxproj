@@ -62,6 +62,8 @@
 		7780E96F2C3E2C05009CCF6F /* Country.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E96E2C3E2C05009CCF6F /* Country.swift */; };
 		7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9702C3F2110009CCF6F /* CustomAlertView.swift */; };
 		778610622E50263D00108721 /* PodcastChaptersNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610612E50263D00108721 /* PodcastChaptersNotesView.swift */; };
+		778610642E50A5F600108721 /* SearchPodcastsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610632E50A5F600108721 /* SearchPodcastsView.swift */; };
+		778610662E50A8A700108721 /* PodcastPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610652E50A8A700108721 /* PodcastPreviewView.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */; };
@@ -183,6 +185,8 @@
 		7780E96E2C3E2C05009CCF6F /* Country.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Country.swift; sourceTree = "<group>"; };
 		7780E9702C3F2110009CCF6F /* CustomAlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomAlertView.swift; sourceTree = "<group>"; };
 		778610612E50263D00108721 /* PodcastChaptersNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastChaptersNotesView.swift; sourceTree = "<group>"; };
+		778610632E50A5F600108721 /* SearchPodcastsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPodcastsView.swift; sourceTree = "<group>"; };
+		778610652E50A8A700108721 /* PodcastPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastPreviewView.swift; sourceTree = "<group>"; };
 		778F68482E282B72009AE6FD /* StreamRadios.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamRadios.entitlements; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
@@ -284,10 +288,12 @@
 				7746179B2C17834200F442B3 /* CircularProgressView.swift */,
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
+				778610632E50A5F600108721 /* SearchPodcastsView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
 				77F50BCA2C647AEF00187488 /* PodcastListView.swift */,
 				774180512C6708020030B459 /* AudioPlayerProtocol.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
+				778610652E50A8A700108721 /* PodcastPreviewView.swift */,
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
 				77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */,
 				7741804F2C6703FC0030B459 /* PodcastPlayer.swift */,
@@ -581,6 +587,7 @@
 				77B4E0F32E086FEF0034F886 /* PodcastEpisodeManager.swift in Sources */,
 				77B4E0F42E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld in Sources */,
 				7709599F2E0A592700478E7C /* DataSyncManager.swift in Sources */,
+				778610662E50A8A700108721 /* PodcastPreviewView.swift in Sources */,
 				770959A02E0A592700478E7C /* DataSyncProgressView.swift in Sources */,
 				77B4E0F52E086FEF0034F886 /* PodcastCloudKitManager.swift in Sources */,
 				77B4E0F62E086FEF0034F887 /* RadioStationCloudKitManager.swift in Sources */,
@@ -595,6 +602,7 @@
 				77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */,
 				77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
+				778610642E50A5F600108721 /* SearchPodcastsView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				774FED5B2E1983FD0084FA72 /* AboutView.swift in Sources */,
 				774FED5C2E1983FD0084FA72 /* PrivacyPolicyView.swift in Sources */,
@@ -793,7 +801,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.0.3;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -833,7 +841,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.0.3;
 				NEW_SETTING = "";
 				PRODUCT_BUNDLE_IDENTIFIER = com.radio.streamradios;
 				PRODUCT_NAME = "$(TARGET_NAME)";

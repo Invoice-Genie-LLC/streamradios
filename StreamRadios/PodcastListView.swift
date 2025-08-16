@@ -14,6 +14,7 @@ struct PodcastListView: View {
     @EnvironmentObject private var viewModel: PodcastViewModel
     @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var showingAddPodcast = false
+    @State private var showingSearchPodcasts = false
     @State private var newPodcastTitle = ""
     @State private var newPodcastURL = ""
     @Binding var selectedPodcast: PodcastFeed?
@@ -96,7 +97,7 @@ struct PodcastListView: View {
                            Button(action: { viewModel.sortFeedsAlphabetically() }) {
                                Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
                            }
-                           Button(action: { showingAddPodcast = true }) {
+                           Button(action: { showingSearchPodcasts = true }) {
                                Image(systemName: "plus")
                            }
                        }
@@ -200,6 +201,9 @@ struct PodcastListView: View {
                        }
                    )
                }
+               .sheet(isPresented: $showingSearchPodcasts) {
+                   SearchPodcastsView(isPresented: $showingSearchPodcasts)
+               }
                
            }
            .alert(isPresented: $viewModel.showNoEpisodesAlert) {
@@ -226,7 +230,7 @@ struct PodcastListView: View {
                 .padding(.leading, 8)
             
             ZStack(alignment: .trailing) {
-                TextField("Search podcasts", text: $searchText)
+                TextField("Search saved podcasts", text: $searchText)
                     .padding(.vertical, 8)
                     .padding(.trailing, 30)
                     .autocapitalization(.none)

@@ -271,9 +271,6 @@ struct AddPodcastView: View {
     @State private var scrollToEpisodeID: String?
     @State private var showPodcastPlayerSheet = false
     @StateObject private var radioPlayer = RadioPlayer.shared
-    @StateObject private var searchService = PodcastSearchService()
-    @State private var searchText = ""
-    @State private var searchTask: Task<Void, Never>?
     
     // Progress indicator state
     @State private var isAddingPodcast = false
@@ -303,8 +300,7 @@ struct AddPodcastView: View {
             ZStack(alignment: .bottom) {
                 VStack(spacing: 0) {
                     ScrollView {
-                        LazyVStack(spacing: 24) {
-                            podcastSearchCard
+                        VStack(spacing: 24) {
                             podcastDetailsCard
                         }
                         .padding(.horizontal, 16)
@@ -349,12 +345,8 @@ struct AddPodcastView: View {
                         }
                     }
                 } else {
-                    // Adding new podcast - always clear search state, but preserve form fields if they exist
-                    print("🔧 DEBUG: New podcast mode - clearing search state")
-                    searchText = ""
-                    searchService.clearResults()
-                    
-                    // Dismiss keyboard if it's showing
+                    // Adding new podcast - dismiss keyboard if it's showing
+                    print("🔧 DEBUG: New podcast mode")
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     
                     if title.isEmpty && url.isEmpty {
@@ -413,198 +405,6 @@ struct AddPodcastView: View {
     }
     
     // MARK: - UI Components
-    
-    @ViewBuilder
-    private var podcastSearchCard: some View {
-        VStack(spacing: 16) {
-            // Search Header
-            searchHeader
-            
-            // Search Results
-            if searchService.isSearching {
-                loadingView
-            } else if !searchService.searchResults.isEmpty {
-                searchResultsList
-            } else if !searchText.isEmpty && !searchService.isSearching {
-                noResultsView
-            }
-            
-            // Error Message
-            if let error = searchService.searchError {
-                errorView(error)
-            }
-            
-            // Credit Section (required by PodcastIndex.org)
-            creditSection
-        }
-    }
-    
-    @ViewBuilder
-    private var searchHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.body)
-                    .foregroundColor(.blue)
-                
-                Text("Search Podcasts")
-                    .font(.headline)
-                    .foregroundColor(.adaptivePrimaryText)
-                
-                Spacer()
-            }
-            
-            HStack {
-                TextField("Search for podcasts...", text: $searchText)
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .foregroundColor(.adaptivePrimaryText)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                    .onChange(of: searchText) { newValue in
-                        performSearch(query: newValue)
-                    }
-                    .padding(.leading, 4)
-                
-                if !searchText.isEmpty {
-                    Button(action: {
-                                            searchText = ""
-                    searchService.clearResults()
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.adaptiveSecondaryText)
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.adaptiveFieldBackground)
-            .cornerRadius(8)
-        }
-        .padding(20)
-        .background(Color.adaptiveCardBackground)
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.adaptiveBorder, lineWidth: 0.5)
-        )
-    }
-    
-    @ViewBuilder
-    private var loadingView: some View {
-        HStack {
-            ProgressView()
-                .scaleEffect(0.8)
-            Text("Searching podcasts...")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .background(Color.adaptiveCardBackground)
-        .cornerRadius(8)
-    }
-    
-    @ViewBuilder
-    private var searchResultsList: some View {
-        LazyVStack(spacing: 12) {
-            ForEach(searchService.searchResults, id: \.id) { result in
-                PodcastSearchResultRow(result: result) {
-                    // Dismiss keyboard when a podcast is selected
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    
-                    // Populate the form fields when a podcast is selected
-                    title = result.title
-                    url = result.feedUrl
-                    
-                    // Clear search results and text to dismiss the selection list
-                    searchText = ""
-                    searchService.clearResults()
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-    }
-    
-    @ViewBuilder
-    private var noResultsView: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.largeTitle)
-                .foregroundColor(.adaptiveSecondaryText)
-            
-            Text("No podcasts found")
-                .font(.body)
-                .foregroundColor(.primary)
-            
-            Text("Try adjusting your search terms")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .background(Color.adaptiveCardBackground)
-        .cornerRadius(8)
-    }
-    
-    @ViewBuilder
-    private func errorView(_ error: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
-            
-            Text(error)
-                .font(.subheadline)
-                .foregroundColor(.primary)
-        }
-        .padding()
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(8)
-    }
-    
-    @ViewBuilder
-    private var creditSection: some View {
-        HStack(spacing: 4) {
-            Text("Powered by")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            Text("Apple iTunes")
-                .font(.caption)
-                .foregroundColor(.adaptiveSecondaryText)
-            
-            Text("&")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            Text("PodcastIndex.org")
-                .font(.caption)
-                .foregroundColor(.adaptiveSecondaryText)
-        }
-        .padding(.horizontal)
-    }
-    
-    private func performSearch(query: String) {
-        searchTask?.cancel()
-        
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        guard !trimmedQuery.isEmpty else {
-            searchService.clearResults()
-            return
-        }
-        
-        // Don't search for very short queries to avoid too many API calls
-        guard trimmedQuery.count >= 2 else {
-            return
-        }
-        
-        searchTask = Task {
-            // Debounce search by 800ms to reduce cancellations
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            
-            if !Task.isCancelled {
-                await searchService.searchPodcasts(query: trimmedQuery)
-            }
-        }
-    }
     
     @ViewBuilder
     private var podcastDetailsCard: some View {
@@ -747,10 +547,6 @@ struct AddPodcastView: View {
             HStack {
                 Button("Cancel") {
                     if !isAddingPodcast {
-                        // Clear search state when canceling
-                        searchText = ""
-                        searchService.clearResults()
-                        
                         // Dismiss keyboard
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                         
