@@ -54,15 +54,17 @@ struct AudioSettingsSheet: View {
                                 }
                                 
                                 // Speed buttons row
-                                HStack(spacing: 8) {
+                                HStack(spacing: 6) {
                                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0], id: \.self) { speed in
                                         Button(action: {
                                             setPlaybackSpeed(speed)
                                         }) {
                                             Text(formatSpeedText(speed))
-                                                .font(.system(size: 16, weight: .medium))
+                                                .font(.system(size: 14, weight: .medium))
                                                 .foregroundColor(playbackSpeed == speed ? .white : .primary)
-                                                .frame(minWidth: 40, minHeight: 36)
+                                                .frame(minWidth: 45, minHeight: 36)
+                                                .lineLimit(1)
+                                                .minimumScaleFactor(0.8)
                                                 .background(
                                                     RoundedRectangle(cornerRadius: 8)
                                                         .fill(playbackSpeed == speed ? Color.blue : Color.gray.opacity(0.15))
@@ -121,9 +123,13 @@ struct AudioSettingsSheet: View {
                                         Text("Feed-Specific Settings")
                                             .font(.body)
                                             .foregroundColor(.primary)
-                                        Text(feedSpecificSettingsEnabled ? "APPLIES TO CURRENT FEED ONLY" : "APPLIES TO ALL PODCASTS")
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.9)
+                                        Text("APPLIES TO CURRENT FEED ONLY")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
                                     }
                                     
                                     Spacer()
@@ -135,37 +141,26 @@ struct AudioSettingsSheet: View {
                                 }
                             }
                             
-                            if !feedSpecificSettingsEnabled {
-                                HStack {
-                                    Image(systemName: "info.circle.fill")
-                                        .foregroundColor(.blue)
-                                        .font(.caption)
-                                    Text("Playback speed will apply to all podcasts")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                                .padding(.top, 4)
-                            } else {
-                                HStack {
-                                    Image(systemName: "person.circle.fill")
-                                        .foregroundColor(.orange)
-                                        .font(.caption)
-                                    Text("Speed setting is unique to this podcast feed")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                                .padding(.top, 4)
+                            HStack {
+                                Image(systemName: "person.circle.fill")
+                                    .foregroundColor(.orange)
+                                    .font(.caption)
+                                Text("Speed setting is unique to this podcast feed")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Spacer()
                             }
+                            .padding(.top, 4)
                         }
                         .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
+                        .padding(.vertical, 20)
                         .background(Color.gray.opacity(0.08))
                         .cornerRadius(12)
+                        .clipped()
                     }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 100) // Extra padding for bottom safe area
+                    .padding(.bottom, 8)
+                    .padding(.bottom, 150) // Extra padding for bottom safe area and note readability
                 }
             }
             .navigationBarHidden(true)
@@ -213,6 +208,11 @@ struct AudioSettingsSheet: View {
             UserDefaults.standard.set(newValue, forKey: feedToggleKey)
         }
         
+        // If enabling feed-specific settings, reset speeds for non-feed-specific feeds
+        if newValue {
+            resetNonFeedSpecificSpeeds()
+        }
+        
         // Update PodcastPlayer state
         podcastPlayer.feedSpecificSettingsEnabled = newValue
         
@@ -224,6 +224,49 @@ struct AudioSettingsSheet: View {
         setPlaybackSpeed(playbackSpeed)
         
         UserDefaults.standard.synchronize()
+    }
+    
+    private func resetNonFeedSpecificSpeeds() {
+        // Get all UserDefaults keys to find feed-specific settings
+        let userDefaults = UserDefaults.standard
+        let allKeys = userDefaults.dictionaryRepresentation().keys
+        
+        // Find all feed-specific speed keys and toggle keys
+        let speedKeys = allKeys.filter { $0.hasPrefix("playbackSpeed_") }
+        let toggleKeys = allKeys.filter { $0.hasPrefix("feedSpecificSettings_") }
+        
+        // Get all unique feed IDs from both speed and toggle keys
+        var allFeedIds = Set<String>()
+        
+        // Add feed IDs from speed keys
+        for speedKey in speedKeys {
+            let feedId = String(speedKey.dropFirst("playbackSpeed_".count))
+            allFeedIds.insert(feedId)
+        }
+        
+        // Add feed IDs from toggle keys
+        for toggleKey in toggleKeys {
+            let feedId = String(toggleKey.dropFirst("feedSpecificSettings_".count))
+            allFeedIds.insert(feedId)
+        }
+        
+        // For each feed, check if it has feed-specific settings enabled
+        for feedId in allFeedIds {
+            let toggleKey = "feedSpecificSettings_\(feedId)"
+            let speedKey = "playbackSpeed_\(feedId)"
+            
+            // If this feed doesn't have feed-specific settings enabled, set it to default 1.0x speed
+            let hasFeedSpecificSettings = userDefaults.bool(forKey: toggleKey)
+            if !hasFeedSpecificSettings {
+                userDefaults.set(1.0, forKey: speedKey)
+                print("🧹 Reset feed \(feedId) to default 1.0x speed")
+            }
+        }
+        
+        // Also ensure the global default is set to 1.0x
+        userDefaults.set(1.0, forKey: "podcastPlaybackSpeed")
+        
+        userDefaults.synchronize()
     }
     
     private func setPlaybackSpeed(_ speed: Double) {
