@@ -32,6 +32,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var currentFeed: PodcastFeed?
     @Published var currentProgress: Double = 0
     @Published var connectionState: PodcastConnectionState = .disconnected
+    
+    // Audio Settings
+    @Published var playbackSpeed: Double = 1.0
+    @Published var feedSpecificSettingsEnabled: Bool = false
+    
     static let shared = PodcastPlayer()
     weak var radioPlayer: RadioPlayer?
     var player: AVPlayer?
@@ -87,6 +92,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     
     private init() {
+        // Load audio settings from UserDefaults
+        playbackSpeed = UserDefaults.standard.double(forKey: "podcastPlaybackSpeed") != 0 ? 
+                       UserDefaults.standard.double(forKey: "podcastPlaybackSpeed") : 1.0
+        feedSpecificSettingsEnabled = false // Will be loaded per-feed when needed
+        
         setupAudioSession()
                setupReachability()
                setupRemoteCommandCenter()
@@ -805,6 +815,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL: Set user intent to play podcast (like RadioPlayer)
         userWantsToPlay = true
         
+        // Load appropriate playback speed for this feed
+        currentFeed = feed
+        loadPlaybackSpeedForCurrentContext()
+        
         // CRITICAL FIX: Stop current playback FIRST to prevent multiple episodes showing as playing
         let previousEpisode = currentEpisode
         
@@ -1304,6 +1318,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.play()
                isPlaying = true
         
+        // Apply current audio settings
+        applyCurrentAudioSettings()
+        
         // REAL-TIME CROSS-DEVICE SYNC: Start periodic sync timer when playback begins
         setupCrossDeviceSyncTimer()
         
@@ -1569,6 +1586,74 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let targetTime = CMTime(seconds: time, preferredTimescale: 1)
         player.seek(to: targetTime)
         currentTime = time
+    }
+    
+    // MARK: - Audio Settings Methods
+    
+    func setPlaybackSpeed(_ speed: Double) {
+        playbackSpeed = speed
+        player?.rate = Float(speed)
+        
+        // Save based on feed-specific settings
+        if feedSpecificSettingsEnabled, let currentFeed = currentFeed {
+            UserDefaults.standard.set(speed, forKey: "playbackSpeed_\(currentFeed.id ?? "unknown")")
+        } else {
+            UserDefaults.standard.set(speed, forKey: "podcastPlaybackSpeed")
+        }
+        UserDefaults.standard.synchronize()
+        
+        os_log("🎵 Playback speed set to %.2fx", log: log, type: .info, speed)
+    }
+    
+    func setFeedSpecificSettingsEnabled(_ enabled: Bool) {
+        feedSpecificSettingsEnabled = enabled
+        
+        // Save to UserDefaults per feed
+        if let currentFeed = currentFeed {
+            let feedToggleKey = "feedSpecificSettings_\(currentFeed.id ?? "unknown")"
+            UserDefaults.standard.set(enabled, forKey: feedToggleKey)
+        }
+        UserDefaults.standard.synchronize()
+        
+        // Load appropriate speed setting
+        loadPlaybackSpeedForCurrentContext()
+        
+        os_log("🎵 Feed-specific settings %@ for feed %@", log: log, type: .info, enabled ? "enabled" : "disabled", currentFeed?.title ?? "unknown")
+    }
+    
+    private func loadPlaybackSpeedForCurrentContext() {
+        if let currentFeed = currentFeed {
+            // Check if this specific feed has feed-specific settings enabled
+            let feedToggleKey = "feedSpecificSettings_\(currentFeed.id ?? "unknown")"
+            let isFeedSpecific = UserDefaults.standard.bool(forKey: feedToggleKey)
+            
+            if isFeedSpecific {
+                // Load feed-specific speed if available
+                let feedSpecificSpeed = UserDefaults.standard.double(forKey: "playbackSpeed_\(currentFeed.id ?? "unknown")")
+                playbackSpeed = feedSpecificSpeed != 0 ? feedSpecificSpeed : 1.0
+                feedSpecificSettingsEnabled = true
+            } else {
+                // Load global speed for this feed
+                let globalSpeed = UserDefaults.standard.double(forKey: "podcastPlaybackSpeed")
+                playbackSpeed = globalSpeed != 0 ? globalSpeed : 1.0
+                feedSpecificSettingsEnabled = false
+            }
+        } else {
+            // Load global speed as fallback
+            let globalSpeed = UserDefaults.standard.double(forKey: "podcastPlaybackSpeed")
+            playbackSpeed = globalSpeed != 0 ? globalSpeed : 1.0
+            feedSpecificSettingsEnabled = false
+        }
+        applyCurrentAudioSettings()
+    }
+    
+    private func applyCurrentAudioSettings() {
+        // Apply playback speed if player is available
+        if let player = player {
+            player.rate = isPlaying ? Float(playbackSpeed) : 0.0
+        }
+        
+        // Apply other audio settings would go here in a full implementation
     }
     
     func saveProgressIfNeeded() {

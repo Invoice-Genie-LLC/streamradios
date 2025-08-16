@@ -61,10 +61,12 @@ struct RadioStationListView: View {
                                 .font(.subheadline)
                                 .foregroundColor(.adaptiveSecondaryText)
                                 .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
                                 .animation(.easeInOut(duration: 0.2), value: viewModel.loadingPhase)
                         }
                     }
                 }
+                .frame(maxWidth: .infinity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.adaptiveBackground)
             } else if viewModel.stations.isEmpty {

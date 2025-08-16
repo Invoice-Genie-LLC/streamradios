@@ -911,6 +911,7 @@ struct UnifiedPodcastPlayerView: View {
     @Environment(\.horizontalSizeClass) var sizeClass
     
     @State private var showChaptersNotes = false
+    @State private var showAudioSettings = false
     
     // Responsive sizing that scales with Dynamic Type
     private var artworkSize: CGFloat {
@@ -1044,6 +1045,17 @@ struct UnifiedPodcastPlayerView: View {
                                 .frame(width: buttonSize, height: buttonSize)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        
+                        // Audio settings button - responsive size
+                        Button(action: {
+                            showAudioSettings = true
+                        }) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: iconSize))
+                                .foregroundColor(.white)
+                                .frame(width: buttonSize, height: buttonSize)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     
                     // Connection status indicator for podcast player
@@ -1069,6 +1081,11 @@ struct UnifiedPodcastPlayerView: View {
                 podcastPlayer: podcastPlayer,
                 isPresented: $showChaptersNotes
             )
+        }
+        .sheet(isPresented: $showAudioSettings) {
+            AudioSettingsSheet(podcastPlayer: podcastPlayer)
+                .presentationDetents([.fraction(0.5), .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -1386,6 +1403,12 @@ struct UnifiedRadioProgressBanner: View {
                         .font(.headline)
                         .foregroundColor(iconColor)
                         .frame(width: 20)
+                        .transition(.asymmetric(
+                            insertion: .scale.combined(with: .opacity),
+                            removal: .scale.combined(with: .opacity)
+                        ))
+                        .animation(.easeInOut(duration: 0.4), value: currentOperationType)
+                        .animation(.easeInOut(duration: 0.4), value: iconColor)
                     
                     // Progress message
                     VStack(alignment: .leading, spacing: 2) {
@@ -1393,11 +1416,18 @@ struct UnifiedRadioProgressBanner: View {
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
+                            .id(bannerTitle)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                                removal: .opacity.combined(with: .scale(scale: 0.9))
+                            ))
+                            .animation(.easeInOut(duration: 0.4), value: bannerTitle)
                         
                         if !currentCountryInfo.isEmpty {
                             Text(currentCountryInfo)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
+                                .animation(.easeInOut(duration: 0.4), value: currentCountryInfo)
                         }
                     }
                     
@@ -1408,6 +1438,7 @@ struct UnifiedRadioProgressBanner: View {
                         .font(.headline)
                         .fontWeight(.semibold)
                         .foregroundColor(iconColor)
+                        .animation(.easeInOut(duration: 0.4), value: iconColor)
                 }
                 
                 // Progress bar
@@ -1436,6 +1467,7 @@ struct UnifiedRadioProgressBanner: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .lineLimit(2)
+                            .animation(.easeInOut(duration: 0.4), value: operationStatus)
                         Spacer()
                     }
                 }
@@ -1446,6 +1478,7 @@ struct UnifiedRadioProgressBanner: View {
             .cornerRadius(10)
             .padding(.horizontal, 12)
             .padding(.vertical, 2)
+            .animation(.easeInOut(duration: 0.4), value: bannerBackgroundColor)
             .transition(.asymmetric(
                 insertion: .opacity.combined(with: .move(edge: .top)),
                 removal: .opacity.combined(with: .move(edge: .top))
@@ -1480,11 +1513,14 @@ struct UnifiedRadioProgressBanner: View {
     private var progressIcon: some View {
         if currentOperationType == .cloudKitSave {
             Image(systemName: "icloud.and.arrow.up")
+                .id("cloudKitSave")
         } else if currentOperationType == .cloudKitFetch {
             Image(systemName: "icloud.and.arrow.down")
+                .id("cloudKitFetch")
         } else {
             // API fetching
             Image(systemName: "arrow.down.circle")
+                .id("apiFetch")
         }
     }
     

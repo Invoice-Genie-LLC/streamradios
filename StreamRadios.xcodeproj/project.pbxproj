@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		35784634DC5C44839E7A7E8C /* CarPlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */; };
 		7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA3A2C152EF2006D5EBB /* ContentView.swift */; };
-		BEA4F63E75A94FF0814F0C1F /* PodcastChaptersNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE21F7FDA6042B9876542AD /* PodcastChaptersNotesView.swift */; };
 		7707DA3D2C152EF5006D5EBB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3C2C152EF5006D5EBB /* Assets.xcassets */; };
 		7707DA402C152EF5006D5EBB /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3F2C152EF5006D5EBB /* Preview Assets.xcassets */; };
 		7707DA5B2C15524F006D5EBB /* RadioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA5A2C15524F006D5EBB /* RadioPlayer.swift */; };
@@ -27,7 +26,6 @@
 		7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */; };
 		7715BDA02C4EAA6C00FA7CB1 /* AlertManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */; };
 		771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */; };
-
 		7727D7E82C616A6A004549C9 /* MusicAuthorizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */; };
 		77313D6D2C2C9CFB005F4AC8 /* DataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */; };
 		77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */; };
@@ -63,6 +61,7 @@
 		7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 7780E96B2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld */; };
 		7780E96F2C3E2C05009CCF6F /* Country.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E96E2C3E2C05009CCF6F /* Country.swift */; };
 		7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9702C3F2110009CCF6F /* CustomAlertView.swift */; };
+		778610622E50263D00108721 /* PodcastChaptersNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610612E50263D00108721 /* PodcastChaptersNotesView.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
 		779352222C1A118A008F8416 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 779352212C1A118A008F8416 /* AlbumArtView.swift */; };
 		77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */; };
@@ -92,6 +91,7 @@
 		77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F6689E2C7A56CF00E2618C /* BannerAlert.swift */; };
 		77F830922E15682E00E2CA1C /* StreamQualityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F830912E15682E00E2CA1C /* StreamQualityManager.swift */; };
 		77FC45412E0F816100C823B8 /* GlobalPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FC45402E0F816100C823B8 /* GlobalPlayerView.swift */; };
+		B2F29DD3820F421291555FF0EC14AC64 /* AudioSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13EEBEE095834FD2A182D6544F831109 /* AudioSettingsSheet.swift */; };
 		CARPLAY001234567890ABCDEF /* CarPlay.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CARPLAY123456789ABCDEF01 /* CarPlay.framework */; };
 		CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */; };
 		ELEGANTPICKER123456789ABC /* CountryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEGANTPICKER987654321DEF /* CountryPicker.swift */; };
@@ -122,10 +122,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		13EEBEE095834FD2A182D6544F831109 /* AudioSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsSheet.swift; sourceTree = "<group>"; };
 		6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayManager.swift; sourceTree = "<group>"; };
 		7707DA352C152EF2006D5EBB /* StreamRadios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreamRadios.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7707DA3A2C152EF2006D5EBB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		CEE21F7FDA6042B9876542AD /* PodcastChaptersNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastChaptersNotesView.swift; sourceTree = "<group>"; };
 		7707DA3C2C152EF5006D5EBB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		7707DA3F2C152EF5006D5EBB /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		7707DA462C152F36006D5EBB /* StreamRadios.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamRadios.entitlements; sourceTree = "<group>"; };
@@ -145,7 +145,6 @@
 		7715BD9D2C4E66DA00FA7CB1 /* ActiveSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveSheet.swift; sourceTree = "<group>"; };
 		7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertManager.swift; sourceTree = "<group>"; };
 		771D408D2C2C6E92005D4FF5 /* NeumorphicShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeumorphicShadow.swift; sourceTree = "<group>"; };
-
 		7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicAuthorizationManager.swift; sourceTree = "<group>"; };
 		77313D6C2C2C9CFB005F4AC8 /* DataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStore.swift; sourceTree = "<group>"; };
 		77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
@@ -183,6 +182,7 @@
 		7780E96C2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = StreamRadiosModel.xcdatamodel; sourceTree = "<group>"; };
 		7780E96E2C3E2C05009CCF6F /* Country.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Country.swift; sourceTree = "<group>"; };
 		7780E9702C3F2110009CCF6F /* CustomAlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomAlertView.swift; sourceTree = "<group>"; };
+		778610612E50263D00108721 /* PodcastChaptersNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastChaptersNotesView.swift; sourceTree = "<group>"; };
 		778F68482E282B72009AE6FD /* StreamRadios.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamRadios.entitlements; sourceTree = "<group>"; };
 		778F746F2C2F13CE00AB81CD /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		779352212C1A118A008F8416 /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
@@ -279,7 +279,7 @@
 				7707DA642C156F7A006D5EBB /* Models */,
 				7707DA4D2C1539F3006D5EBB /* ViewModels */,
 				7707DA3A2C152EF2006D5EBB /* ContentView.swift */,
-				CEE21F7FDA6042B9876542AD /* PodcastChaptersNotesView.swift */,
+				13EEBEE095834FD2A182D6544F831109 /* AudioSettingsSheet.swift */,
 				77FC45402E0F816100C823B8 /* GlobalPlayerView.swift */,
 				7746179B2C17834200F442B3 /* CircularProgressView.swift */,
 				77CCE95A2C161E910098EE74 /* SideMenuView.swift */,
@@ -304,8 +304,8 @@
 				7746A49C2C6D07C10025C215 /* ReachabilityCheck.swift */,
 				77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */,
 				7778807B2CAF31320013AA62 /* ScrollOffsetTracker.swift */,
+				778610612E50263D00108721 /* PodcastChaptersNotesView.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
-
 				7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */,
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
 				77F50BC82C64725600187488 /* AddPodcastView.swift */,
@@ -586,14 +586,13 @@
 				77B4E0F62E086FEF0034F887 /* RadioStationCloudKitManager.swift in Sources */,
 				775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */,
 				7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */,
-				BEA4F63E75A94FF0814F0C1F /* PodcastChaptersNotesView.swift in Sources */,
+				B2F29DD3820F421291555FF0EC14AC64 /* AudioSettingsSheet.swift in Sources */,
 				7780E96D2C3DC6DF009CCF6F /* StreamRadiosModel.xcdatamodeld in Sources */,
 				7727D7E82C616A6A004549C9 /* MusicAuthorizationManager.swift in Sources */,
 				77130BF82C307D5F00D4711A /* EndEditing.swift in Sources */,
 				77DD9D182C96698000C7BA3C /* NotificationCenterProtocol.swift in Sources */,
 				77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */,
 				77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */,
-
 				77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
@@ -617,6 +616,7 @@
 				77322EEC2C45609E00C5D449 /* NotificationManager.swift in Sources */,
 				7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */,
 				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
+				778610622E50263D00108721 /* PodcastChaptersNotesView.swift in Sources */,
 				77B327A12E27F9D000ABDD89 /* SubscriptionManager.swift in Sources */,
 				7746A49D2C6D07C10025C215 /* ReachabilityCheck.swift in Sources */,
 				7778807C2CAF31320013AA62 /* ScrollOffsetTracker.swift in Sources */,

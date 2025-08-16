@@ -225,14 +225,14 @@ struct SettingsView: View {
         ) {
             ToggleRow(
                 title: "Auto-Play Last Station",
-                subtitle: "Automatically resume the last played station when opening the app",
+                subtitle: "Automatically resume the last played radio station when opening the app",
                 isOn: $autoPlayLastStation,
                 icon: "play.circle.fill"
             )
 
             ToggleRow(
                 title: "Stop After Episode",
-                subtitle: "When an episode finishes, stop playback instead of playing the next one",
+                subtitle: "When a podcast episode finishes, stop playback instead of playing the next one",
                 isOn: $stopAfterEpisode,
                 icon: "stop.circle.fill"
             )
@@ -669,7 +669,7 @@ extension SettingsView {
                     HStack(spacing: 8) {
                         Image(systemName: "trash")
                             .font(.body)
-                        Text("Clear Counters")
+                        Text("Clear Logs")
                             .font(.body)
                             .fontWeight(.medium)
                     }
@@ -2223,7 +2223,7 @@ struct InternalDataManagementView: View {
                         )
                     }
                     
-                    WarningText(text: "This will permanently erase ALL app data including stations, podcasts, episodes, downloads, progress, favorites, and settings from both iCloud and local storage. Please do not close the app during this process.")
+                    WarningText(text: "This will permanently erase ALL app data including stations, podcasts, episodes, downloads, progress, favorites, and settings from both iCloud and local storage. Please do not close the app during this process.\n\nIf you have saved a very large number of stations, you may encounter an error due to reaching the iCloud storage limit. If this happens, tap the “Delete All App Data” button again until a success message appears and the app restarts to complete the reset.\n\nYou may need to repeat this process several times before all stations are completely reset.")
                 }
             }
             
@@ -2258,7 +2258,7 @@ struct InternalDataManagementView: View {
                         )
                     }
                     
-                    WarningText(text: "This will permanently remove all radio stations and their favorites from both iCloud and local storage. Please do not close the app during this process.")
+                    WarningText(text: "This will permanently remove all radio stations and their favorites from both iCloud and local storage. Please do not close the app during this process.\n\nIf you have saved a very large number of stations, you may encounter an error due to reaching the iCloud storage limit. If this happens, tap the “Delete Station Data” button again until a success message appears and the app restarts to complete the reset.\n\nYou may need to repeat this process several times before all stations are completely reset.")
                 }
             }
             
@@ -2293,7 +2293,7 @@ struct InternalDataManagementView: View {
                         )
                     }
                     
-                    WarningText(text: "This will permanently remove all podcast feeds, episodes, downloads, progress, and favorites from both iCloud and local storage. Please do not close the app during this process.")
+                    WarningText(text: "This will permanently remove all podcast feeds, episodes, downloads, progress, and favorites from both iCloud and local storage. Please do not close the app during this process.\n\nIf you have saved a very large number of stations, you may encounter an error due to reaching the iCloud storage limit. If this happens, tap the “Delete Podcast Data” button again until a success message appears and the app restarts to complete the reset.\n\nYou may need to repeat this process several times before all stations are completely reset.")
                 }
             }
         }
