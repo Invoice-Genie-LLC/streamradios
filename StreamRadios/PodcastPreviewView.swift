@@ -10,6 +10,7 @@ import SwiftUI
 struct PodcastPreviewView: View {
     @Binding var isPresented: Bool
     let podcast: PodcastFeed
+    var parentDismissal: Binding<Bool>?
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
     @State private var episodes: [PodcastEpisode] = []
     @State private var isLoadingEpisodes = false
@@ -18,6 +19,14 @@ struct PodcastPreviewView: View {
     @State private var newPodcastURL = ""
     @State private var showAlert = false
     @State private var alertMessage = ""
+    
+    // Progress indicator state
+    @State private var isAddingPodcast = false
+    @State private var addingProgress: Double = 0.0
+    @State private var addingStageText = ""
+    
+
+    
     @State private var presentedEpisode: PodcastEpisode?
     @State private var selectedEpisode: PodcastEpisode?
     @State private var enhancedFeed: PodcastFeed?
@@ -127,6 +136,18 @@ struct PodcastPreviewView: View {
         } message: {
             Text(alertMessage)
         }
+        .overlay(
+            Group {
+                if isAddingPodcast {
+                    Color.black.opacity(0.75).edgesIgnoringSafeArea(.all)
+                    PodcastAddingProgressView(
+                        progress: addingProgress,
+                        stageText: addingStageText
+                    )
+                    .transition(.opacity)
+                }
+            }
+        )
     }
     
     @ViewBuilder
@@ -182,7 +203,7 @@ struct PodcastPreviewView: View {
     @ViewBuilder
     private var addPodcastButton: some View {
         Button(action: {
-            addPodcastAction()
+            addPodcastAction(nil)
         }) {
             HStack {
                 Image(systemName: "plus")
@@ -349,7 +370,7 @@ struct PodcastPreviewView: View {
         }
     }
     
-    private func addPodcastAction() {
+    private func addPodcastAction(_ podcastId: String?) {
         // Validate inputs
         guard !newPodcastTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             alertMessage = "Please enter a podcast title."
@@ -364,25 +385,92 @@ struct PodcastPreviewView: View {
             return
         }
         
-        // Add the podcast directly using the preview data
+        // Add podcast with progress indication
+        addPodcastWithProgress()
+    }
+    
+    private func addPodcastWithProgress() {
+        isAddingPodcast = true
+        addingProgress = 0.0
+        addingStageText = "Preparing to add podcast..."
+        
         Task {
             do {
-                // Add to view model
+                // Stage 1: Validate URL
+                await updateProgress(0.1, "Connecting to podcast feed...")
+                try await Task.sleep(nanoseconds: 200_000_000) // Brief pause for UI
+                
+                // Stage 2: Download and parse RSS feed
+                await updateProgress(0.3, "Downloading podcast RSS feed...")
+                
+                // Add the podcast feed using the ViewModel with custom title
+                let customTitle = newPodcastTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                let customTitleToUse = customTitle.isEmpty ? nil : customTitle
                 let success = await podcastViewModel.addPodcastFeed(
-                    url: newPodcastURL.trimmingCharacters(in: .whitespacesAndNewlines),
-                    customTitle: newPodcastTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    url: newPodcastURL.trimmingCharacters(in: .whitespacesAndNewlines), 
+                    customTitle: customTitleToUse
                 )
                 
-                await MainActor.run {
-                    if success {
-                        // Dismiss the preview
+                if success {
+                    // Stage 3: Processing episodes and artwork
+                    await updateProgress(0.6, "Processing episodes and downloading artwork...")
+                    try await Task.sleep(nanoseconds: 800_000_000) // Allow time for RSS parsing and artwork download
+                    
+                    // Stage 4: Saving to Core Data and CloudKit
+                    await updateProgress(0.8, "Saving to your podcast library...")
+                    try await Task.sleep(nanoseconds: 400_000_000) // Allow time for Core Data and CloudKit sync
+                    
+                    // Stage 5: Finalizing and updating UI
+                    await updateProgress(0.95, "Finalizing podcast import...")
+                    try await Task.sleep(nanoseconds: 300_000_000) // Allow background operations to complete
+                    
+                    // Stage 6: Complete - Feed should now be visible
+                    await updateProgress(1.0, "Podcast added successfully!")
+                    
+                    await MainActor.run {
+                        isAddingPodcast = false
+                        
+                        // Get the newly added podcast ID for auto-focus
+                        let newPodcastId = podcastViewModel.podcastFeedOrder.last
+                        print("🎯 PodcastPreviewView: Successfully added podcast, last ID in order: \(newPodcastId ?? "nil")")
+                        if let podcastId = newPodcastId {
+                            print("🎯 PodcastPreviewView: Posting focus notification for podcast ID: \(podcastId)")
+                            // Notify PodcastListView to auto-focus on the new podcast
+                            NotificationCenter.default.post(name: .podcastAddedForFocus, object: podcastId)
+                        } else {
+                            print("🎯 PodcastPreviewView: No podcast ID to focus on")
+                        }
+                        
+                        // Clear the input fields for next time
+                        newPodcastTitle = ""
+                        newPodcastURL = ""
+                        
+                        // Dismiss both the preview and the parent search sheet immediately
                         isPresented = false
-                    } else {
-                        alertMessage = "Failed to add podcast. Please try again."
+                        parentDismissal?.wrappedValue = false
+                    }
+                } else {
+                    await MainActor.run {
+                        isAddingPodcast = false
+                        alertMessage = podcastViewModel.error ?? "Failed to add podcast. Please check the URL and try again."
                         showAlert = true
                     }
                 }
+            } catch {
+                await MainActor.run {
+                    isAddingPodcast = false
+                    alertMessage = "Failed to add podcast: \(error.localizedDescription)"
+                    showAlert = true
+                }
             }
+        }
+    }
+    
+    @MainActor
+    private func updateProgress(_ progress: Double, _ text: String) {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            addingProgress = progress
+            addingStageText = text
         }
     }
 }

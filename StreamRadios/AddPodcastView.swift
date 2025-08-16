@@ -31,6 +31,7 @@ struct PodcastSearchResult: Identifiable, Hashable {
     let description: String?
     let author: String?
     let source: SearchSource
+    let category: String?
     
     enum SearchSource {
         case podcastIndex
@@ -59,7 +60,8 @@ struct PodcastIndexFeed: Codable {
             artworkUrl: image ?? artwork,
             description: description,
             author: author,
-            source: .podcastIndex
+            source: .podcastIndex,
+            category: nil
         )
     }
 }
@@ -85,16 +87,22 @@ struct iTunesResult: Codable {
             artworkUrl: artworkUrl100,
             description: nil,
             author: artistName,
-            source: .iTunes
+            source: .iTunes,
+            category: nil
         )
     }
 }
+
+
 
 // MARK: - Podcast Search Service
 @MainActor
 class PodcastSearchService: ObservableObject {
     @Published var searchResults: [PodcastSearchResult] = []
+    @Published var popularPodcasts: [PodcastSearchResult] = []
+    @Published var categorizedPopularPodcasts: [(category: String, podcasts: [PodcastSearchResult])] = []
     @Published var isSearching = false
+    @Published var isLoadingPopular = false
     @Published var searchError: String?
     
     private let podcastIndexAPIKey = "CCWZDUP9ANLKNFNCJTNC"
@@ -251,6 +259,174 @@ class PodcastSearchService: ObservableObject {
         }
     }
     
+    func fetchPopularPodcasts() async {
+        self.isLoadingPopular = true
+        self.searchError = nil
+        
+        do {
+            // Fetch top podcasts from iTunes API with categories
+            let (results, categorized) = try await fetchTopPodcastsFromiTunes()
+            self.popularPodcasts = results
+            self.categorizedPopularPodcasts = categorized
+            print("✅ Fetched \(results.count) popular podcasts from iTunes in \(categorized.count) categories")
+        } catch {
+            print("⚠️ Failed to fetch popular podcasts: \(error.localizedDescription)")
+            self.searchError = "Failed to load popular podcasts"
+            self.popularPodcasts = []
+            self.categorizedPopularPodcasts = []
+        }
+        
+        self.isLoadingPopular = false
+    }
+    
+    private func fetchTopPodcastsFromiTunes() async throws -> ([PodcastSearchResult], [(category: String, podcasts: [PodcastSearchResult])]) {
+        // Expanded categories with more specific terms for better quality results
+        let categories = [
+            ("News & Politics", ["news", "politics", "current events"]),
+            ("Comedy", ["comedy", "humor", "stand-up"]),
+            ("True Crime", ["true crime", "mystery", "investigation"]),
+            ("Business", ["business", "entrepreneur", "investing"]),
+            ("Health & Fitness", ["health", "fitness", "wellness"]),
+            ("Technology", ["technology", "tech", "programming", "AI", "software"]),
+            ("Education", ["education", "learning", "science"]),
+            ("Sports", ["sports", "football", "basketball"]),
+            ("Arts & Culture", ["arts", "culture", "design"]),
+            ("Society", ["society", "philosophy", "religion"]),
+            ("Entertainment", ["entertainment", "celebrity", "movies"]),
+            ("Music", ["music", "musicians", "album"]),
+            ("History", ["history", "historical", "war"]),
+            ("Self Improvement", ["self improvement", "productivity", "motivation"]),
+            ("Gaming", ["gaming", "video games", "esports"]),
+            ("Food & Cooking", ["food", "cooking", "recipes"]),
+            ("Travel", ["travel", "adventure", "destinations"]),
+            ("Science", ["science", "research", "discovery"]),
+            ("Lifestyle", ["lifestyle", "fashion", "beauty"]),
+            ("Parenting", ["parenting", "family", "kids"])
+        ]
+        
+        var categorizedResults: [(category: String, podcasts: [PodcastSearchResult])] = []
+        var seenIds: Set<String> = []
+        
+        // Use TaskGroup for concurrent API calls to improve performance
+        await withTaskGroup(of: (String, [PodcastSearchResult]).self) { group in
+            // Add tasks for each category concurrently
+            for (categoryName, terms) in categories {
+                group.addTask {
+                    await self.fetchCategoryPodcasts(categoryName: categoryName, terms: terms)
+                }
+            }
+            
+            // Collect results as they complete
+            for await (categoryName, categoryPodcasts) in group {
+                if !categoryPodcasts.isEmpty {
+                    // Filter duplicates and enhance artwork
+                    var filteredPodcasts: [PodcastSearchResult] = []
+                    for podcast in categoryPodcasts {
+                        if !seenIds.contains(podcast.id) {
+                            seenIds.insert(podcast.id)
+                            
+                            // Enhance artwork URL for higher quality
+                            let enhancedArtworkUrl = podcast.artworkUrl != nil ? enhanceArtworkQuality(podcast.artworkUrl!) : podcast.artworkUrl
+                            
+                            let enhancedResult = PodcastSearchResult(
+                                id: podcast.id,
+                                title: podcast.title,
+                                feedUrl: podcast.feedUrl,
+                                artworkUrl: enhancedArtworkUrl,
+                                description: podcast.description,
+                                author: podcast.author,
+                                source: podcast.source,
+                                category: categoryName
+                            )
+                            
+                            filteredPodcasts.append(enhancedResult)
+                        }
+                    }
+                    
+                    if !filteredPodcasts.isEmpty {
+                        // Limit to 15 podcasts per category to reach ~300 total (20 categories × 15)
+                        categorizedResults.append((category: categoryName, podcasts: Array(filteredPodcasts.prefix(15))))
+                    }
+                }
+            }
+        }
+        
+        // Flatten results while maintaining some category order
+        var finalResults: [PodcastSearchResult] = []
+        let maxPerCategory = 15 // 20 categories × 15 = 300 podcasts
+        
+        for (_, podcasts) in categorizedResults {
+            finalResults.append(contentsOf: Array(podcasts.prefix(maxPerCategory)))
+        }
+        
+        return (Array(finalResults.prefix(300)), categorizedResults) // Return up to 300 results and categories
+    }
+    
+    private func fetchCategoryPodcasts(categoryName: String, terms: [String]) async -> (String, [PodcastSearchResult]) {
+        var categoryPodcasts: [PodcastSearchResult] = []
+        
+        // Search multiple terms per category for diversity - limit to 2 terms for performance
+        for term in terms.prefix(2) {
+            do {
+                let results = try await searchiTunes(query: term)
+                // Take more results per term to get 15 per category
+                for result in results.prefix(10) {
+                    let enhancedResult = PodcastSearchResult(
+                        id: result.id,
+                        title: result.title,
+                        feedUrl: result.feedUrl,
+                        artworkUrl: result.artworkUrl,
+                        description: result.description,
+                        author: result.author,
+                        source: result.source,
+                        category: categoryName
+                    )
+                    categoryPodcasts.append(enhancedResult)
+                }
+            } catch {
+                print("⚠️ Failed to fetch podcasts for term '\(term)' in category '\(categoryName)': \(error.localizedDescription)")
+                continue
+            }
+        }
+        
+        return (categoryName, categoryPodcasts)
+    }
+    
+    private func enhanceArtworkQuality(_ originalUrl: String) -> String {
+        var enhancedUrl = originalUrl
+        
+        // For iTunes/Apple artwork, try to get larger versions
+        if enhancedUrl.contains("mzstatic.com") || enhancedUrl.contains("is1-ssl.mzstatic.com") {
+            // Replace common small sizes with larger ones
+            enhancedUrl = enhancedUrl.replacingOccurrences(of: "60x60", with: "600x600")
+            enhancedUrl = enhancedUrl.replacingOccurrences(of: "100x100", with: "600x600")
+            enhancedUrl = enhancedUrl.replacingOccurrences(of: "170x170", with: "600x600")
+            enhancedUrl = enhancedUrl.replacingOccurrences(of: "300x300", with: "600x600")
+            enhancedUrl = enhancedUrl.replacingOccurrences(of: "400x400", with: "600x600")
+            enhancedUrl = enhancedUrl.replacingOccurrences(of: "500x500", with: "600x600")
+            
+            // Also try the bb parameter for better quality
+            if !enhancedUrl.contains("bb=") {
+                enhancedUrl += enhancedUrl.contains("?") ? "&bb=" : "?bb="
+            }
+        }
+        
+        // For other CDNs, try common size parameters
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "size=60", with: "size=600")
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "size=100", with: "size=600")
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "width=60", with: "width=600")
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "width=100", with: "width=600")
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "height=60", with: "height=600")
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "height=100", with: "height=600")
+        
+        // Replace small image suffixes
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "_small.jpg", with: "_large.jpg")
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "_thumb.jpg", with: "_large.jpg")
+        enhancedUrl = enhancedUrl.replacingOccurrences(of: "_s.jpg", with: "_l.jpg")
+        
+        return enhancedUrl
+    }
+    
     func clearResults() {
         searchResults = []
         searchError = nil
@@ -279,7 +455,7 @@ struct AddPodcastView: View {
     
     // Add editing support
     let podcastToEdit: PodcastFeed?
-    let onAdd: () -> Void
+    let onAdd: (String?) -> Void
     let onUpdate: ((PodcastFeed) -> Void)?
     
 
@@ -501,12 +677,15 @@ struct AddPodcastView: View {
                     
                     // Stage 6: Complete - Feed should now be visible
                     await updateProgress(1.0, "Podcast added successfully!")
-                    try await Task.sleep(nanoseconds: 500_000_000) // Show completion briefly
                     
                     await MainActor.run {
-                        // Don't call onAdd() since podcastViewModel.addPodcastFeed() already added the feed
-                        // The feed is already in the main podcast list view due to immediate UI update
-                        // Just close the sheet and reset state
+                        // Get the newly added podcast ID (should be the last one in the order)
+                        let newPodcastId = podcastViewModel.podcastFeedOrder.last
+                        
+                        // Call onAdd() to notify parent view (like SearchPodcastsView) to dismiss
+                        onAdd(newPodcastId)
+                        
+                        // Close the sheet and reset state
                         isPresented = false
                         isAddingPodcast = false
                         
@@ -761,8 +940,8 @@ struct AddPodcastView_Previews: PreviewProvider {
                 title: .constant(""), 
                 url: .constant(""), 
                 podcastToEdit: nil,
-                onAdd: {
-                    print("Podcast added")
+                onAdd: { podcastId in
+                    print("Podcast added with ID: \(podcastId ?? "unknown")")
                 },
                 onUpdate: { podcast in
                     print("Podcast updated: \(podcast.title)")
@@ -778,8 +957,8 @@ struct AddPodcastView_Previews: PreviewProvider {
                 title: .constant("Sample Podcast"), 
                 url: .constant("https://example.com/feed.rss"), 
                 podcastToEdit: nil,
-                onAdd: {
-                    print("Podcast added")
+                onAdd: { podcastId in
+                    print("Podcast added with ID: \(podcastId ?? "unknown")")
                 },
                 onUpdate: { podcast in
                     print("Podcast updated: \(podcast.title)")

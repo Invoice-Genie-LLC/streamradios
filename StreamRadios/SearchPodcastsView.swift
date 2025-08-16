@@ -9,6 +9,10 @@ import SwiftUI
 import CryptoKit
 import CommonCrypto
 
+extension Notification.Name {
+    static let podcastAddedForFocus = Notification.Name("podcastAddedForFocus")
+}
+
 struct SearchPodcastsView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject private var podcastViewModel: PodcastViewModel
@@ -57,10 +61,10 @@ struct SearchPodcastsView: View {
                                 searchResultsList
                             } else if !searchText.isEmpty && !searchService.isSearching {
                                 noResultsView
-                            } else {
-                                // Show "My Podcasts" section when no search
-                                myPodcastsSection
-                            }
+                                                    } else {
+                            // Show popular podcasts section when no search
+                            popularPodcastsSection
+                        }
                             
                             // Error Message
                             if let error = searchService.searchError {
@@ -87,6 +91,11 @@ struct SearchPodcastsView: View {
                 searchText = ""
                 searchService.clearResults()
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                
+                // Fetch popular podcasts when view appears
+                Task {
+                    await searchService.fetchPopularPodcasts()
+                }
             }
         }
         .background(Color.adaptiveBackground)
@@ -125,7 +134,8 @@ struct SearchPodcastsView: View {
             if let presentedPodcast = presentedPodcast {
                 PodcastPreviewView(
                     isPresented: showingPreview,
-                    podcast: presentedPodcast
+                    podcast: presentedPodcast,
+                    parentDismissal: $isPresented
                 )
             }
         }
@@ -245,19 +255,128 @@ struct SearchPodcastsView: View {
     }
     
     @ViewBuilder
-    private var myPodcastsSection: some View {
+    private var popularPodcastsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("MY PODCASTS")
+                Text("POPULAR PODCASTS")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundColor(.adaptiveSecondaryText)
                 Spacer()
+                
+                if searchService.isLoadingPopular {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
             }
             
-            LazyVStack(spacing: 12) {
-                ForEach(podcastViewModel.podcastFeeds) { podcast in
-                    MyPodcastRow(podcast: podcast)
+            if searchService.isLoadingPopular && searchService.popularPodcasts.isEmpty {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.2)
+                    Text("Loading popular podcasts...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 40)
+            } else if searchService.popularPodcasts.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.largeTitle)
+                        .foregroundColor(.adaptiveSecondaryText)
+                    
+                    Text("Unable to load popular podcasts")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                    
+                    Text("Check your internet connection")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .background(Color.adaptiveCardBackground)
+                .cornerRadius(8)
+            } else {
+                // Loading state for popular podcasts
+                if searchService.isLoadingPopular {
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                            .tint(.adaptiveSecondaryText)
+                        
+                        Text("Loading Popular Podcasts...")
+                            .font(.headline)
+                            .foregroundColor(.adaptiveSecondaryText)
+                        
+                        Text("Fetching 300+ podcasts across 20 categories")
+                            .font(.caption)
+                            .foregroundColor(.adaptiveSecondaryText.opacity(0.8))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 200)
+                    .padding()
+                } else if searchService.categorizedPopularPodcasts.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.largeTitle)
+                            .foregroundColor(.orange)
+                        
+                        Text("Failed to Load Popular Podcasts")
+                            .font(.headline)
+                            .foregroundColor(.adaptivePrimaryText)
+                        
+                        Text("Please check your internet connection and try again")
+                            .font(.subheadline)
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .multilineTextAlignment(.center)
+                        
+                        Button("Retry") {
+                            Task {
+                                await searchService.fetchPopularPodcasts()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 200)
+                    .padding()
+                } else {
+                    // Categorized popular podcasts sections
+                    LazyVStack(spacing: 24) {
+                        ForEach(searchService.categorizedPopularPodcasts, id: \.category) { categoryData in
+                            VStack(alignment: .leading, spacing: 12) {
+                                // Category header
+                                HStack {
+                                    Text(categoryData.category)
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.adaptivePrimaryText)
+                                    Spacer()
+                                    Text("\(categoryData.podcasts.count)")
+                                        .font(.caption)
+                                        .foregroundColor(.adaptiveSecondaryText)
+                                }
+                                .padding(.horizontal, 4)
+                                
+                                // Album-style grid for category
+                                LazyVGrid(
+                                    columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), 
+                                    spacing: 16
+                                ) {
+                                    ForEach(categoryData.podcasts, id: \.id) { podcast in
+                                        PopularPodcastItem(podcast: podcast) {
+                                            // Dismiss keyboard when a podcast is selected
+                                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                                            
+                                            // Show preview for the selected podcast
+                                            showPreview(for: podcast)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 4)
+                                .scrollContentBackground(.hidden) // Reduce scroll interference
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -372,12 +491,14 @@ struct SearchPodcastsView: View {
                     try await Task.sleep(nanoseconds: 300_000_000)
                     
                     await updateProgress(1.0, "Podcast added successfully!")
-                    try await Task.sleep(nanoseconds: 500_000_000)
                     
                     await MainActor.run {
                         isAddingPodcast = false
                         searchText = ""
                         searchService.clearResults()
+                        
+                        // Dismiss the search sheet immediately after successful addition
+                        isPresented = false
                     }
                 } else {
                     await MainActor.run {
@@ -396,11 +517,23 @@ struct SearchPodcastsView: View {
         }
     }
     
-    private func addPodcast() {
+    private func addPodcast(_ podcastId: String?) {
         // This is called when AddPodcastView successfully adds a podcast
-        // Refresh the view to show the new podcast
+        // Clear form fields and dismiss the search sheet
         newPodcastTitle = ""
         newPodcastURL = ""
+        
+        // If we have a podcast ID, trigger auto-focus in PodcastListView
+        if let podcastId = podcastId {
+            print("🎯 SearchPodcastsView: Posting focus notification for podcast ID: \(podcastId)")
+            // Store the podcast ID to trigger auto-focus when we return to PodcastListView
+            NotificationCenter.default.post(name: .podcastAddedForFocus, object: podcastId)
+        } else {
+            print("🎯 SearchPodcastsView: No podcast ID to focus on")
+        }
+        
+        // Dismiss the search sheet after successful addition
+        isPresented = false
     }
     
     private func showPreview(for result: PodcastSearchResult) {
@@ -438,68 +571,122 @@ struct SearchPodcastsView: View {
     }
 }
 
-// MARK: - My Podcast Row
+// MARK: - Popular Podcast Item
 
-struct MyPodcastRow: View {
-    let podcast: PodcastFeed
+struct PopularPodcastItem: View {
+    let podcast: PodcastSearchResult
+    let onTap: () -> Void
+    @State private var isPressed = false
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Podcast Artwork
-            AsyncImage(url: URL(string: podcast.artworkUrl ?? "")) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Rectangle()
-                    .fill(Color.adaptiveBorder)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .foregroundColor(.adaptiveSecondaryText)
-                    )
-            }
-            .frame(width: 60, height: 60)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            
-            // Podcast Info
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 8) {
+            VStack(spacing: 8) {
+                // Podcast Artwork - Album style with enhanced quality
+                AsyncImage(url: URL(string: podcast.artworkUrl ?? "")) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .interpolation(.high) // High quality scaling
+                            .aspectRatio(1.0, contentMode: .fill) // Perfect square aspect ratio
+                            .clipped()
+                    case .failure:
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.adaptiveCardBackground, Color.adaptiveCardBackground.opacity(0.7)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .aspectRatio(1.0, contentMode: .fill)
+                            .overlay(
+                                VStack(spacing: 4) {
+                                    Image(systemName: "music.note.list")
+                                        .font(.title3)
+                                        .foregroundColor(.adaptiveSecondaryText.opacity(0.6))
+                                    Text("No Image")
+                                        .font(.caption2)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.adaptiveSecondaryText.opacity(0.8))
+                                }
+                            )
+                    case .empty:
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.adaptiveCardBackground.opacity(0.3), Color.adaptiveCardBackground.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .aspectRatio(1.0, contentMode: .fill)
+                            .overlay(
+                                ProgressView()
+                                    .scaleEffect(0.9)
+                                    .tint(.adaptiveSecondaryText)
+                            )
+                    @unknown default:
+                        Rectangle()
+                            .fill(Color.adaptiveCardBackground)
+                            .aspectRatio(1.0, contentMode: .fill)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.2), Color.clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                
+                // Podcast Title
                 Text(podcast.title)
-                    .font(.body)
+                    .font(.caption)
+                    .fontWeight(.medium)
                     .foregroundColor(.adaptivePrimaryText)
                     .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                
-                if let description = podcast.descriptionText {
-                    Text(description)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-                
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption2)
-                        .foregroundColor(.green)
-                    
-                    Text("Subscribed")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                    .multilineTextAlignment(.center)
+                    .frame(height: 32) // Fixed height for consistent layout
             }
-            
-            Spacer()
-            
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
-        .padding(16)
-        .background(Color.adaptiveCardBackground)
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.adaptiveBorder, lineWidth: 0.5)
+        .scaleEffect(isPressed ? 0.95 : 1.0)
+        .opacity(isPressed ? 0.8 : 1.0)
+        .animation(.easeInOut(duration: 0.1), value: isPressed)
+        .onTapGesture {
+            // Add haptic feedback
+            let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+            impactFeedback.impactOccurred()
+            onTap()
+        }
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: 30) { isPressing in
+            // Only trigger visual feedback, not the action
+            // Reduced maximum distance to be more scroll-friendly
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = isPressing
+            }
+        } perform: {
+            // This will be called for long press, but we handle tap separately
+        }
+        .simultaneousGesture(
+            // Add a drag gesture to better handle scroll vs tap distinction
+            DragGesture(minimumDistance: 10)
+                .onChanged { _ in
+                    // Cancel press state when dragging starts
+                    if isPressed {
+                        withAnimation(.easeInOut(duration: 0.1)) {
+                            isPressed = false
+                        }
+                    }
+                }
         )
+        .background(Color.clear)
     }
 }
 

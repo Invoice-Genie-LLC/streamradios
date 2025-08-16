@@ -32,6 +32,10 @@ struct PodcastListView: View {
     @State private var selectedTab: Tab = .podcast
     @State private var isPlayerSheetPresented = false
     
+    // Auto-focus on newly added podcast
+    @State private var newlyAddedPodcastId: String?
+    @State private var highlightedPodcastId: String?
+    
     // Edit functionality
     @State private var showingEditPodcast = false
     @State private var podcastToEdit: PodcastFeed?
@@ -139,6 +143,7 @@ struct PodcastListView: View {
                        showingAddPodcast = newValue
                        if !newValue {
                            resetAddState()
+                           checkForNewlyAddedPodcast()
                        }
                    }
                )) {
@@ -149,6 +154,7 @@ struct PodcastListView: View {
                                showingAddPodcast = newValue
                                if !newValue {
                                    resetAddState()
+                                   checkForNewlyAddedPodcast()
                                }
                            }
                        ), 
@@ -195,15 +201,21 @@ struct PodcastListView: View {
                            }
                        ),
                        podcastToEdit: podcastToEdit,
-                       onAdd: { },
+                       onAdd: { _ in },
                        onUpdate: { updatedPodcast in
                            updatePodcast(updatedPodcast)
                        }
                    )
                }
-               .sheet(isPresented: $showingSearchPodcasts) {
-                   SearchPodcastsView(isPresented: $showingSearchPodcasts)
-               }
+                               .sheet(isPresented: $showingSearchPodcasts) {
+                    SearchPodcastsView(isPresented: $showingSearchPodcasts)
+                }
+                .onChange(of: showingSearchPodcasts) { _, isPresented in
+                    if !isPresented {
+                        // Search sheet was dismissed, check if a new podcast was added
+                        checkForNewlyAddedPodcast()
+                    }
+                }
                
            }
            .alert(isPresented: $viewModel.showNoEpisodesAlert) {
@@ -289,17 +301,18 @@ struct PodcastListView: View {
                     .frame(height: 0.5)
             }
             
-            List {
-                if viewModel.isLoading {
-                    PodcastLoadingProgressView()
-                        .padding()
-                } else if viewModel.podcastFeeds.isEmpty {
-                    Text("No podcast feeds available")
-                        .foregroundColor(.adaptiveSecondaryText)
-                        .italic()
-                        .padding()
-                }
-                ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
+            ScrollViewReader { proxy in
+                List {
+                    if viewModel.isLoading {
+                        PodcastLoadingProgressView()
+                            .padding()
+                    } else if viewModel.podcastFeeds.isEmpty {
+                        Text("No podcast feeds available")
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .italic()
+                            .padding()
+                    }
+                    ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
                     if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
                        filteredPodcasts.contains(where: { $0.id == feedId }) {
                         PodcastRowView(
@@ -334,6 +347,15 @@ struct PodcastListView: View {
                             viewModel: viewModel,
                             podcastPlayer: podcastPlayer,
                             isEditMode: isEditing
+                        )
+                        .overlay(
+                            // Highlight effect for newly added podcast
+                            highlightedPodcastId == feed.id ?
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.blue, lineWidth: 3)
+                                .opacity(0.7)
+                                .animation(.easeInOut(duration: 0.5), value: highlightedPodcastId)
+                            : nil
                         )
                         .simultaneousGesture(
                             LongPressGesture(minimumDuration: 0.5)
@@ -370,6 +392,7 @@ struct PodcastListView: View {
                                 }
                             }
                         }
+                        .id(feedId)
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             if !isEditing {
                                 Button {
@@ -393,9 +416,91 @@ struct PodcastListView: View {
                     }
                 }
                 .onMove(perform: isEditing ? moveFeeds : nil)
+                }
+                .listStyle(PlainListStyle())
+                .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+                .onReceive(NotificationCenter.default.publisher(for: .podcastAddedForFocus)) { notification in
+                    if let podcastId = notification.object as? String {
+                        print("🎯 PodcastListView: Received focus notification for podcast ID: \(podcastId)")
+                        print("🎯 PodcastListView: Current feed order: \(viewModel.podcastFeedOrder)")
+                        print("🎯 PodcastListView: Current feeds count: \(viewModel.podcastFeeds.count)")
+                        newlyAddedPodcastId = podcastId
+                        
+                        // Check if the podcast is already in the list and trigger scroll immediately
+                        if viewModel.podcastFeedOrder.contains(podcastId),
+                           viewModel.podcastFeeds.contains(where: { $0.id == podcastId }) {
+                            print("🎯 PodcastListView: Podcast already in list - triggering immediate scroll")
+                            
+                            // Use a longer delay to ensure UI is fully updated
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                print("🎯 PodcastListView: Executing immediate scroll to podcast: \(podcastId)")
+                                
+                                // First, highlight the podcast
+                                highlightedPodcastId = podcastId
+                                
+                                // Then scroll to it with animation
+                                withAnimation(.easeInOut(duration: 0.8)) {
+                                    proxy.scrollTo(podcastId, anchor: .center)
+                                }
+                                
+                                // Remove highlight after 2 seconds
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                    highlightedPodcastId = nil
+                                }
+                                
+                                // Clear the newly added podcast ID after scrolling
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                    newlyAddedPodcastId = nil
+                                    print("🎯 PodcastListView: Cleared newlyAddedPodcastId after immediate scroll")
+                                }
+                            }
+                        } else {
+                            print("🎯 PodcastListView: Podcast not yet in list - will wait for onChange trigger")
+                        }
+                    }
+                }
+                .onChange(of: viewModel.podcastFeedOrder) { _ in
+                    print("🎯 PodcastListView: podcastFeedOrder changed, count: \(viewModel.podcastFeedOrder.count)")
+                    print("🎯 PodcastListView: newlyAddedPodcastId: \(newlyAddedPodcastId ?? "nil")")
+                    
+                    // Check if a new podcast was added and scroll to it
+                    if let newPodcastId = newlyAddedPodcastId,
+                       viewModel.podcastFeedOrder.contains(newPodcastId),
+                       viewModel.podcastFeeds.contains(where: { $0.id == newPodcastId }) {
+                        
+                        print("🎯 PodcastListView: Found new podcast to scroll to: \(newPodcastId)")
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            print("🎯 PodcastListView: Attempting to scroll to podcast: \(newPodcastId)")
+                            
+                            // First, highlight the podcast
+                            highlightedPodcastId = newPodcastId
+                            
+                            // Then scroll to it with animation
+                            withAnimation(.easeInOut(duration: 0.8)) {
+                                proxy.scrollTo(newPodcastId, anchor: .center)
+                            }
+                            
+                            // Remove highlight after 2 seconds
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                                highlightedPodcastId = nil
+                            }
+                            
+                            // Clear the newly added podcast ID after scrolling
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                newlyAddedPodcastId = nil
+                                print("🎯 PodcastListView: Cleared newlyAddedPodcastId")
+                            }
+                        }
+                    } else {
+                        if let newPodcastId = newlyAddedPodcastId {
+                            print("🎯 PodcastListView: New podcast ID exists but conditions not met:")
+                            print("🎯   - ID in feedOrder: \(viewModel.podcastFeedOrder.contains(newPodcastId))")
+                            print("🎯   - Feed exists: \(viewModel.podcastFeeds.contains(where: { $0.id == newPodcastId }))")
+                        }
+                    }
+                }
             }
-            .listStyle(PlainListStyle())
-            .environment(\.editMode, .constant(isEditing ? .active : .inactive))
             .safeAreaInset(edge: .bottom) {
                 Color.clear.frame(height: 100)  // Add extra space at the bottom
             }
@@ -511,12 +616,17 @@ struct PodcastListView: View {
     
 
     
-    private func addPodcast() {
+    private func addPodcast(_ podcastId: String?) {
         let newFeed = PodcastFeed(id: UUID().uuidString, title: newPodcastTitle, url: newPodcastURL)
         viewModel.addPodcastFeed(newFeed)
         newPodcastTitle = ""
         newPodcastURL = ""
         showingAddPodcast = false
+        
+        // Set auto-focus if we received a podcast ID
+        if let podcastId = podcastId {
+            newlyAddedPodcastId = podcastId
+        }
     }
     
     // MARK: - Edit Helper Methods
@@ -631,6 +741,28 @@ struct PodcastListView: View {
             return viewModel.podcastFeeds.filter { feed in
                 feed.title.lowercased().contains(searchText.lowercased()) ||
                 (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
+            }
+        }
+    }
+    
+    // MARK: - Auto-focus on newly added podcast
+    private func checkForNewlyAddedPodcast() {
+        // Store the previous podcast count to detect new additions
+        let currentCount = viewModel.podcastFeeds.count
+        let currentFeedIds = Set(viewModel.podcastFeedOrder)
+        
+        // Check if we have a new podcast by comparing with what we had before
+        // The newest podcast should be the last one in the order
+        if currentCount > 0,
+           let lastFeedId = viewModel.podcastFeedOrder.last,
+           viewModel.podcastFeeds.contains(where: { $0.id == lastFeedId }) {
+            
+            print("🎯 Auto-focus: Detected potential new podcast with ID: \(lastFeedId)")
+            
+            // Set the newly added podcast ID to trigger auto-scroll
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                newlyAddedPodcastId = lastFeedId
+                print("🎯 Auto-focus: Set newlyAddedPodcastId to \(lastFeedId)")
             }
         }
     }
