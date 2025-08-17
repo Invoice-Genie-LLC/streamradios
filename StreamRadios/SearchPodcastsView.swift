@@ -130,7 +130,16 @@ struct SearchPodcastsView: View {
                 onUpdate: nil
             )
         }
-        .sheet(isPresented: showingPreview) {
+        .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? showingPreview : .constant(false)) {
+            if let presentedPodcast = presentedPodcast {
+                PodcastPreviewView(
+                    isPresented: showingPreview,
+                    podcast: presentedPodcast,
+                    parentDismissal: $isPresented
+                )
+            }
+        }
+        .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? showingPreview : .constant(false)) {
             if let presentedPodcast = presentedPodcast {
                 PodcastPreviewView(
                     isPresented: showingPreview,

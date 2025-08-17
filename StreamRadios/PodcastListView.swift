@@ -207,7 +207,10 @@ struct PodcastListView: View {
                        }
                    )
                }
-                               .sheet(isPresented: $showingSearchPodcasts) {
+                               .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $showingSearchPodcasts : .constant(false)) {
+                    SearchPodcastsView(isPresented: $showingSearchPodcasts)
+                }
+                .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $showingSearchPodcasts : .constant(false)) {
                     SearchPodcastsView(isPresented: $showingSearchPodcasts)
                 }
                 .onChange(of: showingSearchPodcasts) { _, isPresented in
