@@ -1040,12 +1040,12 @@ struct UnifiedPodcastPlayerView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         
-                        // Audio settings button - responsive size with extra padding
+                        // Playback speed button - shows current speed and opens audio settings
                         Button(action: {
                             showAudioSettings = true
                         }) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: iconSize))
+                            Text(String(format: "%.1fx", podcastPlayer.playbackSpeed))
+                                .font(.system(size: iconSize - 2, weight: .medium))
                                 .foregroundColor(.white)
                                 .frame(width: buttonSize + 8, height: buttonSize + 8)
                         }
