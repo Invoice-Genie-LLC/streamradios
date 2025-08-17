@@ -248,11 +248,6 @@ struct PodcastPreviewView: View {
                     .foregroundColor(.primary)
                 
                 Spacer()
-                
-                if isLoadingEpisodes {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                }
             }
             
             if isLoadingEpisodes {
