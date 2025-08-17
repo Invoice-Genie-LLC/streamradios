@@ -1345,16 +1345,28 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             sections.append(filterSection)
         }
         
-        // Show ALL episodes - no artificial limits
-        var episodeItems: [CPListItem] = []
+        // Add "Latest Episode" section first if we have episodes
+        if !podcast.episodes.isEmpty {
+            let latestEpisode = podcast.episodes.first!
+            let latestEpisodeItem = self.createEpisodeListItem(episode: latestEpisode, podcast: podcast, carPlayManager: carPlayManager)
+            let latestEpisodeSection = CPListSection(items: [latestEpisodeItem], header: "Latest Episode", sectionIndexTitle: nil)
+            sections.append(latestEpisodeSection)
+        }
         
-        for episode in podcast.episodes {
+        // Show remaining episodes (skip the first one since we showed it as "Latest Episode")
+        var episodeItems: [CPListItem] = []
+        let remainingEpisodes = podcast.episodes.count > 1 ? Array(podcast.episodes.dropFirst()) : []
+        
+        for episode in remainingEpisodes {
             let item = self.createEpisodeListItem(episode: episode, podcast: podcast, carPlayManager: carPlayManager)
             episodeItems.append(item)
         }
         
-        let episodesSection = CPListSection(items: episodeItems, header: "Episodes (\(totalEpisodes))", sectionIndexTitle: nil)
-        sections.append(episodesSection)
+        // Only add Episodes section if we have remaining episodes
+        if !episodeItems.isEmpty {
+            let episodesSection = CPListSection(items: episodeItems, header: "Episodes", sectionIndexTitle: nil)
+            sections.append(episodesSection)
+        }
         
         let listTemplate = CPListTemplate(title: podcast.title, sections: sections)
         
@@ -1405,10 +1417,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             sections.append(filterSection)
         }
         
-        // Show loaded episodes
-        var episodeItems: [CPListItem] = []
+        // Add "Latest Episode" section first if we have episodes
+        if !podcast.episodes.isEmpty {
+            let latestEpisode = podcast.episodes.first!
+            let latestEpisodeItem = self.createEpisodeListItem(episode: latestEpisode, podcast: podcast, carPlayManager: carPlayManager)
+            let latestEpisodeSection = CPListSection(items: [latestEpisodeItem], header: "Latest Episode", sectionIndexTitle: nil)
+            sections.append(latestEpisodeSection)
+        }
         
-        for episode in podcast.episodes {
+        // Show remaining episodes (skip the first one since we showed it as "Latest Episode")
+        var episodeItems: [CPListItem] = []
+        let remainingEpisodes = podcast.episodes.count > 1 ? Array(podcast.episodes.dropFirst()) : []
+        
+        for episode in remainingEpisodes {
             let item = self.createEpisodeListItem(episode: episode, podcast: podcast, carPlayManager: carPlayManager)
             episodeItems.append(item)
         }
@@ -1425,9 +1446,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             episodeItems.append(loadMoreItem)
         }
         
-        let episodesHeader = loadedCount < totalEpisodes ? "Recent Episodes (\(loadedCount) of \(totalEpisodes))" : "Episodes (\(totalEpisodes))"
-        let episodesSection = CPListSection(items: episodeItems, header: episodesHeader, sectionIndexTitle: nil)
-        sections.append(episodesSection)
+        // Only add Episodes section if we have remaining episodes or load more option
+        if !episodeItems.isEmpty {
+            let episodesSection = CPListSection(items: episodeItems, header: "Episodes", sectionIndexTitle: nil)
+            sections.append(episodesSection)
+        }
         
         let listTemplate = CPListTemplate(title: podcast.title, sections: sections)
         
