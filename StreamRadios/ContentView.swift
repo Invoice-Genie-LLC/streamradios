@@ -939,7 +939,7 @@ struct UnifiedPodcastPlayerView: View {
     }
     
     private var buttonSpacing: CGFloat {
-        sizeClass == .compact ? 8 : 12
+        sizeClass == .compact ? 0 : 1
     }
     
     // Navigation action to currently playing episode
@@ -976,29 +976,15 @@ struct UnifiedPodcastPlayerView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 
-                // Tappable text area - give it maximum available space with dynamic height
+                // Tappable text area - limit episode title to 3 lines with vertical scrolling
                 Button(action: navigateToCurrentEpisode) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(currentEpisode.title)
-                            .font(.caption)
-                            .foregroundColor(.adaptivePrimaryText)
-                            .lineLimit(nil) // Remove line limit to allow unlimited lines
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true) // Allow vertical expansion
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        Text(currentFeed.title)
-                            .font(.caption2)
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .lineLimit(1) // Keep podcast name to 1 line
-                            .truncationMode(.tail)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    ScrollableEpisodeTitle(title: currentEpisode.title)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, -4) // Increase display width by reducing padding
                 }
                 .buttonStyle(PlainButtonStyle())
                 
-                // Player controls with time elapsed below - centered and responsive
+                // Player controls with timer aligned under play button
                 VStack(spacing: 4) {
                     // Essential controls only - using responsive sizing
                     HStack(spacing: buttonSpacing) {
@@ -1007,64 +993,67 @@ struct UnifiedPodcastPlayerView: View {
                             Image(systemName: "gobackward.15")
                                 .font(.system(size: iconSize))
                                 .foregroundColor(.white)
-                                .frame(width: buttonSize, height: buttonSize)
                         }
                         .buttonStyle(PlainButtonStyle())
                         
-                        // Main play/pause button - responsive size
-                        Button(action: podcastPlayer.togglePlayPause) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.blue)
-                                    .frame(width: playButtonSize, height: playButtonSize)
-                                
-                                if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
-                                    // Show loading spinner when episode is loading
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.8)
-                                } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
-                                    // Show spinning indicator when reconnecting or buffering
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                        .font(.system(size: playIconSize))
-                                        .foregroundColor(.white)
+                        // Main play/pause button with timer below - centered
+                        VStack(spacing: 4) {
+                            Button(action: podcastPlayer.togglePlayPause) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.blue)
+                                        .frame(width: playButtonSize, height: playButtonSize)
+                                    
+                                    if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
+                                        // Show loading spinner when episode is loading
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                        // Show spinning indicator when reconnecting or buffering
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                            .font(.system(size: playIconSize))
+                                            .foregroundColor(.white)
+                                    }
                                 }
                             }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Time elapsed/total display - perfectly centered under play button
+                            Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
+                                .font(.caption2)
+                                .foregroundColor(.adaptiveSecondaryText)
+                                .lineLimit(1)
+                                .frame(width: 80, alignment: .center)
+                                .minimumScaleFactor(0.8)
                         }
-                        .buttonStyle(PlainButtonStyle())
                         
                         // Skip forward 30s - responsive size
                         Button(action: podcastPlayer.skipForward) {
                             Image(systemName: "goforward.30")
                                 .font(.system(size: iconSize))
                                 .foregroundColor(.white)
-                                .frame(width: buttonSize, height: buttonSize)
                         }
                         .buttonStyle(PlainButtonStyle())
                         
-                        // Audio settings button - responsive size
+                        // Audio settings button - responsive size with extra padding
                         Button(action: {
                             showAudioSettings = true
                         }) {
                             Image(systemName: "slider.horizontal.3")
                                 .font(.system(size: iconSize))
                                 .foregroundColor(.white)
-                                .frame(width: buttonSize, height: buttonSize)
+                                .frame(width: buttonSize + 8, height: buttonSize + 8)
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                     
                     // Connection status indicator for podcast player
                     podcastConnectionStatusView
-                    
-                    // Time elapsed/total display
-                    Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                        .font(.caption2)
-                        .foregroundColor(.adaptiveSecondaryText)
                 }
             }
             .padding(.horizontal, horizontalPadding)
@@ -1641,6 +1630,125 @@ struct UnifiedRadioProgressBanner: View {
         case apiFetch
         case cloudKitSave
         case cloudKitFetch
+    }
+}
+
+// MARK: - ScrollableEpisodeTitle Component
+
+struct ScrollableEpisodeTitle: View {
+    let title: String
+    @State private var isScrollable = false
+    @State private var scrollOffset: CGPoint = .zero
+    @State private var contentHeight: CGFloat = 0
+    @State private var containerHeight: CGFloat = 0
+    
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    Text(title)
+                        .font(.caption)
+                        .foregroundColor(.adaptivePrimaryText)
+                        .lineLimit(nil)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            GeometryReader { textGeometry in
+                                Color.clear
+                                    .onAppear {
+                                        contentHeight = textGeometry.size.height
+                                        containerHeight = calculateHeight()
+                                        isScrollable = contentHeight > containerHeight
+                                    }
+                                    .onChange(of: title) { _ in
+                                        contentHeight = textGeometry.size.height
+                                        containerHeight = calculateHeight()
+                                        isScrollable = contentHeight > containerHeight
+                                    }
+                            }
+                        )
+                }
+                .frame(height: calculateHeight())
+                .clipped()
+                .coordinateSpace(name: "scroll")
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear
+                            .preference(key: ScrollOffsetPreferenceKey.self, value: geometry.frame(in: .named("scroll")).origin)
+                    }
+                )
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                    scrollOffset = value
+                }
+            }
+            
+            // Spacing before vertical scroll indicator
+            if isScrollable {
+                Spacer()
+                    .frame(width: 8)
+            }
+            
+            // Vertical scroll indicator line with arrows
+            if isScrollable {
+                VStack(spacing: 0) {
+                    // Top arrow
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 8))
+                        .foregroundColor(.adaptiveSecondaryText.opacity(0.6))
+                        .frame(height: 10)
+                    
+                    // Scroll line with indicator
+                    Rectangle()
+                        .fill(Color.adaptiveSecondaryText.opacity(0.3))
+                        .frame(width: 2, height: calculateHeight() - 20) // Reduce height for arrows
+                        .overlay(
+                            // Scroll position indicator (white part)
+                            Rectangle()
+                                .fill(Color.adaptiveSecondaryText)
+                                .frame(width: 2, height: calculateScrollIndicatorHeight())
+                                .offset(y: calculateScrollIndicatorOffset()),
+                            alignment: .top
+                        )
+                    
+                    // Bottom arrow
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8))
+                        .foregroundColor(.adaptiveSecondaryText.opacity(0.6))
+                        .frame(height: 10)
+                }
+            }
+            
+            // Spacing after vertical scroll indicator  
+            if isScrollable {
+                Spacer()
+                    .frame(width: 8)
+            }
+        }
+        .frame(height: calculateHeight())
+    }
+    
+    private func calculateHeight() -> CGFloat {
+        // Calculate height for 3 lines of caption text
+        let font = UIFont.preferredFont(forTextStyle: .caption1)
+        let lineHeight = font.lineHeight
+        return lineHeight * 3 + 4 // Add some padding
+    }
+    
+    private func calculateScrollIndicatorHeight() -> CGFloat {
+        guard contentHeight > 0 && containerHeight > 0 else { return 0 }
+        let ratio = containerHeight / contentHeight
+        let lineHeight = calculateHeight() - 20 // Account for arrow space
+        return max(lineHeight * ratio, 15) // Minimum height of 15
+    }
+    
+    private func calculateScrollIndicatorOffset() -> CGFloat {
+        guard contentHeight > containerHeight else { return 0 }
+        let maxScroll = contentHeight - containerHeight
+        let scrollProgress = min(max(-scrollOffset.y, 0), maxScroll) / maxScroll
+        let availableHeight = calculateHeight() - 20 // Account for arrow space
+        let maxOffset = availableHeight - calculateScrollIndicatorHeight()
+        return scrollProgress * maxOffset
     }
 }
 
