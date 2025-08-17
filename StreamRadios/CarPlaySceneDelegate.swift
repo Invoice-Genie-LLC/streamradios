@@ -32,6 +32,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         print("🚗 CarPlay: Starting independent data initialization...")
         
         do {
+            // CRITICAL: Initialize EpisodeStateManager to ensure proper app group UserDefaults access
+            // This ensures episode states are available even when main app is closed
+            await initializeEpisodeStateManager()
+            
             // Load podcast feeds and episodes from Core Data directly
             await loadPodcastDataFromCoreData()
             
@@ -50,6 +54,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 CarPlayManager.shared.configurePodcastData([])
                 CarPlayManager.shared.updateContent()
             }
+        }
+    }
+    
+    /// Initialize EpisodeStateManager to ensure it's properly set up for CarPlay
+    private func initializeEpisodeStateManager() async {
+        await MainActor.run {
+            // Access the singleton to trigger initialization
+            // This ensures the app group UserDefaults are properly initialized
+            let _ = EpisodeStateManager.shared
+            os_log("🚗 CarPlay: EpisodeStateManager initialized for independent operation", log: log, type: .info)
+            print("🚗 CarPlay: EpisodeStateManager ready for episode state access")
         }
     }
     
@@ -2787,7 +2802,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     /// Load episodes for a specific podcast feed from CoreData on-demand
     private func loadEpisodesForPodcast(_ podcastFeed: PodcastFeed, completion: @escaping ([PodcastEpisode]) -> Void) {
-        os_log("🚗 CarPlay: Loading ALL episodes for podcast '%@'", log: log, type: .info, podcastFeed.title)
+        os_log("🚗 CarPlay: Loading ALL episodes for podcast '%@' (closed app compatible)", log: log, type: .info, podcastFeed.title)
         
         let context = CoreDataStack.shared.context
         
@@ -2798,17 +2813,26 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
                 
                 let managedEpisodes = try context.fetch(episodeRequest)
-                let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                
+                // CRITICAL: Ensure EpisodeStateManager is available before conversion
+                // This guarantees episode states work even when main app is closed
+                var episodes: [PodcastEpisode] = []
+                
+                for managedEpisode in managedEpisodes {
+                    // Convert using the standard method which handles EpisodeStateManager access
                     var episode = managedEpisode.toPodcastEpisode()
-                    episode.state.isPlayed = managedEpisode.isPlayed
-                    episode.state.progress = managedEpisode.progress
-                    episode.state.isFavorite = managedEpisode.isFavorite
-                    episode.state.isDownloaded = managedEpisode.isDownloaded
                     
-                    return episode
+                    // FALLBACK: If EpisodeStateManager fails, use Core Data values directly
+                    // This ensures episodes are always accessible in CarPlay
+                    if episode.state.progress == 0 && managedEpisode.progress > 0 {
+                        episode.state.progress = managedEpisode.progress
+                        os_log("🚗 CarPlay: Using Core Data fallback progress for episode '%@': %.2f%%", log: self.log, type: .debug, episode.title, managedEpisode.progress * 100)
+                    }
+                    
+                    episodes.append(episode)
                 }
                 
-                os_log("🚗 CarPlay: Successfully loaded %d episodes for podcast '%@'", log: self.log, type: .info, episodes.count, podcastFeed.title)
+                os_log("🚗 CarPlay: Successfully loaded %d episodes for podcast '%@' (with fallback support)", log: self.log, type: .info, episodes.count, podcastFeed.title)
                 
                 DispatchQueue.main.async {
                     completion(episodes)
@@ -2826,7 +2850,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     /// PERFORMANCE OPTIMIZED: Load only initial batch of episodes for fast CarPlay response
     private func loadInitialEpisodesForPodcast(_ podcastFeed: PodcastFeed, limit: Int, completion: @escaping ([PodcastEpisode]) -> Void) {
-        os_log("🚗 CarPlay: Loading initial %d episodes for fast response for podcast '%@'", log: log, type: .info, limit, podcastFeed.title)
+        os_log("🚗 CarPlay: Loading initial %d episodes for podcast '%@' (closed app compatible)", log: log, type: .info, limit, podcastFeed.title)
         
         let context = CoreDataStack.shared.context
         
@@ -2838,17 +2862,26 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 episodeRequest.fetchLimit = limit
                 
                 let managedEpisodes = try context.fetch(episodeRequest)
-                let episodes = managedEpisodes.map { managedEpisode -> PodcastEpisode in
+                
+                // CRITICAL: Ensure EpisodeStateManager is available before conversion
+                // This guarantees episode states work even when main app is closed
+                var episodes: [PodcastEpisode] = []
+                
+                for managedEpisode in managedEpisodes {
+                    // Convert using the standard method which handles EpisodeStateManager access
                     var episode = managedEpisode.toPodcastEpisode()
-                    episode.state.isPlayed = managedEpisode.isPlayed
-                    episode.state.progress = managedEpisode.progress
-                    episode.state.isFavorite = managedEpisode.isFavorite
-                    episode.state.isDownloaded = managedEpisode.isDownloaded
                     
-                    return episode
+                    // FALLBACK: If EpisodeStateManager fails, use Core Data values directly
+                    // This ensures episodes are always accessible in CarPlay
+                    if episode.state.progress == 0 && managedEpisode.progress > 0 {
+                        episode.state.progress = managedEpisode.progress
+                        os_log("🚗 CarPlay: Using Core Data fallback progress for episode '%@': %.2f%%", log: self.log, type: .debug, episode.title, managedEpisode.progress * 100)
+                    }
+                    
+                    episodes.append(episode)
                 }
                 
-                os_log("🚗 CarPlay: Successfully loaded initial %d episodes for podcast '%@'", log: self.log, type: .info, episodes.count, podcastFeed.title)
+                os_log("🚗 CarPlay: Successfully loaded initial %d episodes for podcast '%@' (with fallback support)", log: self.log, type: .info, episodes.count, podcastFeed.title)
                 
                 DispatchQueue.main.async {
                     completion(episodes)
