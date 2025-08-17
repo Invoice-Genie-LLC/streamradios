@@ -576,7 +576,7 @@ class RadioStationCloudKitManager: ObservableObject {
             // Report batch start progress (20% preparation + 80% saving)
             let batchStartProgress = 0.2 + (Double(batchIndex) / Double(totalBatches)) * 0.8
             await MainActor.run {
-                progressCallback(batchStartProgress, totalSavedRecords, "Saving batch \(batchNumber) of \(totalBatches) to iCloud...")
+                progressCallback(batchStartProgress, totalSavedRecords, "Saving batch \(batchNumber) of \(totalBatches) to iCloud")
             }
             
             // Use async/await for the batch operation
