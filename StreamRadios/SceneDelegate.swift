@@ -72,6 +72,44 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // Clear all notifications and reset badge count when app becomes active
         NotificationManager.shared.clearAllNotificationsAndBadge()
+        
+        // 🚗 CARPLAY SYNC: Immediate and aggressive sync to CarPlay when main app becomes active
+        // This ensures podcast feeds sync to CarPlay when user opens the phone app
+        
+        // AGGRESSIVE SYNC: Force immediate data refresh for CarPlay
+        print("🚗 MAIN APP: DEBUG - Scene became active, triggering aggressive CarPlay sync")
+        
+        // 1. Force PodcastViewModel to reload immediately
+        PodcastViewModel.shared.loadFeedsFromCoreData()
+        
+        // 2. Immediate sync attempt via CarPlayManager
+        CarPlayManager.shared.forceRefreshPodcastData()
+        
+        // 3. Debug check
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let feedCount = PodcastViewModel.shared.podcastFeeds.count
+            print("🚗 MAIN APP: DEBUG - After aggressive sync, PodcastViewModel has \(feedCount) feeds")
+        }
+        
+        // Set UserDefaults flag for polling-based backup
+        if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
+            appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
+            appGroupDefaults.set("SceneDidBecomeActive", forKey: "CarPlaySyncSource")
+            appGroupDefaults.synchronize()
+            print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when main app became active")
+        }
+        
+        // Multiple notification attempts with different timings
+        for delay in [0.0, 0.1, 0.3, 0.5, 1.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("CarPlayRefreshRequested"),
+                    object: nil,
+                    userInfo: ["source": "SceneDidBecomeActive", "attempt": "\(delay)"]
+                )
+                print("🚗 CARPLAY SYNC: Sent refresh request to CarPlay (attempt \(delay)s)")
+            }
+        }
     }
 
     func sceneWillResignActive(_ scene: UIScene) {
@@ -81,9 +119,28 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneWillEnterForeground(_ scene: UIScene) {
-        // ToDo
         // Called as the scene transitions from the background to the foreground.
         // Use this method to undo the changes made on entering the background.
+        
+        // 🚗 CARPLAY SYNC: Signal to CarPlay that podcast data needs refresh using shared UserDefaults
+        // This ensures podcast feeds sync to CarPlay when app returns from background
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // Use app group UserDefaults for cross-scene communication
+            if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
+                appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
+                appGroupDefaults.set("SceneWillEnterForeground", forKey: "CarPlaySyncSource")
+                appGroupDefaults.synchronize()
+                print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when app entered foreground")
+            }
+            
+            // Also send notification as backup (in case CarPlay is in same process)
+            NotificationCenter.default.post(
+                name: NSNotification.Name("CarPlayRefreshRequested"),
+                object: nil,
+                userInfo: ["source": "SceneWillEnterForeground"]
+            )
+            print("🚗 CARPLAY SYNC: Sent refresh request to CarPlay when app entered foreground")
+        }
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {

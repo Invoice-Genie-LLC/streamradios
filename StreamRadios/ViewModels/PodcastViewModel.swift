@@ -582,6 +582,18 @@ class PodcastViewModel: ObservableObject {
             // The UI might be out of sync with the data state, so force refresh
             self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
             
+            // 🚗 CARPLAY FIX: Notify CarPlay immediately about cross-device favorite sync
+            print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for cross-device favorite sync")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("EpisodeStateChanged"),
+                object: nil,
+                userInfo: [
+                    "episodeId": episodeId,
+                    "isFavorite": isFavorite
+                ]
+            )
+            print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent for cross-device sync")
+            
             if currentFavorite != isFavorite {
                 print("📡 ✅ Applied instant podcast favorite sync with data change: \(episodeId) (favorite: \(isFavorite))")
             } else {
@@ -608,6 +620,18 @@ class PodcastViewModel: ObservableObject {
             // 🔄 CRITICAL FIX: ALWAYS trigger UI refresh regardless of data change
             // The UI might be out of sync with the data state, so force refresh
             self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
+            
+            // 🚗 CARPLAY FIX: Notify CarPlay immediately about cross-device download sync
+            print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for cross-device download sync")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("EpisodeStateChanged"),
+                object: nil,
+                userInfo: [
+                    "episodeId": episodeId,
+                    "isDownloaded": isDownloaded
+                ]
+            )
+            print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent for download sync")
             
             if currentDownloaded != isDownloaded {
                 print("📡 ✅ Applied instant podcast download sync with data change: \(episodeId) (downloaded: \(isDownloaded))")
@@ -1672,6 +1696,18 @@ class PodcastViewModel: ObservableObject {
                     print("📡 UI UPDATE: Triggering updateEpisodeUIState for \(episodeId)")
                     self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
                     print("📡 UI UPDATE COMPLETED: Episode UI state updated")
+                    
+                    // 🚗 CARPLAY FIX: Notify CarPlay immediately about favorite state change
+                    print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for episode \(episodeId)")
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeStateChanged"),
+                        object: nil,
+                        userInfo: [
+                            "episodeId": episodeId,
+                            "isFavorite": isFavorite
+                        ]
+                    )
+                    print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent successfully")
                 }
             }
             if let isDownloaded = isDownloaded {
@@ -1687,6 +1723,18 @@ class PodcastViewModel: ObservableObject {
                 // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
                 await MainActor.run {
                     self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
+                    
+                    // 🚗 CARPLAY FIX: Notify CarPlay immediately about download state change
+                    print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for episode \(episodeId) download state")
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("EpisodeStateChanged"),
+                        object: nil,
+                        userInfo: [
+                            "episodeId": episodeId,
+                            "isDownloaded": isDownloaded
+                        ]
+                    )
+                    print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent for download state")
                 }
             }
             

@@ -44,6 +44,43 @@ class CarPlayManager: ObservableObject {
         os_log("CarPlay: Content updated - %d stations, %d recent episodes", log: log, type: .debug, radioStations.count, recentPodcastEpisodes.count)
     }
     
+    /// Force refresh podcast data immediately - called when main app becomes active
+    func forceRefreshPodcastData() {
+        os_log("🚗 CarPlay: Force refresh podcast data requested", log: log, type: .info)
+        
+        // Trigger immediate podcast data refresh in the main app
+        DispatchQueue.main.async {
+            print("🚗 CarPlay: DEBUG - Starting force refresh podcast data")
+            
+            // Force PodcastViewModel to reload from Core Data
+            PodcastViewModel.shared.loadFeedsFromCoreData()
+            
+            // Get the latest podcast feeds from PodcastViewModel
+            let latestFeeds = PodcastViewModel.shared.podcastFeeds
+            print("🚗 CarPlay: DEBUG - Found \(latestFeeds.count) feeds in PodcastViewModel")
+            
+            // Configure CarPlayManager with latest data
+            self.configurePodcastData(latestFeeds)
+            
+            // Update our local data
+            self.updateContent()
+            
+            // Send multiple notifications to trigger CarPlay template refresh with different timings
+            for delay in [0.0, 0.2, 0.5, 1.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("CarPlayRefreshRequested"),
+                        object: nil,
+                        userInfo: ["source": "ForceRefreshPodcastData", "delay": "\(delay)"]
+                    )
+                    print("🚗 CarPlay: DEBUG - Sent refresh notification (delay: \(delay)s)")
+                }
+            }
+            
+            print("🚗 CarPlay: Force refresh podcast data completed with \(latestFeeds.count) feeds")
+        }
+    }
+    
     func configurePodcastData(_ podcastFeeds: [PodcastFeed]) {
         self.podcastFeeds = podcastFeeds
         updateRecentPodcastEpisodes()

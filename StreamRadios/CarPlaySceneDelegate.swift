@@ -23,6 +23,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var lastProgressUpdateTime: Date?
     private var isUpdatingTemplate = false
     
+    // UserDefaults sync monitoring timer
+    private var syncMonitoringTimer: Timer?
+    
     // MARK: - Scene Delegate Methods
     
     /// Initialize CarPlay data independently from the main app
@@ -126,6 +129,37 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             CarPlayManager.shared.configurePodcastData(podcastFeeds)
             os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, podcastFeeds.count)
             print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds")
+            
+            // DEBUGGING: Force immediate template refresh if we have feeds
+            if !podcastFeeds.isEmpty {
+                print("🚗 CarPlay: DEBUG - Podcast feeds loaded, forcing immediate template refresh")
+                
+                // Force refresh the podcast tab template
+                self.refreshPodcastTabTemplate()
+                
+                // Force refresh current template if needed
+                self.refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+                
+                print("🚗 CarPlay: DEBUG - Template refresh completed")
+            } else {
+                print("🚗 CarPlay: DEBUG - No podcast feeds found in Core Data")
+                
+                // Try to trigger PodcastViewModel to load data if no feeds found
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    print("🚗 CarPlay: DEBUG - Attempting to trigger PodcastViewModel data load")
+                    PodcastViewModel.shared.loadFeedsFromCoreData()
+                    
+                    // Re-check after a delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        let updatedFeeds = PodcastViewModel.shared.podcastFeeds
+                        print("🚗 CarPlay: DEBUG - After PodcastViewModel load: \(updatedFeeds.count) feeds")
+                        if !updatedFeeds.isEmpty {
+                            CarPlayManager.shared.configurePodcastData(updatedFeeds)
+                            self.refreshPodcastTabTemplate()
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -168,6 +202,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Set up real-time update listeners
         setupProgressUpdateListeners()
+        
+        // Set up UserDefaults-based sync monitoring for cross-scene communication
+        setupCarPlaySyncMonitoring()
+        
+        // Immediately check for any pending sync requests when CarPlay connects
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.checkForSyncRequests()
+        }
     }
     
     func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene, 
@@ -182,6 +224,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         // CRITICAL: Save current playback state before disconnection
         // This helps restore state when app is killed and CarPlay reconnects
         savePlaybackStateForRestoration()
+        
+        // Clean up sync monitoring timer
+        syncMonitoringTimer?.invalidate()
+        syncMonitoringTimer = nil
+        os_log("🚗 CarPlay: Sync monitoring timer cleaned up", log: log, type: .info)
         
         // Clear CarPlay connection status for performance optimizations
         CarPlayManager.shared.isCarPlayConnected = false
@@ -1232,7 +1279,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         if podcastItems.isEmpty {
-            let emptyItem = CPListItem(text: "No Podcasts", detailText: "Add podcasts to see them here")
+            let emptyItem = CPListItem(text: "No Podcasts", detailText: "Open the phone app to sync your podcasts")
             podcastItems.append(emptyItem)
         }
         
@@ -2094,7 +2141,24 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         }
         
         os_log("🚗 CarPlay: Episode state changed: %@", log: log, type: .info, episodeId)
-        refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
+        
+        // 🚗 CARPLAY FIX: For favorite/download state changes, use gentle data updates instead of template refreshes
+        // This prevents the black screen issue while still updating the data
+        let isFavoriteChange = userInfo["isFavorite"] != nil
+        let isDownloadChange = userInfo["isDownloaded"] != nil
+        
+        if isFavoriteChange || isDownloadChange {
+            // For favorite/download changes, use immediate but gentle refresh to prevent black screens
+            os_log("🚗 CarPlay: Using gentle immediate refresh for favorite/download change", log: log, type: .info)
+            let carPlayManager = CarPlayManager.shared
+            carPlayManager.updateContent() // Update internal data first
+            
+            // Use immediate gentle refresh instead of the aggressive template refresh
+            performGentleRefreshIfVisible(episodeId: episodeId)
+        } else {
+            // For other changes (like progress), use the existing refresh logic
+            refreshCurrentPodcastTemplateIfNeeded(episodeId: episodeId)
+        }
     }
     
     private func handlePlaybackStateChange(_ notification: Notification) {
@@ -2205,13 +2269,40 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let source = notification.userInfo?["source"] as? String ?? "unknown"
         os_log("🚗 CarPlay: Received refresh request from source: %@", log: log, type: .info, source)
         
-        // Force refresh all data
-        let carPlayManager = CarPlayManager.shared
-        carPlayManager.updateContent()
-        
-        // Refresh current templates
-        refreshRecentsTabTemplate()
-        refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+        // 🔄 ENHANCED SYNC: Force reload podcast data from Core Data when main app requests refresh
+        // This ensures that new podcast feeds added in the main app are immediately available in CarPlay
+        if source == "SceneDidBecomeActive" || source == "SceneWillEnterForeground" {
+            os_log("🚗 CarPlay: Performing enhanced data reload for main app sync", log: log, type: .info)
+            
+            // Reload podcast feeds data asynchronously to prevent UI blocking
+            Task {
+                await loadPodcastDataFromCoreData()
+                
+                // After data reload, refresh UI on main thread
+                await MainActor.run {
+                    os_log("🚗 CarPlay: Podcast data reloaded, refreshing UI templates", log: self.log, type: .info)
+                    
+                    // Force refresh all data
+                    let carPlayManager = CarPlayManager.shared
+                    carPlayManager.updateContent()
+                    
+                    // Refresh the podcast tab template to show newly loaded feeds
+                    self.refreshPodcastTabTemplate()
+                    
+                    // Refresh current templates
+                    self.refreshRecentsTabTemplate()
+                    self.refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+                }
+            }
+        } else {
+            // For other refresh sources, use the existing quick refresh
+            let carPlayManager = CarPlayManager.shared
+            carPlayManager.updateContent()
+            
+            // Refresh current templates
+            refreshRecentsTabTemplate()
+            refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+        }
         
         // Note: Removed deprecated MPPlayableContentManager.shared().reloadData()
         // CarPlay uses CPTemplateApplicationScene and direct template updates
@@ -2520,6 +2611,180 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         } else {
             os_log("🚗 CarPlay: Downloads tab index out of bounds or not a list template", log: log, type: .error)
         }
+    }
+    
+    /// Set up monitoring for UserDefaults-based sync requests from main app
+    private func setupCarPlaySyncMonitoring() {
+        os_log("🚗 CarPlay: Setting up UserDefaults-based sync monitoring", log: log, type: .info)
+        
+        // Invalidate existing timer if any
+        syncMonitoringTimer?.invalidate()
+        
+        // Check for sync requests every 0.5 seconds when CarPlay is active for immediate response
+        syncMonitoringTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.checkForSyncRequests()
+        }
+        
+        // Store timer reference and add to run loop
+        if let timer = syncMonitoringTimer {
+            RunLoop.current.add(timer, forMode: .common)
+        }
+        
+        os_log("🚗 CarPlay: UserDefaults sync monitoring timer started", log: log, type: .info)
+    }
+    
+    /// Check for sync requests from main app via shared UserDefaults
+    private func checkForSyncRequests() {
+        guard let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") else {
+            os_log("🚗 CarPlay: Failed to access app group UserDefaults", log: log, type: .error)
+            return
+        }
+        
+        let syncRequestTime = appGroupDefaults.double(forKey: "CarPlaySyncRequested")
+        let syncSource = appGroupDefaults.string(forKey: "CarPlaySyncSource") ?? "Unknown"
+        let lastProcessedTime = appGroupDefaults.double(forKey: "CarPlayLastProcessed")
+        
+        // Debug logging every 10 seconds to avoid spam
+        if Int(Date().timeIntervalSince1970) % 10 == 0 {
+            os_log("🚗 CarPlay: Sync check - Request: %.1f, Source: %@, LastProcessed: %.1f", 
+                   log: log, type: .debug, syncRequestTime, syncSource, lastProcessedTime)
+        }
+        
+        // Check if this is a new sync request (within last 60 seconds and not already processed)
+        let now = Date().timeIntervalSince1970
+        let timeSinceRequest = now - syncRequestTime
+        
+        if syncRequestTime > 0 && timeSinceRequest < 60.0 && timeSinceRequest >= 0 {
+            // Check if we've already processed this request
+            
+            if syncRequestTime > lastProcessedTime {
+                os_log("🚗 CarPlay: Found new sync request from %@ (%.1f seconds ago)", log: log, type: .info, syncSource, timeSinceRequest)
+                
+                // Mark this request as processed
+                appGroupDefaults.set(syncRequestTime, forKey: "CarPlayLastProcessed")
+                appGroupDefaults.synchronize()
+                
+                // Trigger the sync
+                handleCarPlaySyncRequest(source: syncSource)
+            } else {
+                // Debug: Request already processed
+                if timeSinceRequest < 5.0 { // Only log for recent requests
+                    os_log("🚗 CarPlay: Sync request already processed (%.1f seconds ago)", log: log, type: .debug, timeSinceRequest)
+                }
+            }
+        } else if syncRequestTime > 0 && timeSinceRequest >= 60.0 {
+            // Debug: Request too old
+            os_log("🚗 CarPlay: Sync request too old (%.1f seconds ago)", log: log, type: .debug, timeSinceRequest)
+        }
+    }
+    
+    /// Handle sync request with proper source identification
+    private func handleCarPlaySyncRequest(source: String) {
+        os_log("🚗 CarPlay: Processing sync request from source: %@", log: log, type: .info, source)
+        
+        // Use the existing enhanced sync logic for main app requests
+        if source == "SceneDidBecomeActive" || source == "SceneWillEnterForeground" {
+            os_log("🚗 CarPlay: Performing enhanced data reload for main app sync", log: log, type: .info)
+            
+            // Reload podcast feeds data asynchronously to prevent UI blocking
+            Task {
+                await loadPodcastDataFromCoreData()
+                
+                // After data reload, refresh UI on main thread
+                await MainActor.run {
+                    os_log("🚗 CarPlay: Podcast data reloaded, refreshing UI templates", log: self.log, type: .info)
+                    
+                    // Force refresh all data
+                    let carPlayManager = CarPlayManager.shared
+                    carPlayManager.updateContent()
+                    
+                    // Refresh the podcast tab template to show newly loaded feeds
+                    self.refreshPodcastTabTemplate()
+                    
+                    // Refresh current templates
+                    self.refreshRecentsTabTemplate()
+                    self.refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+                }
+            }
+        } else {
+            // For other refresh sources, use the existing quick refresh
+            let carPlayManager = CarPlayManager.shared
+            carPlayManager.updateContent()
+            
+            // Refresh current templates
+            refreshRecentsTabTemplate()
+            refreshCurrentPodcastTemplateIfNeeded(episodeId: "")
+        }
+    }
+    
+    /// Refresh the podcast tab template to show newly added podcast feeds
+    private func refreshPodcastTabTemplate() {
+        guard let interfaceController = self.interfaceController,
+              let tabBarTemplate = interfaceController.rootTemplate as? CPTabBarTemplate else {
+            os_log("🚗 CarPlay: Unable to refresh podcast tab - no root template found", log: log, type: .error)
+            return
+        }
+        
+        // Find the podcast tab (index 3 based on setupRootTemplate order: stations, downloads, recents, podcasts)
+        let podcastTabIndex = 3
+        guard podcastTabIndex < tabBarTemplate.templates.count,
+              let currentPodcastTab = tabBarTemplate.templates[podcastTabIndex] as? CPListTemplate else {
+            os_log("🚗 CarPlay: Unable to find podcast tab to refresh", log: log, type: .error)
+            return
+        }
+        
+        os_log("🚗 CarPlay: Refreshing podcast tab template with latest data", log: log, type: .info)
+        
+        // Get updated podcast feeds from CarPlayManager
+        let carPlayManager = CarPlayManager.shared
+        let podcastFeeds = carPlayManager.getPodcastFeeds()
+        
+        var podcastItems: [CPListItem] = []
+        for podcast in podcastFeeds {
+            // Get episode count synchronously
+            let episodeCount = getEpisodeCountSync(for: podcast)
+            
+            let item = CPListItem(text: podcast.title,
+                                 detailText: "\(episodeCount) episodes",
+                                 image: carPlayManager.getPodcastArtwork(for: podcast))
+            item.handler = { [weak self] (item: CPSelectableListItem, completion: @escaping () -> Void) in
+                self?.showPodcastDetails(podcast, completion: completion)
+            }
+            podcastItems.append(item)
+        }
+        
+        if podcastItems.isEmpty {
+            let emptyItem = CPListItem(text: "No Podcasts", detailText: "Open the phone app to sync your podcasts")
+            podcastItems.append(emptyItem)
+        }
+        
+        let podcastSection = CPListSection(items: podcastItems, header: "Your Podcasts", sectionIndexTitle: nil)
+        
+        // Update the sections instead of recreating the entire template (prevents black screen)
+        currentPodcastTab.updateSections([podcastSection])
+        
+        os_log("🚗 CarPlay: Successfully refreshed podcast tab with %d feeds", log: log, type: .info, podcastFeeds.count)
+    }
+    
+    /// Gentle refresh that only updates visible templates without causing black screens
+    private func performGentleRefreshIfVisible(episodeId: String) {
+        // Only refresh if we're currently viewing a podcast episode list
+        guard let currentTemplate = interfaceController?.topTemplate as? CPListTemplate,
+              let currentFeed = currentPodcastFeed,
+              currentTemplate.title == currentFeed.title,
+              currentFeed.episodes.contains(where: { $0.id == episodeId }) else {
+            os_log("🚗 CarPlay: Skipping gentle refresh - not viewing relevant podcast template", log: log, type: .debug)
+            return
+        }
+        
+        // Use the most gentle update method - update sections in place rather than recreating the template
+        let carPlayManager = CarPlayManager.shared
+        carPlayManager.updateContent()
+        
+        // Update the current template sections without recreating the template (prevents black screen)
+        updateCurrentPodcastTemplateSections(for: currentFeed)
+        
+        os_log("🚗 CarPlay: Completed gentle refresh for episode: %@", log: log, type: .debug, episodeId)
     }
     
     private func refreshCurrentPodcastTemplateIfNeeded(episodeId: String) {
