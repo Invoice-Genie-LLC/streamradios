@@ -576,7 +576,7 @@ class RadioStationCloudKitManager: ObservableObject {
             // Report batch start progress (20% preparation + 80% saving)
             let batchStartProgress = 0.2 + (Double(batchIndex) / Double(totalBatches)) * 0.8
             await MainActor.run {
-                progressCallback(batchStartProgress, totalSavedRecords, "Saving batch \(batchNumber) of \(totalBatches) to CloudKit...")
+                progressCallback(batchStartProgress, totalSavedRecords, "Saving batch \(batchNumber) of \(totalBatches) to iCloud...")
             }
             
             // Use async/await for the batch operation
@@ -617,7 +617,7 @@ class RadioStationCloudKitManager: ObservableObject {
             // Report batch completion progress
             let batchCompleteProgress = 0.2 + (Double(batchNumber) / Double(totalBatches)) * 0.8
             await MainActor.run {
-                progressCallback(batchCompleteProgress, totalSavedRecords, "Saved \(totalSavedRecords) of \(totalStations) stations to CloudKit")
+                progressCallback(batchCompleteProgress, totalSavedRecords, "Saved \(totalSavedRecords) of \(totalStations) stations to iCloud")
             }
             
             os_log("📡 ✅ RADIO Completed batch %d/%d with %d saved records (total: %d)", log: log, type: .info, batchNumber, totalBatches, savedRecords.count, totalSavedRecords)
@@ -625,7 +625,7 @@ class RadioStationCloudKitManager: ObservableObject {
         
         // Final completion progress
         await MainActor.run {
-            progressCallback(1.0, totalSavedRecords, "Successfully saved \(totalSavedRecords) stations to CloudKit")
+            progressCallback(1.0, totalSavedRecords, "Successfully saved \(totalSavedRecords) stations to iCloud")
         }
         
         os_log("🎉 RADIO Successfully completed all %d batches for %d total records", log: log, type: .info, totalBatches, records.count)
@@ -643,7 +643,7 @@ class RadioStationCloudKitManager: ObservableObject {
             let batchRecordIDs = Array(recordIDs[startIndex..<endIndex])
             
             let batchNumber = batchIndex + 1
-            os_log("📡 🗑️ RADIO Processing CloudKit deletion batch %d/%d (%d records)", log: log, type: .info, batchNumber, totalBatches, batchRecordIDs.count)
+            os_log("📡 🗑️ RADIO Processing iCloud deletion batch %d/%d (%d records)", log: log, type: .info, batchNumber, totalBatches, batchRecordIDs.count)
             
             // Use async/await for the batch deletion operation
             let deletedRecordIDs = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord.ID], Error>) in

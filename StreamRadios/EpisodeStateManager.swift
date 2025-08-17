@@ -363,60 +363,75 @@ class EpisodeStateManager: ObservableObject {
     
     private func saveCurrentStates() {
         // CRITICAL FIX: Limit data size to prevent UserDefaults overflow
-        // Clean up old data if we have too many entries
-        cleanupOldDataIfNeeded()
+        // Emergency cleanup before any save operations
+        emergencyCleanupIfNeeded()
         
-        // Save episode states with size check
+        // Reduced per-dataset limit to ensure total stays under 4MB
+        let maxDataSize = 800_000 // 800KB per dataset = ~3.2MB total for 4 datasets
+        
+        // Save episode states with strict size check
         let statesForSaving = episodeStates.mapValues { $0.rawValue }
         if let statesData = try? JSONEncoder().encode(statesForSaving) {
-            if statesData.count < 3_000_000 { // 3MB limit
+            if statesData.count < maxDataSize {
                 userDefaults.set(statesData, forKey: statesKey)
             } else {
-                print("⚠️ EpisodeStateManager: States data too large (\(statesData.count) bytes), cleaning up")
-                cleanupLargeDatasets()
+                print("⚠️ EpisodeStateManager: States data too large (\(statesData.count) bytes), performing emergency cleanup")
+                emergencyCleanupStates()
                 // Try again with cleaned data
                 let cleanedStatesForSaving = episodeStates.mapValues { $0.rawValue }
-                if let cleanedStatesData = try? JSONEncoder().encode(cleanedStatesForSaving) {
+                if let cleanedStatesData = try? JSONEncoder().encode(cleanedStatesForSaving),
+                   cleanedStatesData.count < maxDataSize {
                     userDefaults.set(cleanedStatesData, forKey: statesKey)
+                } else {
+                    print("❌ EpisodeStateManager: States still too large after cleanup, skipping save")
                 }
             }
         }
         
-        // Save episode progress with size check
+        // Save episode progress with strict size check
         if let progressData = try? JSONEncoder().encode(episodeProgress) {
-            if progressData.count < 3_000_000 { // 3MB limit
+            if progressData.count < maxDataSize {
                 userDefaults.set(progressData, forKey: progressKey)
             } else {
-                print("⚠️ EpisodeStateManager: Progress data too large (\(progressData.count) bytes), cleaning up")
-                cleanupLargeDatasets()
-                if let cleanedProgressData = try? JSONEncoder().encode(episodeProgress) {
+                print("⚠️ EpisodeStateManager: Progress data too large (\(progressData.count) bytes), performing emergency cleanup")
+                emergencyCleanupProgress()
+                if let cleanedProgressData = try? JSONEncoder().encode(episodeProgress),
+                   cleanedProgressData.count < maxDataSize {
                     userDefaults.set(cleanedProgressData, forKey: progressKey)
+                } else {
+                    print("❌ EpisodeStateManager: Progress still too large after cleanup, skipping save")
                 }
             }
         }
         
-        // Save episode favorites with size check
+        // Save episode favorites with strict size check
         if let favoritesData = try? JSONEncoder().encode(episodeFavorites) {
-            if favoritesData.count < 3_000_000 { // 3MB limit
+            if favoritesData.count < maxDataSize {
                 userDefaults.set(favoritesData, forKey: favoritesKey)
             } else {
-                print("⚠️ EpisodeStateManager: Favorites data too large (\(favoritesData.count) bytes), cleaning up")
-                cleanupLargeDatasets()
-                if let cleanedFavoritesData = try? JSONEncoder().encode(episodeFavorites) {
+                print("⚠️ EpisodeStateManager: Favorites data too large (\(favoritesData.count) bytes), performing emergency cleanup")
+                emergencyCleanupFavorites()
+                if let cleanedFavoritesData = try? JSONEncoder().encode(episodeFavorites),
+                   cleanedFavoritesData.count < maxDataSize {
                     userDefaults.set(cleanedFavoritesData, forKey: favoritesKey)
+                } else {
+                    print("❌ EpisodeStateManager: Favorites still too large after cleanup, skipping save")
                 }
             }
         }
         
-        // Save episode downloads with size check
+        // Save episode downloads with strict size check
         if let downloadsData = try? JSONEncoder().encode(episodeDownloads) {
-            if downloadsData.count < 3_000_000 { // 3MB limit
+            if downloadsData.count < maxDataSize {
                 userDefaults.set(downloadsData, forKey: downloadsKey)
             } else {
-                print("⚠️ EpisodeStateManager: Downloads data too large (\(downloadsData.count) bytes), cleaning up")
-                cleanupLargeDatasets()
-                if let cleanedDownloadsData = try? JSONEncoder().encode(episodeDownloads) {
+                print("⚠️ EpisodeStateManager: Downloads data too large (\(downloadsData.count) bytes), performing emergency cleanup")
+                emergencyCleanupDownloads()
+                if let cleanedDownloadsData = try? JSONEncoder().encode(episodeDownloads),
+                   cleanedDownloadsData.count < maxDataSize {
                     userDefaults.set(cleanedDownloadsData, forKey: downloadsKey)
+                } else {
+                    print("❌ EpisodeStateManager: Downloads still too large after cleanup, skipping save")
                 }
             }
         }
@@ -430,6 +445,67 @@ class EpisodeStateManager: ObservableObject {
     }
     
     // MARK: - Data Cleanup Methods
+    
+    /// Emergency cleanup before any save operations
+    private func emergencyCleanupIfNeeded() {
+        let emergencyLimit = 3_000 // Much stricter limit for emergency situations
+        
+        if episodeStates.count > emergencyLimit {
+            print("🚨 EpisodeStateManager: Emergency cleanup - episode states (\(episodeStates.count) > \(emergencyLimit))")
+            emergencyCleanupStates()
+        }
+        
+        if episodeProgress.count > emergencyLimit {
+            print("🚨 EpisodeStateManager: Emergency cleanup - episode progress (\(episodeProgress.count) > \(emergencyLimit))")
+            emergencyCleanupProgress()
+        }
+        
+        if episodeFavorites.count > emergencyLimit {
+            print("🚨 EpisodeStateManager: Emergency cleanup - episode favorites (\(episodeFavorites.count) > \(emergencyLimit))")
+            emergencyCleanupFavorites()
+        }
+        
+        if episodeDownloads.count > emergencyLimit {
+            print("🚨 EpisodeStateManager: Emergency cleanup - episode downloads (\(episodeDownloads.count) > \(emergencyLimit))")
+            emergencyCleanupDownloads()
+        }
+    }
+    
+    /// Emergency cleanup for episode states - keep only the most essential data
+    private func emergencyCleanupStates() {
+        let keepCount = 1000 // Only keep 1000 most recent states
+        let sortedStates = episodeStates.sorted { $0.key > $1.key } // Sort by ID descending (newer first)
+        let keepStates = Array(sortedStates.prefix(keepCount))
+        episodeStates = Dictionary(uniqueKeysWithValues: keepStates)
+        print("🧹 EpisodeStateManager: Emergency cleaned episode states to \(episodeStates.count) entries")
+    }
+    
+    /// Emergency cleanup for episode progress - keep only the most essential data
+    private func emergencyCleanupProgress() {
+        let keepCount = 1000 // Only keep 1000 most recent progress entries
+        let sortedProgress = episodeProgress.sorted { $0.key > $1.key } // Sort by ID descending (newer first)
+        let keepProgress = Array(sortedProgress.prefix(keepCount))
+        episodeProgress = Dictionary(uniqueKeysWithValues: keepProgress)
+        print("🧹 EpisodeStateManager: Emergency cleaned episode progress to \(episodeProgress.count) entries")
+    }
+    
+    /// Emergency cleanup for episode favorites - keep only the most essential data
+    private func emergencyCleanupFavorites() {
+        let keepCount = 1000 // Only keep 1000 most recent favorites
+        let sortedFavorites = episodeFavorites.sorted { $0.key > $1.key } // Sort by ID descending (newer first)
+        let keepFavorites = Array(sortedFavorites.prefix(keepCount))
+        episodeFavorites = Dictionary(uniqueKeysWithValues: keepFavorites)
+        print("🧹 EpisodeStateManager: Emergency cleaned episode favorites to \(episodeFavorites.count) entries")
+    }
+    
+    /// Emergency cleanup for episode downloads - keep only the most essential data
+    private func emergencyCleanupDownloads() {
+        let keepCount = 1000 // Only keep 1000 most recent downloads
+        let sortedDownloads = episodeDownloads.sorted { $0.key > $1.key } // Sort by ID descending (newer first)
+        let keepDownloads = Array(sortedDownloads.prefix(keepCount))
+        episodeDownloads = Dictionary(uniqueKeysWithValues: keepDownloads)
+        print("🧹 EpisodeStateManager: Emergency cleaned episode downloads to \(episodeDownloads.count) entries")
+    }
     
     /// Clean up old data if we have too many entries to prevent UserDefaults overflow
     private func cleanupOldDataIfNeeded() {
