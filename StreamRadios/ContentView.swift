@@ -1396,28 +1396,39 @@ struct UnifiedRadioProgressBanner: View {
                             insertion: .scale.combined(with: .opacity),
                             removal: .scale.combined(with: .opacity)
                         ))
-                        .animation(.easeInOut(duration: 0.4), value: currentOperationType)
-                        .animation(.easeInOut(duration: 0.4), value: iconColor)
+                        .animation(.easeInOut(duration: 0.2), value: currentOperationType)
+                        .animation(.easeInOut(duration: 0.2), value: iconColor)
                     
-                    // Progress message
+                    // Progress message - FIXED HEIGHT
                     VStack(alignment: .leading, spacing: 2) {
                         Text(bannerTitle)
                             .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
+                            .lineLimit(1)
                             .id(bannerTitle)
                             .transition(.asymmetric(
                                 insertion: .opacity.combined(with: .scale(scale: 0.9)),
                                 removal: .opacity.combined(with: .scale(scale: 0.9))
                             ))
-                            .animation(.easeInOut(duration: 0.4), value: bannerTitle)
+                            .animation(.easeInOut(duration: 0.2), value: bannerTitle)
                         
-                        if !currentCountryInfo.isEmpty {
-                            Text(currentCountryInfo)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .animation(.easeInOut(duration: 0.4), value: currentCountryInfo)
+                        // FIXED HEIGHT: Always reserve space for country info
+                        Group {
+                            if !currentCountryInfo.isEmpty {
+                                Text(currentCountryInfo)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .animation(.easeInOut(duration: 0.2), value: currentCountryInfo)
+                            } else {
+                                Text("Loading data...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .opacity(0.0)
+                            }
                         }
+                        .frame(height: 16)
                     }
                     
                     Spacer()
@@ -1427,7 +1438,7 @@ struct UnifiedRadioProgressBanner: View {
                         .font(.headline)
                         .fontWeight(.semibold)
                         .foregroundColor(iconColor)
-                        .animation(.easeInOut(duration: 0.4), value: iconColor)
+                        .animation(.easeInOut(duration: 0.2), value: iconColor)
                 }
                 
                 // Progress bar
@@ -1449,17 +1460,28 @@ struct UnifiedRadioProgressBanner: View {
                 }
                 .frame(height: 4)
                 
-                // Operation status
-                if !operationStatus.isEmpty {
-                    HStack {
-                        Text(operationStatus)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                            .animation(.easeInOut(duration: 0.4), value: operationStatus)
-                        Spacer()
+                // FIXED HEIGHT: Operation status always reserve space
+                Group {
+                    if !operationStatus.isEmpty {
+                        HStack {
+                            Text(operationStatus)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .animation(.easeInOut(duration: 0.2), value: operationStatus)
+                            Spacer()
+                        }
+                    } else {
+                        HStack {
+                            Text("Preparing operation...")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .opacity(0.0)
+                            Spacer()
+                        }
                     }
                 }
+                .frame(height: 18)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -1467,7 +1489,7 @@ struct UnifiedRadioProgressBanner: View {
             .cornerRadius(10)
             .padding(.horizontal, 12)
             .padding(.vertical, 2)
-            .animation(.easeInOut(duration: 0.4), value: bannerBackgroundColor)
+            .animation(.easeInOut(duration: 0.2), value: bannerBackgroundColor)
             .transition(.asymmetric(
                 insertion: .opacity.combined(with: .move(edge: .top)),
                 removal: .opacity.combined(with: .move(edge: .top))
@@ -1575,7 +1597,7 @@ struct UnifiedRadioProgressBanner: View {
             return "Loading \(radioViewModel.selectedCountry)"
         }
         
-        // For CloudKit operations, extract country from operation string
+        // For CloudKit operations, extract country from operation string (simplified)
         let operation = syncManager.radioStationsOperation
         if operation.contains("processing") {
             if let processingIndex = operation.range(of: "processing ")?.upperBound,
@@ -1585,21 +1607,45 @@ struct UnifiedRadioProgressBanner: View {
             }
         }
         
+        // Fallback to generic text to maintain consistent layout
+        if syncManager.radioStationsStatus == .inProgress {
+            return "Processing data"
+        }
+        
         return ""
     }
     
     private var operationStatus: String {
-        // For API fetching, use the loading phase
+        // For API fetching, use simplified stable messages
         if radioViewModel.isLoading && currentOperationType == .apiFetch {
             if radioViewModel.totalStationsToLoad > 0 {
-                return "Converting \(radioViewModel.totalStationsToLoad) stations..."
+                return "Converting stations to local format..."
             } else {
-                return radioViewModel.loadingPhase
+                // Simplify loading phase to avoid frequent text changes
+                let phase = radioViewModel.loadingPhase
+                if phase.contains("Connecting") {
+                    return "Connecting to radio database..."
+                } else if phase.contains("Download") || phase.contains("Receiving") {
+                    return "Downloading station data..."
+                } else if phase.contains("Finishing") {
+                    return "Finalizing download..."
+                } else {
+                    return "Loading radio stations..."
+                }
             }
         }
         
-        // For CloudKit operations, use the operation string
-        return syncManager.radioStationsOperation
+        // For CloudKit operations, simplify operation string
+        let operation = syncManager.radioStationsOperation
+        if operation.contains("Saving") {
+            return "Saving data to iCloud..."
+        } else if operation.contains("Fetching") || operation.contains("Loading") {
+            return "Loading data from iCloud..."
+        } else if !operation.isEmpty {
+            return "Processing data..."
+        }
+        
+        return ""
     }
     
     private var bannerBackgroundColor: Color {
