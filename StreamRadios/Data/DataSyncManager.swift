@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 import CoreData
 import UIKit
+import CloudKit
 
 
 
@@ -52,6 +53,10 @@ class DataSyncManager: ObservableObject {
     @Published var episodeStatesCurrentCount = 0
     @Published var episodeStatesTotalCount = 0
     
+    // Minimal CloudKit sync indicator (for individual saves)
+    @Published var isMinimalCloudKitSyncing = false
+    @Published var minimalSyncTimer: Timer?
+    
     // User Preferences
     @Published var userPreferencesStatus: DataSyncStatus = .pending
     @Published var userPreferencesProgress: Double = 0.0
@@ -61,6 +66,9 @@ class DataSyncManager: ObservableObject {
     @Published var feedParsingProgress: Double = 0.0
     @Published var feedParsingMessage = ""
     @Published var isParsingFeeds = false
+    
+    // Individual Feed Addition (UI-initiated)
+    @Published var isAddingIndividualFeed = false
     
     // MARK: - Artwork Download Tracking
     private var totalArtworkDownloads = 0
@@ -211,18 +219,29 @@ class DataSyncManager: ObservableObject {
     
     @MainActor
     private func syncPodcastFeeds() async {
+        // Check how many feeds we expect to sync FIRST
+        let expectedFeedCount = await getExpectedPodcastFeedCount()
+        
+        // If there are no feeds to sync, skip the entire process
+        if expectedFeedCount == 0 {
+            print("📡 DataSyncManager: No podcast feeds to sync - skipping")
+            podcastFeedsStatus = .none
+            podcastFeedsOperation = ""
+            podcastFeedsProgress = 0.0
+            podcastFeedsCurrentCount = 0
+            podcastFeedsTotalCount = 0
+            return
+        }
+        
         podcastFeedsStatus = .inProgress
         podcastFeedsOperation = "Initializing podcast feeds..."
         podcastFeedsProgress = 0.0
         podcastFeedsCurrentCount = 0
-        podcastFeedsTotalCount = 0
+        podcastFeedsTotalCount = expectedFeedCount
         
         do {
             // Get or create PodcastViewModel instance
             let podcastViewModel = PodcastViewModel.shared
-            
-            // Check how many feeds we expect to sync
-            podcastFeedsTotalCount = await getExpectedPodcastFeedCount()
             
             // Start podcast loading with progress updates
             for progress in stride(from: 0.0, through: 0.3, by: 0.1) {
@@ -448,11 +467,109 @@ class DataSyncManager: ObservableObject {
     func updateFeedParsingProgress(_ progress: Double, message: String) {
         feedParsingProgress = progress
         feedParsingMessage = message
-        isParsingFeeds = progress > 0.0 && progress < 1.0
+        // CRITICAL FIX: Don't show main banner during individual feed addition (PodcastAddingProgressView handles it)
+        isParsingFeeds = (progress > 0.0 && progress < 1.0) && !isAddingIndividualFeed
         
         // Also update podcast feeds operation if parsing is active
         if isParsingFeeds {
             podcastFeedsOperation = message
+        }
+    }
+    
+    /// Start episode state synchronization tracking
+    @MainActor
+    func startEpisodeStateSync(totalCount: Int) {
+        if totalCount > 0 {
+            episodeStatesStatus = .inProgress
+            episodeStatesProgress = 0.0
+            episodeStatesCurrentCount = 0
+            episodeStatesTotalCount = totalCount
+            episodeStatesOperation = "Syncing episode states from iCloud..."
+            print("📊 DataSyncManager: Started episode state sync tracking (\(totalCount) episodes)")
+        } else {
+            // No episodes to sync - immediately mark as completed and reset
+            episodeStatesStatus = .none
+            episodeStatesProgress = 0.0
+            episodeStatesCurrentCount = 0
+            episodeStatesTotalCount = 0
+            episodeStatesOperation = ""
+            print("📊 DataSyncManager: No episodes to sync - skipping")
+        }
+    }
+    
+    /// Update episode state synchronization progress
+    @MainActor
+    func updateEpisodeStateProgress(currentCount: Int, operation: String = "") {
+        episodeStatesCurrentCount = currentCount
+        if episodeStatesTotalCount > 0 {
+            episodeStatesProgress = Double(currentCount) / Double(episodeStatesTotalCount)
+        }
+        if !operation.isEmpty {
+            episodeStatesOperation = operation
+        }
+        // print("📊 Episode sync progress: \(currentCount)/\(episodeStatesTotalCount) (\(Int(episodeStatesProgress * 100))%)")
+    }
+    
+    /// Complete episode state synchronization
+    @MainActor
+    func completeEpisodeStateSync() {
+        episodeStatesStatus = .completed
+        episodeStatesProgress = 1.0
+        episodeStatesCurrentCount = episodeStatesTotalCount
+        episodeStatesOperation = "Episode states synchronized"
+        print("✅ DataSyncManager: Completed episode state sync tracking")
+        
+        // Auto-reset after 3 seconds to hide the banner
+        Task { @MainActor in
+            try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+            self.resetEpisodeStateSync()
+        }
+    }
+    
+    /// Reset episode state synchronization tracking
+    @MainActor
+    func resetEpisodeStateSync() {
+        episodeStatesStatus = .none
+        episodeStatesProgress = 0.0
+        episodeStatesCurrentCount = 0
+        episodeStatesTotalCount = 0
+        episodeStatesOperation = ""
+        print("🔄 DataSyncManager: Reset episode state sync tracking")
+    }
+    
+    // MARK: - Individual Feed Addition Tracking
+    
+    /// Start tracking individual feed addition (UI-initiated)
+    @MainActor
+    func startIndividualFeedAddition() {
+        isAddingIndividualFeed = true
+        print("🔄 DataSyncManager: Started individual feed addition tracking")
+    }
+    
+    /// Complete individual feed addition tracking
+    @MainActor
+    func completeIndividualFeedAddition() {
+        isAddingIndividualFeed = false
+        print("🔄 DataSyncManager: Completed individual feed addition tracking")
+    }
+    
+    // MARK: - Minimal CloudKit Sync Indicator
+    
+    /// Show minimal sync indicator for individual CloudKit saves
+    @MainActor
+    func showMinimalCloudKitSync() {
+        // Cancel existing timer
+        minimalSyncTimer?.invalidate()
+        
+        // Show indicator
+        isMinimalCloudKitSyncing = true
+        
+        // Auto-hide after 1.5 seconds
+        minimalSyncTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.isMinimalCloudKitSyncing = false
+                self?.minimalSyncTimer = nil
+            }
         }
     }
     
@@ -479,8 +596,13 @@ class DataSyncManager: ObservableObject {
         if isReceivingCrossDeviceProgress {
             feedParsingProgress = progress
             feedParsingMessage = "📡 \(feedTitle): \(message)"
-            isParsingFeeds = true
+            // CRITICAL FIX: Don't show main banner during individual feed addition AND use consistent logic for isParsingFeeds
+            isParsingFeeds = (progress > 0.0 && progress < 1.0) && !isAddingIndividualFeed
             podcastFeedsOperation = "📡 Syncing from other device: \(message)"
+        } else if progress >= 1.0 {
+            // CRITICAL FIX: Reset parsing flags when cross-device sync completes
+            isParsingFeeds = false
+            feedParsingMessage = ""
         }
         
         // Clean up completed or old progress entries
@@ -896,9 +1018,14 @@ class DataSyncManager: ObservableObject {
             return localCount
         }
         
-        // If no local feeds, estimate based on CloudKit (this would be a more complex implementation)
-        // For now, return a conservative estimate
-        return 10 // Conservative estimate for progress display
+        // If no local feeds, check CloudKit to see if there are feeds to sync
+        let cloudKitCount = await getCloudKitPodcastFeedCount()
+        if cloudKitCount > 0 {
+            return cloudKitCount
+        }
+        
+        // If no feeds in local storage or CloudKit, return 0 to prevent banner from showing
+        return 0
     }
     
     private func getEstimatedEpisodeCount() async -> Int {
@@ -930,6 +1057,45 @@ class DataSyncManager: ObservableObject {
                     continuation.resume(returning: 0)
                 }
             }
+        }
+    }
+    
+    private func getCloudKitPodcastFeedCount() async -> Int {
+        do {
+            // Quick CloudKit query to get feed count without downloading data
+            let predicate = NSPredicate(value: true)
+            let query = CKQuery(recordType: "PodcastFeed", predicate: predicate)
+            
+            // Use queryOperation with resultsLimit to get count efficiently
+            return await withCheckedContinuation { continuation in
+                let operation = CKQueryOperation(query: query)
+                operation.resultsLimit = 100 // Reasonable limit for count estimation
+                operation.desiredKeys = ["recordID"] // Only fetch record ID to minimize data transfer
+                
+                var recordCount = 0
+                operation.recordMatchedBlock = { _, _ in
+                    recordCount += 1
+                }
+                
+                operation.queryResultBlock = { result in
+                    switch result {
+                    case .success(let cursor):
+                        // For simplicity, we'll use the count from first batch
+                        // In a real scenario, you might want to continue querying with cursor
+                        print("📊 CloudKit podcast feed count: \(recordCount)")
+                        continuation.resume(returning: recordCount)
+                    case .failure(let error):
+                        print("❌ Failed to count CloudKit feeds: \(error)")
+                        continuation.resume(returning: 0)
+                    }
+                }
+                
+                let database = CKContainer(identifier: "iCloud.com.radio.streamradios").privateCloudDatabase
+                database.add(operation)
+            }
+        } catch {
+            print("❌ Error querying CloudKit feed count: \(error)")
+            return 0
         }
     }
     

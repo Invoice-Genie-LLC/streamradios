@@ -12,6 +12,41 @@ import Combine
 import SwiftUI
 import CoreData
 
+/// Structure to track CloudKit sync progress for resumption capability
+struct CloudKitSyncProgress: Codable {
+    let totalEpisodeIds: [String]
+    var processedEpisodeIds: Set<String>
+    let startTime: Date
+    var lastProgressTime: Date
+    let isFreshInstall: Bool
+    
+    init(totalEpisodeIds: [String], isFreshInstall: Bool) {
+        self.totalEpisodeIds = totalEpisodeIds
+        self.processedEpisodeIds = Set<String>()
+        self.startTime = Date()
+        self.lastProgressTime = Date()
+        self.isFreshInstall = isFreshInstall
+    }
+    
+    var remainingEpisodeIds: [String] {
+        return totalEpisodeIds.filter { !processedEpisodeIds.contains($0) }
+    }
+    
+    var progress: Double {
+        guard !totalEpisodeIds.isEmpty else { return 1.0 }
+        return Double(processedEpisodeIds.count) / Double(totalEpisodeIds.count)
+    }
+    
+    var isComplete: Bool {
+        return processedEpisodeIds.count >= totalEpisodeIds.count
+    }
+    
+    mutating func markEpisodeProcessed(_ episodeId: String) {
+        processedEpisodeIds.insert(episodeId)
+        lastProgressTime = Date()
+    }
+}
+
 enum EpisodePlaybackState: String, Codable, Equatable {
     case new
     case playing
@@ -108,6 +143,17 @@ class EpisodeStateManager: ObservableObject {
     private var updateTimer: Timer?
     private let updateDelay: TimeInterval = 0.1
     
+    // Periodic backup counter
+    private var periodicBackupCounter = 0
+    
+    // SELECTIVE SYNC: Control when CloudKit syncs happen
+    private var deferCloudKitSync = false
+    private var pendingCloudKitSyncs: Set<String> = []
+    
+    // SYNC RESUMPTION: Track CloudKit sync progress
+    private var cloudKitSyncProgress: CloudKitSyncProgress?
+    private let syncProgressKey = "CloudKitSyncProgress"
+    
     private init() {
         // Try to use app group UserDefaults, fallback to standard if not available
         if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
@@ -135,6 +181,140 @@ class EpisodeStateManager: ObservableObject {
         
         // CRITICAL FIX: Check current UserDefaults size and clean if needed
         checkAndCleanUserDefaultsSize()
+        
+        // CRITICAL: Setup notification listeners for Core Data recreation events
+        setupCoreDataNotificationListeners()
+        
+        // SYNC RESUMPTION: Load any incomplete sync progress on startup
+        loadSyncProgress()
+    }
+    
+    // MARK: - Core Data Recreation Protection
+    
+    /// Setup notification listeners for Core Data recreation events
+    private func setupCoreDataNotificationListeners() {
+        // Listen for Core Data deletion warning
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("CoreDataWillBeDeleted"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleCoreDataDeletionWarning()
+        }
+        
+        // Listen for Core Data recreation completion
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("CoreDataWasRecreated"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleCoreDataRecreation()
+        }
+        
+        print("✅ EpisodeStateManager: Core Data recreation notification listeners setup")
+    }
+    
+    /// Handle warning that Core Data is about to be deleted due to migration errors
+    private func handleCoreDataDeletionWarning() {
+        print("🚨 EpisodeStateManager: Core Data deletion warning received - creating emergency backup")
+        
+        // Create comprehensive backup before Core Data is wiped
+        createEmergencyBackup()
+        
+        // Force save any pending changes
+        saveCurrentStates()
+        
+        print("💾 EpisodeStateManager: Emergency backup completed before Core Data deletion")
+    }
+    
+    /// Handle notification that Core Data has been recreated
+    private func handleCoreDataRecreation() {
+        print("🔄 EpisodeStateManager: Core Data recreation detected - attempting data recovery")
+        
+        // Restore data from emergency backup
+        restoreFromEmergencyBackup()
+        
+        // Re-sync with the new empty Core Data
+        saveToCoreData()
+        
+        print("✅ EpisodeStateManager: Data recovery from Core Data recreation completed")
+    }
+    
+    /// Create emergency backup of all episode data to multiple locations
+    private func createEmergencyBackup() {
+        let timestamp = Date().timeIntervalSince1970
+        let emergencyKey = "EmergencyBackup_\(timestamp)"
+        
+        var emergencyData: [String: Any] = [:]
+        
+        // Backup in-memory data (most current)
+        emergencyData["episodeStates"] = episodeStates.mapValues { $0.rawValue }
+        emergencyData["episodeProgress"] = episodeProgress
+        emergencyData["episodeFavorites"] = episodeFavorites
+        emergencyData["episodeDownloads"] = episodeDownloads
+        emergencyData["currentlyPlaying"] = currentlyPlayingEpisodeId
+        emergencyData["timestamp"] = timestamp
+        emergencyData["version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        
+        // Store in multiple backup locations
+        if let emergencyBackupData = try? JSONSerialization.data(withJSONObject: emergencyData) {
+            // Primary emergency backup
+            userDefaults.set(emergencyBackupData, forKey: emergencyKey)
+            
+            // Secondary backup with fixed key (overwrites previous)
+            userDefaults.set(emergencyBackupData, forKey: "CoreDataEmergencyBackup")
+            
+            // Tertiary backup in iCloud key-value storage if available
+            if let iCloudStore = NSUbiquitousKeyValueStore.default as NSUbiquitousKeyValueStore? {
+                iCloudStore.set(emergencyBackupData, forKey: "StreamRadios_EpisodeStates_Emergency")
+                iCloudStore.synchronize()
+            }
+            
+            print("💾 EpisodeStateManager: Created emergency backup with \(episodeStates.count) states, \(episodeProgress.count) progress entries")
+        }
+    }
+    
+    /// Restore data from emergency backup after Core Data recreation
+    private func restoreFromEmergencyBackup() {
+        // Try restoring from the most recent emergency backup
+        guard let emergencyData = userDefaults.data(forKey: "CoreDataEmergencyBackup"),
+              let backup = try? JSONSerialization.jsonObject(with: emergencyData) as? [String: Any] else {
+            print("⚠️ EpisodeStateManager: No emergency backup found")
+            return
+        }
+        
+        print("🔄 EpisodeStateManager: Restoring from emergency backup")
+        
+        // Restore episode states
+        if let statesDict = backup["episodeStates"] as? [String: String] {
+            self.episodeStates = statesDict.compactMapValues { EpisodePlaybackState(rawValue: $0) }
+        }
+        
+        // Restore episode progress
+        if let progressDict = backup["episodeProgress"] as? [String: Double] {
+            self.episodeProgress = progressDict
+        }
+        
+        // Restore episode favorites
+        if let favoritesDict = backup["episodeFavorites"] as? [String: Bool] {
+            self.episodeFavorites = favoritesDict
+        }
+        
+        // Restore episode downloads
+        if let downloadsDict = backup["episodeDownloads"] as? [String: Bool] {
+            self.episodeDownloads = downloadsDict
+        }
+        
+        // Restore currently playing
+        if let currentlyPlaying = backup["currentlyPlaying"] as? String {
+            self.currentlyPlayingEpisodeId = currentlyPlaying
+        }
+        
+        print("✅ EpisodeStateManager: Restored \(episodeStates.count) states, \(episodeProgress.count) progress entries from emergency backup")
+        
+        // Save restored data immediately
+        saveCurrentStates()
+        sendThrottledUpdate()
     }
     
     // MARK: - Upgrade Protection Methods
@@ -322,11 +502,22 @@ class EpisodeStateManager: ObservableObject {
         // CRITICAL FIX: Load from Core Data instead of UserDefaults
         loadFromCoreData()
         
+        // Check if Core Data loading failed and we need to restore from emergency backup
+        if episodeStates.isEmpty && episodeProgress.isEmpty && hasEmergencyBackup() {
+            print("🚨 EpisodeStateManager: Core Data appears empty but emergency backup exists - attempting recovery")
+            restoreFromEmergencyBackup()
+        }
+        
         // Load currently playing episode from UserDefaults (small data)
         currentlyPlayingEpisodeId = userDefaults.string(forKey: currentlyPlayingKey)
         if let playingId = currentlyPlayingEpisodeId {
             print("✅ EpisodeStateManager: Currently playing episode: \(playingId)")
         }
+    }
+    
+    /// Check if emergency backup exists
+    private func hasEmergencyBackup() -> Bool {
+        return userDefaults.data(forKey: "CoreDataEmergencyBackup") != nil
     }
     
     /// Load episode states from Core Data (new primary method)
@@ -454,8 +645,22 @@ class EpisodeStateManager: ObservableObject {
             userDefaults.removeObject(forKey: currentlyPlayingKey)
         }
         
+        // CRITICAL: Create emergency backup periodically to survive Core Data recreation
+        createPeriodicEmergencyBackup()
+        
         // Send throttled notification about state changes
         sendThrottledUpdate()
+    }
+    
+    /// Create emergency backup periodically (every 10 saves) to avoid excessive backup creation
+    private func createPeriodicEmergencyBackup() {
+        // Use instance property instead of static to avoid Swift compilation error
+        periodicBackupCounter += 1
+        
+        // Create emergency backup every 10 saves or if significant data exists
+        if periodicBackupCounter % 10 == 0 || episodeStates.count >= 50 || episodeProgress.count >= 50 {
+            createEmergencyBackup()
+        }
     }
     
     /// Helper method to get feedId for an episode (needed for CloudKit sync)
@@ -483,7 +688,7 @@ class EpisodeStateManager: ObservableObject {
     
     /// Save episode states to Core Data instead of UserDefaults
     /// Thread-safe: Uses background context to prevent concurrent access issues
-    private func saveToCoreData() {
+    private func saveToCoreData(silentMode: Bool = false) {
         let context = CoreDataStack.shared.newBackgroundContext()
         
         // Use a background queue to avoid blocking the main thread
@@ -535,8 +740,8 @@ class EpisodeStateManager: ObservableObject {
                         if hasChanges {
                             savedCount += 1
                             
-                            // RESTORE CLOUDKIT FUNCTIONALITY: Sync to CloudKit when Core Data changes
-                            if let feedId = episode.feedId, !feedId.isEmpty {
+                            // SELECTIVE SYNC: Only sync to CloudKit when not in silent mode (prevents sync loops)
+                            if !silentMode, let feedId = episode.feedId, !feedId.isEmpty {
                                 let currentProgress = Double(episode.progress)
                                 let currentFavorite = episode.isFavorite
                                 let currentDownloaded = episode.isDownloaded
@@ -958,22 +1163,29 @@ class EpisodeStateManager: ObservableObject {
             saveCurrentStates()
             sendThrottledUpdate()
             
-            // RESTORE CLOUDKIT FUNCTIONALITY: Sync progress updates to CloudKit
+            // SELECTIVE CLOUDKIT FUNCTIONALITY: Defer or sync based on mode
             if shouldUpdateProgress, let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
-                let currentFavorite = isFavorite(episodeId)
-                let currentDownloaded = isDownloaded(episodeId)
-                let currentPlayed = getIsPlayed(episodeId)
-                
-                Task.detached(priority: .utility) {
-                    await PodcastCloudKitManager.shared.saveEpisodeState(
-                        episodeId: episodeId,
-                        feedId: feedId,
-                        progress: effectiveProgress,
-                        isFavorite: currentFavorite,
-                        isDownloaded: currentDownloaded,
-                        isPlayed: currentPlayed
-                    )
-                    print("☁️ EpisodeStateManager: Synced progress update to CloudKit: \(episodeId)")
+                if deferCloudKitSync {
+                    // Add to pending syncs for later flush
+                    pendingCloudKitSyncs.insert(episodeId)
+                    print("📡 📋 SELECTIVE SYNC: Deferred progress update sync for \(episodeId)")
+                } else {
+                    // Immediate sync (legacy behavior for compatibility)
+                    let currentFavorite = isFavorite(episodeId)
+                    let currentDownloaded = isDownloaded(episodeId)
+                    let currentPlayed = getIsPlayed(episodeId)
+                    
+                    Task.detached(priority: .utility) {
+                        await PodcastCloudKitManager.shared.saveEpisodeState(
+                            episodeId: episodeId,
+                            feedId: feedId,
+                            progress: effectiveProgress,
+                            isFavorite: currentFavorite,
+                            isDownloaded: currentDownloaded,
+                            isPlayed: currentPlayed
+                        )
+                        print("☁️ EpisodeStateManager: Synced progress update to CloudKit: \(episodeId)")
+                    }
                 }
             }
         }
@@ -1011,24 +1223,11 @@ class EpisodeStateManager: ObservableObject {
             )
         }
         
-        // RESTORE CLOUDKIT FUNCTIONALITY: Immediate CloudKit sync for progress
-        if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
-            let currentFavorite = isFavorite(episodeId)
-            let currentDownloaded = isDownloaded(episodeId)
-            let currentPlayed = getIsPlayed(episodeId)
-            
-            Task.detached(priority: .userInitiated) {
-                await PodcastCloudKitManager.shared.saveEpisodeState(
-                    episodeId: episodeId,
-                    feedId: feedId,
-                    progress: progress,
-                    isFavorite: currentFavorite,
-                    isDownloaded: currentDownloaded,
-                    isPlayed: currentPlayed
-                )
-                print("☁️ EpisodeStateManager: Synced progress to CloudKit: \(episodeId)")
-            }
-        }
+        // CONDITIONAL SYNC: Progress updates are stored locally only
+        // CloudKit sync will happen only during specific conditions:
+        // - Episode paused, app backgrounded, app closed (handled by PodcastPlayer)
+        // - User explicitly favorites/downloads (handled by respective methods)
+        print("📡 🔄 CONDITIONAL SYNC: Progress stored locally for \(episodeId) - CloudKit sync deferred until allowed condition")
     }
     
 
@@ -1038,7 +1237,7 @@ class EpisodeStateManager: ObservableObject {
         return episodeFavorites[episodeId] ?? false
     }
     
-    /// Set favorite state for an episode
+    /// Set favorite state for an episode with conditional CloudKit sync
     func setFavorite(_ episodeId: String, isFavorite: Bool) {
         episodeFavorites[episodeId] = isFavorite
         saveCurrentStates()
@@ -1046,24 +1245,9 @@ class EpisodeStateManager: ObservableObject {
         sendThrottledUpdate()
         print("🔍 EpisodeStateManager: Set favorite for \(episodeId): \(isFavorite)")
         
-        // RESTORE CLOUDKIT FUNCTIONALITY: Immediate CloudKit sync for favorites
-        if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
-            let currentProgress = getProgress(for: episodeId)
-            let currentDownloaded = isDownloaded(episodeId)
-            let currentPlayed = getIsPlayed(episodeId)
-            
-            Task.detached(priority: .userInitiated) {
-                await PodcastCloudKitManager.shared.saveEpisodeState(
-                    episodeId: episodeId,
-                    feedId: feedId,
-                    progress: currentProgress,
-                    isFavorite: isFavorite,
-                    isDownloaded: currentDownloaded,
-                    isPlayed: currentPlayed
-                )
-                print("☁️ EpisodeStateManager: Synced favorite state to CloudKit: \(episodeId)")
-            }
-        }
+        // CONDITIONAL SYNC: Only sync when user explicitly favorites/unfavorites
+        // This triggers instant sync as favoriting is one of the allowed conditions
+        performInstantSyncForEpisode(episodeId, reason: "favorite_action")
     }
     
     /// Get download state for an episode
@@ -1100,7 +1284,49 @@ class EpisodeStateManager: ObservableObject {
         return result
     }
     
-    /// Set download state for an episode
+    /// Set played state for an episode with CloudKit sync
+    func setPlayed(_ episodeId: String, isPlayed: Bool) {
+        // Update local state tracking
+        if isPlayed {
+            episodeStates[episodeId] = .played
+        } else if episodeStates[episodeId] == .played {
+            // Only change from played to not played, preserve other states
+            let currentProgress = getProgress(for: episodeId)
+            if currentProgress > 0 {
+                episodeStates[episodeId] = .inProgress
+            } else {
+                episodeStates[episodeId] = .new
+            }
+        }
+        
+        saveCurrentStates()
+        sendThrottledUpdate()
+        
+        // DEFERRED SYNC: Add to pending syncs if in deferred mode, otherwise sync immediately
+        if deferCloudKitSync {
+            pendingCloudKitSyncs.insert(episodeId)
+            print("📡 🔄 DEFERRED SYNC: Added episode \(episodeId) to pending syncs for played state change")
+        } else {
+            // Immediate sync (legacy behavior for compatibility)
+            let currentProgress = getProgress(for: episodeId)
+            let currentFavorite = isFavorite(episodeId)
+            let currentDownloaded = isDownloaded(episodeId)
+            
+            Task.detached(priority: .userInitiated) {
+                await PodcastCloudKitManager.shared.saveEpisodeState(
+                    episodeId: episodeId,
+                    feedId: self.getFeedId(for: episodeId) ?? "",
+                    progress: currentProgress,
+                    isFavorite: currentFavorite,
+                    isDownloaded: currentDownloaded,
+                    isPlayed: isPlayed
+                )
+                print("☁️ EpisodeStateManager: Synced played state to CloudKit: \(episodeId)")
+            }
+        }
+    }
+    
+    /// Set download state for an episode with conditional CloudKit sync
     func setDownloaded(_ episodeId: String, isDownloaded: Bool) {
         episodeDownloads[episodeId] = isDownloaded
         saveCurrentStates()
@@ -1108,24 +1334,9 @@ class EpisodeStateManager: ObservableObject {
         sendThrottledUpdate()
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded)")
         
-        // RESTORE CLOUDKIT FUNCTIONALITY: Immediate CloudKit sync for downloads
-        if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
-            let currentProgress = getProgress(for: episodeId)
-            let currentFavorite = isFavorite(episodeId)
-            let currentPlayed = getIsPlayed(episodeId)
-            
-            Task.detached(priority: .userInitiated) {
-                await PodcastCloudKitManager.shared.saveEpisodeState(
-                    episodeId: episodeId,
-                    feedId: feedId,
-                    progress: currentProgress,
-                    isFavorite: currentFavorite,
-                    isDownloaded: isDownloaded,
-                    isPlayed: currentPlayed
-                )
-                print("☁️ EpisodeStateManager: Synced download state to CloudKit: \(episodeId)")
-            }
-        }
+        // CONDITIONAL SYNC: Only sync when user explicitly downloads/removes download
+        // This triggers instant sync as downloading is one of the allowed conditions
+        performInstantSyncForEpisode(episodeId, reason: "download_action")
     }
     
     /// UPGRADE PROTECTION: Enhanced download state setting with backup
@@ -1355,6 +1566,299 @@ class EpisodeStateManager: ObservableObject {
         // Send immediate update to refresh UI without throttling
         DispatchQueue.main.async {
             self.objectWillChange.send()
+        }
+    }
+}
+
+// MARK: - Selective CloudKit Sync Management
+
+extension EpisodeStateManager {
+    /// Enable deferred CloudKit sync mode (sync only on pause/background/close)
+    func enableDeferredCloudKitSync() {
+        deferCloudKitSync = true
+        print("📡 🔄 SELECTIVE SYNC: Enabled deferred CloudKit sync mode")
+    }
+    
+    /// Disable deferred CloudKit sync mode (immediate syncs)
+    func disableDeferredCloudKitSync() {
+        deferCloudKitSync = false
+        print("📡 🔄 SELECTIVE SYNC: Disabled deferred CloudKit sync mode")
+    }
+    
+    /// Flush all pending CloudKit syncs (called on pause/background/close)
+    func flushPendingCloudKitSyncs() {
+        guard !pendingCloudKitSyncs.isEmpty else { return }
+        
+        print("📡 🔄 SELECTIVE SYNC: Flushing \(pendingCloudKitSyncs.count) pending CloudKit syncs")
+        
+        for episodeId in pendingCloudKitSyncs {
+            syncEpisodeToCloudKit(episodeId: episodeId)
+        }
+        
+        pendingCloudKitSyncs.removeAll()
+        print("📡 ✅ SELECTIVE SYNC: All pending syncs flushed")
+    }
+    
+    /// Internal method to sync a specific episode to CloudKit
+    private func syncEpisodeToCloudKit(episodeId: String) {
+        guard let feedId = getFeedId(for: episodeId), !feedId.isEmpty else { return }
+        
+        let currentProgress = getProgress(for: episodeId)
+        let currentFavorite = isFavorite(episodeId)
+        let currentDownloaded = isDownloaded(episodeId)
+        let currentPlayed = getIsPlayed(episodeId)
+        
+        Task.detached(priority: .userInitiated) {
+            await PodcastCloudKitManager.shared.saveEpisodeState(
+                episodeId: episodeId,
+                feedId: feedId,
+                progress: currentProgress,
+                isFavorite: currentFavorite,
+                isDownloaded: currentDownloaded,
+                isPlayed: currentPlayed
+            )
+            print("☁️ EpisodeStateManager: Synced pending state to CloudKit: \(episodeId)")
+        }
+    }
+    
+    /// Save current states silently without triggering CloudKit sync (for incoming CloudKit updates)
+    private func saveCurrentStatesSilently() {
+        // CRITICAL FIX: Save to Core Data instead of UserDefaults to prevent CFPreferences overflow
+        saveToCoreData(silentMode: true) // Silent mode prevents CloudKit sync loop
+        
+        // Save currently playing episode to UserDefaults (small data, safe)
+        if let playingId = currentlyPlayingEpisodeId {
+            userDefaults.set(playingId, forKey: "currentlyPlayingEpisodeId")
+        }
+        
+        userDefaults.synchronize()
+        createPeriodicEmergencyBackup()
+    }
+    
+    // MARK: - Silent Update Methods (No CloudKit Sync)
+    
+    /// Set progress silently without triggering CloudKit sync (for incoming CloudKit updates)
+    func setProgressSilently(for episodeId: String, progress: Double) {
+        episodeProgress[episodeId] = progress
+        
+        // CRITICAL FIX: Update episode state based on progress (just like setProgress does)
+        // This ensures "NEW" changes to "IN PROGRESS" immediately when synced from other devices
+        let newState: EpisodePlaybackState
+        if progress >= 0.99 {
+            newState = .played
+        } else if progress > 0 {
+            newState = .inProgress
+        } else {
+            newState = .new
+        }
+        
+        episodeStates[episodeId] = newState
+        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
+        sendThrottledUpdate()
+        
+        // Send real-time notification for UI updates
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .init("EpisodeProgressChangedInstantly"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "progress": progress]
+            )
+        }
+        
+        print("🔄 EpisodeStateManager: Set progress silently for \(episodeId): \(Int(progress * 100))% -> State: \(newState)")
+    }
+    
+    /// Set favorite state silently without triggering CloudKit sync
+    func setFavoriteSilently(_ episodeId: String, isFavorite: Bool) {
+        episodeFavorites[episodeId] = isFavorite
+        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
+        userDefaults.synchronize()
+        sendThrottledUpdate()
+        print("🔄 EpisodeStateManager: Set favorite silently for \(episodeId): \(isFavorite)")
+    }
+    
+    /// Set download state silently without triggering CloudKit sync
+    func setDownloadedSilently(_ episodeId: String, isDownloaded: Bool) {
+        episodeDownloads[episodeId] = isDownloaded
+        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
+        userDefaults.synchronize()
+        sendThrottledUpdate()
+        print("🔄 EpisodeStateManager: Set downloaded silently for \(episodeId): \(isDownloaded)")
+    }
+    
+    /// Set played state silently without triggering CloudKit sync
+    func setPlayedSilently(_ episodeId: String, isPlayed: Bool) {
+        // Update local state tracking
+        if isPlayed {
+            episodeStates[episodeId] = .played
+        } else if episodeStates[episodeId] == .played {
+            // Only change from played to not played, preserve other states
+            let currentProgress = getProgress(for: episodeId)
+            if currentProgress > 0 {
+                episodeStates[episodeId] = .inProgress
+            } else {
+                episodeStates[episodeId] = .new
+            }
+        }
+        
+        saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
+        userDefaults.synchronize()
+        sendThrottledUpdate()
+        
+        // CRITICAL FIX: Send real-time notification for UI updates
+        // This ensures "IN PROGRESS" changes to "PLAYED" immediately when synced from other devices
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .init("EpisodePlayedChangedInstantly"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "isPlayed": isPlayed]
+            )
+        }
+        
+        print("🔄 EpisodeStateManager: Set played silently for \(episodeId): \(isPlayed)")
+    }
+}
+
+// MARK: - CloudKit Sync Progress Management
+extension EpisodeStateManager {
+    /// Start tracking CloudKit sync progress for resumption capability
+    func startCloudKitSyncProgress(totalEpisodeIds: [String], isFreshInstall: Bool) {
+        let syncProgress = CloudKitSyncProgress(totalEpisodeIds: totalEpisodeIds, isFreshInstall: isFreshInstall)
+        self.cloudKitSyncProgress = syncProgress
+        saveSyncProgress()
+        print("📡 🔄 SYNC RESUMPTION: Started tracking sync for \(totalEpisodeIds.count) episodes (fresh install: \(isFreshInstall))")
+    }
+    
+    /// Mark an episode as processed in the sync progress
+    func markEpisodeProcessed(_ episodeId: String) {
+        guard var syncProgress = self.cloudKitSyncProgress else { return }
+        syncProgress.markEpisodeProcessed(episodeId)
+        self.cloudKitSyncProgress = syncProgress
+        saveSyncProgress()
+        
+        let progressPercent = Int(syncProgress.progress * 100)
+        print("📡 ⚡ SYNC PROGRESS: Episode \(episodeId) processed (\(progressPercent)% complete)")
+    }
+    
+    /// Get the current sync progress if any
+    func getCurrentSyncProgress() -> CloudKitSyncProgress? {
+        return cloudKitSyncProgress
+    }
+    
+    /// Check if there's an incomplete sync that can be resumed
+    func hasIncompleteSyncToResume() -> Bool {
+        guard let syncProgress = cloudKitSyncProgress else { return false }
+        return !syncProgress.isComplete
+    }
+    
+    /// Get remaining episode IDs to sync
+    func getRemainingEpisodesToSync() -> [String] {
+        return cloudKitSyncProgress?.remainingEpisodeIds ?? []
+    }
+    
+    /// Complete the current sync progress
+    func completeSyncProgress() {
+        cloudKitSyncProgress = nil
+        userDefaults.removeObject(forKey: syncProgressKey)
+        userDefaults.synchronize()
+        print("📡 ✅ SYNC RESUMPTION: Sync progress completed and cleared")
+    }
+    
+    /// Save sync progress to persistent storage
+    private func saveSyncProgress() {
+        guard let syncProgress = cloudKitSyncProgress else {
+            userDefaults.removeObject(forKey: syncProgressKey)
+            return
+        }
+        
+        do {
+            let data = try JSONEncoder().encode(syncProgress)
+            userDefaults.set(data, forKey: syncProgressKey)
+            userDefaults.synchronize()
+        } catch {
+            print("⚠️ SYNC RESUMPTION: Failed to save sync progress: \(error)")
+        }
+    }
+    
+    /// Load sync progress from persistent storage
+    private func loadSyncProgress() {
+        guard let data = userDefaults.data(forKey: syncProgressKey) else { return }
+        
+        do {
+            let syncProgress = try JSONDecoder().decode(CloudKitSyncProgress.self, from: data)
+            self.cloudKitSyncProgress = syncProgress
+            print("📡 🔄 SYNC RESUMPTION: Loaded incomplete sync with \(syncProgress.remainingEpisodeIds.count) remaining episodes")
+        } catch {
+            print("⚠️ SYNC RESUMPTION: Failed to load sync progress: \(error)")
+            // Clear corrupted data
+            userDefaults.removeObject(forKey: syncProgressKey)
+        }
+    }
+}
+
+// MARK: - Conditional CloudKit Sync Management
+extension EpisodeStateManager {
+    /// Perform instant CloudKit sync only for allowed conditions
+    func performInstantSyncForEpisode(_ episodeId: String, reason: String) {
+        // Validate that this is an allowed sync condition
+        let allowedReasons = ["favorite_action", "download_action", "episode_paused", "app_background", "app_closed"]
+        guard allowedReasons.contains(reason) else {
+            print("📡 ❌ CONDITIONAL SYNC: Rejected sync for \(episodeId) - reason '\(reason)' not allowed")
+            return
+        }
+        
+        guard let feedId = getFeedId(for: episodeId), !feedId.isEmpty else {
+            print("⚠️ CONDITIONAL SYNC: Could not find feedId for episode \(episodeId), skipping CloudKit sync")
+            return
+        }
+        
+        let currentProgress = getProgress(for: episodeId)
+        let currentFavorite = isFavorite(episodeId)
+        let currentDownloaded = isDownloaded(episodeId)
+        let currentPlayed = getIsPlayed(episodeId)
+        
+        print("📡 ✅ CONDITIONAL SYNC: Syncing \(episodeId) to CloudKit (reason: \(reason))")
+        
+        // Perform both instant sync and persistent sync
+        Task.detached(priority: .userInitiated) {
+            // Step 1: Instant sync for real-time updates
+            await PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+                episodeId: episodeId,
+                progress: currentProgress
+            )
+            
+            if currentFavorite {
+                await PodcastCloudKitManager.shared.syncPodcastFavoriteInstantly(
+                    episodeId: episodeId,
+                    isFavorite: currentFavorite
+                )
+            }
+            
+            if currentDownloaded {
+                await PodcastCloudKitManager.shared.syncPodcastDownloadInstantly(
+                    episodeId: episodeId,
+                    isDownloaded: currentDownloaded
+                )
+            }
+            
+            // Step 2: Persistent sync to CloudKit records
+            await PodcastCloudKitManager.shared.saveEpisodeState(
+                episodeId: episodeId,
+                feedId: feedId,
+                progress: currentProgress,
+                isFavorite: currentFavorite,
+                isDownloaded: currentDownloaded,
+                isPlayed: currentPlayed
+            )
+            
+            print("☁️ CONDITIONAL SYNC: Completed sync for \(episodeId) (reason: \(reason))")
+        }
+    }
+    
+    /// Perform conditional sync for multiple episodes (used by PodcastPlayer for pause/background/close)
+    func performConditionalSyncForEpisodes(_ episodeIds: [String], reason: String) {
+        for episodeId in episodeIds {
+            performInstantSyncForEpisode(episodeId, reason: reason)
         }
     }
 }

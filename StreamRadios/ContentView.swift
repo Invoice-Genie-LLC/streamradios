@@ -1679,6 +1679,318 @@ struct UnifiedRadioProgressBanner: View {
     }
 }
 
+// MARK: - Minimal CloudKit Sync Indicator
+
+struct MinimalCloudKitSyncIndicator: View {
+    @StateObject private var syncManager = DataSyncManager.shared
+    
+    var body: some View {
+        if syncManager.isMinimalCloudKitSyncing {
+            HStack(spacing: 4) {
+                Image(systemName: "icloud.and.arrow.up")
+                    .font(.caption2)
+                    .foregroundColor(.cyan)
+                Text("Syncing...")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.ultraThinMaterial, in: Capsule())
+            .transition(.scale.combined(with: .opacity))
+            .animation(.easeInOut(duration: 0.2), value: syncManager.isMinimalCloudKitSyncing)
+        }
+    }
+}
+
+// MARK: - Unified Podcast Progress Banner
+
+struct UnifiedPodcastProgressBanner: View {
+    @StateObject private var podcastViewModel = PodcastViewModel.shared
+    @StateObject private var syncManager = DataSyncManager.shared
+    @State private var hideCompletedBanner = false
+    
+    var body: some View {
+        if shouldShowBanner {
+            VStack(spacing: 6) {
+                // Top row with icon, title and percentage
+                HStack(spacing: 8) {
+                    // Progress icon with animation
+                    progressIcon
+                        .font(.headline)
+                        .foregroundColor(iconColor)
+                        .frame(width: 20)
+                        .transition(.asymmetric(
+                            insertion: .scale.combined(with: .opacity),
+                            removal: .scale.combined(with: .opacity)
+                        ))
+                        .animation(.easeInOut(duration: 0.2), value: currentOperationType)
+                        .animation(.easeInOut(duration: 0.2), value: iconColor)
+                    
+                    // Progress message - FIXED HEIGHT
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(bannerTitle)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .id(bannerTitle)
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.9)),
+                                removal: .opacity.combined(with: .scale(scale: 0.9))
+                            ))
+                            .animation(.easeInOut(duration: 0.2), value: bannerTitle)
+                        
+                        // FIXED HEIGHT: Always reserve space for operation info
+                        Group {
+                            if !currentOperationInfo.isEmpty {
+                                Text(currentOperationInfo)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .animation(.easeInOut(duration: 0.2), value: currentOperationInfo)
+                            } else {
+                                Text("Processing data...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .opacity(0.0)
+                            }
+                        }
+                        .frame(height: 16)
+                    }
+                    
+                    Spacer()
+                    
+                    // Percentage
+                    Text("\(Int(currentProgress * 100))%")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(iconColor)
+                        .animation(.easeInOut(duration: 0.2), value: iconColor)
+                }
+                
+                // Progress bar
+                ProgressView(value: currentProgress)
+                    .progressViewStyle(LinearProgressViewStyle(tint: iconColor))
+                    .scaleEffect(y: 1.5, anchor: .center)
+                    .animation(.easeInOut(duration: 0.2), value: currentProgress)
+                    .animation(.easeInOut(duration: 0.2), value: iconColor)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(bannerBackgroundColor)
+            .cornerRadius(12)
+            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 2)
+            .animation(.easeInOut(duration: 0.2), value: bannerBackgroundColor)
+            .transition(.asymmetric(
+                insertion: .opacity.combined(with: .move(edge: .top)),
+                removal: .opacity.combined(with: .move(edge: .top))
+            ))
+            .animation(.easeInOut(duration: 0.3), value: shouldShowBanner)
+            .onChange(of: syncManager.episodeStatesStatus) { status in
+                if status == .completed {
+                    // Show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                            // Reset status to .none after showing completion
+                            syncManager.episodeStatesStatus = .none
+                            syncManager.episodeStatesProgress = 0.0
+                            syncManager.episodeStatesOperation = ""
+                        }
+                    }
+                } else if status == .inProgress || status == .pending {
+                    // Reset the hide flag when new operations start
+                    hideCompletedBanner = false
+                }
+            }
+            .onChange(of: syncManager.podcastFeedsStatus) { status in
+                if status == .completed {
+                    // Show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                            // Reset status to .none after showing completion
+                            syncManager.podcastFeedsStatus = .none
+                            syncManager.podcastFeedsProgress = 0.0
+                            syncManager.podcastFeedsOperation = ""
+                        }
+                    }
+                } else if status == .inProgress || status == .pending {
+                    // Reset the hide flag when new operations start
+                    hideCompletedBanner = false
+                }
+            }
+            .onChange(of: syncManager.isParsingFeeds) { isActive in
+                // Handle feed parsing completion
+                if !isActive && syncManager.feedParsingProgress >= 1.0 {
+                    // Feed parsing just completed - show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                            // Reset feed parsing progress to clear the banner
+                            syncManager.feedParsingProgress = 0.0
+                            syncManager.feedParsingMessage = ""
+                        }
+                    }
+                } else if isActive {
+                    // Reset the hide flag when feed parsing starts
+                    hideCompletedBanner = false
+                }
+            }
+            // CloudKit saves now use minimal indicator instead of banner onChange handler
+        }
+    }
+    
+    // MARK: - Components
+    
+    @ViewBuilder
+    private var progressIcon: some View {
+        switch currentOperationType {
+        case .episodeStateSync:
+            Image(systemName: "icloud.and.arrow.down")
+                .id("episodeStateSync")
+        case .feedSync:
+            Image(systemName: "rss")
+                .id("feedSync")
+        case .feedParsing:
+            Image(systemName: "doc.text.magnifyingglass")
+                .id("feedParsing")
+        case .coreDataOperation:
+            Image(systemName: "cylinder.split.1x2")
+                .id("coreDataOperation")
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var shouldShowBanner: Bool {
+        // CRITICAL: Completely disable banner - sync is now handled close to Episodes section
+        return false
+    }
+    
+    private var currentOperationType: PodcastOperationType {
+        // Priority: Show episode state sync first (highest priority, only if there are episodes)
+        if (syncManager.episodeStatesStatus == .inProgress && syncManager.episodeStatesTotalCount > 0) || 
+           (syncManager.episodeStatesStatus == .completed && !hideCompletedBanner && 
+            syncManager.episodeStatesProgress > 0 && syncManager.episodeStatesTotalCount > 0) {
+            return .episodeStateSync
+        }
+        
+        // CloudKit saves now use minimal indicator instead of banner
+        
+        // Then show feed parsing (active or completed)
+        if syncManager.isParsingFeeds || 
+           (!syncManager.isParsingFeeds && !hideCompletedBanner && syncManager.feedParsingProgress >= 1.0) {
+            return .feedParsing
+        }
+        
+        // Then show feed sync (only if there are feeds)
+        if (syncManager.podcastFeedsStatus == .inProgress && syncManager.podcastFeedsTotalCount > 0) || 
+           (syncManager.podcastFeedsStatus == .completed && !hideCompletedBanner && 
+            syncManager.podcastFeedsProgress > 0 && syncManager.podcastFeedsTotalCount > 0) {
+            return .feedSync
+        }
+        
+        // Finally show local CoreData operations
+        return .coreDataOperation
+    }
+    
+    private var currentProgress: Double {
+        switch currentOperationType {
+        case .episodeStateSync:
+            if syncManager.episodeStatesStatus == .completed {
+                return 1.0
+            }
+            return syncManager.episodeStatesProgress
+        case .feedSync:
+            if syncManager.podcastFeedsStatus == .completed {
+                return 1.0
+            }
+            return syncManager.podcastFeedsProgress
+        case .feedParsing:
+            return syncManager.feedParsingProgress
+        case .coreDataOperation:
+            return podcastViewModel.isLoading ? 0.5 : 0.0
+        }
+    }
+    
+    private var bannerTitle: String {
+        switch currentOperationType {
+        case .episodeStateSync:
+            return "Syncing episode states"
+        case .feedSync:
+            return "Syncing podcast feeds"
+        case .feedParsing:
+            return "Getting your episodes ready to play"
+        case .coreDataOperation:
+            return "Processing podcast data"
+        }
+    }
+    
+    private var currentOperationInfo: String {
+        switch currentOperationType {
+        case .episodeStateSync:
+            if syncManager.episodeStatesTotalCount > 0 {
+                return "\(syncManager.episodeStatesCurrentCount)/\(syncManager.episodeStatesTotalCount) episodes"
+            }
+            return syncManager.episodeStatesOperation
+        case .feedSync:
+            if syncManager.podcastFeedsTotalCount > 0 {
+                return "\(syncManager.podcastFeedsCurrentCount)/\(syncManager.podcastFeedsTotalCount) feeds"
+            }
+            return syncManager.podcastFeedsOperation
+        case .feedParsing:
+            return syncManager.feedParsingMessage
+        case .coreDataOperation:
+            return "Loading from local storage"
+        }
+    }
+    
+    private var bannerBackgroundColor: Color {
+        switch currentOperationType {
+        case .episodeStateSync:
+            return Color.blue.opacity(0.1)
+        case .feedSync:
+            return Color.green.opacity(0.1)
+        case .feedParsing:
+            return Color.purple.opacity(0.1)
+        case .coreDataOperation:
+            return Color.orange.opacity(0.1)
+        }
+    }
+    
+    private var iconColor: Color {
+        switch currentOperationType {
+        case .episodeStateSync:
+            return .blue
+        case .feedSync:
+            return .green
+        case .feedParsing:
+            return .purple
+        case .coreDataOperation:
+            return .orange
+        }
+    }
+    
+    // MARK: - Types
+    
+    private enum PodcastOperationType {
+        case episodeStateSync
+        case feedSync
+        case feedParsing
+        case coreDataOperation
+    }
+}
+
 // MARK: - ScrollableEpisodeTitle Component
 
 struct ScrollableEpisodeTitle: View {

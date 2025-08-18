@@ -39,6 +39,15 @@ class CoreDataStack {
                 if error.code == NSPersistentStoreIncompatibleVersionHashError || 
                    error.code == NSMigrationMissingSourceModelError {
                     print("CoreData: Attempting to recreate store due to migration error")
+                    
+                    // CRITICAL: Notify EpisodeStateManager about impending data loss before deleting store
+                    // This allows it to create comprehensive backups before Core Data is wiped
+                    print("⚠️ CoreData: Warning EpisodeStateManager about impending Core Data deletion")
+                    NotificationCenter.default.post(name: NSNotification.Name("CoreDataWillBeDeleted"), object: nil)
+                    
+                    // Give a brief moment for backup operations to complete
+                    Thread.sleep(forTimeInterval: 0.5)
+                    
                     try? FileManager.default.removeItem(at: storeURL)
                     
                     // Try loading again
@@ -47,6 +56,11 @@ class CoreDataStack {
                             fatalError("Unresolved CoreData error after recreation: \(newError), \(newError.userInfo)")
                         } else {
                             print("CoreData: Successfully recreated store at \(newStoreDescription.url?.absoluteString ?? "Unknown URL")")
+                            
+                            // CRITICAL: Notify EpisodeStateManager that Core Data has been recreated
+                            // This allows it to restore data from backups
+                            print("✅ CoreData: Notifying EpisodeStateManager about Core Data recreation")
+                            NotificationCenter.default.post(name: NSNotification.Name("CoreDataWasRecreated"), object: nil)
                         }
                     }
                 } else {

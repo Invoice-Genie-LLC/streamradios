@@ -648,6 +648,9 @@ struct AddPodcastView: View {
         addingProgress = 0.0
         addingStageText = "Preparing to add podcast..."
         
+        // Notify DataSyncManager that individual feed addition started
+        DataSyncManager.shared.startIndividualFeedAddition()
+        
         Task {
             do {
                 // Stage 1: Validate URL
@@ -685,19 +688,32 @@ struct AddPodcastView: View {
                         // Call onAdd() to notify parent view (like SearchPodcastsView) to dismiss
                         onAdd(newPodcastId)
                         
-                        // Close the sheet and reset state
-                        isPresented = false
-                        isAddingPodcast = false
-                        
-                        // Clear the input fields for next time
-                        title = ""
-                        url = ""
+                                            // Close the sheet and reset state
+                    isPresented = false
+                    isAddingPodcast = false
+                    
+                    // CRITICAL FIX: Delay completion until after auto-focus operations have time to complete
+                    // This prevents the main banner from appearing during auto-focus operations
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        DataSyncManager.shared.completeIndividualFeedAddition()
+                        print("🔄 AddPodcastView: Delayed completion of individual feed addition")
+                    }
+                    
+                    // Clear the input fields for next time
+                    title = ""
+                    url = ""
                     }
                 } else {
                     await MainActor.run {
                         isAddingPodcast = false
                         alertMessage = podcastViewModel.error ?? "Failed to add podcast. Please check the URL and try again."
                         showAlert = true
+                        
+                        // CRITICAL FIX: Delay completion even for errors to maintain consistency
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            DataSyncManager.shared.completeIndividualFeedAddition()
+                            print("🔄 AddPodcastView: Delayed completion of individual feed addition (error case)")
+                        }
                     }
                 }
             } catch {
@@ -705,6 +721,12 @@ struct AddPodcastView: View {
                     isAddingPodcast = false
                     alertMessage = "Failed to add podcast: \(error.localizedDescription)"
                     showAlert = true
+                    
+                    // CRITICAL FIX: Delay completion even for errors to maintain consistency
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        DataSyncManager.shared.completeIndividualFeedAddition()
+                        print("🔄 AddPodcastView: Delayed completion of individual feed addition (exception case)")
+                    }
                 }
             }
         }

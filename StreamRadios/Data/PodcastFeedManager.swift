@@ -88,8 +88,8 @@ class PodcastFeedManager {
     func addFeed(from url: URL, customTitle: String? = nil, forceRefresh: Bool = false) async throws -> PodcastFeed {
         os_log("🆕 Adding new feed from: %@", log: log, type: .info, url.absoluteString)
         
-        // Parse RSS feed in background with progress tracking
-        let feedData = try await URLSession.shared.data(from: url).0
+        // Parse RSS feed in background with robust error handling and retry mechanism
+        let feedData = try await fetchRSSDataWithRetry(url: url, feedTitle: customTitle ?? "New Feed")
         let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString) { progress, message in
             Task { @MainActor in
                 DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
@@ -152,8 +152,8 @@ class PodcastFeedManager {
         
         os_log("🔄 Refreshing feed: %@", log: log, type: .info, existingFeed.title)
         
-        // Parse RSS feed with progress tracking
-        let feedData = try await URLSession.shared.data(from: URL(string: existingFeed.url)!).0
+        // Parse RSS feed with robust error handling and retry mechanism
+        let feedData = try await fetchRSSDataWithRetry(url: URL(string: existingFeed.url)!, feedTitle: existingFeed.title)
         let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url) { progress, message in
             Task { @MainActor in
                 DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
@@ -327,6 +327,15 @@ class PodcastFeedManager {
                     // Create feed with episodes for return
                     var feedWithEpisodes = feed
                     feedWithEpisodes.episodes = episodes
+                    
+                    // Report final completion - this will trigger banner dismissal
+                    Task { @MainActor in
+                        DataSyncManager.shared.updateFeedParsingProgress(1.0, message: "✅ Completed processing \(feed.title)")
+                        // Brief delay then reset to dismiss the banner
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            DataSyncManager.shared.updateFeedParsingProgress(0.0, message: "")
+                        }
+                    }
                     
                     os_log("✅ Saved new feed with %d episodes: %@", log: self.log, type: .info, episodes.count, feed.title)
                     continuation.resume(returning: feedWithEpisodes)
@@ -662,6 +671,8 @@ enum FeedError: Error, LocalizedError {
     case feedNotFound
     case parsingFailed
     case networkError
+    case feedDataCorrupted
+    case retryLimitExceeded
     
     var errorDescription: String? {
         switch self {
@@ -673,6 +684,104 @@ enum FeedError: Error, LocalizedError {
             return "Failed to parse feed"
         case .networkError:
             return "Network error"
+        case .feedDataCorrupted:
+            return "Feed data is corrupted or truncated"
+        case .retryLimitExceeded:
+            return "Maximum retry attempts exceeded"
+        }
+    }
+}
+
+// MARK: - Robust RSS Data Fetching
+
+extension PodcastFeedManager {
+    /// Fetch RSS data with retry mechanism and robust error handling for decode issues
+    private func fetchRSSDataWithRetry(url: URL, feedTitle: String, maxRetries: Int = 3) async throws -> Data {
+        var lastError: Error?
+        
+        for attempt in 1...maxRetries {
+            do {
+                os_log("🔄 Fetching RSS data (attempt %d/%d) for feed: %@", log: log, type: .info, attempt, maxRetries, feedTitle)
+                
+                // Configure URLSession with longer timeout for large feeds
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 30.0 // Increased timeout for large episodes
+                request.setValue("StreamRadios/1.0", forHTTPHeaderField: "User-Agent")
+                request.setValue("application/rss+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
+                request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                // Validate HTTP response
+                if let httpResponse = response as? HTTPURLResponse {
+                    os_log("📡 HTTP Response: %d for feed: %@", log: log, type: .info, httpResponse.statusCode, feedTitle)
+                    
+                    // Check for server errors
+                    guard 200...299 ~= httpResponse.statusCode else {
+                        throw FeedError.networkError
+                    }
+                    
+                    // Log content type for debugging
+                    if let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") {
+                        os_log("📄 Content-Type: %@ for feed: %@", log: log, type: .info, contentType, feedTitle)
+                    }
+                }
+                
+                // Validate data size and content
+                guard !data.isEmpty else {
+                    os_log("❌ Empty data received for feed: %@", log: log, type: .error, feedTitle)
+                    throw FeedError.feedDataCorrupted
+                }
+                
+                // Check for minimum RSS/XML content
+                guard data.count > 100 else { // Minimum viable RSS feed should be larger
+                    os_log("❌ Data too small (%d bytes) for feed: %@", log: log, type: .error, data.count, feedTitle)
+                    throw FeedError.feedDataCorrupted
+                }
+                
+                // Validate XML structure - check if data starts with valid XML
+                let dataPrefix = String(data: data.prefix(200), encoding: .utf8) ?? ""
+                let hasXMLDeclaration = dataPrefix.contains("<?xml") || dataPrefix.contains("<rss") || dataPrefix.contains("<feed")
+                
+                guard hasXMLDeclaration else {
+                    os_log("❌ Invalid XML structure for feed: %@ - Data starts with: %@", log: log, type: .error, feedTitle, String(dataPrefix.prefix(100)))
+                    throw FeedError.feedDataCorrupted
+                }
+                
+                // Check for common encoding issues (BOM, invalid characters)
+                if dataPrefix.hasPrefix("\u{FEFF}") {
+                    os_log("🔧 Removing BOM from feed data: %@", log: log, type: .info, feedTitle)
+                    return Data(data.dropFirst(3)) // Remove UTF-8 BOM
+                }
+                
+                os_log("✅ Successfully fetched %d bytes for feed: %@", log: log, type: .info, data.count, feedTitle)
+                return data
+                
+            } catch {
+                lastError = error
+                let isDecodeError = (error as NSError).code == -1015
+                
+                os_log("❌ Fetch attempt %d/%d failed for feed: %@ - Error: %@", log: log, type: .error, attempt, maxRetries, feedTitle, error.localizedDescription)
+                
+                // For decode errors, wait longer between retries
+                if isDecodeError && attempt < maxRetries {
+                    let delay = Double(attempt) * 2.0 // Progressive delay: 2s, 4s, 6s
+                    os_log("⏳ Waiting %.1f seconds before retry due to decode error...", log: log, type: .info, delay)
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } else if attempt < maxRetries {
+                    // Standard retry delay for other errors
+                    try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                }
+            }
+        }
+        
+        // All retries failed
+        os_log("💥 All %d fetch attempts failed for feed: %@ - Final error: %@", log: log, type: .error, maxRetries, feedTitle, lastError?.localizedDescription ?? "Unknown error")
+        
+        if let lastError = lastError, (lastError as NSError).code == -1015 {
+            throw FeedError.feedDataCorrupted
+        } else {
+            throw FeedError.retryLimitExceeded
         }
     }
 }

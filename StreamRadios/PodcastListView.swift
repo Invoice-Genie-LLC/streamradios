@@ -79,6 +79,10 @@ struct PodcastListView: View {
                        VStack(spacing: 0) {
                            instructionText
                            searchBar
+                           
+                           // Podcast progress banner - shows sync operations in real-time
+                           UnifiedPodcastProgressBanner()
+                           
                            podcastList
                        }
                        .contentShape(Rectangle())
@@ -86,6 +90,13 @@ struct PodcastListView: View {
                            TapGesture().onEnded { _ in
                                // Dismiss keyboard when tapping outside search box
                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                           }
+                       )
+                       .simultaneousGesture(
+                           // DEBUG: Triple tap to trigger CloudKit sync and show banner
+                           TapGesture(count: 3).onEnded { _ in
+                               print("🔄 DEBUG: Triple tap detected - triggering CloudKit sync...")
+                               viewModel.manuallyTriggerCloudKitSync()
                            }
                        )
                    }
@@ -1059,6 +1070,11 @@ struct EpisodeRowView: View {
         viewModel.downloadProgress[episode.id] != nil && viewModel.downloadProgress[episode.id]! > 0 && viewModel.downloadProgress[episode.id]! < 1
     }
     
+    // Computed property for checking if episode is marked as played
+    private var isEpisodePlayed: Bool {
+        EpisodeStateManager.shared.getState(for: episode.id) == .played
+    }
+    
     // Static formatter to avoid recreation
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -1147,8 +1163,8 @@ struct EpisodeRowView: View {
                         .layoutPriority(1) // Give title priority in layout
                     
                     // Progress bar for episodes with progress (embedded in content)
-                    // GRANULAR PROGRESS FIX: Show progress bar all the way to completion, not just until 99%
-                    if currentProgress > 0 && currentProgress < 1.0 {
+                    // CRITICAL FIX: Hide progress bar when episode is marked as played
+                    if currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
                         ProgressView(value: currentProgress)
                             .progressViewStyle(LinearProgressViewStyle(tint: isPlaying ? .blue : .gray))
                             .frame(height: 3)
@@ -1284,6 +1300,15 @@ struct EpisodeRowView: View {
                 print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) progress updated")
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodePlayedChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's played state changes instantly
+                refreshTrigger = UUID()
+                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) played state updated")
+            }
+        }
         // REAL-TIME PROGRESS: Added notification listener for instant progress updates to force UI refresh
     }
     
@@ -1398,8 +1423,9 @@ struct EpisodeRowView: View {
         let remainingDuration: Double
         if isPlaying {
             remainingDuration = podcastPlayer.remainingTime
-        } else if episode.state.progress > 0 {
-            remainingDuration = episode.duration * (1 - episode.state.progress)
+        } else if currentProgress > 0 {
+            // CRITICAL FIX: Use currentProgress instead of episode.state.progress for real-time sync
+            remainingDuration = episode.duration * (1 - currentProgress)
         } else {
             remainingDuration = episode.duration
         }
@@ -1409,7 +1435,8 @@ struct EpisodeRowView: View {
         let hours = Int(remainingDuration) / 3600
         let minutes = (Int(remainingDuration) % 3600) / 60
         
-        if episode.state.progress > 0 {
+        if currentProgress > 0 {
+            // CRITICAL FIX: Use currentProgress instead of episode.state.progress for real-time sync
             if hours > 0 {
                 return String(format: "%dh %dm left", hours, minutes)
             } else {
@@ -1474,6 +1501,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
+    @State private var refreshTrigger = UUID() // Force UI refresh when progress/played state changes
     
     // Cache expensive computations to avoid recalculation during scrolling
     private let cachedProgress: Double
@@ -1493,6 +1521,11 @@ struct OptimizedEpisodeRowView: View, Equatable {
             // This will update when sync notifications are received
             return viewModel.episodeProgress[episode.id] ?? cachedProgress
         }
+    }
+    
+    // Computed property for checking if episode is marked as played
+    private var isEpisodePlayed: Bool {
+        EpisodeStateManager.shared.getState(for: episode.id) == .played
     }
     
 
@@ -1620,7 +1653,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
         // Pre-compute time info
         if episode.duration > 0 {
             let remainingTime = episode.duration * (1 - cachedProgress)
-            if remainingTime > 0 && episode.state.progress > 0 {
+            if remainingTime > 0 && cachedProgress > 0 {
+                // CRITICAL FIX: Use cachedProgress instead of episode.state.progress for real-time sync
                 let hours = Int(remainingTime) / 3600
                 let minutes = (Int(remainingTime) % 3600) / 60
                 if hours > 0 {
@@ -1661,6 +1695,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             
             episodeCard
         }
+        .id(refreshTrigger) // Force view refresh when progress/played state changes
         .alert(isPresented: $showingDeleteConfirmation) {
             Alert(
                 title: Text("Delete Download"),
@@ -1757,8 +1792,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     .layoutPriority(1) // Give title priority in layout
                 
                 // Progress bar for episodes with progress (embedded in content)
-                // GRANULAR PROGRESS FIX: Show progress bar all the way to completion, not just until 99%
-                if currentProgress > 0 && currentProgress < 1.0 {
+                // CRITICAL FIX: Hide progress bar when episode is marked as played
+                if currentProgress > 0 && currentProgress < 1.0 && !isEpisodePlayed {
                     ProgressView(value: currentProgress)
                         .progressViewStyle(LinearProgressViewStyle(tint: isPlaying ? .blue : .gray))
                         .frame(height: 3)
@@ -1874,7 +1909,17 @@ struct OptimizedEpisodeRowView: View, Equatable {
                let episodeId = userInfo["episodeId"] as? String,
                episodeId == episode.id {
                 // Force view refresh when this episode's progress changes instantly
+                refreshTrigger = UUID()
                 print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) progress updated")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodePlayedChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's played state changes instantly
+                refreshTrigger = UUID()
+                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) played state updated")
             }
         }
     }
@@ -2023,6 +2068,10 @@ struct PodcastPlayerView: View {
             VStack(spacing: 0) {
                 playerHeader
                 episodeFilterTabs
+                
+                // Podcast progress banner - shows sync operations in real-time
+                UnifiedPodcastProgressBanner()
+                
                 episodeListContent
             }
             
@@ -2196,6 +2245,9 @@ struct PodcastPlayerView: View {
                     .font(.caption)
                     .foregroundColor(.primary)
                     .tracking(1.0)
+                
+                // Minimal CloudKit sync indicator next to EPISODES header
+                MinimalCloudKitSyncIndicator()
                 
                 Spacer()
                 

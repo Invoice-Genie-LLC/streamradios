@@ -159,6 +159,7 @@ class PodcastViewModel: ObservableObject {
     @Published var isLoadingEpisodes = false
     @Published var isLoadingMoreEpisodes = false
     @Published var hasMoreEpisodes = false
+    @Published var operationInProgress = false
     @Published var error: String?
     @Published var currentTab = 0
     @Published var searchQuery = ""
@@ -803,12 +804,12 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Parse RSS feed to get episodes only (without saving feed to Core Data)
+    /// Parse RSS feed to get episodes only (without saving feed to Core Data) with robust error handling
     private func parseRSSEpisodesOnly(from url: URL) async throws -> [PodcastEpisode] {
         print("🔍 Parsing RSS episodes from: \(url.absoluteString)")
         
-        // Fetch RSS data
-        let (feedData, _) = try await URLSession.shared.data(from: url)
+        // Fetch RSS data with robust error handling for large feeds and decode issues
+        let feedData = try await fetchRSSDataWithRetry(url: url, feedTitle: url.absoluteString)
         
         // Parse RSS using the same parser as PodcastFeedManager with progress tracking
         let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString) { [weak self] progress, message in
@@ -820,6 +821,94 @@ class PodcastViewModel: ObservableObject {
         
         print("🔍 Parsed \(episodes.count) episodes from RSS")
         return episodes
+    }
+    
+    /// Robust RSS data fetching with retry mechanism for decode errors  
+    private func fetchRSSDataWithRetry(url: URL, feedTitle: String, maxRetries: Int = 3) async throws -> Data {
+        var lastError: Error?
+        
+        for attempt in 1...maxRetries {
+            do {
+                print("🔄 Fetching RSS data (attempt \(attempt)/\(maxRetries)) for: \(feedTitle)")
+                
+                // Configure URLSession with longer timeout for large feeds
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 30.0 // Increased timeout for large episodes
+                request.setValue("StreamRadios/1.0", forHTTPHeaderField: "User-Agent")
+                request.setValue("application/rss+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
+                request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                // Validate HTTP response
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("📡 HTTP Response: \(httpResponse.statusCode) for: \(feedTitle)")
+                    
+                    // Check for server errors
+                    guard 200...299 ~= httpResponse.statusCode else {
+                        throw NSError(domain: "HTTPError", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(httpResponse.statusCode)"])
+                    }
+                    
+                    // Log content type for debugging
+                    if let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") {
+                        print("📄 Content-Type: \(contentType) for: \(feedTitle)")
+                    }
+                }
+                
+                // Validate data size and content
+                guard !data.isEmpty else {
+                    throw NSError(domain: "FeedError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty data received"])
+                }
+                
+                // Check for minimum RSS/XML content
+                guard data.count > 100 else { // Minimum viable RSS feed should be larger
+                    throw NSError(domain: "FeedError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Data too small (\(data.count) bytes)"])
+                }
+                
+                // Validate XML structure - check if data starts with valid XML
+                let dataPrefix = String(data: data.prefix(200), encoding: .utf8) ?? ""
+                let hasXMLDeclaration = dataPrefix.contains("<?xml") || dataPrefix.contains("<rss") || dataPrefix.contains("<feed")
+                
+                guard hasXMLDeclaration else {
+                    print("❌ Invalid XML structure for: \(feedTitle) - Data starts with: \(dataPrefix.prefix(100))")
+                    throw NSError(domain: "FeedError", code: 3, userInfo: [NSLocalizedDescriptionKey: "Invalid XML structure"])
+                }
+                
+                // Check for common encoding issues (BOM, invalid characters)
+                if dataPrefix.hasPrefix("\u{FEFF}") {
+                    print("🔧 Removing BOM from feed data: \(feedTitle)")
+                    return Data(data.dropFirst(3)) // Remove UTF-8 BOM
+                }
+                
+                print("✅ Successfully fetched \(data.count) bytes for: \(feedTitle)")
+                return data
+                
+            } catch {
+                lastError = error
+                let isDecodeError = (error as NSError).code == -1015
+                
+                print("❌ Fetch attempt \(attempt)/\(maxRetries) failed for: \(feedTitle) - Error: \(error.localizedDescription)")
+                
+                // For decode errors, wait longer between retries
+                if isDecodeError && attempt < maxRetries {
+                    let delay = Double(attempt) * 2.0 // Progressive delay: 2s, 4s, 6s
+                    print("⏳ Waiting \(delay) seconds before retry due to decode error...")
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } else if attempt < maxRetries {
+                    // Standard retry delay for other errors
+                    try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                }
+            }
+        }
+        
+        // All retries failed
+        print("💥 All \(maxRetries) fetch attempts failed for: \(feedTitle) - Final error: \(lastError?.localizedDescription ?? "Unknown error")")
+        
+        if let lastError = lastError, (lastError as NSError).code == -1015 {
+            throw NSError(domain: "FeedError", code: -1015, userInfo: [NSLocalizedDescriptionKey: "Feed data is corrupted or truncated"])
+        } else {
+            throw NSError(domain: "FeedError", code: 4, userInfo: [NSLocalizedDescriptionKey: "Maximum retry attempts exceeded"])
+        }
     }
     
     /// Helper met hod to add feed to UI without episode parsing (fallback)
@@ -1314,24 +1403,22 @@ class PodcastViewModel: ObservableObject {
                 )
             }
             
-            // Step 3: Background CloudKit sync
-            Task {
-                do {
-                    try await cloudKitManager.savePodcastFeedToCloudKit(feed)
-                    print("☁️ Successfully saved feed to CloudKit: \(feed.title)")
-                    
-                    // Notify user of successful import
-                    await MainActor.run {
-                        NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported podcast '\(feed.title)'.")
-                    }
-                } catch {
-                    print("⚠️ Failed to save feed to CloudKit (local save succeeded): \(error)")
-                    // Continue even if CloudKit save fails - local data is preserved
-                    
-                    // Notify user of successful import with warning
-                    await MainActor.run {
-                        NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported podcast '\(feed.title)' locally. Some data may not sync to iCloud.")
-                    }
+            // Step 3: Background CloudKit sync - WAIT for completion before allowing banner to show
+            do {
+                try await cloudKitManager.savePodcastFeedToCloudKit(feed)
+                print("☁️ Successfully saved feed to CloudKit: \(feed.title)")
+                
+                // Notify user of successful import
+                await MainActor.run {
+                    NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported podcast '\(feed.title)'.")
+                }
+            } catch {
+                print("⚠️ Failed to save feed to CloudKit (local save succeeded): \(error)")
+                // Continue even if CloudKit save fails - local data is preserved
+                
+                // Notify user of successful import with warning
+                await MainActor.run {
+                    NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported podcast '\(feed.title)' locally. Some data may not sync to iCloud.")
                 }
             }
             
@@ -1374,6 +1461,7 @@ class PodcastViewModel: ObservableObject {
             // Only show loading if we don't have episodes cached AND we don't have current episodes
             if !hasEpisodesInMemory && self.currentEpisodes.isEmpty {
                 self.isLoadingEpisodes = true
+                self.operationInProgress = true
             }
             // SMOOTH LOADING: Don't clear currentEpisodes to prevent UI jump
             // Let the new episodes replace them naturally to avoid flickering
@@ -1475,6 +1563,7 @@ class PodcastViewModel: ObservableObject {
                 let uniqueFilteredEpisodes = self.removeDuplicatesFromEpisodes(filteredEpisodes)
                 self.currentEpisodes = uniqueFilteredEpisodes
                 self.isLoadingEpisodes = false
+                self.operationInProgress = false
                 self.hasMoreEpisodes = false
                 // Reduce logging during scrolling for better performance
                 if !self.isUserScrolling {
@@ -1553,12 +1642,14 @@ class PodcastViewModel: ObservableObject {
                 
                 await MainActor.run {
                     self.isLoadingEpisodes = false
+                    self.operationInProgress = false
                 }
                 
             } catch {
                 await MainActor.run {
                     self.error = "Failed to refresh feed: \(error.localizedDescription)"
                     self.isLoadingEpisodes = false
+                    self.operationInProgress = false
                     os_log("❌ Failed to refresh feed: %@", log: self.log, type: .error, error.localizedDescription)
                 }
             }
@@ -1659,22 +1750,12 @@ class PodcastViewModel: ObservableObject {
                 // Use our carefully calculated finalProgress (which may have rejected corrupted explicit progress)
                 EpisodeStateManager.shared.setProgress(for: episodeId, progress: finalProgress)
                 
-                            // INSTANT SYNC: Sync episode progress immediately across devices
-            print("📡 CALLING SYNC: Episode \(episodeId) progress \(finalProgress)")
-            PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
-                episodeId: episodeId,
-                progress: finalProgress
-            )
+                            // CONDITIONAL SYNC: Progress is stored locally, CloudKit sync happens only on allowed conditions
             } else if isCurrentlyPlaying {
                 // For currently playing episodes, sync the player's progress
                 EpisodeStateManager.shared.setProgress(for: episodeId, progress: playerProgress)
                 
-                // INSTANT SYNC: Sync episode progress immediately across devices
-                print("📡 CALLING SYNC: Currently playing episode \(episodeId) progress \(playerProgress)")
-                PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
-                    episodeId: episodeId,
-                    progress: playerProgress
-                )
+                // CONDITIONAL SYNC: Progress is stored locally, CloudKit sync happens only on allowed conditions
             }
             // IMPORTANT: If no explicit progress and not currently playing, DON'T modify stored progress
             
@@ -1683,13 +1764,7 @@ class PodcastViewModel: ObservableObject {
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
                 print("📡 UPDATE EPISODE STATE: EpisodeStateManager updated successfully")
                 
-                // INSTANT SYNC: Sync episode favorite immediately across devices
-                print("📡 CALLING SYNC: Episode \(episodeId) favorite \(isFavorite)")
-                PodcastCloudKitManager.shared.syncPodcastFavoriteInstantly(
-                    episodeId: episodeId,
-                    isFavorite: isFavorite
-                )
-                print("📡 SYNC CALL COMPLETED: syncPodcastFavoriteInstantly finished")
+                // CONDITIONAL SYNC: Favorite changes trigger immediate CloudKit sync (allowed condition)
                 
                 // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
                 await MainActor.run {
@@ -1713,12 +1788,7 @@ class PodcastViewModel: ObservableObject {
             if let isDownloaded = isDownloaded {
                 EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded)
                 
-                // INSTANT SYNC: Sync episode download status immediately across devices
-                print("📡 CALLING SYNC: Episode \(episodeId) download \(isDownloaded)")
-                PodcastCloudKitManager.shared.syncPodcastDownloadInstantly(
-                    episodeId: episodeId,
-                    isDownloaded: isDownloaded
-                )
+                // CONDITIONAL SYNC: Download changes trigger immediate CloudKit sync (allowed condition)
                 
                 // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
                 await MainActor.run {
@@ -2131,6 +2201,7 @@ class PodcastViewModel: ObservableObject {
                 
                 self.hasMoreEpisodes = result.hasMore
                 self.isLoadingEpisodes = false
+                self.operationInProgress = false
                 
                 print("🔍 DEBUG: Updated currentEpisodes to \(self.currentEpisodes.count) episodes")
                 os_log("📊 Loaded %d episodes (page %d), hasMore: %@", 
@@ -2150,6 +2221,7 @@ class PodcastViewModel: ObservableObject {
             await MainActor.run {
                 self.error = "Failed to load episodes: \(error.localizedDescription)"
                 self.isLoadingEpisodes = false
+                self.operationInProgress = false
                 os_log("❌ Failed to load episodes: %@", log: self.log, type: .error, error.localizedDescription)
             }
         }
@@ -2339,6 +2411,15 @@ class PodcastViewModel: ObservableObject {
             let allEpisodeIds = await getAllEpisodeIdsFromCoreData()
             
             if !allEpisodeIds.isEmpty {
+                // Start episode state sync tracking in DataSyncManager
+                await DataSyncManager.shared.startEpisodeStateSync(totalCount: allEpisodeIds.count)
+                
+                // Update progress during CloudKit sync
+                await DataSyncManager.shared.updateEpisodeStateProgress(
+                    currentCount: 0,
+                    operation: "Fetching episode states from iCloud..."
+                )
+                
                 // Sync episode states from CloudKit
                 let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
                     for: allEpisodeIds,
@@ -2347,6 +2428,12 @@ class PodcastViewModel: ObservableObject {
                 
                 let coreDataUpdates = syncResult.updates
                 let syncSuccess = syncResult.success
+                
+                // Update progress during Core Data save
+                await DataSyncManager.shared.updateEpisodeStateProgress(
+                    currentCount: allEpisodeIds.count * 3 / 4,
+                    operation: "Saving episode states to local storage..."
+                )
                 
                 // Save all synced states to Core Data if there are updates
                 if !coreDataUpdates.isEmpty {
@@ -2358,6 +2445,12 @@ class PodcastViewModel: ObservableObject {
                     }
                 }
                 
+                // Update progress during UI refresh
+                await DataSyncManager.shared.updateEpisodeStateProgress(
+                    currentCount: allEpisodeIds.count * 9 / 10,
+                    operation: "Refreshing episode list..."
+                )
+                
                 // Update UI with synced states
                 await MainActor.run {
                     self.refreshEpisodeStatesFromManager()
@@ -2367,6 +2460,9 @@ class PodcastViewModel: ObservableObject {
                         }
                     }
                 }
+                
+                // Complete episode state sync tracking
+                await DataSyncManager.shared.completeEpisodeStateSync()
                 
                 if syncSuccess {
                     print("✅ Episode state sync completed successfully for \(allEpisodeIds.count) episodes")
@@ -3042,6 +3138,15 @@ class PodcastViewModel: ObservableObject {
                 }
             } else {
                 print("⚡ Skipping CloudKit episode state sync - loading from local storage only for better performance")
+                
+                // BANNER TEST: Periodically sync a subset of episodes to show CloudKit activity
+                // This ensures users see the banner working even on existing installations
+                let shouldPerformPeriodicSync = await shouldPerformPeriodicCloudKitSync()
+                if shouldPerformPeriodicSync {
+                    print("🔄 Performing periodic CloudKit episode state sync to demonstrate banner...")
+                    await performLightweightCloudKitSync()
+                }
+                
                 // Just refresh local episode states from EpisodeStateManager
                 await MainActor.run {
                     self.refreshEpisodeStatesFromManager()
@@ -3073,6 +3178,29 @@ class PodcastViewModel: ObservableObject {
         print("🔄 Initializing episode state sync...")
         
         Task {
+            // SYNC RESUMPTION: Check for incomplete sync first
+            if EpisodeStateManager.shared.hasIncompleteSyncToResume() {
+                let currentSyncProgress = EpisodeStateManager.shared.getCurrentSyncProgress()
+                let remainingCount = EpisodeStateManager.shared.getRemainingEpisodesToSync().count
+                print("📡 🔄 SYNC RESUMPTION: Found incomplete sync with \(remainingCount) episodes remaining")
+                
+                if let syncProgress = currentSyncProgress {
+                    let progressPercent = Int(syncProgress.progress * 100)
+                    print("📡 🔄 SYNC RESUMPTION: Resuming sync at \(progressPercent)% complete (started: \(syncProgress.startTime))")
+                    
+                    // Resume the sync with the original fresh install flag
+                    let syncSuccess = await syncEpisodeStatesFromCloudKit(isFreshInstall: syncProgress.isFreshInstall)
+                    
+                    if syncSuccess {
+                        print("✅ SYNC RESUMPTION: Completed resumed sync successfully")
+                        UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+                    } else {
+                        print("⚠️ SYNC RESUMPTION: Resumed sync failed - will retry on next launch")
+                    }
+                    return
+                }
+            }
+            
             // UPGRADE PROTECTION: Use EpisodeStateManager's robust upgrade detection
             let hasLaunchedBefore = UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
             let legacyFreshInstallCheck = !hasLaunchedBefore
@@ -3544,6 +3672,71 @@ class PodcastViewModel: ObservableObject {
         print("🔄 Reset episode states sync flag - will re-sync from CloudKit on next launch")
     }
     
+    /// Manually trigger CloudKit episode state sync immediately (for testing banner)
+    /// This will show the progress banner in real-time
+    @MainActor
+    func manuallyTriggerCloudKitSync() {
+        print("🔄 Manually triggering CloudKit episode state sync for testing...")
+        Task {
+            let syncSuccess = await syncEpisodeStatesFromCloudKit(isFreshInstall: false)
+            if syncSuccess {
+                print("✅ Manual CloudKit sync completed successfully")
+            } else {
+                print("⚠️ Manual CloudKit sync failed")
+            }
+        }
+    }
+    
+    /// Check if we should perform a periodic CloudKit sync to demonstrate banner functionality
+    private func shouldPerformPeriodicCloudKitSync() async -> Bool {
+        // Perform a lightweight sync every 5 app launches to demonstrate the banner
+        let launchCount = UserDefaults.standard.integer(forKey: "AppLaunchCount")
+        UserDefaults.standard.set(launchCount + 1, forKey: "AppLaunchCount")
+        
+        // Show CloudKit sync every 5th launch to demonstrate banner functionality
+        return launchCount % 5 == 0
+    }
+    
+    /// Perform a lightweight CloudKit sync of a subset of episodes to show banner activity
+    private func performLightweightCloudKitSync() async {
+        print("🔄 Starting lightweight CloudKit sync for banner demonstration...")
+        
+        // Get a subset of episodes (first 50) to sync
+        let allEpisodeIds = await getAllEpisodeIdsFromCoreData()
+        let episodeSubset = Array(allEpisodeIds.prefix(min(50, allEpisodeIds.count)))
+        
+        guard !episodeSubset.isEmpty else {
+            print("📊 No episodes found for lightweight sync")
+            return
+        }
+        
+        // Start episode state sync tracking in DataSyncManager
+        await DataSyncManager.shared.startEpisodeStateSync(totalCount: episodeSubset.count)
+        
+        // Update progress during CloudKit sync
+        await DataSyncManager.shared.updateEpisodeStateProgress(
+            currentCount: 0,
+            operation: "Checking for episode updates from iCloud..."
+        )
+        
+        // Sync episode states from CloudKit
+        let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+            for: episodeSubset,
+            isFreshInstall: false
+        )
+        
+        // Update progress during completion
+        await DataSyncManager.shared.updateEpisodeStateProgress(
+            currentCount: episodeSubset.count,
+            operation: "Sync completed"
+        )
+        
+        // Complete episode state sync tracking
+        await DataSyncManager.shared.completeEpisodeStateSync()
+        
+        print("✅ Lightweight CloudKit sync completed for \(episodeSubset.count) episodes")
+    }
+    
     /// Reset the podcast feeds sync flag to force a re-sync from CloudKit on next launch
     /// This is useful for troubleshooting if podcast feeds get out of sync
     @MainActor
@@ -3805,11 +3998,7 @@ extension PodcastViewModel {
         // Update EpisodeStateManager immediately (source of truth)
         EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: newState)
         
-        // INSTANT SYNC: Sync podcast download immediately across devices
-        PodcastCloudKitManager.shared.syncPodcastDownloadInstantly(
-            episodeId: episode.id,
-            isDownloaded: newState
-        )
+        // CONDITIONAL SYNC: Download changes trigger immediate CloudKit sync (allowed condition) - handled by setDownloaded
         
         // Update local state immediately for all tabs
         Task { @MainActor in

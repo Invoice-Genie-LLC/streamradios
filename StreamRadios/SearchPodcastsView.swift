@@ -480,6 +480,9 @@ struct SearchPodcastsView: View {
         addingProgress = 0.0
         addingStageText = "Preparing to add podcast..."
         
+        // Notify DataSyncManager that individual feed addition started
+        DataSyncManager.shared.startIndividualFeedAddition()
+        
         Task {
             do {
                 await updateProgress(0.1, "Connecting to podcast feed...")
@@ -508,12 +511,25 @@ struct SearchPodcastsView: View {
                         
                         // Dismiss the search sheet immediately after successful addition
                         isPresented = false
+                        
+                        // CRITICAL FIX: Delay completion until after auto-focus operations have time to complete
+                        // This prevents the main banner from appearing during auto-focus operations
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            DataSyncManager.shared.completeIndividualFeedAddition()
+                            print("🔄 SearchPodcastsView: Delayed completion of individual feed addition")
+                        }
                     }
                 } else {
                     await MainActor.run {
                         isAddingPodcast = false
                         alertMessage = podcastViewModel.error ?? "Failed to add podcast. Please check the URL and try again."
                         showAlert = true
+                        
+                        // CRITICAL FIX: Delay completion even for errors to maintain consistency
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            DataSyncManager.shared.completeIndividualFeedAddition()
+                            print("🔄 SearchPodcastsView: Delayed completion of individual feed addition (error case)")
+                        }
                     }
                 }
             } catch {
@@ -521,6 +537,12 @@ struct SearchPodcastsView: View {
                     isAddingPodcast = false
                     alertMessage = "Failed to add podcast: \(error.localizedDescription)"
                     showAlert = true
+                    
+                    // CRITICAL FIX: Delay completion even for errors to maintain consistency
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        DataSyncManager.shared.completeIndividualFeedAddition()
+                        print("🔄 SearchPodcastsView: Delayed completion of individual feed addition (exception case)")
+                    }
                 }
             }
         }
