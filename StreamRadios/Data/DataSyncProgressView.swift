@@ -13,11 +13,11 @@ struct DataSyncProgressView: View {
                 Color.black.opacity(0.4)
                     .ignoresSafeArea(.all)
                 
-                // Main progress container
-                VStack(spacing: 24) {
-                    // App icon or logo
+                // Main progress container with reduced height
+                VStack(spacing: 16) {
+                    // App icon or logo (smaller)
                     Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                        .font(.largeTitle)
+                        .font(.title)
                         .foregroundColor(.blue)
                         .rotationEffect(.degrees(animateProgress ? 360 : 0))
                         .animation(
@@ -26,39 +26,39 @@ struct DataSyncProgressView: View {
                             value: animateProgress
                         )
                     
-                    VStack(spacing: 16) {
-                        // Title
+                    VStack(spacing: 8) {
+                        // Title (smaller)
                         Text("Setting Up Your App")
-                            .font(.title2)
+                            .font(.title3)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
                         
                         Text("Syncing your data from iCloud...")
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
                     
-                    // Overall progress bar
-                    VStack(spacing: 8) {
+                    // Overall progress bar (more compact)
+                    VStack(spacing: 4) {
                         HStack {
                             Text("Overall Progress")
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
                             Spacer()
                             Text("\(Int(syncManager.overallProgress * 100))%")
-                                .font(.caption)
+                                .font(.caption2)
                                 .fontWeight(.medium)
                                 .foregroundColor(.primary)
                         }
                         
                         ProgressView(value: syncManager.overallProgress)
                             .progressViewStyle(CustomProgressViewStyle())
-                            .frame(height: 12)
+                            .frame(height: 8)
                     }
                     
-                    // Individual sync status items with detailed progress
-                    VStack(spacing: 12) {
+                    // Individual sync status items with detailed progress - FIXED HEIGHT CONTAINER (more compact)
+                    VStack(spacing: 8) {
                         DetailedSyncStatusItem(
                             title: "Radio Stations",
                             status: syncManager.radioStationsStatus,
@@ -101,42 +101,84 @@ struct DataSyncProgressView: View {
                             progress: syncManager.userPreferencesProgress
                         )
                         
-                        // Show feed parsing progress if active
-                        if syncManager.isParsingFeeds {
-                            FeedParsingProgressItem(
-                                progress: syncManager.feedParsingProgress,
-                                message: syncManager.feedParsingMessage
-                            )
-                        }
-                        
-                        // Show cross-device progress for feeds being synced on other devices
-                        if syncManager.isReceivingCrossDeviceProgress {
-                            ForEach(Array(syncManager.crossDeviceFeedProgress.values), id: \.feedId) { feedProgress in
-                                CrossDeviceFeedProgressItem(feedProgress: feedProgress)
+                        // FIXED HEIGHT: Compact feed parsing progress (reduced height)
+                        Group {
+                            if syncManager.isParsingFeeds {
+                                FeedParsingProgressItem(
+                                    progress: syncManager.feedParsingProgress,
+                                    message: syncManager.feedParsingMessage
+                                )
+                                .scaleEffect(0.85)
+                            } else {
+                                // Invisible placeholder with minimal height
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(height: 1)
+                                    .opacity(0)
                             }
                         }
+                        .frame(height: 32) // Reduced height for feed parsing section
+                        
+                        // FIXED HEIGHT: Compact cross-device progress (reduced to 1 item max)
+                        Group {
+                            if syncManager.isReceivingCrossDeviceProgress {
+                                let feedProgressItems = Array(syncManager.crossDeviceFeedProgress.values)
+                                if !feedProgressItems.isEmpty {
+                                    CrossDeviceFeedProgressItem(feedProgress: feedProgressItems[0])
+                                        .scaleEffect(0.85)
+                                } else {
+                                    Rectangle()
+                                        .fill(Color.clear)
+                                        .frame(height: 1)
+                                        .opacity(0)
+                                }
+                            } else {
+                                // Minimal invisible placeholder
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(height: 1)
+                                    .opacity(0)
+                            }
+                        }
+                        .frame(height: 40) // Reduced height for cross-device section (1 item max)
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 4)
                     
-                    // Overall sync status - show most active operation
-                    if syncManager.isSyncing {
-                        let activeOperation = getActiveOperation()
-                        if !activeOperation.isEmpty {
-                            Text(activeOperation)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 16)
+                    // FIXED HEIGHT: Compact active operation text
+                    Group {
+                        if syncManager.isSyncing {
+                            let activeOperation = getActiveOperation()
+                            if !activeOperation.isEmpty {
+                                Text(activeOperation)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 12)
+                                    .lineLimit(1)
+                            } else {
+                                // Minimal invisible placeholder
+                                Rectangle()
+                                    .fill(Color.clear)
+                                    .frame(height: 1)
+                                    .opacity(0)
+                            }
+                        } else {
+                            // Minimal invisible placeholder
+                            Rectangle()
+                                .fill(Color.clear)
+                                .frame(height: 1)
+                                .opacity(0)
                         }
                     }
+                    .frame(height: 16) // Reduced height for operation text
                 }
-                .padding(32)
+                .padding(16)
                 .background(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 12)
                         .fill(.regularMaterial)
-                        .shadow(radius: 10)
+                        .shadow(radius: 8)
                 )
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 32)
                 .scaleEffect(isVisible ? 1.0 : 0.8)
                 .opacity(isVisible ? 1.0 : 0.0)
                 .animation(.spring(response: 0.6, dampingFraction: 0.8), value: isVisible)
@@ -287,24 +329,39 @@ struct DetailedSyncStatusItem: View {
                 }
             }
             
-            // Progress bar for in-progress items
-            if status == .inProgress {
-                ProgressView(value: progress)
-                    .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                    .frame(height: 4)
-            }
-            
-            // Operation description
-            if !operation.isEmpty {
-                HStack {
-                    Text(operation)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Spacer()
+            // FIXED HEIGHT: Progress bar (always reserve space)
+            Group {
+                if status == .inProgress {
+                    ProgressView(value: progress)
+                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                        .frame(height: 4)
+                } else {
+                    Rectangle()
+                        .fill(Color.clear)
+                        .frame(height: 4)
+                        .opacity(0)
                 }
             }
+            
+            // FIXED HEIGHT: Operation description (always reserve space)
+            Group {
+                if !operation.isEmpty {
+                    HStack {
+                        Text(operation)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .multilineTextAlignment(.leading)
+                        Spacer()
+                    }
+                } else {
+                    Rectangle()
+                        .fill(Color.clear)
+                        .frame(height: 16)
+                        .opacity(0)
+                }
+            }
+            .frame(height: 16)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)

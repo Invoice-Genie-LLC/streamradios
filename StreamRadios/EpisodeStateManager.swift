@@ -330,8 +330,9 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Load episode states from Core Data (new primary method)
+    /// Thread-safe: Uses background context to prevent concurrent access issues
     private func loadFromCoreData() {
-        let context = CoreDataStack.shared.context
+        let context = CoreDataStack.shared.newBackgroundContext()
         context.perform {
             do {
                 // Fetch all episodes that have state data
@@ -458,25 +459,32 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Helper method to get feedId for an episode (needed for CloudKit sync)
+    /// Thread-safe: Uses background context to prevent concurrent access issues
     private func getFeedId(for episodeId: String) -> String? {
-        let context = CoreDataStack.shared.context
-        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
-        fetchRequest.fetchLimit = 1
+        var result: String?
+        let context = CoreDataStack.shared.newBackgroundContext()
         
-        do {
-            if let episode = try context.fetch(fetchRequest).first {
-                return episode.feedId
+        context.performAndWait {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+            fetchRequest.fetchLimit = 1
+            
+            do {
+                if let episode = try context.fetch(fetchRequest).first {
+                    result = episode.feedId
+                }
+            } catch {
+                print("❌ EpisodeStateManager: Failed to fetch feedId for episode \(episodeId): \(error)")
             }
-        } catch {
-            print("❌ EpisodeStateManager: Failed to fetch feedId for episode \(episodeId): \(error)")
         }
-        return nil
+        
+        return result
     }
     
     /// Save episode states to Core Data instead of UserDefaults
+    /// Thread-safe: Uses background context to prevent concurrent access issues
     private func saveToCoreData() {
-        let context = CoreDataStack.shared.context
+        let context = CoreDataStack.shared.newBackgroundContext()
         
         // Use a background queue to avoid blocking the main thread
         context.perform {
@@ -954,7 +962,7 @@ class EpisodeStateManager: ObservableObject {
             if shouldUpdateProgress, let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
                 let currentFavorite = isFavorite(episodeId)
                 let currentDownloaded = isDownloaded(episodeId)
-                let currentPlayed = effectiveProgress >= 0.99
+                let currentPlayed = getIsPlayed(episodeId)
                 
                 Task.detached(priority: .utility) {
                     await PodcastCloudKitManager.shared.saveEpisodeState(
@@ -1007,7 +1015,7 @@ class EpisodeStateManager: ObservableObject {
         if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
             let currentFavorite = isFavorite(episodeId)
             let currentDownloaded = isDownloaded(episodeId)
-            let currentPlayed = progress >= 0.99
+            let currentPlayed = getIsPlayed(episodeId)
             
             Task.detached(priority: .userInitiated) {
                 await PodcastCloudKitManager.shared.saveEpisodeState(
@@ -1042,7 +1050,7 @@ class EpisodeStateManager: ObservableObject {
         if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
             let currentProgress = getProgress(for: episodeId)
             let currentDownloaded = isDownloaded(episodeId)
-            let currentPlayed = currentProgress >= 0.99
+            let currentPlayed = getIsPlayed(episodeId)
             
             Task.detached(priority: .userInitiated) {
                 await PodcastCloudKitManager.shared.saveEpisodeState(
@@ -1063,6 +1071,35 @@ class EpisodeStateManager: ObservableObject {
         return episodeDownloads[episodeId] ?? false
     }
     
+    /// Get played state for an episode from Core Data
+    /// Thread-safe: Uses background context to prevent concurrent access issues
+    func getIsPlayed(_ episodeId: String) -> Bool {
+        var result: Bool = false
+        let context = CoreDataStack.shared.newBackgroundContext()
+        
+        context.performAndWait {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+            fetchRequest.fetchLimit = 1
+            
+            do {
+                if let episode = try context.fetch(fetchRequest).first {
+                    result = episode.isPlayed
+                }
+            } catch {
+                print("❌ EpisodeStateManager: Failed to fetch isPlayed for episode \(episodeId): \(error)")
+            }
+        }
+        
+        // If Core Data fetch didn't find anything, fallback to progress calculation
+        if !result {
+            let progress = getProgress(for: episodeId)
+            result = progress >= 0.99
+        }
+        
+        return result
+    }
+    
     /// Set download state for an episode
     func setDownloaded(_ episodeId: String, isDownloaded: Bool) {
         episodeDownloads[episodeId] = isDownloaded
@@ -1075,7 +1112,7 @@ class EpisodeStateManager: ObservableObject {
         if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
             let currentProgress = getProgress(for: episodeId)
             let currentFavorite = isFavorite(episodeId)
-            let currentPlayed = currentProgress >= 0.99
+            let currentPlayed = getIsPlayed(episodeId)
             
             Task.detached(priority: .userInitiated) {
                 await PodcastCloudKitManager.shared.saveEpisodeState(
@@ -1256,13 +1293,14 @@ class EpisodeStateManager: ObservableObject {
                                         Task.detached(priority: .utility) {
                                             let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
                                             let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+                                            let currentPlayed = EpisodeStateManager.shared.getIsPlayed(episodeId)
                                             await PodcastCloudKitManager.shared.saveEpisodeState(
                                                 episodeId: episodeId,
                                                 feedId: feedId,
                                                 progress: currentProgress,
                                                 isFavorite: currentFavorite,
                                                 isDownloaded: false,
-                                                isPlayed: currentProgress >= 0.99
+                                                isPlayed: currentPlayed
                                             )
                                             print("☁️ Synced download state cleanup to CloudKit from EpisodeStateManager: \(episodeId)")
                                         }
