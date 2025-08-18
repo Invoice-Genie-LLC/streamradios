@@ -134,8 +134,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             // CRITICAL: Synchronize ALL download states during force close protection
             synchronizeAllDownloadStates()
             
-            // CRITICAL FIX: Force save all episode states to prevent progress loss on force close
-            EpisodeStateManager.shared.forceSave()
+            // CRITICAL FIX: Core Data saves happen automatically, just ensure final sync
+            // No need to force save since Core Data is now the primary storage
             
             // Save context and force synchronize
             podcastViewModel.saveContextIfNeeded()
@@ -188,8 +188,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     // Save Core Data changes
                     try context.save()
                     
-                    // Force save EpisodeStateManager to UserDefaults
-                    EpisodeStateManager.shared.forceSave()
+                    // Core Data saves happen automatically, no need to force save
+                    // Data is already persisted in Core Data
                     
                     print("✅ Force close download sync completed successfully")
                     

@@ -4605,8 +4605,8 @@ extension PodcastViewModel {
         EpisodeStateManager.shared.clearAllStates()
         print("🧹 EPISODE STATE CLEARING: Cleared all episode states from EpisodeStateManager")
         
-        // Also force a save to ensure UserDefaults are updated immediately
-        EpisodeStateManager.shared.forceSave()
+        // Core Data saves happen automatically, no need to force save
+        // clearAllStates() already triggers save through state changes
         print("🧹 EPISODE STATE CLEARING: Forced save completed - all local episode data cleared")
     }
     

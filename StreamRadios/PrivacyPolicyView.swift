@@ -87,7 +87,7 @@ struct PrivacyPolicyView: View {
                             .fontWeight(.bold)
                             .foregroundColor(primaryTextColor)
                         
-                        Text("If you have any questions or concerns about our privacy practices, please contact us at:\n\nEmail: support@streamradiostations.com")
+                        Text("If you have any questions or concerns about our privacy practices, please contact us at:\n\nEmail: support@streamradios.app")
                             .font(.body)
                             .foregroundColor(secondaryTextColor)
                             .lineSpacing(4)

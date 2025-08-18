@@ -542,22 +542,25 @@ extension SettingsView {
     private var debugSettings: some View {
         VStack(spacing: 16) {
             // Debug Logs Section Header
-            HStack {
-                Image(systemName: "ladybug.fill")
-                    .font(.title2)
+            VStack(alignment: .leading, spacing: 8) {
+                // Support title and icon in one row
+                HStack {
+                    Image(systemName: "envelope.open.fill")
+                        .font(.title2)
                         .foregroundColor(.orange)
                     
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Debug Logs")
+                    Text("Support")
                         .font(.headline)
                         .foregroundColor(primaryTextColor)
                     
-                    Text("View and share comprehensive error logs")
-                        .font(.caption)
-                        .foregroundColor(secondaryTextColor)
-                }
-                    
                     Spacer()
+                }
+                
+                // Description text pushed left underneath
+                Text("Found a bug or experiencing performance issues? Enable \"Allow Data Sharing\" and email support to help us troubleshoot and improve your experience.")
+                    .font(.caption)
+                    .foregroundColor(secondaryTextColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -962,7 +965,7 @@ extension SettingsView {
         
         // Create email-specific sharing items
         let emailSubject = "Debug Sent From User"
-        let emailRecipient = "support@streamradiostations.com"
+        let emailRecipient = "support@streamradios.app"
         
         // Check if mail is available and try to use MFMailComposeViewController first
         if MFMailComposeViewController.canSendMail() {

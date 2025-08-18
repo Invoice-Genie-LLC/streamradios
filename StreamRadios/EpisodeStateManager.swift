@@ -319,32 +319,113 @@ class EpisodeStateManager: ObservableObject {
     // MARK: - Public Methods
     
     private func loadSavedStates() {
+        // CRITICAL FIX: Load from Core Data instead of UserDefaults
+        loadFromCoreData()
+        
+        // Load currently playing episode from UserDefaults (small data)
+        currentlyPlayingEpisodeId = userDefaults.string(forKey: currentlyPlayingKey)
+        if let playingId = currentlyPlayingEpisodeId {
+            print("✅ EpisodeStateManager: Currently playing episode: \(playingId)")
+        }
+    }
+    
+    /// Load episode states from Core Data (new primary method)
+    private func loadFromCoreData() {
+        let context = CoreDataStack.shared.context
+        context.perform {
+            do {
+                // Fetch all episodes that have state data
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "progress > 0 OR isFavorite == YES OR isDownloaded == YES OR isPlayed == YES")
+                
+                let episodes = try context.fetch(fetchRequest)
+                
+                var loadedProgress: [String: Double] = [:]
+                var loadedFavorites: [String: Bool] = [:]
+                var loadedDownloads: [String: Bool] = [:]
+                var loadedStates: [String: EpisodePlaybackState] = [:]
+                
+                for episode in episodes {
+                    guard let episodeId = episode.id else { continue }
+                    
+                    // Load progress
+                    if episode.progress > 0 {
+                        loadedProgress[episodeId] = Double(episode.progress)
+                    }
+                    
+                    // Load favorites
+                    if episode.isFavorite {
+                        loadedFavorites[episodeId] = true
+                    }
+                    
+                    // Load downloads
+                    if episode.isDownloaded {
+                        loadedDownloads[episodeId] = true
+                    }
+                    
+                    // Load played state
+                    if episode.isPlayed {
+                        loadedStates[episodeId] = .played
+                    } else if episode.progress > 0 {
+                        loadedStates[episodeId] = .inProgress
+                    }
+                }
+                
+                // Update in-memory dictionaries on main thread
+                DispatchQueue.main.async {
+                    self.episodeProgress = loadedProgress
+                    self.episodeFavorites = loadedFavorites
+                    self.episodeDownloads = loadedDownloads
+                    self.episodeStates = loadedStates
+                    
+                    print("✅ EpisodeStateManager: Loaded from Core Data - Progress: \(loadedProgress.count), Favorites: \(loadedFavorites.count), Downloads: \(loadedDownloads.count), States: \(loadedStates.count)")
+                    
+                    // Fallback: If no Core Data found, try loading from UserDefaults (for migration)
+                    if loadedProgress.isEmpty && loadedFavorites.isEmpty && loadedDownloads.isEmpty {
+                        self.loadFromUserDefaultsAsFallback()
+                    }
+                }
+                
+            } catch {
+                print("❌ EpisodeStateManager: Failed to load from Core Data: \(error)")
+                // Fallback to UserDefaults loading
+                DispatchQueue.main.async {
+                    self.loadFromUserDefaultsAsFallback()
+                }
+            }
+        }
+    }
+    
+    /// Fallback method to load from UserDefaults (for migration from old data)
+    private func loadFromUserDefaultsAsFallback() {
+        print("🔄 EpisodeStateManager: Loading from UserDefaults as fallback")
+        
         // Load episode states
         if let statesData = userDefaults.data(forKey: statesKey),
            let decodedStates = try? JSONDecoder().decode([String: String].self, from: statesData) {
             self.episodeStates = decodedStates.compactMapValues { EpisodePlaybackState(rawValue: $0) }
-            print("✅ EpisodeStateManager: Loaded \(episodeStates.count) episode states")
+            print("✅ EpisodeStateManager: Loaded \(episodeStates.count) episode states from UserDefaults")
         }
         
         // Load episode progress
         if let progressData = userDefaults.data(forKey: progressKey),
            let decodedProgress = try? JSONDecoder().decode([String: Double].self, from: progressData) {
             self.episodeProgress = decodedProgress
-            print("✅ EpisodeStateManager: Loaded \(episodeProgress.count) episode progress entries")
+            print("✅ EpisodeStateManager: Loaded \(episodeProgress.count) episode progress entries from UserDefaults")
         }
         
         // Load episode favorites
         if let favoritesData = userDefaults.data(forKey: favoritesKey),
            let decodedFavorites = try? JSONDecoder().decode([String: Bool].self, from: favoritesData) {
             self.episodeFavorites = decodedFavorites
-            print("✅ EpisodeStateManager: Loaded \(episodeFavorites.count) episode favorites")
+            print("✅ EpisodeStateManager: Loaded \(episodeFavorites.count) episode favorites from UserDefaults")
         }
         
         // Load episode downloads
         if let downloadsData = userDefaults.data(forKey: downloadsKey),
            let decodedDownloads = try? JSONDecoder().decode([String: Bool].self, from: downloadsData) {
             self.episodeDownloads = decodedDownloads
-            print("✅ EpisodeStateManager: Loaded \(episodeDownloads.count) episode downloads")
+            print("✅ EpisodeStateManager: Loaded \(episodeDownloads.count) episode downloads from UserDefaults")
         }
         
         // UPGRADE PROTECTION: Recover any missing download states from backups
@@ -354,93 +435,139 @@ class EpisodeStateManager: ObservableObject {
             recoverDownloadStatesFromIndividualBackups()
         }
         
-        // Load currently playing episode
-        currentlyPlayingEpisodeId = userDefaults.string(forKey: currentlyPlayingKey)
-        if let playingId = currentlyPlayingEpisodeId {
-            print("✅ EpisodeStateManager: Currently playing episode: \(playingId)")
+        // If we loaded from UserDefaults, immediately migrate to Core Data
+        if !episodeProgress.isEmpty || !episodeFavorites.isEmpty || !episodeDownloads.isEmpty {
+            print("🔄 EpisodeStateManager: Migrating UserDefaults data to Core Data")
+            saveToCoreData()
         }
     }
     
     private func saveCurrentStates() {
-        // CRITICAL FIX: Limit data size to prevent UserDefaults overflow
-        // Emergency cleanup before any save operations
-        emergencyCleanupIfNeeded()
+        // CRITICAL FIX: Save to Core Data instead of UserDefaults to prevent CFPreferences overflow
+        saveToCoreData()
         
-        // Reduced per-dataset limit to ensure total stays under 4MB
-        let maxDataSize = 800_000 // 800KB per dataset = ~3.2MB total for 4 datasets
-        
-        // Save episode states with strict size check
-        let statesForSaving = episodeStates.mapValues { $0.rawValue }
-        if let statesData = try? JSONEncoder().encode(statesForSaving) {
-            if statesData.count < maxDataSize {
-                userDefaults.set(statesData, forKey: statesKey)
-            } else {
-                print("⚠️ EpisodeStateManager: States data too large (\(statesData.count) bytes), performing emergency cleanup")
-                emergencyCleanupStates()
-                // Try again with cleaned data
-                let cleanedStatesForSaving = episodeStates.mapValues { $0.rawValue }
-                if let cleanedStatesData = try? JSONEncoder().encode(cleanedStatesForSaving),
-                   cleanedStatesData.count < maxDataSize {
-                    userDefaults.set(cleanedStatesData, forKey: statesKey)
-                } else {
-                    print("❌ EpisodeStateManager: States still too large after cleanup, skipping save")
-                }
-            }
-        }
-        
-        // Save episode progress with strict size check
-        if let progressData = try? JSONEncoder().encode(episodeProgress) {
-            if progressData.count < maxDataSize {
-                userDefaults.set(progressData, forKey: progressKey)
-            } else {
-                print("⚠️ EpisodeStateManager: Progress data too large (\(progressData.count) bytes), performing emergency cleanup")
-                emergencyCleanupProgress()
-                if let cleanedProgressData = try? JSONEncoder().encode(episodeProgress),
-                   cleanedProgressData.count < maxDataSize {
-                    userDefaults.set(cleanedProgressData, forKey: progressKey)
-                } else {
-                    print("❌ EpisodeStateManager: Progress still too large after cleanup, skipping save")
-                }
-            }
-        }
-        
-        // Save episode favorites with strict size check
-        if let favoritesData = try? JSONEncoder().encode(episodeFavorites) {
-            if favoritesData.count < maxDataSize {
-                userDefaults.set(favoritesData, forKey: favoritesKey)
-            } else {
-                print("⚠️ EpisodeStateManager: Favorites data too large (\(favoritesData.count) bytes), performing emergency cleanup")
-                emergencyCleanupFavorites()
-                if let cleanedFavoritesData = try? JSONEncoder().encode(episodeFavorites),
-                   cleanedFavoritesData.count < maxDataSize {
-                    userDefaults.set(cleanedFavoritesData, forKey: favoritesKey)
-                } else {
-                    print("❌ EpisodeStateManager: Favorites still too large after cleanup, skipping save")
-                }
-            }
-        }
-        
-        // Save episode downloads with strict size check
-        if let downloadsData = try? JSONEncoder().encode(episodeDownloads) {
-            if downloadsData.count < maxDataSize {
-                userDefaults.set(downloadsData, forKey: downloadsKey)
-            } else {
-                print("⚠️ EpisodeStateManager: Downloads data too large (\(downloadsData.count) bytes), performing emergency cleanup")
-                emergencyCleanupDownloads()
-                if let cleanedDownloadsData = try? JSONEncoder().encode(episodeDownloads),
-                   cleanedDownloadsData.count < maxDataSize {
-                    userDefaults.set(cleanedDownloadsData, forKey: downloadsKey)
-                } else {
-                    print("❌ EpisodeStateManager: Downloads still too large after cleanup, skipping save")
-                }
-            }
-        }
-        
-        // Save currently playing episode
+        // Save currently playing episode to UserDefaults (small data, safe)
         if let playingId = currentlyPlayingEpisodeId {
             userDefaults.set(playingId, forKey: currentlyPlayingKey)
         } else {
             userDefaults.removeObject(forKey: currentlyPlayingKey)
+        }
+        
+        // Send throttled notification about state changes
+        sendThrottledUpdate()
+    }
+    
+    /// Helper method to get feedId for an episode (needed for CloudKit sync)
+    private func getFeedId(for episodeId: String) -> String? {
+        let context = CoreDataStack.shared.context
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+        fetchRequest.fetchLimit = 1
+        
+        do {
+            if let episode = try context.fetch(fetchRequest).first {
+                return episode.feedId
+            }
+        } catch {
+            print("❌ EpisodeStateManager: Failed to fetch feedId for episode \(episodeId): \(error)")
+        }
+        return nil
+    }
+    
+    /// Save episode states to Core Data instead of UserDefaults
+    private func saveToCoreData() {
+        let context = CoreDataStack.shared.context
+        
+        // Use a background queue to avoid blocking the main thread
+        context.perform {
+            var savedCount = 0
+            var errorCount = 0
+            
+            // Get all episodes that have state changes
+            let episodesToUpdate = Set(self.episodeStates.keys)
+                .union(Set(self.episodeProgress.keys))
+                .union(Set(self.episodeFavorites.keys))
+                .union(Set(self.episodeDownloads.keys))
+            
+            for episodeId in episodesToUpdate {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.fetchLimit = 1
+                
+                do {
+                    if let episode = try context.fetch(fetchRequest).first {
+                        var hasChanges = false
+                        
+                        // Update progress
+                        if let progress = self.episodeProgress[episodeId] {
+                            let newProgress = Float(progress)
+                            if abs(Double(episode.progress) - progress) > 0.001 { // Use epsilon comparison for floating point
+                                episode.progress = Double(newProgress)
+                                episode.isPlayed = progress >= 0.99
+                                hasChanges = true
+                            }
+                        }
+                        
+                        // Update favorite status
+                        if let isFavorite = self.episodeFavorites[episodeId] {
+                            if episode.isFavorite != isFavorite {
+                                episode.isFavorite = isFavorite
+                                hasChanges = true
+                            }
+                        }
+                        
+                        // Update download status
+                        if let isDownloaded = self.episodeDownloads[episodeId] {
+                            if episode.isDownloaded != isDownloaded {
+                                episode.isDownloaded = isDownloaded
+                                hasChanges = true
+                            }
+                        }
+                        
+                        if hasChanges {
+                            savedCount += 1
+                            
+                            // RESTORE CLOUDKIT FUNCTIONALITY: Sync to CloudKit when Core Data changes
+                            if let feedId = episode.feedId, !feedId.isEmpty {
+                                let currentProgress = Double(episode.progress)
+                                let currentFavorite = episode.isFavorite
+                                let currentDownloaded = episode.isDownloaded
+                                let currentPlayed = episode.isPlayed
+                                
+                                Task.detached(priority: .utility) {
+                                    await PodcastCloudKitManager.shared.saveEpisodeState(
+                                        episodeId: episodeId,
+                                        feedId: feedId,
+                                        progress: currentProgress,
+                                        isFavorite: currentFavorite,
+                                        isDownloaded: currentDownloaded,
+                                        isPlayed: currentPlayed
+                                    )
+                                    print("☁️ EpisodeStateManager: Synced episode state to CloudKit: \(episodeId)")
+                                }
+                            }
+                        }
+                    }
+                } catch {
+                    print("❌ EpisodeStateManager: Failed to fetch episode \(episodeId): \(error)")
+                    errorCount += 1
+                }
+            }
+            
+            // Save context if we made changes
+            if savedCount > 0 {
+                do {
+                    try context.save()
+                    print("✅ EpisodeStateManager: Saved \(savedCount) episodes to Core Data")
+                } catch {
+                    print("❌ EpisodeStateManager: Failed to save to Core Data: \(error)")
+                    errorCount += 1
+                }
+            }
+            
+            if errorCount > 0 {
+                print("⚠️ EpisodeStateManager: Encountered \(errorCount) errors while saving to Core Data")
+            }
         }
     }
     
@@ -573,7 +700,7 @@ class EpisodeStateManager: ObservableObject {
     
     /// Check and clean UserDefaults size if it's getting too large
     private func checkAndCleanUserDefaultsSize() {
-        let maxDataSize = 2_000_000 // 2MB limit to stay well under 4MB
+        let maxDataSize = 300_000 // CRITICAL FIX: 300KB per dataset to prevent CFPreferences overflow
         
         // Check each data set size
         var totalSize = 0
@@ -607,7 +734,7 @@ class EpisodeStateManager: ObservableObject {
             }
         }
         
-        if totalSize > 3_500_000 || !oversizedKeys.isEmpty { // 3.5MB total limit
+        if totalSize > 1_000_000 || !oversizedKeys.isEmpty { // CRITICAL FIX: 1MB total limit to prevent CFPreferences overflow
             print("⚠️ EpisodeStateManager: UserDefaults too large (\(totalSize) bytes), cleaning up keys: \(oversizedKeys)")
             
             // Emergency cleanup - remove oversized data and reload from Core Data
@@ -822,6 +949,25 @@ class EpisodeStateManager: ObservableObject {
             episodeStates[episodeId] = newState
             saveCurrentStates()
             sendThrottledUpdate()
+            
+            // RESTORE CLOUDKIT FUNCTIONALITY: Sync progress updates to CloudKit
+            if shouldUpdateProgress, let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
+                let currentFavorite = isFavorite(episodeId)
+                let currentDownloaded = isDownloaded(episodeId)
+                let currentPlayed = effectiveProgress >= 0.99
+                
+                Task.detached(priority: .utility) {
+                    await PodcastCloudKitManager.shared.saveEpisodeState(
+                        episodeId: episodeId,
+                        feedId: feedId,
+                        progress: effectiveProgress,
+                        isFavorite: currentFavorite,
+                        isDownloaded: currentDownloaded,
+                        isPlayed: currentPlayed
+                    )
+                    print("☁️ EpisodeStateManager: Synced progress update to CloudKit: \(episodeId)")
+                }
+            }
         }
     }
     
@@ -856,13 +1002,28 @@ class EpisodeStateManager: ObservableObject {
                 userInfo: ["episodeId": episodeId, "progress": progress]
             )
         }
+        
+        // RESTORE CLOUDKIT FUNCTIONALITY: Immediate CloudKit sync for progress
+        if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
+            let currentFavorite = isFavorite(episodeId)
+            let currentDownloaded = isDownloaded(episodeId)
+            let currentPlayed = progress >= 0.99
+            
+            Task.detached(priority: .userInitiated) {
+                await PodcastCloudKitManager.shared.saveEpisodeState(
+                    episodeId: episodeId,
+                    feedId: feedId,
+                    progress: progress,
+                    isFavorite: currentFavorite,
+                    isDownloaded: currentDownloaded,
+                    isPlayed: currentPlayed
+                )
+                print("☁️ EpisodeStateManager: Synced progress to CloudKit: \(episodeId)")
+            }
+        }
     }
     
-    /// Force save current states immediately (for critical saves)
-    func forceSave() {
-        saveCurrentStates()
-        userDefaults.synchronize()
-    }
+
     
     /// Get favorite state for an episode
     func isFavorite(_ episodeId: String) -> Bool {
@@ -876,6 +1037,25 @@ class EpisodeStateManager: ObservableObject {
         userDefaults.synchronize() // Force immediate sync
         sendThrottledUpdate()
         print("🔍 EpisodeStateManager: Set favorite for \(episodeId): \(isFavorite)")
+        
+        // RESTORE CLOUDKIT FUNCTIONALITY: Immediate CloudKit sync for favorites
+        if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
+            let currentProgress = getProgress(for: episodeId)
+            let currentDownloaded = isDownloaded(episodeId)
+            let currentPlayed = currentProgress >= 0.99
+            
+            Task.detached(priority: .userInitiated) {
+                await PodcastCloudKitManager.shared.saveEpisodeState(
+                    episodeId: episodeId,
+                    feedId: feedId,
+                    progress: currentProgress,
+                    isFavorite: isFavorite,
+                    isDownloaded: currentDownloaded,
+                    isPlayed: currentPlayed
+                )
+                print("☁️ EpisodeStateManager: Synced favorite state to CloudKit: \(episodeId)")
+            }
+        }
     }
     
     /// Get download state for an episode
@@ -890,6 +1070,25 @@ class EpisodeStateManager: ObservableObject {
         userDefaults.synchronize() // Force immediate sync
         sendThrottledUpdate()
         print("🔍 EpisodeStateManager: Set downloaded for \(episodeId): \(isDownloaded)")
+        
+        // RESTORE CLOUDKIT FUNCTIONALITY: Immediate CloudKit sync for downloads
+        if let feedId = getFeedId(for: episodeId), !feedId.isEmpty {
+            let currentProgress = getProgress(for: episodeId)
+            let currentFavorite = isFavorite(episodeId)
+            let currentPlayed = currentProgress >= 0.99
+            
+            Task.detached(priority: .userInitiated) {
+                await PodcastCloudKitManager.shared.saveEpisodeState(
+                    episodeId: episodeId,
+                    feedId: feedId,
+                    progress: currentProgress,
+                    isFavorite: currentFavorite,
+                    isDownloaded: isDownloaded,
+                    isPlayed: currentPlayed
+                )
+                print("☁️ EpisodeStateManager: Synced download state to CloudKit: \(episodeId)")
+            }
+        }
     }
     
     /// UPGRADE PROTECTION: Enhanced download state setting with backup

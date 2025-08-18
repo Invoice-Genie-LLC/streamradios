@@ -1662,7 +1662,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Save progress to persistent storage
         stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: isPlaying, currentTime: currentTime)
-        stateManager.forceSave()
+        // Core Data saves happen automatically in updateProgress
         
         // Update local cache
         Task { @MainActor in
@@ -1713,8 +1713,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             viewModel?.updateEpisodeState(episode.id, progress: progress, isPlayed: isPlayed)
         }
         
-        // 4. Force save the state manager data immediately
-        stateManager.forceSave()
+        // 4. Core Data saves happen automatically, no need to force save
+        // Data is already persisted through saveCurrentStates()
         
         // 5. Force synchronize UserDefaults for additional safety
         UserDefaults.standard.synchronize()

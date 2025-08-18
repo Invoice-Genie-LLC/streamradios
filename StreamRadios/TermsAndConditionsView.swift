@@ -99,7 +99,7 @@ struct TermsAndConditionsView: View {
                             .fontWeight(.bold)
                             .foregroundColor(primaryTextColor)
                         
-                        Text("Rights holders who believe their content is being used without authorization on StreamRadios should submit a formal takedown request to support@streamradiostations.com. Valid notices must include:\n\n• Clear identification of the copyrighted work\n• Location of the allegedly infringing content on our platform\n• Contact information for the rights holder or authorized representative\n• A statement of good faith belief that the use is unauthorized\n• Declaration that the information provided is accurate\n\nUpon receiving valid takedown notices, StreamRadios will promptly remove the disputed content and notify the user who posted it.")
+                        Text("Rights holders who believe their content is being used without authorization on StreamRadios should submit a formal takedown request to support@streamradios.app. Valid notices must include:\n\n• Clear identification of the copyrighted work\n• Location of the allegedly infringing content on our platform\n• Contact information for the rights holder or authorized representative\n• A statement of good faith belief that the use is unauthorized\n• Declaration that the information provided is accurate\n\nUpon receiving valid takedown notices, StreamRadios will promptly remove the disputed content and notify the user who posted it.")
                             .font(.body)
                             .foregroundColor(secondaryTextColor)
                             .lineSpacing(4)
