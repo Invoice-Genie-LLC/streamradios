@@ -372,11 +372,6 @@ struct ContentView: View {
                         
                         // Search box for filtering stations
                         searchBar
-                        
-                        // Unified radio station progress banner
-                        if selectedTab == .radio {
-                            UnifiedRadioProgressBanner()
-                        }
 
                     }
                     .padding(.top, topPadding)
@@ -538,6 +533,11 @@ struct ContentView: View {
     @ViewBuilder
     private var searchBar: some View {
         HStack {
+            // Radio syncing indicator on the left side
+            if selectedTab == .radio {
+                RadioSyncIndicator()
+            }
+            
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.adaptiveSecondaryText)
@@ -1039,6 +1039,10 @@ struct UnifiedPodcastPlayerView: View {
                                 .foregroundColor(.white)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        
+                        // Extra spacing between forward button and speed button to prevent accidental taps
+                        Spacer()
+                            .frame(width: 16)
                         
                         // Playback speed button - shows current speed and opens audio settings
                         Button(action: {
@@ -1700,6 +1704,84 @@ struct MinimalCloudKitSyncIndicator: View {
             .transition(.scale.combined(with: .opacity))
             .animation(.easeInOut(duration: 0.2), value: syncManager.isMinimalCloudKitSyncing)
         }
+    }
+}
+
+// MARK: - Radio Sync Indicator
+
+struct RadioSyncIndicator: View {
+    @StateObject private var syncManager = DataSyncManager.shared
+    @StateObject private var radioViewModel = RadioStationViewModel.shared
+    
+    var body: some View {
+        Group {
+            if shouldShowIndicator {
+                HStack(spacing: 4) {
+                    Image(systemName: currentIcon)
+                        .font(.caption2)
+                        .foregroundColor(currentColor)
+                        .symbolEffect(.pulse, isActive: isAnimating)
+                    
+                    if showText {
+                        Text(currentText)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.ultraThinMaterial, in: Capsule())
+                .transition(.scale.combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.2), value: shouldShowIndicator)
+            }
+        }
+    }
+    
+    private var shouldShowIndicator: Bool {
+        // Show for active API fetching
+        let hasAPIFetching = radioViewModel.isLoadingFromAPI
+        
+        // Show for active CloudKit operations
+        let hasActiveCloudKitSync = syncManager.radioStationsStatus == .inProgress
+        
+        // Only show when actively syncing - don't show completed state
+        return hasAPIFetching || hasActiveCloudKitSync
+    }
+    
+    private var currentIcon: String {
+        if syncManager.radioStationsStatus == .inProgress {
+            if syncManager.radioStationsOperation.contains("Saving") {
+                return "icloud.and.arrow.up"
+            } else if syncManager.radioStationsOperation.contains("Fetching") || 
+                      syncManager.radioStationsOperation.contains("Loading") {
+                return "icloud.and.arrow.down"
+            }
+        }
+        
+        // API fetching
+        return "antenna.radiowaves.left.and.right"
+    }
+    
+    private var currentColor: Color {
+        if syncManager.radioStationsStatus == .inProgress {
+            return .cyan
+        } else {
+            return .blue
+        }
+    }
+    
+    private var currentText: String {
+        return "Syncing"
+    }
+    
+    private var showText: Bool {
+        // Show text only when actively syncing
+        return syncManager.radioStationsStatus == .inProgress || radioViewModel.isLoading
+    }
+    
+    private var isAnimating: Bool {
+        return syncManager.radioStationsStatus == .inProgress || radioViewModel.isLoadingFromAPI
     }
 }
 

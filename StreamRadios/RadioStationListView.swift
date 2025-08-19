@@ -50,23 +50,20 @@ struct RadioStationListView: View {
         GeometryReader { geometry in
             if viewModel.isLoading {
                 // Show simple loading message - detailed progress is in the banner
-                VStack(spacing: 20) {
-                    VStack(spacing: 8) {
-                        Text("Loading Stations")
-                            .font(.headline)
-                            .foregroundColor(.adaptivePrimaryText)
-                        
-                        if !viewModel.loadingPhase.isEmpty {
-                            Text(viewModel.loadingPhase)
-                                .font(.subheadline)
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
-                                .animation(.easeInOut(duration: 0.2), value: viewModel.loadingPhase)
-                        }
+                VStack(spacing: 8) {
+                    Text("Loading Stations")
+                        .font(.headline)
+                        .foregroundColor(.adaptivePrimaryText)
+                        .multilineTextAlignment(.center)
+                    
+                    if !viewModel.loadingPhase.isEmpty {
+                        Text(viewModel.loadingPhase)
+                            .font(.subheadline)
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .multilineTextAlignment(.center)
+                            .animation(.easeInOut(duration: 0.2), value: viewModel.loadingPhase)
                     }
                 }
-                .frame(maxWidth: .infinity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.adaptiveBackground)
             } else if viewModel.stations.isEmpty {

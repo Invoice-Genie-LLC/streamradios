@@ -2166,7 +2166,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Filter out stations that already exist (check by URL to avoid duplicates)
             await MainActor.run {
-                loadingPhase = "Filtering existing stations..."
+                loadingPhase = "Filtering existing stations"
                 loadingProgress = 0.75
             }
             
@@ -2174,7 +2174,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let uniqueNewStations = newStations.filter { !existingURLs.contains($0.url) }
             
             await MainActor.run {
-                loadingPhase = "Analyzing results..."
+                loadingPhase = "Analyzing results"
                 loadingProgress = 0.8
             }
             
