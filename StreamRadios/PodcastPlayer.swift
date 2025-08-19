@@ -1265,6 +1265,26 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return
         }
         
+        // CRITICAL FIX: Prevent seeking if audio is already playing and we're close to the expected position
+        // This prevents the "first sentence repeats twice" issue after sync
+        if isPlaying && currentTime > 0 {
+            let expectedProgress = max(
+                stateManager.getProgress(for: currentEpisode.id),
+                currentEpisode.state.progress
+            )
+            let expectedTime = expectedProgress * duration
+            let timeDifference = abs(currentTime - expectedTime)
+            
+            // If we're within 3 seconds of the expected position and audio is playing, don't seek
+            if timeDifference <= 3.0 {
+                os_log("🔍 ⚡ SKIP SEEK: Already playing at correct position (%.1fs vs expected %.1fs) - preventing repetition", 
+                       log: log, type: .info, currentTime, expectedTime)
+                hasRestoredPositionForCurrentEpisode = true
+                currentEpisodeIdForRestoration = currentEpisode.id
+                return
+            }
+        }
+        
         // If this is a replay action, always start from the beginning
         if shouldStartFromBeginning {
             os_log("🔄 Replay requested - starting from the beginning", log: log, type: .info)
@@ -1295,7 +1315,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
         
         // ENHANCEMENT: Check for latest progress from other devices before resuming
-        await checkForLatestCrossDeviceProgress(for: currentEpisode.id)
+        // But only if we're not already playing to prevent interrupting playback
+        if !isPlaying {
+            await checkForLatestCrossDeviceProgress(for: currentEpisode.id)
+        }
         
         // Try to get saved progress from multiple sources for better reliability
         var savedProgress: Double = 0.0

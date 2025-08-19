@@ -154,6 +154,14 @@ class EpisodeStateManager: ObservableObject {
     private var recentSyncs: [String: Double] = [:]
     private let syncDeduplicationWindow: TimeInterval = 0.5 // 0.5 seconds - much shorter to allow real-time syncs
     
+    // EPISODE-SPECIFIC SYNC TIMING: Track real-time sync timing per episode to prevent refresh conflicts
+    private var episodeLastRealTimeSyncTime: [String: Double] = [:]
+    
+    // CLOUDKIT PRIORITY MODE: When enabled, Core Data takes precedence over EpisodeStateManager
+    // Used during pull-to-refresh and episode list loading to ensure CloudKit data is immediately visible
+    private var cloudKitPriorityMode: Bool = false
+    private let cloudKitPriorityQueue = DispatchQueue(label: "com.streamradios.cloudkitPriority", attributes: .concurrent)
+    
     // SYNC RESUMPTION: Track CloudKit sync progress
     private var cloudKitSyncProgress: CloudKitSyncProgress?
     private let syncProgressKey = "CloudKitSyncProgress"
@@ -503,6 +511,32 @@ class EpisodeStateManager: ObservableObject {
         print("📊 EpisodeStateManager: Upgrade check - HasVersion: \(hasStoredVersion), HasInit: \(hasInitTimestamp), HasData: \(hasEpisodeData) = \(isUpgrade)")
         
         return isUpgrade
+    }
+    
+    // MARK: - CloudKit Priority Mode Methods
+    
+    /// Enable CloudKit priority mode - Core Data takes precedence over EpisodeStateManager
+    /// Used during pull-to-refresh and episode list loading
+    func enableCloudKitPriorityMode() {
+        cloudKitPriorityQueue.async(flags: .barrier) {
+            self.cloudKitPriorityMode = true
+            print("☁️ 🔄 CLOUDKIT PRIORITY: Enabled - Core Data will take precedence during episode loading")
+        }
+    }
+    
+    /// Disable CloudKit priority mode - return to normal EpisodeStateManager priority
+    func disableCloudKitPriorityMode() {
+        cloudKitPriorityQueue.async(flags: .barrier) {
+            self.cloudKitPriorityMode = false
+            print("☁️ ✅ CLOUDKIT PRIORITY: Disabled - EpisodeStateManager will take precedence during episode loading")
+        }
+    }
+    
+    /// Check if CloudKit priority mode is enabled (thread-safe)
+    func isCloudKitPriorityMode() -> Bool {
+        return cloudKitPriorityQueue.sync {
+            return cloudKitPriorityMode
+        }
     }
     
     // MARK: - Public Methods
@@ -877,8 +911,7 @@ class EpisodeStateManager: ObservableObject {
                 performRealTimeSyncForEpisode(episodeId, reason: reason)
             }
             
-            // Track real-time sync timing to prevent refresh conflicts
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+            // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
             
             print("📡 ⚡ REAL-TIME PROGRESS SYNC: Triggered for \(episodeId) (reason: \(reason))")
         } else {
@@ -1317,17 +1350,27 @@ class EpisodeStateManager: ObservableObject {
         let shouldUpdateProgress: Bool
         
         if progress > 0 {
-            // Always update when we have positive progress
-            shouldUpdateProgress = true
-            episodeProgress[episodeId] = progress
+            // PROGRESS PROTECTION: Only update if progress moves forward
+            if progress >= existingProgress {
+                shouldUpdateProgress = true
+                episodeProgress[episodeId] = progress
+            } else {
+                print("🛡️ UPDATE PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress))")
+                shouldUpdateProgress = false
+            }
         } else if existingProgress == 0.0 {
             // Update to 0.0 only if there's no existing progress
             shouldUpdateProgress = true
             episodeProgress[episodeId] = progress
         } else if currentTime != nil {
-            // Update if we have explicit currentTime (from episode switch)
-            shouldUpdateProgress = true
-            episodeProgress[episodeId] = progress
+            // Update if we have explicit currentTime (from episode switch) - but still protect against backwards progress
+            if progress >= existingProgress || progress == 0.0 {
+                shouldUpdateProgress = true
+                episodeProgress[episodeId] = progress
+            } else {
+                print("🛡️ SWITCH PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress))")
+                shouldUpdateProgress = false
+            }
         } else if !isPlaying && existingState == .inProgress && progress == 0.0 {
             // CRITICAL: Don't overwrite in-progress episodes with 0.0 during loading
             shouldUpdateProgress = false
@@ -1378,13 +1421,24 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func setProgress(for episodeId: String, progress: Double) {
-        episodeProgress[episodeId] = progress
+        // PROGRESS PROTECTION: Never allow progress to go backwards
+        let existingProgress = episodeProgress[episodeId] ?? 0.0
+        let finalProgress: Double
         
-        // Update state based on progress
+        if progress < existingProgress {
+            print("🛡️ PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
+            finalProgress = existingProgress // Keep the higher progress
+        } else {
+            finalProgress = progress // Allow forward progress or same value
+        }
+        
+        episodeProgress[episodeId] = finalProgress
+        
+        // Update state based on final progress
         let newState: EpisodePlaybackState
-        if progress >= 0.99 {
+        if finalProgress >= 0.99 {
             newState = .played
-        } else if progress > 0 {
+        } else if finalProgress > 0 {
             newState = .inProgress
         } else {
             newState = .new
@@ -1404,7 +1458,7 @@ class EpisodeStateManager: ObservableObject {
             NotificationCenter.default.post(
                 name: .init("EpisodeProgressChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "progress": progress]
+                userInfo: ["episodeId": episodeId, "progress": finalProgress]
             )
         }
         
@@ -1417,6 +1471,19 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set progress with real-time sync for specific trigger conditions
     func setProgressWithRealTimeSync(for episodeId: String, progress: Double, reason: String) {
+        // Get episode title for banner display
+        let episodeTitle = getEpisodeTitle(for: episodeId)
+        let progressValue = "\(Int(progress * 100))%"
+        
+        // Start real-time sync banner
+        DispatchQueue.main.async {
+            DataSyncManager.shared.startRealTimeEpisodeSync(
+                type: .progress, 
+                episodeTitle: episodeTitle, 
+                value: progressValue
+            )
+        }
+        
         // Update local progress first
         setProgress(for: episodeId, progress: progress)
         
@@ -1425,8 +1492,7 @@ class EpisodeStateManager: ObservableObject {
         if allowedReasons.contains(reason) {
             performRealTimeSyncForEpisode(episodeId, reason: reason)
             
-            // Track real-time sync timing to prevent refresh conflicts
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+            // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
             
             print("📡 ⚡ REAL-TIME PROGRESS SYNC: Triggered for \(episodeId) (reason: \(reason))")
         } else {
@@ -1448,6 +1514,19 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set favorite state for an episode with real-time CloudKit sync and known feedId
     func setFavorite(_ episodeId: String, isFavorite: Bool, feedId: String?) {
+        // Get episode title for banner display
+        let episodeTitle = getEpisodeTitle(for: episodeId)
+        let favoriteValue = isFavorite ? "❤️" : "♡"
+        
+        // Start real-time sync banner
+        DispatchQueue.main.async {
+            DataSyncManager.shared.startRealTimeEpisodeSync(
+                type: .favorite, 
+                episodeTitle: episodeTitle, 
+                value: favoriteValue
+            )
+        }
+        
         episodeFavorites[episodeId] = isFavorite
         saveCurrentStates()
         userDefaults.synchronize() // Force immediate sync
@@ -1462,8 +1541,7 @@ class EpisodeStateManager: ObservableObject {
             performRealTimeSyncForEpisode(episodeId, reason: "favorite_action")
         }
         
-        // Track real-time sync timing to prevent refresh conflicts
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
         
         // REAL-TIME NOTIFICATION: Send immediate notification for favorite changes
         DispatchQueue.main.async {
@@ -1529,6 +1607,19 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set played state for an episode with real-time CloudKit sync
     func setPlayed(_ episodeId: String, isPlayed: Bool) {
+        // Get episode title for banner display
+        let episodeTitle = getEpisodeTitle(for: episodeId)
+        let playedValue = isPlayed ? "✅ Completed" : "🔄 Reset"
+        
+        // Start real-time sync banner
+        DispatchQueue.main.async {
+            DataSyncManager.shared.startRealTimeEpisodeSync(
+                type: .played, 
+                episodeTitle: episodeTitle, 
+                value: playedValue
+            )
+        }
+        
         // Update local state tracking
         if isPlayed {
             episodeStates[episodeId] = .played
@@ -1592,6 +1683,19 @@ class EpisodeStateManager: ObservableObject {
     
     /// Set download state for an episode with real-time CloudKit sync and known feedId
     func setDownloaded(_ episodeId: String, isDownloaded: Bool, feedId: String?) {
+        // Get episode title for banner display
+        let episodeTitle = getEpisodeTitle(for: episodeId)
+        let downloadValue = isDownloaded ? "⬇️ Downloaded" : "❌ Removed"
+        
+        // Start real-time sync banner
+        DispatchQueue.main.async {
+            DataSyncManager.shared.startRealTimeEpisodeSync(
+                type: .download, 
+                episodeTitle: episodeTitle, 
+                value: downloadValue
+            )
+        }
+        
         episodeDownloads[episodeId] = isDownloaded
         saveCurrentStates()
         userDefaults.synchronize() // Force immediate sync
@@ -1606,8 +1710,7 @@ class EpisodeStateManager: ObservableObject {
             performRealTimeSyncForEpisode(episodeId, reason: "download_action")
         }
         
-        // Track real-time sync timing to prevent refresh conflicts
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
         
         // REAL-TIME NOTIFICATION: Send immediate notification for download changes
         DispatchQueue.main.async {
@@ -1921,14 +2024,25 @@ extension EpisodeStateManager {
     
     /// Set progress silently without triggering CloudKit sync (for incoming CloudKit updates)
     func setProgressSilently(for episodeId: String, progress: Double) {
-        episodeProgress[episodeId] = progress
+        // PROGRESS PROTECTION: Never allow progress to go backwards, even from CloudKit
+        let existingProgress = episodeProgress[episodeId] ?? 0.0
+        let finalProgress: Double
         
-        // CRITICAL FIX: Update episode state based on progress (just like setProgress does)
+        if progress < existingProgress {
+            print("🛡️ CLOUDKIT PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
+            finalProgress = existingProgress // Keep the higher progress
+        } else {
+            finalProgress = progress // Allow forward progress or same value
+        }
+        
+        episodeProgress[episodeId] = finalProgress
+        
+        // CRITICAL FIX: Update episode state based on final progress (just like setProgress does)
         // This ensures "NEW" changes to "IN PROGRESS" immediately when synced from other devices
         let newState: EpisodePlaybackState
-        if progress >= 0.99 {
+        if finalProgress >= 0.99 {
             newState = .played
-        } else if progress > 0 {
+        } else if finalProgress > 0 {
             newState = .inProgress
         } else {
             newState = .new
@@ -1938,15 +2052,14 @@ extension EpisodeStateManager {
         saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
-        // Track real-time sync timing to prevent refresh conflicts
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
         
         // REAL-TIME NOTIFICATION: Send immediate notification for cross-device UI updates
         DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .init("EpisodeProgressChangedInstantly"),
                 object: nil,
-                userInfo: ["episodeId": episodeId, "progress": progress]
+                userInfo: ["episodeId": episodeId, "progress": finalProgress]
             )
             
             // Also send state change notification for real-time status updates
@@ -1957,7 +2070,7 @@ extension EpisodeStateManager {
             )
         }
         
-        print("🔄 EpisodeStateManager: Set progress silently for \(episodeId): \(Int(progress * 100))% -> State: \(newState)")
+        print("🔄 EpisodeStateManager: Set progress silently for \(episodeId): \(Int(finalProgress * 100))% -> State: \(newState)")
     }
     
     /// Set favorite state silently without triggering CloudKit sync
@@ -1967,8 +2080,7 @@ extension EpisodeStateManager {
         userDefaults.synchronize()
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
-        // Track real-time sync timing to prevent refresh conflicts
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
         
         // REAL-TIME NOTIFICATION: Send immediate notification for cross-device favorite updates
         DispatchQueue.main.async {
@@ -1989,8 +2101,7 @@ extension EpisodeStateManager {
         userDefaults.synchronize()
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
-        // Track real-time sync timing to prevent refresh conflicts
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
         
         // REAL-TIME NOTIFICATION: Send immediate notification for cross-device download updates
         DispatchQueue.main.async {
@@ -2026,8 +2137,7 @@ extension EpisodeStateManager {
         userDefaults.synchronize()
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
         
-        // Track real-time sync timing to prevent refresh conflicts
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastRealTimeSyncTime")
+        // Episode-specific timing is already tracked in performRealTimeSyncForEpisode
         
         // REAL-TIME NOTIFICATION: Send immediate notification for cross-device played state updates
         DispatchQueue.main.async {
@@ -2047,6 +2157,35 @@ extension EpisodeStateManager {
         }
         
         print("🔄 EpisodeStateManager: Set played silently for \(episodeId): \(isPlayed)")
+    }
+    
+    // MARK: - Helper Methods
+    
+    /// Get episode title for banner display
+    private func getEpisodeTitle(for episodeId: String) -> String {
+        let context = CoreDataStack.shared.newBackgroundContext()
+        var title = "Episode"
+        
+        context.performAndWait {
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+            fetchRequest.fetchLimit = 1
+            
+            do {
+                if let episode = try context.fetch(fetchRequest).first,
+                   let episodeTitle = episode.title {
+                    title = episodeTitle
+                }
+            } catch {
+                print("❌ EpisodeStateManager: Failed to fetch episode title for \(episodeId): \(error)")
+            }
+        }
+        
+        // Truncate title if too long for banner
+        if title.count > 40 {
+            return String(title.prefix(37)) + "..."
+        }
+        return title
     }
 }
 
@@ -2152,6 +2291,25 @@ extension EpisodeStateManager {
         recentSyncs = recentSyncs.filter { currentTime - $0.value < syncDeduplicationWindow * 2 }
     }
     
+    /// Mark episode real-time sync timing for UI refresh protection
+    private func markEpisodeRealTimeSyncTime(_ episodeId: String) {
+        let currentTime = Date().timeIntervalSince1970
+        episodeLastRealTimeSyncTime[episodeId] = currentTime
+        
+        // Clean up old entries to prevent memory bloat
+        episodeLastRealTimeSyncTime = episodeLastRealTimeSyncTime.filter { currentTime - $0.value < 10.0 }
+    }
+    
+    /// Check if an episode was recently synced for UI refresh protection
+    func wasEpisodeRecentlySynced(_ episodeId: String, within timeWindow: TimeInterval = 2.0) -> Bool {
+        let currentTime = Date().timeIntervalSince1970
+        if let lastSyncTime = episodeLastRealTimeSyncTime[episodeId] {
+            let timeSinceLastSync = currentTime - lastSyncTime
+            return timeSinceLastSync < timeWindow
+        }
+        return false
+    }
+    
     /// Perform real-time CloudKit sync for immediate cross-device updates
     func performRealTimeSyncForEpisode(_ episodeId: String, reason: String) {
         print("📡 🔄 REAL-TIME SYNC ENTRY: Called for \(episodeId) with reason: \(reason)")
@@ -2189,6 +2347,9 @@ extension EpisodeStateManager {
         
         // Mark as recently synced before starting sync
         markAsRecentlySynced(episodeId)
+        
+        // Mark episode-specific real-time sync timing
+        markEpisodeRealTimeSyncTime(episodeId)
         
         let currentProgress = getProgress(for: episodeId)
         let currentFavorite = isFavorite(episodeId)

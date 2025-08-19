@@ -82,8 +82,8 @@ struct PodcastListView: View {
                            
                            
                            
-                           // Podcast progress banner - shows sync operations in real-time
-                           UnifiedPodcastProgressBanner()
+                           // Podcast progress banner - shows sync operations in real-time (including episode sync)
+                           MainPodcastListBanner()
                            
                            podcastList
                        }
@@ -1308,7 +1308,25 @@ struct EpisodeRowView: View {
                 print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) played state updated")
             }
         }
-        // REAL-TIME PROGRESS: Added notification listener for instant progress updates to force UI refresh
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeFavoriteChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's favorite state changes instantly
+                refreshTrigger = UUID()
+                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) favorite state updated")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeDownloadChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's download state changes instantly
+                refreshTrigger = UUID()
+                print("📡 ⚡ EPISODE ROW REFRESH: Episode \(episode.title) download state updated")
+            }
+        }
+        // REAL-TIME SYNC: Added notification listeners for instant progress, played, favorite, and download state updates to force UI refresh
     }
     
     
@@ -1919,6 +1937,24 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 // Force view refresh when this episode's played state changes instantly
                 refreshTrigger = UUID()
                 print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) played state updated")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeFavoriteChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's favorite state changes instantly
+                refreshTrigger = UUID()
+                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) favorite state updated")
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeDownloadChangedInstantly"))) { notification in
+            if let userInfo = notification.userInfo,
+               let episodeId = userInfo["episodeId"] as? String,
+               episodeId == episode.id {
+                // Force view refresh when this episode's download state changes instantly
+                refreshTrigger = UUID()
+                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) download state updated")
             }
         }
     }

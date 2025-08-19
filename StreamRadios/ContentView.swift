@@ -1877,9 +1877,9 @@ struct UnifiedPodcastProgressBanner: View {
         case .feedSync:
             Image(systemName: "rss")
                 .id("feedSync")
-        case .feedParsing:
-            Image(systemName: "doc.text.magnifyingglass")
-                .id("feedParsing")
+        // case .feedParsing: // DISABLED
+        //     Image(systemName: "doc.text.magnifyingglass")
+        //         .id("feedParsing")
         case .crossDeviceFeedSync:
             Image(systemName: "icloud.and.arrow.down.fill")
                 .id("crossDeviceFeedSync")
@@ -1892,13 +1892,28 @@ struct UnifiedPodcastProgressBanner: View {
     // MARK: - Computed Properties
     
     private var shouldShowBanner: Bool {
-        // Show banner only for cross-device feed syncing (feeds added on other devices)
+        // Show banner for cross-device feed syncing (feeds added on other devices)
         let hasCrossDeviceFeedSync = syncManager.crossDeviceFeedSyncStatus == .inProgress || 
                                    (syncManager.crossDeviceFeedSyncStatus == .completed && !hideCompletedBanner)
         
-
+        // Episode state sync (batch operations)
+        let hasEpisodeStateSync = (syncManager.episodeStatesStatus == .inProgress && syncManager.episodeStatesTotalCount > 0) || 
+                                 (syncManager.episodeStatesStatus == .completed && !hideCompletedBanner && 
+                                  syncManager.episodeStatesProgress > 0 && syncManager.episodeStatesTotalCount > 0)
         
-        return hasCrossDeviceFeedSync
+        // Feed parsing operations
+        // let hasFeedParsing = syncManager.isParsingFeeds || 
+        //                    (!syncManager.isParsingFeeds && !hideCompletedBanner && syncManager.feedParsingProgress >= 1.0)
+        
+        // Feed sync operations
+        let hasFeedSync = (syncManager.podcastFeedsStatus == .inProgress && syncManager.podcastFeedsTotalCount > 0) || 
+                         (syncManager.podcastFeedsStatus == .completed && !hideCompletedBanner && 
+                          syncManager.podcastFeedsProgress > 0 && syncManager.podcastFeedsTotalCount > 0)
+        
+        // NOTE: Real-time episode sync banners are excluded from detailed episode views (Downloads/Favorites)
+        // They only appear in the main PodcastListView
+        // NOTE: Feed parsing banners have been removed completely
+        return hasCrossDeviceFeedSync || hasEpisodeStateSync || hasFeedSync
     }
     
     private var currentOperationType: PodcastOperationType {
@@ -1917,11 +1932,11 @@ struct UnifiedPodcastProgressBanner: View {
         
         // CloudKit saves now use minimal indicator instead of banner
         
-        // Then show feed parsing (active or completed)
-        if syncManager.isParsingFeeds || 
-           (!syncManager.isParsingFeeds && !hideCompletedBanner && syncManager.feedParsingProgress >= 1.0) {
-            return .feedParsing
-        }
+        // Feed parsing banners have been DISABLED
+        // if syncManager.isParsingFeeds || 
+        //    (!syncManager.isParsingFeeds && !hideCompletedBanner && syncManager.feedParsingProgress >= 1.0) {
+        //     return .feedParsing
+        // }
         
         // Then show feed sync (only if there are feeds)
         if (syncManager.podcastFeedsStatus == .inProgress && syncManager.podcastFeedsTotalCount > 0) || 
@@ -1946,8 +1961,8 @@ struct UnifiedPodcastProgressBanner: View {
                 return 1.0
             }
             return syncManager.podcastFeedsProgress
-        case .feedParsing:
-            return syncManager.feedParsingProgress
+        // case .feedParsing: // DISABLED
+        //     return 0.0 // DISABLED
         case .crossDeviceFeedSync:
             if syncManager.crossDeviceFeedSyncStatus == .completed {
                 return 1.0
@@ -1964,8 +1979,8 @@ struct UnifiedPodcastProgressBanner: View {
             return "Syncing episode states"
         case .feedSync:
             return "Syncing podcast feeds"
-        case .feedParsing:
-            return "Getting your episodes ready to play"
+        // case .feedParsing: // DISABLED
+        //     return "" // DISABLED
         case .crossDeviceFeedSync:
             return "Syncing feeds from other devices"
         case .coreDataOperation:
@@ -1985,8 +2000,8 @@ struct UnifiedPodcastProgressBanner: View {
                 return "\(syncManager.podcastFeedsCurrentCount)/\(syncManager.podcastFeedsTotalCount) feeds"
             }
             return syncManager.podcastFeedsOperation
-        case .feedParsing:
-            return syncManager.feedParsingMessage
+        // case .feedParsing: // DISABLED
+        //     return "" // DISABLED
         case .crossDeviceFeedSync:
             if syncManager.crossDeviceFeedSyncTotalCount > 0 {
                 return "\(syncManager.crossDeviceFeedSyncCurrentCount)/\(syncManager.crossDeviceFeedSyncTotalCount) feeds"
@@ -2003,8 +2018,8 @@ struct UnifiedPodcastProgressBanner: View {
             return Color.blue.opacity(0.1)
         case .feedSync:
             return Color.green.opacity(0.1)
-        case .feedParsing:
-            return Color.purple.opacity(0.1)
+        // case .feedParsing: // DISABLED
+        //     return Color.clear // DISABLED
         case .crossDeviceFeedSync:
             return Color.cyan.opacity(0.1)
         case .coreDataOperation:
@@ -2018,8 +2033,8 @@ struct UnifiedPodcastProgressBanner: View {
             return .blue
         case .feedSync:
             return .green
-        case .feedParsing:
-            return .purple
+        // case .feedParsing: // DISABLED
+        //     return .clear // DISABLED
         case .crossDeviceFeedSync:
             return .cyan
         case .coreDataOperation:
@@ -2032,9 +2047,363 @@ struct UnifiedPodcastProgressBanner: View {
     private enum PodcastOperationType {
         case episodeStateSync
         case feedSync
-        case feedParsing
+        // case feedParsing // DISABLED - removed "Getting your episodes ready to play" banner
         case crossDeviceFeedSync
         case coreDataOperation
+    }
+}
+
+// MARK: - Main Podcast List Banner (includes real-time episode sync)
+
+struct MainPodcastListBanner: View {
+    @StateObject private var podcastViewModel = PodcastViewModel.shared
+    @StateObject private var syncManager = DataSyncManager.shared
+    @State private var hideCompletedBanner = false
+    
+    // MARK: - Types
+    
+    private enum PodcastOperationType {
+        case realTimeEpisodeSync
+        case episodeStateSync
+        case feedSync
+        // case feedParsing // DISABLED - removed "Getting your episodes ready to play" banner
+        case crossDeviceFeedSync
+        case coreDataOperation
+    }
+    
+    var body: some View {
+        if shouldShowBanner {
+            VStack(spacing: 6) {
+                // Top row with icon, title and percentage
+                HStack(spacing: 8) {
+                    // Progress icon with animation
+                    progressIcon
+                        .font(.headline)
+                        .foregroundColor(iconColor)
+                        .frame(width: 20)
+                        .transition(.asymmetric(
+                            insertion: .scale.combined(with: .opacity),
+                            removal: .scale.combined(with: .opacity)
+                        ))
+                        .animation(.easeInOut(duration: 0.2), value: currentOperationType)
+                        .animation(.easeInOut(duration: 0.2), value: iconColor)
+                    
+                    // Progress message - FIXED HEIGHT
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(bannerTitle)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .frame(height: 20, alignment: .leading)
+                        
+                        Text(currentOperationInfo)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .frame(height: 14, alignment: .leading)
+                    }
+                    .frame(height: 34)
+                    
+                    Spacer()
+                    
+                    // Progress percentage
+                    if currentOperationType != .realTimeEpisodeSync {
+                        Text("\(Int(currentProgress * 100))%")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .frame(width: 35, alignment: .trailing)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                
+                // Progress bar (hidden for real-time sync)
+                if currentOperationType != .realTimeEpisodeSync {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(height: 3)
+                            
+                            Rectangle()
+                                .fill(iconColor)
+                                .frame(width: geometry.size.width * currentProgress, height: 3)
+                                .animation(.easeInOut(duration: 0.3), value: currentProgress)
+                        }
+                    }
+                    .frame(height: 3)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                }
+            }
+            .background(bannerBackgroundColor)
+            .cornerRadius(8)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+            .transition(.asymmetric(
+                insertion: .move(edge: .top).combined(with: .opacity),
+                removal: .move(edge: .top).combined(with: .opacity)
+            ))
+            .animation(.easeInOut(duration: 0.3), value: shouldShowBanner)
+            .onReceive(NotificationCenter.default.publisher(for: .init("PodcastFeedSyncCompleted"))) { _ in
+                // Reset banner state when feed sync completes
+                if syncManager.podcastFeedsStatus == .completed {
+                    hideCompletedBanner = false
+                }
+            }
+            .onChange(of: syncManager.crossDeviceFeedSyncStatus) { status in
+                if status == .completed {
+                    // Show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                            // Reset status to .none after showing completion
+                            syncManager.crossDeviceFeedSyncStatus = .none
+                            syncManager.crossDeviceFeedSyncProgress = 0.0
+                            syncManager.crossDeviceFeedSyncOperation = ""
+                        }
+                    }
+                } else if status == .inProgress || status == .pending {
+                    // Reset the hide flag when new operations start
+                    hideCompletedBanner = false
+                }
+            }
+            .onChange(of: syncManager.podcastFeedsStatus) { status in
+                if status == .completed {
+                    // Show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                            // Reset status to .none after showing completion
+                            syncManager.podcastFeedsStatus = .none
+                            syncManager.podcastFeedsProgress = 0.0
+                            syncManager.podcastFeedsOperation = ""
+                        }
+                    }
+                } else if status == .inProgress || status == .pending {
+                    // Reset the hide flag when new operations start
+                    hideCompletedBanner = false
+                }
+            }
+            .onChange(of: syncManager.isParsingFeeds) { isActive in
+                // Handle feed parsing completion
+                if !isActive && syncManager.feedParsingProgress >= 1.0 {
+                    // Feed parsing just completed - show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                            // Reset feed parsing progress to clear the banner
+                            syncManager.feedParsingProgress = 0.0
+                            syncManager.feedParsingMessage = ""
+                        }
+                    }
+                } else if isActive {
+                    // Reset the hide flag when feed parsing starts
+                    hideCompletedBanner = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Components
+    
+    @ViewBuilder
+    private var progressIcon: some View {
+        switch currentOperationType {
+        case .realTimeEpisodeSync:
+            Text(syncManager.realTimeEpisodeType.icon)
+                .font(.headline)
+                .id("realTimeEpisodeSync")
+        case .episodeStateSync:
+            Image(systemName: "icloud.and.arrow.down")
+                .id("episodeStateSync")
+        case .feedSync:
+            Image(systemName: "rss")
+                .id("feedSync")
+        // case .feedParsing: // DISABLED
+        //     Image(systemName: "doc.text.magnifyingglass")
+        //         .id("feedParsing")
+        case .crossDeviceFeedSync:
+            Image(systemName: "icloud.and.arrow.down.fill")
+                .id("crossDeviceFeedSync")
+        case .coreDataOperation:
+            Image(systemName: "cylinder.split.1x2")
+                .id("coreDataOperation")
+        }
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var shouldShowBanner: Bool {
+        // HIGHEST PRIORITY: Real-time episode sync (immediate individual episode changes)
+        let hasRealTimeEpisodeSync = syncManager.isRealTimeEpisodeSyncing
+        
+        // Show banner for cross-device feed syncing (feeds added on other devices)
+        let hasCrossDeviceFeedSync = syncManager.crossDeviceFeedSyncStatus == .inProgress || 
+                                   (syncManager.crossDeviceFeedSyncStatus == .completed && !hideCompletedBanner)
+        
+        // Episode state sync (batch operations)
+        let hasEpisodeStateSync = (syncManager.episodeStatesStatus == .inProgress && syncManager.episodeStatesTotalCount > 0) || 
+                                 (syncManager.episodeStatesStatus == .completed && !hideCompletedBanner && 
+                                  syncManager.episodeStatesProgress > 0 && syncManager.episodeStatesTotalCount > 0)
+        
+        // Feed parsing operations
+        // let hasFeedParsing = syncManager.isParsingFeeds || 
+        //                    (!syncManager.isParsingFeeds && !hideCompletedBanner && syncManager.feedParsingProgress >= 1.0)
+        
+        // Feed sync operations
+        let hasFeedSync = (syncManager.podcastFeedsStatus == .inProgress && syncManager.podcastFeedsTotalCount > 0) || 
+                         (syncManager.podcastFeedsStatus == .completed && !hideCompletedBanner && 
+                          syncManager.podcastFeedsProgress > 0 && syncManager.podcastFeedsTotalCount > 0)
+        
+        return hasRealTimeEpisodeSync || hasCrossDeviceFeedSync || hasEpisodeStateSync || hasFeedSync
+    }
+    
+    private var currentOperationType: PodcastOperationType {
+        // HIGHEST PRIORITY: Real-time episode sync (immediate individual episode changes)
+        if syncManager.isRealTimeEpisodeSyncing {
+            return .realTimeEpisodeSync
+        }
+        
+        // SECOND PRIORITY: Cross-device feed sync (feeds added on other devices)
+        if (syncManager.crossDeviceFeedSyncStatus == .inProgress) || 
+           (syncManager.crossDeviceFeedSyncStatus == .completed && !hideCompletedBanner) {
+            return .crossDeviceFeedSync
+        }
+        
+        // Priority: Show episode state sync (only if there are episodes)
+        if (syncManager.episodeStatesStatus == .inProgress && syncManager.episodeStatesTotalCount > 0) || 
+           (syncManager.episodeStatesStatus == .completed && !hideCompletedBanner && 
+            syncManager.episodeStatesProgress > 0 && syncManager.episodeStatesTotalCount > 0) {
+            return .episodeStateSync
+        }
+        
+        // Feed parsing banners have been DISABLED
+        // if syncManager.isParsingFeeds || 
+        //    (!syncManager.isParsingFeeds && !hideCompletedBanner && syncManager.feedParsingProgress >= 1.0) {
+        //     return .feedParsing
+        // }
+        
+        // Then show feed sync (only if there are feeds)
+        if (syncManager.podcastFeedsStatus == .inProgress && syncManager.podcastFeedsTotalCount > 0) || 
+           (syncManager.podcastFeedsStatus == .completed && !hideCompletedBanner && 
+            syncManager.podcastFeedsProgress > 0 && syncManager.podcastFeedsTotalCount > 0) {
+            return .feedSync
+        }
+        
+        // Finally show local CoreData operations
+        return .coreDataOperation
+    }
+    
+    private var currentProgress: Double {
+        switch currentOperationType {
+        case .realTimeEpisodeSync:
+            return 1.0 // Real-time sync shows as complete/instant
+        case .episodeStateSync:
+            if syncManager.episodeStatesStatus == .completed {
+                return 1.0
+            }
+            return syncManager.episodeStatesProgress
+        case .feedSync:
+            if syncManager.podcastFeedsStatus == .completed {
+                return 1.0
+            }
+            return syncManager.podcastFeedsProgress
+        // case .feedParsing: // DISABLED
+        //     return 0.0 // DISABLED
+        case .crossDeviceFeedSync:
+            if syncManager.crossDeviceFeedSyncStatus == .completed {
+                return 1.0
+            }
+            return syncManager.crossDeviceFeedSyncProgress
+        case .coreDataOperation:
+            return podcastViewModel.isLoading ? 0.5 : 0.0
+        }
+    }
+    
+    private var bannerTitle: String {
+        switch currentOperationType {
+        case .realTimeEpisodeSync:
+            return "\(syncManager.realTimeEpisodeType.displayName) synced"
+        case .episodeStateSync:
+            return "Syncing episode states"
+        case .feedSync:
+            return "Syncing podcast feeds"
+        // case .feedParsing: // DISABLED
+        //     return "" // DISABLED
+        case .crossDeviceFeedSync:
+            return "Syncing feeds from other devices"
+        case .coreDataOperation:
+            return "Processing podcast data"
+        }
+    }
+    
+    private var currentOperationInfo: String {
+        switch currentOperationType {
+        case .realTimeEpisodeSync:
+            return "\(syncManager.realTimeEpisodeTitle): \(syncManager.realTimeEpisodeValue)"
+        case .episodeStateSync:
+            if syncManager.episodeStatesTotalCount > 0 {
+                return "\(syncManager.episodeStatesCurrentCount)/\(syncManager.episodeStatesTotalCount) episodes"
+            }
+            return syncManager.episodeStatesOperation
+        case .feedSync:
+            if syncManager.podcastFeedsTotalCount > 0 {
+                return "\(syncManager.podcastFeedsCurrentCount)/\(syncManager.podcastFeedsTotalCount) feeds"
+            }
+            return syncManager.podcastFeedsOperation
+        // case .feedParsing: // DISABLED
+        //     return "" // DISABLED
+        case .crossDeviceFeedSync:
+            if syncManager.crossDeviceFeedSyncTotalCount > 0 {
+                return "\(syncManager.crossDeviceFeedSyncCurrentCount)/\(syncManager.crossDeviceFeedSyncTotalCount) feeds"
+            }
+            return syncManager.crossDeviceFeedSyncOperation
+        case .coreDataOperation:
+            return "Loading from local storage"
+        }
+    }
+    
+    private var bannerBackgroundColor: Color {
+        switch currentOperationType {
+        case .realTimeEpisodeSync:
+            return Color.mint.opacity(0.15)
+        case .episodeStateSync:
+            return Color.blue.opacity(0.1)
+        case .feedSync:
+            return Color.green.opacity(0.1)
+        // case .feedParsing: // DISABLED
+        //     return Color.clear // DISABLED
+        case .crossDeviceFeedSync:
+            return Color.cyan.opacity(0.1)
+        case .coreDataOperation:
+            return Color.orange.opacity(0.1)
+        }
+    }
+    
+    private var iconColor: Color {
+        switch currentOperationType {
+        case .realTimeEpisodeSync:
+            return .mint
+        case .episodeStateSync:
+            return .blue
+        case .feedSync:
+            return .green
+        // case .feedParsing: // DISABLED
+        //     return .clear // DISABLED
+        case .crossDeviceFeedSync:
+            return .cyan
+        case .coreDataOperation:
+            return .orange
+        }
     }
 }
 

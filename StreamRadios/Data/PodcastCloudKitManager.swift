@@ -717,6 +717,22 @@ class PodcastCloudKitManager: ObservableObject {
         
         // Get current local progress to avoid unnecessary updates
         let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
+        
+        // HIGHEST PROGRESS SYNC: Compare CloudKit vs local and propagate highest to all devices
+        if progress < currentProgress {
+            print("🔍 📊 HIGHEST PROGRESS: Local higher (\(String(format: "%.4f", currentProgress))) > CloudKit (\(String(format: "%.4f", progress)) - propagating local to all devices")
+            
+            // Propagate the higher local progress back to CloudKit for all devices
+            Task.detached(priority: .userInitiated) {
+                await self.syncPodcastProgressInstantly(episodeId: episodeId, progress: currentProgress)
+            }
+            return
+        } else if progress > currentProgress {
+            print("🔍 📊 HIGHEST PROGRESS: CloudKit higher (\(String(format: "%.4f", progress))) > Local (\(String(format: "%.4f", currentProgress)) - applying CloudKit")
+        } else {
+            print("🔍 📊 HIGHEST PROGRESS: Values equal (\(String(format: "%.4f", progress))")
+        }
+        
         let progressDiff = abs(progress - currentProgress)
         
         // Only update if there's a meaningful difference (> 1% or significant time change)
@@ -1286,6 +1302,21 @@ class PodcastCloudKitManager: ObservableObject {
         }
         
         print("📡 📋 RESUME SYNC: No recent remote progress data for episode \(episodeId)")
+    }
+    
+    /// Fetch the latest instant progress data for an episode from CloudKit (used by pull-to-refresh)
+    func fetchLatestInstantProgress(for episodeId: String) async throws -> (progress: Double, timestamp: Double)? {
+        // Use the same unique key format as syncPodcastProgressInstantly
+        let uniqueProgressKey = "instant_podcast_progress_\(episodeId)"
+        
+        guard let progressData = ubiquitousStore.object(forKey: uniqueProgressKey) as? [String: Any],
+              let progress = progressData["progress"] as? Double,
+              let timestamp = progressData["timestamp"] as? Double else {
+            return nil
+        }
+        
+        print("📡 📥 FETCHED: Latest instant progress for \(episodeId): \(Int(progress * 100))% at timestamp \(timestamp)")
+        return (progress: progress, timestamp: timestamp)
     }
     
     /// Broadcast feed parsing progress to all devices in real-time

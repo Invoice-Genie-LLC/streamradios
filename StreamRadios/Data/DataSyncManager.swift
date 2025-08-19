@@ -17,6 +17,33 @@ struct CrossDeviceFeedProgress {
     let lastUpdated: Date
 }
 
+// MARK: - Real-Time Episode Sync Types
+
+enum RealTimeEpisodeSyncType: String, CaseIterable {
+    case progress = "progress"
+    case favorite = "favorite"
+    case download = "download"
+    case played = "played"
+    
+    var icon: String {
+        switch self {
+        case .progress: return "⏱️"
+        case .favorite: return "❤️"
+        case .download: return "⬇️"
+        case .played: return "✅"
+        }
+    }
+    
+    var displayName: String {
+        switch self {
+        case .progress: return "Progress"
+        case .favorite: return "Favorite"
+        case .download: return "Download"
+        case .played: return "Played"
+        }
+    }
+}
+
 class DataSyncManager: ObservableObject {
     static let shared = DataSyncManager()
     
@@ -578,6 +605,52 @@ class DataSyncManager: ObservableObject {
                 self?.minimalSyncTimer = nil
             }
         }
+    }
+    
+    // MARK: - Real-Time Episode Sync Tracking
+    
+    // Real-time episode sync tracking for individual episode state changes
+    @Published var isRealTimeEpisodeSyncing = false
+    @Published var realTimeEpisodeTitle = ""
+    @Published var realTimeEpisodeType: RealTimeEpisodeSyncType = .progress
+    @Published var realTimeEpisodeValue = ""
+    @Published var realTimeEpisodeSyncTimer: Timer?
+    
+    // MARK: - Real-Time Episode Sync Methods
+    
+    /// Start real-time episode sync banner for individual episode state changes
+    @MainActor
+    func startRealTimeEpisodeSync(type: RealTimeEpisodeSyncType, episodeTitle: String, value: String) {
+        // Cancel existing timer
+        realTimeEpisodeSyncTimer?.invalidate()
+        
+        // Truncate title if too long for banner
+        let displayTitle = episodeTitle.count > 40 ? String(episodeTitle.prefix(37)) + "..." : episodeTitle
+        
+        // Set real-time sync properties
+        realTimeEpisodeType = type
+        realTimeEpisodeTitle = displayTitle
+        realTimeEpisodeValue = value
+        isRealTimeEpisodeSyncing = true
+        
+        print("📡 🚀 REAL-TIME EPISODE SYNC: Started banner - \(type.displayName): \(displayTitle) -> \(value)")
+        
+        // Auto-hide after 2 seconds
+        realTimeEpisodeSyncTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.completeRealTimeEpisodeSync()
+            }
+        }
+    }
+    
+    /// Complete real-time episode sync banner
+    @MainActor
+    func completeRealTimeEpisodeSync() {
+        isRealTimeEpisodeSyncing = false
+        realTimeEpisodeSyncTimer?.invalidate()
+        realTimeEpisodeSyncTimer = nil
+        
+        print("📡 ✅ REAL-TIME EPISODE SYNC: Completed banner display")
     }
     
     // MARK: - Cross-Device Progress Tracking

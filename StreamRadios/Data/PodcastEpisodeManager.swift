@@ -466,26 +466,76 @@ class PodcastEpisodeManager {
             print("🔍   EpisodeStateManager progress: \(String(format: "%.4f", stateManagerProgress))")
             print("🔍   Core Data progress: \(String(format: "%.4f", episode.state.progress))")
             
-            // CRITICAL FIX: Only use EpisodeStateManager progress for episodes that have been played locally
-            // For NEW episodes, preserve their 0.0 progress to ensure they start from beginning
+            // CRITICAL FIX: Check if we're in CloudKit priority mode (during pull-to-refresh or fresh loading)
+            // In this mode, Core Data (which contains fresh CloudKit data) takes precedence over EpisodeStateManager
+            let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
+            
             let finalProgress: Double
-            if stateManagerState == .new && episode.state.progress == 0.0 {
-                // Episode is new and has no local progress - keep it at 0.0 regardless of CloudKit sync
+            let finalState: EpisodePlaybackState
+            let finalFavorite: Bool
+            let finalDownloaded: Bool
+            
+            // HIGHEST PROGRESS SYNC: Always compare and use the highest progress from any source
+            let coreDataProgress = episode.state.progress
+            
+            if isCloudKitPriorityMode {
+                // CLOUDKIT PRIORITY MODE: Compare Core Data vs EpisodeStateManager and use highest progress
+                if coreDataProgress >= stateManagerProgress {
+                    finalProgress = coreDataProgress
+                    // Determine state from Core Data progress
+                    if managedEpisode.isPlayed || coreDataProgress >= 0.99 {
+                        finalState = .played
+                    } else if coreDataProgress > 0 {
+                        finalState = .inProgress
+                    } else {
+                        finalState = .new
+                    }
+                    print("🔍 ☁️ HIGHEST PROGRESS (Core Data): \(String(format: "%.4f", coreDataProgress)) >= \(String(format: "%.4f", stateManagerProgress))")
+                } else {
+                    finalProgress = stateManagerProgress
+                    finalState = stateManagerState
+                    print("🔍 ☁️ HIGHEST PROGRESS (EpisodeStateManager): \(String(format: "%.4f", stateManagerProgress)) > \(String(format: "%.4f", coreDataProgress))")
+                }
+                // For non-progress states, prioritize Core Data in CloudKit mode
+                finalFavorite = managedEpisode.isFavorite
+                finalDownloaded = managedEpisode.isDownloaded
+            } else if stateManagerState == .new && coreDataProgress == 0.0 && stateManagerProgress == 0.0 {
+                // Episode is truly new with no progress anywhere - keep it at 0.0
                 finalProgress = 0.0
-                print("🔍 🆕 Preserving NEW episode state - keeping progress at 0.0 despite EpisodeStateManager having \(String(format: "%.4f", stateManagerProgress))")
+                finalState = .new
+                finalFavorite = stateManagerFavorite
+                finalDownloaded = stateManagerDownloaded
+                print("🔍 🆕 Episode is new with no progress - keeping at 0.0")
             } else {
-                // Episode has been played locally or has local progress - use EpisodeStateManager
-                finalProgress = stateManagerProgress
-                print("🔍 🎯 Using EpisodeStateManager progress: \(String(format: "%.4f", stateManagerProgress))")
+                // NORMAL MODE: Compare EpisodeStateManager vs Core Data and use highest progress
+                if stateManagerProgress >= coreDataProgress {
+                    finalProgress = stateManagerProgress
+                    finalState = stateManagerState
+                    print("🔍 🎯 HIGHEST PROGRESS (EpisodeStateManager): \(String(format: "%.4f", stateManagerProgress)) >= \(String(format: "%.4f", coreDataProgress))")
+                } else {
+                    finalProgress = coreDataProgress
+                    // Determine state from Core Data progress
+                    if managedEpisode.isPlayed || coreDataProgress >= 0.99 {
+                        finalState = .played
+                    } else if coreDataProgress > 0 {
+                        finalState = .inProgress
+                    } else {
+                        finalState = .new
+                    }
+                    print("🔍 🎯 HIGHEST PROGRESS (Core Data): \(String(format: "%.4f", coreDataProgress)) > \(String(format: "%.4f", stateManagerProgress))")
+                }
+                // For non-progress states, use EpisodeStateManager as primary source
+                finalFavorite = stateManagerFavorite
+                finalDownloaded = stateManagerDownloaded
             }
             
-            // Use EpisodeStateManager as the source of truth for all states except new episode progress
+            // Apply the final values to the episode
             episode.state.progress = finalProgress
-            episode.state.isFavorite = stateManagerFavorite
-            episode.state.isDownloaded = stateManagerDownloaded
+            episode.state.isFavorite = finalFavorite
+            episode.state.isDownloaded = finalDownloaded
             
-            // Determine isPlayed based on final progress
-            episode.state.isPlayed = finalProgress >= 0.99
+            // Determine isPlayed based on final state and progress
+            episode.state.isPlayed = (finalState == .played) || (finalProgress >= 0.99)
             
             return episode
         }
