@@ -30,6 +30,9 @@ class CarPlayManager: ObservableObject {
     private let maxCacheSize = 50
     private let cacheExpirationTime: TimeInterval = 300 // 5 minutes
     
+    // Persisted feed artwork for when app is closed
+    private var persistedFeedArtwork: [String: Data] = [:]
+    
     private init() {
         os_log("CarPlay: CarPlayManager initialized", log: log, type: .info)
         loadRecentlyPlayedEpisodes()
@@ -179,6 +182,7 @@ class CarPlayManager: ObservableObject {
             imageCache[cacheKey] = image
             imageCacheAccessTimes[cacheKey] = Date()
             cleanupImageCacheIfNeeded()
+            print("CarPlay: Successfully loaded artwork from imageData for podcast '\(podcast.title)'")
             return image
         }
         
@@ -190,11 +194,83 @@ class CarPlayManager: ObservableObject {
             imageCache[cacheKey] = image
             imageCacheAccessTimes[cacheKey] = Date()
             cleanupImageCacheIfNeeded()
+            print("CarPlay: Successfully loaded artwork from iconData for podcast '\(podcast.title)'")
             return image
         }
         
-        // Return system fallback
-        return UIImage(systemName: "microphone")
+        // Try loading from artwork URL if available and no cached data
+        if let artworkUrl = podcast.artworkUrl, !artworkUrl.isEmpty, 
+           URL(string: artworkUrl) != nil {
+            // For CarPlay, we should try to load synchronously if possible
+            // or return nil to let the caller handle async loading
+            print("CarPlay: No cached artwork for podcast '\(podcast.title)', artworkUrl available: \(artworkUrl)")
+        } else {
+            print("CarPlay: No artwork data or URL available for podcast '\(podcast.title)'")
+        }
+        
+        // Return nil instead of fallback - let caller handle fallback
+        return nil
+    }
+    
+    /// Get podcast artwork by feed ID, using persisted data when app is closed
+    func getPodcastArtworkByFeedId(_ feedId: String) -> UIImage? {
+        let cacheKey = "podcast_\(feedId)"
+        
+        // Check cache first
+        if let cachedImage = imageCache[cacheKey] {
+            imageCacheAccessTimes[cacheKey] = Date()
+            return cachedImage
+        }
+        
+        // Try to find feed in active feeds first
+        if let podcastFeed = podcastFeeds.first(where: { $0.id == feedId }) {
+            return getPodcastArtwork(for: podcastFeed)
+        }
+        
+        // If feed not found in active feeds, use persisted artwork
+        if let persistedData = persistedFeedArtwork[feedId],
+           let image = UIImage(data: persistedData) {
+            // Cache the image
+            imageCache[cacheKey] = image
+            imageCacheAccessTimes[cacheKey] = Date()
+            cleanupImageCacheIfNeeded()
+            print("CarPlay: Successfully loaded artwork from persisted data for feedId: \(feedId)")
+            return image
+        }
+        
+        print("CarPlay: No artwork found for feedId: \(feedId) - neither in active feeds nor persisted data")
+        return nil
+    }
+    
+    // MARK: - Artwork Loading Helper
+    
+    func loadPodcastArtworkFromURL(for podcast: PodcastFeed, completion: @escaping (UIImage?) -> Void) {
+        guard let artworkUrl = podcast.artworkUrl, !artworkUrl.isEmpty,
+              let url = URL(string: artworkUrl) else {
+            completion(nil)
+            return
+        }
+        
+        // Perform async download
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self = self,
+                  let data = data,
+                  let image = UIImage(data: data),
+                  error == nil else {
+                print("CarPlay: Failed to load artwork from URL for podcast '\(podcast.title)': \(error?.localizedDescription ?? "unknown error")")
+                completion(nil)
+                return
+            }
+            
+            // Cache the loaded image
+            let cacheKey = "podcast_\(podcast.id)"
+            self.imageCache[cacheKey] = image
+            self.imageCacheAccessTimes[cacheKey] = Date()
+            self.cleanupImageCacheIfNeeded()
+            
+            print("CarPlay: Successfully loaded artwork from URL for podcast '\(podcast.title)'")
+            completion(image)
+        }.resume()
     }
     
     // MARK: - Recently Played Episodes Management
@@ -310,15 +386,22 @@ class CarPlayManager: ObservableObject {
         
         do {
             let recentEpisodesData = recentlyPlayedEpisodes.map { item in
-                RecentlyPlayedEpisodeData(
+                // Find the feed artwork for this episode
+                let podcastFeed = podcastFeeds.first { feed in
+                    feed.id == item.episode.feedId
+                }
+                
+                return RecentlyPlayedEpisodeData(
                     episodeId: item.episode.id,
                     episodeTitle: item.episode.title,
                     episodeUrl: item.episode.audioUrl,
                     episodeDuration: item.episode.duration,
                     episodePublicationDate: item.episode.publicationDate,
                     playedAt: item.playedAt,
-                    podcastTitle: "",
-                    podcastId: item.episode.feedId
+                    podcastTitle: podcastFeed?.title ?? "",
+                    podcastId: item.episode.feedId,
+                    feedArtworkData: podcastFeed?.imageData,
+                    feedArtworkUrl: podcastFeed?.artworkUrl
                 )
             }
             
@@ -343,7 +426,7 @@ class CarPlayManager: ObservableObject {
         do {
             let recentEpisodesData = try decoder.decode([RecentlyPlayedEpisodeData].self, from: data)
             
-            // Convert back to our internal format
+            // Convert back to our internal format and populate persisted artwork
             recentlyPlayedEpisodes = recentEpisodesData.map { data in
                 let episode = PodcastEpisode(
                     id: data.episodeId,
@@ -355,6 +438,12 @@ class CarPlayManager: ObservableObject {
                     state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
                     feedId: data.podcastId
                 )
+                
+                // Store persisted artwork for this feed
+                if let artworkData = data.feedArtworkData {
+                    persistedFeedArtwork[data.podcastId] = artworkData
+                }
+                
                 return (episode: episode, playedAt: data.playedAt)
             }
             
@@ -381,4 +470,6 @@ private struct RecentlyPlayedEpisodeData: Codable {
     let playedAt: Date
     let podcastTitle: String
     let podcastId: String
+    let feedArtworkData: Data?
+    let feedArtworkUrl: String?
 } 

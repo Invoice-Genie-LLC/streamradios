@@ -58,14 +58,18 @@ struct RadioStationListView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     
                     if !viewModel.loadingPhase.isEmpty {
-                        Text(viewModel.loadingPhase)
-                            .font(.subheadline)
-                            .foregroundColor(.adaptiveSecondaryText)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .lineLimit(nil)
-                            .animation(.easeInOut(duration: 0.2), value: viewModel.loadingPhase)
+                        HStack {
+                            Spacer()
+                            Text(viewModel.loadingPhase)
+                                .font(.subheadline)
+                                .foregroundColor(.adaptiveSecondaryText)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .lineLimit(nil)
+                                .animation(.easeInOut(duration: 0.2), value: viewModel.loadingPhase)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

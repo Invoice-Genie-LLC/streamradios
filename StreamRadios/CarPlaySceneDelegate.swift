@@ -1224,8 +1224,35 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                 feed.id == episode.feedId
             }
             
-            // Use podcast artwork for recently played episodes
-            let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
+            // Use podcast artwork for recently played episodes with persistence support
+            var itemImage: UIImage?
+            
+            // Try to get artwork using the new method that supports persisted data
+            itemImage = carPlayManager.getPodcastArtworkByFeedId(episode.feedId)
+            
+            if let image = itemImage {
+                print("CarPlay: Successfully loaded artwork for episode '\(episode.title)' (feedId: \(episode.feedId))")
+            } else {
+                print("CarPlay: No artwork available for episode '\(episode.title)' (feedId: \(episode.feedId))")
+                
+                // If we have an active feed, try loading from URL asynchronously
+                if let feed = podcastFeed, let artworkUrl = feed.artworkUrl {
+                    carPlayManager.loadPodcastArtworkFromURL(for: feed) { [weak self] loadedImage in
+                        DispatchQueue.main.async {
+                            if loadedImage != nil {
+                                // Refresh the CarPlay interface with the loaded artwork
+                                print("CarPlay: Artwork loaded from URL for '\(feed.title)', refreshing interface")
+                                self?.refreshCarPlayInterface()
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Use microphone icon as fallback if no artwork found
+            if itemImage == nil {
+                itemImage = UIImage(systemName: "microphone")
+            }
             
             let item = CPListItem(text: episode.title,
                                  detailText: "\(duration)\(statusText)",
@@ -2474,8 +2501,35 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     feed.id == episode.feedId
                 }
                 
-                // Use podcast artwork for recently played episodes
-                let itemImage = podcastFeed != nil ? carPlayManager.getPodcastArtwork(for: podcastFeed!) : UIImage(systemName: "microphone")
+                // Use podcast artwork for recently played episodes with persistence support
+                var itemImage: UIImage?
+                
+                // Try to get artwork using the new method that supports persisted data
+                itemImage = carPlayManager.getPodcastArtworkByFeedId(episode.feedId)
+                
+                if let image = itemImage {
+                    print("CarPlay: Successfully loaded artwork for episode '\(episode.title)' (feedId: \(episode.feedId))")
+                } else {
+                    print("CarPlay: No artwork available for episode '\(episode.title)' (feedId: \(episode.feedId))")
+                    
+                    // If we have an active feed, try loading from URL asynchronously
+                    if let feed = podcastFeed, let artworkUrl = feed.artworkUrl {
+                        carPlayManager.loadPodcastArtworkFromURL(for: feed) { [weak self] loadedImage in
+                            DispatchQueue.main.async {
+                                if loadedImage != nil {
+                                    // Refresh the CarPlay interface with the loaded artwork
+                                    print("CarPlay: Artwork loaded from URL for '\(feed.title)', refreshing interface")
+                                    self?.refreshCarPlayInterface()
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Use microphone icon as fallback if no artwork found
+                if itemImage == nil {
+                    itemImage = UIImage(systemName: "microphone")
+                }
                 
                 let item = CPListItem(text: episode.title,
                                      detailText: "\(duration)\(statusText)",
@@ -3911,6 +3965,18 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         os_log("🚀 CarPlay: Instant artwork applied to Now Playing for: %@", log: log, type: .info, metadata)
         
         os_log("🚀 CarPlay: INSTANT artwork sync system active", log: log, type: .info)
+    }
+    
+    // MARK: - Interface Refresh
+    
+    /// Refreshes the CarPlay interface to update artwork after async loading
+    private func refreshCarPlayInterface() {
+        guard let interfaceController = interfaceController else { return }
+        
+        // Refresh the root template to update artwork
+        DispatchQueue.main.async {
+            self.setupRootTemplate()
+        }
     }
     
 } 
