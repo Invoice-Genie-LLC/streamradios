@@ -154,7 +154,9 @@ struct DataSyncProgressView: View {
                                     .foregroundColor(.secondary)
                                     .multilineTextAlignment(.center)
                                     .padding(.horizontal, 12)
-                                    .lineLimit(1)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                             } else {
                                 // Minimal invisible placeholder
                                 Rectangle()
@@ -170,7 +172,7 @@ struct DataSyncProgressView: View {
                                 .opacity(0)
                         }
                     }
-                    .frame(height: 16) // Reduced height for operation text
+                    .frame(minHeight: 16, maxHeight: 32) // Allow text expansion for longer messages
                 }
                 .padding(16)
                 .background(
@@ -249,6 +251,9 @@ struct FeedParsingProgressItem: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .padding(.vertical, 4)
@@ -346,14 +351,13 @@ struct DetailedSyncStatusItem: View {
             // FIXED HEIGHT: Operation description (always reserve space)
             Group {
                 if !operation.isEmpty {
-                    HStack {
-                        Text(operation)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .multilineTextAlignment(.leading)
-                        Spacer()
-                    }
+                    Text(operation)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 } else {
                     Rectangle()
                         .fill(Color.clear)
@@ -361,7 +365,7 @@ struct DetailedSyncStatusItem: View {
                         .opacity(0)
                 }
             }
-            .frame(height: 16)
+            .frame(minHeight: 16, maxHeight: 32)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
@@ -542,6 +546,10 @@ struct CrossDeviceFeedProgressItem: View {
             Text(feedProgress.message)
                 .font(.caption2)
                 .foregroundColor(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)

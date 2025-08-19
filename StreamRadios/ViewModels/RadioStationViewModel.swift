@@ -562,7 +562,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 await MainActor.run {
                     // Update DataSyncManager to show sync banner
                     DataSyncManager.shared.radioStationsStatus = .inProgress
-                    DataSyncManager.shared.radioStationsOperation = "Loading \(newStationsCount) new stations from other devices..."
+                    DataSyncManager.shared.radioStationsOperation = "Loading \(newStationsCount) new stations from other devices"
                     DataSyncManager.shared.radioStationsProgress = 0.0
                     DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
                     DataSyncManager.shared.radioStationsCurrentCount = localStationCount
@@ -601,12 +601,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     let hasModifications = try await RadioStationCloudKitManager.shared.checkForStationModifications(localStations: stations)
                     
                     if hasModifications {
-                        print("📝 Detected station modifications on other devices, triggering sync...")
+                        print("📝 Detected station modifications on other devices, triggering sync")
                         
                         await MainActor.run {
                             // Update DataSyncManager to show sync banner
                             DataSyncManager.shared.radioStationsStatus = .inProgress
-                            DataSyncManager.shared.radioStationsOperation = "Loading station updates from other devices..."
+                            DataSyncManager.shared.radioStationsOperation = "Loading station updates from other devices"
                             DataSyncManager.shared.radioStationsProgress = 0.0
                             DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
                             DataSyncManager.shared.radioStationsCurrentCount = 0
@@ -700,7 +700,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Sync stations from CloudKit with progress tracking for automatic sync
     private func syncStationsFromCloudKitWithProgress() async {
-        print("🔄 Starting automatic CloudKit sync with progress tracking...")
+        print("🔄 Starting automatic CloudKit sync with progress tracking")
         
         do {
             // Use DataStore's fetchRadioStationsWithProgress for banner integration
@@ -891,7 +891,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         NotificationManager.shared.requestAuthorization()
         
         // Notify user that import has started
-        NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing station playlist from file...")
+        NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing station playlist from file")
         
         do {
             let data = try Data(contentsOf: url)
@@ -1879,7 +1879,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Update DataSyncManager to show we're starting a save operation
         await MainActor.run {
             DataSyncManager.shared.radioStationsStatus = .inProgress
-            DataSyncManager.shared.radioStationsOperation = "Saving favorite stations to CloudKit..."
+            DataSyncManager.shared.radioStationsOperation = "Saving favorite stations to iCloud"
             DataSyncManager.shared.radioStationsProgress = 0.0
             DataSyncManager.shared.radioStationsTotalCount = favorites.count
             DataSyncManager.shared.radioStationsCurrentCount = 0
@@ -1949,14 +1949,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
         loadingProgress = 0.0
         totalStationsToLoad = 0
         loadingStationsCount = 0
-        loadingPhase = "Connecting to API..."
+        loadingPhase = "Fetching stations"
         
         do {
             print("🌐 Radio Browser API: Fetching stations for \(country.name) with API code: \(country.apiCountryCode)")
             logDeletedStationsCount()
             
             await MainActor.run {
-                loadingPhase = "Connecting to radio database..."
+                loadingPhase = "Connecting to radio database"
                 loadingProgress = 0.05
             }
             
@@ -1970,13 +1970,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     
                     // Update phase messages during download
                     if currentProgress < 0.1 {
-                        loadingPhase = "Connecting to radio database..."
+                        loadingPhase = "Connecting to radio database."
                     } else if currentProgress < 0.15 {
-                        loadingPhase = "Downloading station data..."
+                        loadingPhase = "Downloading station data"
                     } else if currentProgress < 0.2 {
-                        loadingPhase = "Receiving stations..."
+                        loadingPhase = "Receiving stations"
                     } else {
-                        loadingPhase = "Finishing download..."
+                        loadingPhase = "Finishing download"
                     }
                 }
             }
@@ -1990,7 +1990,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             await MainActor.run {
                 loadingProgress = 0.3
-                loadingPhase = "Download completed, received \(apiStations.count) stations..."
+                loadingPhase = "Download completed, received \(apiStations.count) stations"
             }
             
             guard !apiStations.isEmpty else {
@@ -2004,14 +2004,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             await MainActor.run {
                 totalStationsToLoad = apiStations.count
-                loadingPhase = "Preparing to process \(totalStationsToLoad) stations..."
+                loadingPhase = "Preparing to process \(totalStationsToLoad) stations"
                 loadingProgress = 0.32
             }
             
             // DEDUPLICATION: Filter out stations with identical URLs from the API response
             // Prioritize HTTPS URLs over HTTP when same URL exists with both protocols
             await MainActor.run {
-                loadingPhase = "Checking for duplicates..."
+                loadingPhase = "Checking for duplicates"
                 loadingProgress = 0.35
             }
             
@@ -2027,7 +2027,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     let dedupeProgress = Double(processedCount) / Double(apiStations.count) * 0.15 // 15% range for deduplication
                     Task { @MainActor in
                         loadingProgress = 0.35 + dedupeProgress
-                        loadingPhase = "Checking duplicates... \(processedCount)/\(apiStations.count)"
+                        loadingPhase = "Checking duplicates \(processedCount)/\(apiStations.count)"
                     }
                 }
                 
@@ -2086,7 +2086,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let processedAPIStations = deduplicatedStations
             await MainActor.run {
                 totalStationsToLoad = processedAPIStations.count
-                loadingPhase = "Converting \(totalStationsToLoad) stations..."
+                loadingPhase = "Converting \(totalStationsToLoad) stations"
                 loadingProgress = 0.5
             }
             
@@ -2105,7 +2105,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     Task { @MainActor in
                         loadingStationsCount = conversionProcessedCount
                         loadingProgress = 0.5 + conversionProgress
-                        loadingPhase = "Converting stations... \(conversionProcessedCount)/\(totalStationsToLoad)"
+                        loadingPhase = "Converting stations \(conversionProcessedCount)/\(totalStationsToLoad)"
                     }
                 }
                 
@@ -2197,7 +2197,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             await MainActor.run {
-                loadingPhase = "Adding \(uniqueNewStations.count) new stations..."
+                loadingPhase = "Adding \(uniqueNewStations.count) new stations"
                 loadingProgress = 0.82
             }
             
@@ -2222,20 +2222,20 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Save to CoreData first
             await MainActor.run {
-                loadingPhase = "Preparing local storage..."
+                loadingPhase = "Preparing local storage"
                 loadingProgress = 0.85
             }
             
             saveStationsToCoreData()
             
             await MainActor.run {
-                loadingPhase = "Saving to local storage..."
+                loadingPhase = "Saving to local storage"
                 loadingProgress = 0.9
             }
             
             // Save to CloudKit (using the same method as import for new stations)
             await MainActor.run {
-                loadingPhase = "Initiating cloud sync..."
+                loadingPhase = "Initiating cloud sync"
                 loadingProgress = 0.93
                 
                 // Update DataSyncManager to show CloudKit save progress
@@ -2268,7 +2268,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             await MainActor.run {
-                loadingPhase = "Completing sync..."
+                loadingPhase = "Completing sync"
                 loadingProgress = 0.96
             }
             
@@ -2299,7 +2299,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Notify that stations have been updated
             await MainActor.run {
-                loadingPhase = "Finalizing..."
+                loadingPhase = "Finalizing"
                 loadingProgress = 0.98
             }
             
@@ -2405,7 +2405,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Always fetch stations for the selected country to get the latest available stations
         // The duplicate prevention logic in fetchStationsFromAPI will filter out any existing stations
         let existingStationsForCountry = stations.filter { $0.country == selectedCountry }
-        print("🌐 Radio Browser API: Current stations for \(selectedCountry): \(existingStationsForCountry.count). Fetching latest stations from API...")
+        print("🌐 Radio Browser API: Current stations for \(selectedCountry): \(existingStationsForCountry.count). Fetching latest stations")
         await fetchStationsFromAPI(for: country)
     }
     
