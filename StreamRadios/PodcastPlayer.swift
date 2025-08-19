@@ -374,21 +374,25 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
            notification.name == UIApplication.didEnterBackgroundNotification ||
            notification.name == UIApplication.willResignActiveNotification {
             
-            // SELECTIVE CROSS-DEVICE SYNC: Sync when app goes to background or terminates
+            // REAL-TIME SYNC: Sync when app goes to background or terminates
             let reason: String
             switch notification.name {
             case UIApplication.willTerminateNotification:
-                reason = "app_termination"
+                reason = "app_closed"
             case UIApplication.didEnterBackgroundNotification:
-                reason = "background"
+                reason = "app_background"
             case UIApplication.willResignActiveNotification:
-                reason = "inactive"
+                reason = "app_background"
             default:
-                reason = "lifecycle_event"
+                reason = "app_background"
             }
-            // Flush any pending syncs first
-            stateManager.flushPendingCloudKitSyncs()
-            performCrossDeviceSync(reason: reason)
+            
+            // REAL-TIME SYNC: Trigger immediate sync for app lifecycle events
+            if let currentEpisode = currentEpisode {
+                let progress = duration > 0 ? currentTime / duration : 0
+                stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: reason, feedId: currentEpisode.feedId)
+                print("📡 ⚡ REAL-TIME APP LIFECYCLE SYNC: Triggered for \(reason)")
+            }
             
             // Ensure progress is saved when app is force closed or goes to background
             handleAppWillTerminate()
@@ -838,8 +842,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             Task { @MainActor in
                 viewModel?.episodeProgress[episode.id] = 0.0
                 
-                // Update episode state to not played and reset progress
-                viewModel?.updateEpisodeState(episode.id, progress: 0.0, isPlayed: false)
+                // CONDITIONAL SYNC FIX: Use direct state manager update for rewind to avoid triggering real-time sync
+                // Rewind operations should not trigger CloudKit sync - only local state update
+                stateManager.setProgress(for: episode.id, progress: 0.0) // Local only, no sync
             }
             
             // Update state manager
@@ -1512,16 +1517,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.pause()
         isPlaying = false
         
-        // SELECTIVE CROSS-DEVICE SYNC: Flush pending syncs and then sync immediately when pausing
-        stateManager.flushPendingCloudKitSyncs()
-        performCrossDeviceSync(reason: "pause")
-        
-        // NOTE: Don't clear loading state when pausing - loading state should only be cleared when playback starts
-        // loadingEpisodeId = nil
-        
-        // Connection state should reflect network availability, not playback state
-        // Don't change connection state when pausing
-        
         // Calculate current progress
         let progress = duration > 0 ? currentTime / duration : 0
         
@@ -1536,11 +1531,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
         stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
         
-        // REAL-TIME UI: Immediately update progress to ensure instant UI refresh
-        stateManager.setProgress(for: currentEpisode.id, progress: progress)
+        // REAL-TIME SYNC: Use the new real-time sync method for episode pause with known feedId
+        stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: "episode_paused", feedId: currentEpisode.feedId)
         
         // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
-        print("📡 ⚡ LOCAL SYNC: Triggering instant local progress sync notification")
+        print("📡 ⚡ REAL-TIME PAUSE SYNC: Triggering instant cross-device sync for episode pause")
         NotificationCenter.default.post(
             name: .init("InstantSyncDidUpdatePodcastProgress"),
             object: nil,
@@ -1591,11 +1586,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
             
-            // REAL-TIME UI: Immediately update progress to ensure instant UI refresh
-            stateManager.setProgress(for: currentEpisode.id, progress: progress)
+            // REAL-TIME SYNC: Use the new real-time sync method for episode stop with known feedId
+            stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: "app_closed", feedId: currentEpisode.feedId)
             
             // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
-            print("📡 ⚡ LOCAL SYNC: Triggering instant local progress sync notification")
+            print("📡 ⚡ REAL-TIME STOP SYNC: Triggering instant cross-device sync for episode stop")
             NotificationCenter.default.post(
                 name: .init("InstantSyncDidUpdatePodcastProgress"),
                 object: nil,
@@ -1607,10 +1602,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         isPlaying = false
         userWantsToPlay = false  // Clear user intent
         
-        // SELECTIVE CROSS-DEVICE SYNC: Flush pending syncs and then sync immediately when stopping
-        stateManager.flushPendingCloudKitSyncs()
-        stateManager.disableDeferredCloudKitSync() // Return to normal sync mode when stopped
-        performCrossDeviceSync(reason: "stop")
+        // Note: Real-time sync already handled above for episode stop
         
         // Connection state should reflect network availability, not playback state
         // Don't change connection state when stopping

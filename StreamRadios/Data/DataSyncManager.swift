@@ -39,6 +39,13 @@ class DataSyncManager: ObservableObject {
     @Published var podcastFeedsCurrentCount = 0
     @Published var podcastFeedsTotalCount = 0
     
+    // Cross-Device Feed Sync (when feeds exist on CloudKit but not locally)
+    @Published var crossDeviceFeedSyncStatus: DataSyncStatus = .none
+    @Published var crossDeviceFeedSyncProgress: Double = 0.0
+    @Published var crossDeviceFeedSyncOperation = ""
+    @Published var crossDeviceFeedSyncCurrentCount = 0
+    @Published var crossDeviceFeedSyncTotalCount = 0
+    
     // Artwork Downloads
     @Published var artworkDownloadsStatus: DataSyncStatus = .pending
     @Published var artworkDownloadsProgress: Double = 0.0
@@ -1105,6 +1112,70 @@ class DataSyncManager: ObservableObject {
         print("📡 DataSyncManager: Skipping duplicate feed processing - handled by PodcastViewModel")
     }
     
+    // MARK: - Cross-Device Feed Sync Management
+    
+    /// Start tracking cross-device feed sync (when feeds exist on CloudKit but not locally)
+    @MainActor
+    func startCrossDeviceFeedSync(totalCount: Int, operation: String = "Syncing feeds from other devices") {
+        guard totalCount > 0 else {
+            crossDeviceFeedSyncStatus = .none
+            return
+        }
+        
+        crossDeviceFeedSyncStatus = .inProgress
+        crossDeviceFeedSyncProgress = 0.0
+        crossDeviceFeedSyncOperation = operation
+        crossDeviceFeedSyncCurrentCount = 0
+        crossDeviceFeedSyncTotalCount = totalCount
+        
+        print("📡 🔄 CROSS-DEVICE FEED SYNC: Started syncing \(totalCount) feeds from other devices")
+    }
+    
+    /// Update cross-device feed sync progress
+    @MainActor
+    func updateCrossDeviceFeedSyncProgress(currentCount: Int, operation: String? = nil) {
+        guard crossDeviceFeedSyncTotalCount > 0 else { return }
+        
+        crossDeviceFeedSyncCurrentCount = currentCount
+        crossDeviceFeedSyncProgress = Double(currentCount) / Double(crossDeviceFeedSyncTotalCount)
+        
+        if let operation = operation {
+            crossDeviceFeedSyncOperation = operation
+        }
+        
+        print("📡 🔄 CROSS-DEVICE FEED SYNC: Progress \(currentCount)/\(crossDeviceFeedSyncTotalCount) (\(Int(crossDeviceFeedSyncProgress * 100))%)")
+    }
+    
+    /// Complete cross-device feed sync
+    @MainActor
+    func completeCrossDeviceFeedSync() {
+        crossDeviceFeedSyncStatus = .completed
+        crossDeviceFeedSyncProgress = 1.0
+        crossDeviceFeedSyncOperation = "✅ Feeds synced from other devices"
+        
+        print("📡 ✅ CROSS-DEVICE FEED SYNC: Completed syncing \(crossDeviceFeedSyncTotalCount) feeds")
+        
+        // Auto-reset after showing completion for 3 seconds
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+            await MainActor.run {
+                self.resetCrossDeviceFeedSync()
+            }
+        }
+    }
+    
+    /// Reset cross-device feed sync status
+    @MainActor
+    func resetCrossDeviceFeedSync() {
+        crossDeviceFeedSyncStatus = .none
+        crossDeviceFeedSyncProgress = 0.0
+        crossDeviceFeedSyncOperation = ""
+        crossDeviceFeedSyncCurrentCount = 0
+        crossDeviceFeedSyncTotalCount = 0
+        
+        print("📡 🔄 CROSS-DEVICE FEED SYNC: Reset sync status")
+    }
+    
     // MARK: - Troubleshooting Methods
     
     /// Reset the radio stations sync flag to force a re-sync from CloudKit on next launch
@@ -1113,6 +1184,42 @@ class DataSyncManager: ObservableObject {
     func resetRadioStationsSyncFlag() {
         UserDefaults.standard.set(false, forKey: "HasRadioStationsSynced")
         print("🔄 Reset radio stations sync flag - will re-sync from CloudKit on next fresh install sync")
+    }
+    
+    /// Test method to manually trigger cross-device feed sync banner
+    @MainActor
+    func testCrossDeviceFeedSyncBanner() {
+        print("🧪 TEST: Manually triggering cross-device feed sync banner")
+        startCrossDeviceFeedSync(
+            totalCount: 2,
+            operation: "Testing cross-device feed sync"
+        )
+        
+        // Simulate progress updates
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.updateCrossDeviceFeedSyncProgress(
+                currentCount: 1,
+                operation: "Added 'Test Podcast 1'"
+            )
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.updateCrossDeviceFeedSyncProgress(
+                currentCount: 2,
+                operation: "Added 'Test Podcast 2'"
+            )
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            self.completeCrossDeviceFeedSync()
+        }
+    }
+    
+    /// Reset the podcast feeds sync flag to force cross-device check on next launch
+    @MainActor
+    func resetPodcastFeedsSyncFlag() {
+        UserDefaults.standard.set(false, forKey: "HasPodcastFeedsSynced")
+        print("🔄 Reset podcast feeds sync flag - will check CloudKit for cross-device feeds on next initialization")
     }
 }
 

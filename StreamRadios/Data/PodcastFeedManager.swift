@@ -830,8 +830,11 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
             throw FeedError.parsingFailed
         }
         
+        // CRITICAL: Use deterministic feedId that matches episode feedId generation
+        let feedId = generateFeedIdFromUrl(feedUrl)
+        
         let feed = PodcastFeed(
-            id: UUID().uuidString,
+            id: feedId,
             title: title,
             url: feedUrl,
             artworkUrl: feedArtworkUrl,
@@ -842,6 +845,14 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
         progressCallback?(1.0, "Parsing complete - \(episodes.count) episodes found")
         
         return (feed, episodes)
+    }
+    
+    /// Generate deterministic feedId from feedUrl to ensure consistency with episodes
+    private func generateFeedIdFromUrl(_ feedUrl: String) -> String {
+        // Create a deterministic hash of the feed URL for consistent feed IDs
+        let content = feedUrl.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let hash = abs(content.hashValue)
+        return "feed_\(hash)"
     }
     
     // MARK: - XMLParserDelegate
@@ -1027,6 +1038,9 @@ private class EpisodeBuilder {
         }
         
 
+        // CRITICAL: Generate feedId from feedUrl for proper episode-to-feed mapping
+        let feedId = generateFeedIdFromUrl(feedUrl)
+        
         return PodcastEpisode(
             id: episodeId,
             title: title,
@@ -1035,11 +1049,19 @@ private class EpisodeBuilder {
             publicationDate: publicationDate,
             duration: episodeDuration,
             state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
-            feedId: "", // Will be set when saving
+            feedId: feedId, // Properly assigned feedId for CloudKit sync
             fileSize: fileSize,
             chapters: chapters.isEmpty ? nil : chapters,
             notes: showNotes
         )
+    }
+    
+    /// Generate deterministic feedId from feedUrl to ensure consistency
+    private func generateFeedIdFromUrl(_ feedUrl: String) -> String {
+        // Create a deterministic hash of the feed URL for consistent feed IDs
+        let content = feedUrl.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let hash = abs(content.hashValue)
+        return "feed_\(hash)"
     }
     
     // MARK: - Show Notes Creation

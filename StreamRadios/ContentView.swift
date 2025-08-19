@@ -1789,6 +1789,7 @@ struct UnifiedPodcastProgressBanner: View {
                 removal: .opacity.combined(with: .move(edge: .top))
             ))
             .animation(.easeInOut(duration: 0.3), value: shouldShowBanner)
+
             .onChange(of: syncManager.episodeStatesStatus) { status in
                 if status == .completed {
                     // Show completion for 3 seconds, then hide
@@ -1804,6 +1805,21 @@ struct UnifiedPodcastProgressBanner: View {
                         }
                     }
                 } else if status == .inProgress || status == .pending {
+                    // Reset the hide flag when new operations start
+                    hideCompletedBanner = false
+                }
+            }
+            .onChange(of: syncManager.crossDeviceFeedSyncStatus) { status in
+                if status == .completed {
+                    // Show completion for 3 seconds, then hide
+                    hideCompletedBanner = false
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+                        await MainActor.run {
+                            hideCompletedBanner = true
+                        }
+                    }
+                } else if status == .inProgress {
                     // Reset the hide flag when new operations start
                     hideCompletedBanner = false
                 }
@@ -1864,6 +1880,9 @@ struct UnifiedPodcastProgressBanner: View {
         case .feedParsing:
             Image(systemName: "doc.text.magnifyingglass")
                 .id("feedParsing")
+        case .crossDeviceFeedSync:
+            Image(systemName: "icloud.and.arrow.down.fill")
+                .id("crossDeviceFeedSync")
         case .coreDataOperation:
             Image(systemName: "cylinder.split.1x2")
                 .id("coreDataOperation")
@@ -1873,12 +1892,23 @@ struct UnifiedPodcastProgressBanner: View {
     // MARK: - Computed Properties
     
     private var shouldShowBanner: Bool {
-        // CRITICAL: Completely disable banner - sync is now handled close to Episodes section
-        return false
+        // Show banner only for cross-device feed syncing (feeds added on other devices)
+        let hasCrossDeviceFeedSync = syncManager.crossDeviceFeedSyncStatus == .inProgress || 
+                                   (syncManager.crossDeviceFeedSyncStatus == .completed && !hideCompletedBanner)
+        
+
+        
+        return hasCrossDeviceFeedSync
     }
     
     private var currentOperationType: PodcastOperationType {
-        // Priority: Show episode state sync first (highest priority, only if there are episodes)
+        // HIGHEST PRIORITY: Cross-device feed sync (feeds added on other devices)
+        if (syncManager.crossDeviceFeedSyncStatus == .inProgress) || 
+           (syncManager.crossDeviceFeedSyncStatus == .completed && !hideCompletedBanner) {
+            return .crossDeviceFeedSync
+        }
+        
+        // Priority: Show episode state sync (only if there are episodes)
         if (syncManager.episodeStatesStatus == .inProgress && syncManager.episodeStatesTotalCount > 0) || 
            (syncManager.episodeStatesStatus == .completed && !hideCompletedBanner && 
             syncManager.episodeStatesProgress > 0 && syncManager.episodeStatesTotalCount > 0) {
@@ -1918,6 +1948,11 @@ struct UnifiedPodcastProgressBanner: View {
             return syncManager.podcastFeedsProgress
         case .feedParsing:
             return syncManager.feedParsingProgress
+        case .crossDeviceFeedSync:
+            if syncManager.crossDeviceFeedSyncStatus == .completed {
+                return 1.0
+            }
+            return syncManager.crossDeviceFeedSyncProgress
         case .coreDataOperation:
             return podcastViewModel.isLoading ? 0.5 : 0.0
         }
@@ -1931,6 +1966,8 @@ struct UnifiedPodcastProgressBanner: View {
             return "Syncing podcast feeds"
         case .feedParsing:
             return "Getting your episodes ready to play"
+        case .crossDeviceFeedSync:
+            return "Syncing feeds from other devices"
         case .coreDataOperation:
             return "Processing podcast data"
         }
@@ -1950,6 +1987,11 @@ struct UnifiedPodcastProgressBanner: View {
             return syncManager.podcastFeedsOperation
         case .feedParsing:
             return syncManager.feedParsingMessage
+        case .crossDeviceFeedSync:
+            if syncManager.crossDeviceFeedSyncTotalCount > 0 {
+                return "\(syncManager.crossDeviceFeedSyncCurrentCount)/\(syncManager.crossDeviceFeedSyncTotalCount) feeds"
+            }
+            return syncManager.crossDeviceFeedSyncOperation
         case .coreDataOperation:
             return "Loading from local storage"
         }
@@ -1963,6 +2005,8 @@ struct UnifiedPodcastProgressBanner: View {
             return Color.green.opacity(0.1)
         case .feedParsing:
             return Color.purple.opacity(0.1)
+        case .crossDeviceFeedSync:
+            return Color.cyan.opacity(0.1)
         case .coreDataOperation:
             return Color.orange.opacity(0.1)
         }
@@ -1976,6 +2020,8 @@ struct UnifiedPodcastProgressBanner: View {
             return .green
         case .feedParsing:
             return .purple
+        case .crossDeviceFeedSync:
+            return .cyan
         case .coreDataOperation:
             return .orange
         }
@@ -1987,6 +2033,7 @@ struct UnifiedPodcastProgressBanner: View {
         case episodeStateSync
         case feedSync
         case feedParsing
+        case crossDeviceFeedSync
         case coreDataOperation
     }
 }

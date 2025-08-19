@@ -272,6 +272,13 @@ class PodcastViewModel: ObservableObject {
             object: nil
         )
         
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantPodcastPlayedSync),
+            name: .init("InstantSyncDidUpdatePodcastPlayed"),
+            object: nil
+        )
+        
         // CloudKit automatic sync listeners
         NotificationCenter.default.addObserver(
             self,
@@ -576,12 +583,16 @@ class PodcastViewModel: ObservableObject {
         
         // Always ensure UI is in sync, even if data states match
         DispatchQueue.main.async {
-            // Update EpisodeStateManager to ensure consistency
-            EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
+            // Update EpisodeStateManager silently to prevent sync loops (this is incoming cross-device sync)
+            EpisodeStateManager.shared.setFavoriteSilently(episodeId, isFavorite: isFavorite)
             
             // 🔄 CRITICAL FIX: ALWAYS trigger UI refresh regardless of data change
-            // The UI might be out of sync with the data state, so force refresh
-            self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
+            // For large feeds, use immediate update to bypass batch delays
+            if self.currentEpisodes.count > 100 {
+                self.updateEpisodeUIStateImmediate(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
+            } else {
+                self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
+            }
             
             // 🚗 CARPLAY FIX: Notify CarPlay immediately about cross-device favorite sync
             print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for cross-device favorite sync")
@@ -615,12 +626,16 @@ class PodcastViewModel: ObservableObject {
         
         // Always ensure UI is in sync, even if data states match
         DispatchQueue.main.async {
-            // Update EpisodeStateManager to ensure consistency
-            EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded)
+            // Update EpisodeStateManager silently to prevent sync loops (this is incoming cross-device sync)
+            EpisodeStateManager.shared.setDownloadedSilently(episodeId, isDownloaded: isDownloaded)
             
             // 🔄 CRITICAL FIX: ALWAYS trigger UI refresh regardless of data change
-            // The UI might be out of sync with the data state, so force refresh
-            self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
+            // For large feeds, use immediate update to bypass batch delays
+            if self.currentEpisodes.count > 100 {
+                self.updateEpisodeUIStateImmediate(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
+            } else {
+                self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
+            }
             
             // 🚗 CARPLAY FIX: Notify CarPlay immediately about cross-device download sync
             print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for cross-device download sync")
@@ -642,10 +657,65 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    @objc private func handleInstantPodcastPlayedSync(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let isPlayed = userInfo["isPlayed"] as? Bool else {
+            return
+        }
+        
+        // Update episode played status from remote sync
+        let currentPlayed = EpisodeStateManager.shared.getIsPlayed(episodeId)
+        
+        // Always ensure UI is in sync, even if data states match
+        DispatchQueue.main.async {
+            // Update EpisodeStateManager silently to prevent sync loops (this is incoming cross-device sync)
+            EpisodeStateManager.shared.setPlayedSilently(episodeId, isPlayed: isPlayed)
+            
+            // 🔄 CRITICAL FIX: ALWAYS trigger UI refresh regardless of data change
+            // For played state, we need to update progress to reflect the played status
+            let currentProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
+            let effectiveProgress = isPlayed ? max(currentProgress, 0.99) : currentProgress
+            
+            print("📡 🔄 PLAYED SYNC: Received isPlayed=\(isPlayed) for episode \(episodeId), currentProgress=\(currentProgress), effectiveProgress=\(effectiveProgress)")
+            
+            // For large feeds, use immediate update to bypass batch delays
+            if self.currentEpisodes.count > 100 {
+                self.updateEpisodeUIStateImmediate(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: effectiveProgress)
+            } else {
+                self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: effectiveProgress)
+            }
+            
+            // 🚗 CARPLAY FIX: Notify CarPlay immediately about cross-device played sync
+            print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for cross-device played sync")
+            NotificationCenter.default.post(
+                name: NSNotification.Name("EpisodeStateChanged"),
+                object: nil,
+                userInfo: [
+                    "episodeId": episodeId,
+                    "isPlayed": isPlayed
+                ]
+            )
+            print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent for played sync")
+            
+            if currentPlayed != isPlayed {
+                print("📡 ✅ Applied instant podcast played sync with data change: \(episodeId) (played: \(isPlayed))")
+            } else {
+                print("📡 🔄 PLAYED SYNC: States matched but forced UI refresh: \(episodeId) (played: \(isPlayed))")
+            }
+        }
+    }
+    
     // MARK: - UI State Update Helper
     
     /// Update episode UI state immediately for automatic view refresh across tabs
     private func updateEpisodeUIState(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?, progress: Double? = nil) {
+        // For large feeds (>100 episodes), use batch update mechanism
+        if currentEpisodes.count > 100 {
+            queueEpisodeUpdate(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: isDownloaded, progress: progress)
+            return
+        }
+        
         // Update the episode in currentEpisodes array (triggers UI refresh)
         if let index = currentEpisodes.firstIndex(where: { $0.id == episodeId }) {
             var updatedEpisode = currentEpisodes[index]
@@ -692,6 +762,145 @@ class PodcastViewModel: ObservableObject {
         }
         
         // Apply tab filtering immediately if needed
+        applyTabFiltering(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: isDownloaded)
+    }
+    
+    // MARK: - Large Feed Batch Update System
+    
+    private var pendingUpdates: [String: EpisodeBatchUpdate] = [:]
+    private var batchUpdateTimer: Timer?
+    private let batchUpdateInterval: TimeInterval = 0.5 // 500ms batching window
+    
+    private struct EpisodeBatchUpdate {
+        var isFavorite: Bool?
+        var isDownloaded: Bool?
+        var progress: Double?
+        var timestamp: Date
+        
+        mutating func merge(with update: EpisodeBatchUpdate) {
+            // Use the most recent values
+            if update.isFavorite != nil { self.isFavorite = update.isFavorite }
+            if update.isDownloaded != nil { self.isDownloaded = update.isDownloaded }
+            if update.progress != nil { self.progress = update.progress }
+            self.timestamp = update.timestamp
+        }
+    }
+    
+    /// Queue episode update for batch processing (optimized for large feeds)
+    private func queueEpisodeUpdate(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?, progress: Double?) {
+        let update = EpisodeBatchUpdate(
+            isFavorite: isFavorite,
+            isDownloaded: isDownloaded,
+            progress: progress,
+            timestamp: Date()
+        )
+        
+        if var existingUpdate = pendingUpdates[episodeId] {
+            existingUpdate.merge(with: update)
+            pendingUpdates[episodeId] = existingUpdate
+        } else {
+            pendingUpdates[episodeId] = update
+        }
+        
+        print("📦 BATCH UPDATE: Queued update for episode \\(episodeId) (pending: \\(pendingUpdates.count))")
+        
+        // Schedule batch processing
+        scheduleBatchUpdate()
+    }
+    
+    /// Schedule batch update processing
+    private func scheduleBatchUpdate() {
+        batchUpdateTimer?.invalidate()
+        batchUpdateTimer = Timer.scheduledTimer(withTimeInterval: batchUpdateInterval, repeats: false) { [weak self] _ in
+            self?.processBatchUpdates()
+        }
+    }
+    
+    /// Process all pending episode updates in batch
+    private func processBatchUpdates() {
+        guard !pendingUpdates.isEmpty else { return }
+        
+        print("📦 BATCH UPDATE: Processing \\(pendingUpdates.count) pending episode updates...")
+        
+        let updates = pendingUpdates
+        pendingUpdates.removeAll()
+        
+        // Use efficient dictionary lookups for large datasets
+        var currentEpisodesMap = Dictionary(uniqueKeysWithValues: currentEpisodes.enumerated().map { ($1.id, $0) })
+        var updatedCurrentEpisodes = currentEpisodes
+        
+        // Process updates efficiently
+        for (episodeId, update) in updates {
+            // Update episodeProgress cache
+            if let progress = update.progress {
+                episodeProgress[episodeId] = progress
+            }
+            
+            // Update currentEpisodes using index lookup
+            if let index = currentEpisodesMap[episodeId] {
+                var episode = updatedCurrentEpisodes[index]
+                
+                if let isFavorite = update.isFavorite {
+                    episode.state.isFavorite = isFavorite
+                }
+                if let isDownloaded = update.isDownloaded {
+                    episode.state.isDownloaded = isDownloaded
+                }
+                if let progress = update.progress {
+                    episode.state.progress = progress
+                }
+                
+                updatedCurrentEpisodes[index] = episode
+            }
+            
+            // Apply tab filtering
+            applyTabFiltering(episodeId: episodeId, isFavorite: update.isFavorite, isDownloaded: update.isDownloaded)
+        }
+        
+        // Single UI update for all changes
+        currentEpisodes = updatedCurrentEpisodes
+        
+        // Update podcastFeeds efficiently (only for feeds with changes)
+        updatePodcastFeedsWithBatchChanges(updates)
+        
+        print("📦 BATCH UPDATE: ✅ Completed batch update of \\(updates.count) episodes")
+    }
+    
+    /// Update podcastFeeds with batch changes efficiently
+    private func updatePodcastFeedsWithBatchChanges(_ updates: [String: EpisodeBatchUpdate]) {
+        for feedIndex in 0..<podcastFeeds.count {
+            var feedUpdated = false
+            var updatedFeed = podcastFeeds[feedIndex]
+            
+            // Check if this feed has any episodes that need updates
+            for episodeIndex in 0..<updatedFeed.episodes.count {
+                let episodeId = updatedFeed.episodes[episodeIndex].id
+                
+                if let update = updates[episodeId] {
+                    if let isFavorite = update.isFavorite {
+                        updatedFeed.episodes[episodeIndex].state.isFavorite = isFavorite
+                        feedUpdated = true
+                    }
+                    if let isDownloaded = update.isDownloaded {
+                        updatedFeed.episodes[episodeIndex].state.isDownloaded = isDownloaded
+                        feedUpdated = true
+                    }
+                    if let progress = update.progress {
+                        updatedFeed.episodes[episodeIndex].state.progress = progress
+                        feedUpdated = true
+                    }
+                }
+            }
+            
+            // Only update the feed if it actually changed
+            if feedUpdated {
+                podcastFeeds[feedIndex] = updatedFeed
+            }
+        }
+    }
+    
+    /// Apply tab filtering logic (extracted for reuse)
+    private func applyTabFiltering(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?) {
         let filter = EpisodeFilter(rawValue: currentTab) ?? .all
         switch filter {
         case .favorites:
@@ -710,6 +919,63 @@ class PodcastViewModel: ObservableObject {
             // All tab shows everything, no filtering needed
             break
         }
+    }
+    
+    /// Immediate UI update for real-time sync (bypasses batch processing)
+    private func updateEpisodeUIStateImmediate(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?, progress: Double? = nil) {
+        print("⚡ IMMEDIATE UPDATE: Processing real-time sync for episode \\(episodeId) (large feed optimization)")
+        
+        // Update episodeProgress cache immediately
+        if let progress = progress {
+            episodeProgress[episodeId] = progress
+        }
+        
+        // Update currentEpisodes using efficient single-pass update
+        for index in 0..<currentEpisodes.count {
+            if currentEpisodes[index].id == episodeId {
+                var updatedEpisode = currentEpisodes[index]
+                
+                if let isFavorite = isFavorite {
+                    updatedEpisode.state.isFavorite = isFavorite
+                }
+                if let isDownloaded = isDownloaded {
+                    updatedEpisode.state.isDownloaded = isDownloaded
+                }
+                if let progress = progress {
+                    updatedEpisode.state.progress = progress
+                }
+                
+                currentEpisodes[index] = updatedEpisode
+                print("⚡ IMMEDIATE UPDATE: Updated currentEpisodes[\\(index)] for episode \\(episodeId)")
+                break
+            }
+        }
+        
+        // Update podcastFeeds efficiently (single-pass lookup)
+        for feedIndex in 0..<podcastFeeds.count {
+            for episodeIndex in 0..<podcastFeeds[feedIndex].episodes.count {
+                if podcastFeeds[feedIndex].episodes[episodeIndex].id == episodeId {
+                    var updatedFeed = podcastFeeds[feedIndex]
+                    
+                    if let isFavorite = isFavorite {
+                        updatedFeed.episodes[episodeIndex].state.isFavorite = isFavorite
+                    }
+                    if let isDownloaded = isDownloaded {
+                        updatedFeed.episodes[episodeIndex].state.isDownloaded = isDownloaded
+                    }
+                    if let progress = progress {
+                        updatedFeed.episodes[episodeIndex].state.progress = progress
+                    }
+                    
+                    podcastFeeds[feedIndex] = updatedFeed
+                    print("⚡ IMMEDIATE UPDATE: Updated podcastFeeds[\\(feedIndex)].episodes[\\(episodeIndex)] for episode \\(episodeId)")
+                    return // Found and updated, exit early
+                }
+            }
+        }
+        
+        // Apply tab filtering
+        applyTabFiltering(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: isDownloaded)
     }
     
     // MARK: - CloudKit Automatic Sync Handlers
@@ -776,6 +1042,25 @@ class PodcastViewModel: ObservableObject {
                         self.throttledUIUpdate()
                         
                         print("📡 ☁️ CLOUDKIT FEED ADD: ✅ Added feed with \(episodes.count) episodes from CloudKit: \(feed.title)")
+                        
+                        // 🎯 CROSS-DEVICE BANNER: Show banner for feed added from other device
+                        print("📡 🔄 CROSS-DEVICE NOTIFICATION: Triggering banner for feed added from other device")
+                        DataSyncManager.shared.startCrossDeviceFeedSync(
+                            totalCount: 1,
+                            operation: "Synced '\(feed.title)' from other device"
+                        )
+                        
+                        // Complete the banner after a short delay to show the sync
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            DataSyncManager.shared.updateCrossDeviceFeedSyncProgress(
+                                currentCount: 1,
+                                operation: "Added '\(feed.title)'"
+                            )
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                DataSyncManager.shared.completeCrossDeviceFeedSync()
+                            }
+                        }
                     } else {
                         print("📡 ☁️ CLOUDKIT FEED ADD: ⚠️ Last-second duplicate check prevented duplicate: \(feed.title)")
                     }
@@ -792,6 +1077,27 @@ class PodcastViewModel: ObservableObject {
                     try await saveFeedToCoreData(feed)
                     await addFeedToUIOnly(feed)
                     print("📡 ✅ CLOUDKIT FEED ADD: Saved feed without episodes as fallback: \(feed.title)")
+                    
+                    // 🎯 CROSS-DEVICE BANNER: Show banner for feed added from other device (fallback case)
+                    await MainActor.run {
+                        print("📡 🔄 CROSS-DEVICE NOTIFICATION: Triggering banner for fallback feed addition")
+                        DataSyncManager.shared.startCrossDeviceFeedSync(
+                            totalCount: 1,
+                            operation: "Synced '\(feed.title)' from other device"
+                        )
+                        
+                        // Complete the banner after a short delay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            DataSyncManager.shared.updateCrossDeviceFeedSyncProgress(
+                                currentCount: 1,
+                                operation: "Added '\(feed.title)'"
+                            )
+                            
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                DataSyncManager.shared.completeCrossDeviceFeedSync()
+                            }
+                        }
+                    }
                 } catch {
                     print("📡 ❌ CLOUDKIT FEED ADD: Failed to save feed as fallback: \(error)")
                 }
@@ -1761,7 +2067,8 @@ class PodcastViewModel: ObservableObject {
             
             if let isFavorite = isFavorite {
                 print("📡 UPDATE EPISODE STATE: Setting favorite \(episodeId) to \(isFavorite)")
-                EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite)
+                let feedId = await getFeedIdForEpisode(episodeId)
+                EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite, feedId: feedId)
                 print("📡 UPDATE EPISODE STATE: EpisodeStateManager updated successfully")
                 
                 // CONDITIONAL SYNC: Favorite changes trigger immediate CloudKit sync (allowed condition)
@@ -1786,7 +2093,8 @@ class PodcastViewModel: ObservableObject {
                 }
             }
             if let isDownloaded = isDownloaded {
-                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded)
+                let feedId = await getFeedIdForEpisode(episodeId)
+                EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded, feedId: feedId)
                 
                 // CONDITIONAL SYNC: Download changes trigger immediate CloudKit sync (allowed condition)
                 
@@ -2228,8 +2536,96 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func refreshEpisodeStatesFromManager() {
-        print("🔄 Refreshing episode states from EpisodeStateManager for ALL feeds")
+        print("🔄 Refreshing episode states from EpisodeStateManager for ALL feeds (real-time sync aware)")
         
+        // REAL-TIME SYNC FIX: Check if real-time sync notifications were sent recently
+        // If so, skip this refresh to prevent overriding real-time changes
+        let lastRealTimeSyncTime = UserDefaults.standard.double(forKey: "LastRealTimeSyncTime")
+        let currentTime = Date().timeIntervalSince1970
+        let timeSinceLastSync = currentTime - lastRealTimeSyncTime
+        
+        if timeSinceLastSync < 2.0 { // Within 2 seconds of real-time sync
+            print("⚡ REAL-TIME SYNC PROTECTION: Skipping refresh to preserve recent real-time changes (last sync: \(String(format: "%.1f", timeSinceLastSync))s ago)")
+            return
+        }
+        
+        // Calculate total episodes for optimization decision
+        let totalEpisodes = podcastFeeds.reduce(0) { $0 + $1.episodes.count }
+        let isLargeFeed = totalEpisodes > 300
+        
+        if isLargeFeed {
+            print("📦 LARGE FEED OPTIMIZATION: Processing \(totalEpisodes) episodes with optimized batch refresh")
+            refreshEpisodeStatesOptimized()
+        } else {
+            print("🔄 STANDARD REFRESH: Processing \(totalEpisodes) episodes with standard method")
+            refreshEpisodeStatesStandard()
+        }
+    }
+    
+    /// Optimized refresh for large feeds (>300 episodes)
+    private func refreshEpisodeStatesOptimized() {
+        // Batch collect all episode IDs for single bulk lookup
+        var allEpisodeIds: [String] = []
+        
+        // Collect IDs from currentEpisodes
+        allEpisodeIds.append(contentsOf: currentEpisodes.map { $0.id })
+        
+        // Collect IDs from all feeds
+        for feed in podcastFeeds {
+            allEpisodeIds.append(contentsOf: feed.episodes.map { $0.id })
+        }
+        
+        // Remove duplicates efficiently
+        let uniqueEpisodeIds = Array(Set(allEpisodeIds))
+        print("📦 BATCH LOOKUP: Collecting states for \(uniqueEpisodeIds.count) unique episodes")
+        
+        // Batch collect all states (more efficient than individual lookups)
+        var progressMap: [String: Double] = [:]
+        var favoriteMap: [String: Bool] = [:]
+        var downloadMap: [String: Bool] = [:]
+        
+        for episodeId in uniqueEpisodeIds {
+            progressMap[episodeId] = EpisodeStateManager.shared.getProgress(for: episodeId)
+            favoriteMap[episodeId] = EpisodeStateManager.shared.isFavorite(episodeId)
+            downloadMap[episodeId] = EpisodeStateManager.shared.isDownloaded(episodeId)
+        }
+        
+        // Update currentEpisodes efficiently
+        for index in 0..<currentEpisodes.count {
+            let episodeId = currentEpisodes[index].id
+            
+            var updated = currentEpisodes[index]
+            updated.state.progress = progressMap[episodeId] ?? 0.0
+            updated.state.isFavorite = favoriteMap[episodeId] ?? false
+            updated.state.isDownloaded = downloadMap[episodeId] ?? false
+            updated.state.isPlayed = updated.state.progress >= 0.99
+            
+            currentEpisodes[index] = updated
+        }
+        
+        // Update podcastFeeds efficiently (only feeds with visible episodes)
+        for feedIndex in 0..<podcastFeeds.count {
+            for episodeIndex in 0..<podcastFeeds[feedIndex].episodes.count {
+                let episodeId = podcastFeeds[feedIndex].episodes[episodeIndex].id
+                
+                var updatedFeed = podcastFeeds[feedIndex]
+                var updated = updatedFeed.episodes[episodeIndex]
+                
+                updated.state.progress = progressMap[episodeId] ?? 0.0
+                updated.state.isFavorite = favoriteMap[episodeId] ?? false
+                updated.state.isDownloaded = downloadMap[episodeId] ?? false
+                updated.state.isPlayed = updated.state.progress >= 0.99
+                
+                updatedFeed.episodes[episodeIndex] = updated
+                podcastFeeds[feedIndex] = updatedFeed
+            }
+        }
+        
+        print("📦 ✅ OPTIMIZED REFRESH: Updated \(currentEpisodes.count) current episodes and \(podcastFeeds.count) feeds efficiently")
+    }
+    
+    /// Standard refresh for smaller feeds (<= 300 episodes)
+    private func refreshEpisodeStatesStandard() {
         // Update episode states in currentEpisodes (currently displayed episodes)
         let updatedCurrentEpisodes = currentEpisodes.map { episode in
             var updated = episode
@@ -2258,7 +2654,7 @@ class PodcastViewModel: ObservableObject {
         }
         podcastFeeds = updatedFeeds
         
-        print("✅ Updated episode states for \(currentEpisodes.count) current episodes and \(podcastFeeds.count) feeds")
+        print("✅ STANDARD REFRESH: Updated episode states for \(currentEpisodes.count) current episodes and \(podcastFeeds.count) feeds")
     }
     
     private func updateEpisodeCountsForCurrentFeed() async {
@@ -2339,6 +2735,8 @@ class PodcastViewModel: ObservableObject {
             // Check if podcast feeds have been synced to prevent unnecessary CloudKit fetching
             let hasPodcastFeedsSynced = UserDefaults.standard.bool(forKey: "HasPodcastFeedsSynced")
             
+            print("🔍 SYNC DECISION: existingFeedCount=\(existingFeedCount), isFreshInstall=\(isFreshInstall), hasPodcastFeedsSynced=\(hasPodcastFeedsSynced)")
+            
             if isFreshInstall || !hasPodcastFeedsSynced {
                 print("🔄 Podcast feed sync needed - fresh install: \(isFreshInstall), feeds synced: \(hasPodcastFeedsSynced)")
                 
@@ -2358,23 +2756,33 @@ class PodcastViewModel: ObservableObject {
                     
                     // Mark podcast feeds as synced to prevent future CloudKit syncing on app launches
                     UserDefaults.standard.set(true, forKey: "HasPodcastFeedsSynced")
-                    
-                    // Update UI on main thread with explicit refresh
-                    await MainActor.run {
-                        self.loadFeedsFromCoreData()
-                        
-                        // CRITICAL: Explicit UI refresh for CloudKit sync completion
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            self.throttledUIUpdate()
-                            print("🎯 CLOUDKIT SYNC: Triggered explicit UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
-                        }
-                    }
                 } else {
                     print("📡 No feeds found in CloudKit")
                 }
             } else {
                 print("⚡ Skipping CloudKit podcast feed sync - loading from local storage only for better performance")
-                // Just load feeds from Core Data without CloudKit sync
+                
+                // CROSS-DEVICE SYNC: Even when not doing full sync, check for new cross-device feeds
+                print("🔄 CROSS-DEVICE CHECK: Checking CloudKit for feeds added on other devices...")
+                print("🔄 CROSS-DEVICE CHECK: Current local feed count: \(existingFeedCount)")
+                do {
+                    let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
+                    print("🔄 CROSS-DEVICE CHECK: Found \(cloudKitFeeds.count) feeds in CloudKit")
+                    if !cloudKitFeeds.isEmpty {
+                        print("🔄 CROSS-DEVICE CHECK: CloudKit feeds:")
+                        for feed in cloudKitFeeds {
+                            print("🔄 CROSS-DEVICE CHECK: - \(feed.title) (ID: \(feed.id))")
+                        }
+                        print("🔄 CROSS-DEVICE CHECK: Calling mergeCloudKitFeeds to check for new ones...")
+                        await mergeCloudKitFeeds(cloudKitFeeds)
+                    } else {
+                        print("🔄 CROSS-DEVICE CHECK: No feeds found in CloudKit")
+                    }
+                } catch {
+                    print("🔄 CROSS-DEVICE CHECK: Failed to check CloudKit feeds: \(error)")
+                }
+                
+                // Load feeds from Core Data
                 await MainActor.run {
                     self.loadFeedsFromCoreData()
                     
@@ -2878,42 +3286,100 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Merge CloudKit feeds with existing local feeds
+    /// Merge CloudKit feeds with existing local feeds and show cross-device sync banner
     private func mergeCloudKitFeeds(_ cloudKitFeeds: [PodcastFeed]) async {
         let context = CoreDataStack.shared.context
         
-        await withCheckedContinuation { continuation in
+        // First, identify feeds that exist in CloudKit but not locally
+        let (newFeeds, existingFeedsCount) = await withCheckedContinuation { continuation in
             context.perform {
                 do {
                     // Get existing feeds and create comprehensive duplicate check
                     let existingRequest: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
                     let existingFeeds = try context.fetch(existingRequest)
+                    let feedsCount = existingFeeds.count
                     
                     // Create sets for efficient duplicate checking
                     let existingFeedIds = Set(existingFeeds.compactMap { $0.id })
                     let existingFeedUrls = Set(existingFeeds.compactMap { $0.url })
                     let existingFeedTitles = Set(existingFeeds.compactMap { $0.title })
                     
-                    // Add new feeds that don't exist locally (check by ID, URL, and title)
-                    var newFeedsAdded = 0
+                    // Find feeds that don't exist locally
+                    var feedsToAdd: [PodcastFeed] = []
                     for cloudFeed in cloudKitFeeds {
                         let isDuplicateById = existingFeedIds.contains(cloudFeed.id)
                         let isDuplicateByUrl = existingFeedUrls.contains(cloudFeed.url)
                         let isDuplicateByTitle = existingFeedTitles.contains(cloudFeed.title)
                         
+                        print("🔍 MERGE CHECK: CloudKit feed '\(cloudFeed.title)' (ID: \(cloudFeed.id))")
+                        print("🔍 MERGE CHECK: - Duplicate by ID: \(isDuplicateById)")
+                        print("🔍 MERGE CHECK: - Duplicate by URL: \(isDuplicateByUrl)")
+                        print("🔍 MERGE CHECK: - Duplicate by Title: \(isDuplicateByTitle)")
+                        
                         if !isDuplicateById && !isDuplicateByUrl && !isDuplicateByTitle {
-                            let feedModel = FeedModel(context: context)
-                            feedModel.update(from: cloudFeed)
-                            newFeedsAdded += 1
-                            print("📥 Adding new feed from CloudKit: \(cloudFeed.title)")
+                            print("🔍 MERGE CHECK: ✅ This is a NEW feed - adding to list")
+                            feedsToAdd.append(cloudFeed)
                         } else {
-                            print("⚠️ Skipping duplicate feed from CloudKit: \(cloudFeed.title)")
+                            print("🔍 MERGE CHECK: ❌ This feed already exists locally")
+                        }
+                    }
+                    
+                    continuation.resume(returning: (feedsToAdd, feedsCount))
+                } catch {
+                    print("❌ Failed to identify new CloudKit feeds: \(error)")
+                    continuation.resume(returning: ([], 0))
+                }
+            }
+        }
+        
+        // Show cross-device sync banner if there are new feeds to add
+        print("📡 🔄 MERGE CLOUDKIT FEEDS: Processing \(cloudKitFeeds.count) CloudKit feeds vs \(existingFeedsCount) local feeds")
+        print("📡 🔄 MERGE CLOUDKIT FEEDS: Found \(newFeeds.count) new feeds to add")
+        if !newFeeds.isEmpty {
+            print("📡 🔄 CROSS-DEVICE SYNC: Detected \(newFeeds.count) new feeds from CloudKit")
+            for feed in newFeeds {
+                print("📡 🔄 CROSS-DEVICE SYNC: New feed - \(feed.title)")
+            }
+            await MainActor.run {
+                print("📡 🔄 CROSS-DEVICE SYNC: Starting banner for \(newFeeds.count) feeds")
+                DataSyncManager.shared.startCrossDeviceFeedSync(
+                    totalCount: newFeeds.count,
+                    operation: "Syncing \(newFeeds.count) feeds from other devices"
+                )
+            }
+        } else {
+            print("📡 🔄 MERGE CLOUDKIT FEEDS: No new feeds detected - all CloudKit feeds already exist locally")
+        }
+        
+        // Now add the feeds to Core Data with progress tracking
+        await withCheckedContinuation { continuation in
+            context.perform {
+                do {
+                    var newFeedsAdded = 0
+                    
+                    for (index, cloudFeed) in newFeeds.enumerated() {
+                        let feedModel = FeedModel(context: context)
+                        feedModel.update(from: cloudFeed)
+                        newFeedsAdded += 1
+                        print("📥 Adding new feed from CloudKit: \(cloudFeed.title)")
+                        
+                        // Update progress on main thread
+                        Task { @MainActor in
+                            DataSyncManager.shared.updateCrossDeviceFeedSyncProgress(
+                                currentCount: index + 1,
+                                operation: "Added '\(cloudFeed.title)'"
+                            )
                         }
                     }
                     
                     if newFeedsAdded > 0 {
                         try context.save()
                         print("✅ Merged \(newFeedsAdded) new feeds from CloudKit")
+                        
+                        // Complete the sync
+                        Task { @MainActor in
+                            DataSyncManager.shared.completeCrossDeviceFeedSync()
+                        }
                     } else {
                         print("📊 No new feeds to merge from CloudKit (all were duplicates)")
                     }
@@ -2921,6 +3387,9 @@ class PodcastViewModel: ObservableObject {
                     continuation.resume()
                 } catch {
                     print("❌ Failed to merge CloudKit feeds: \(error)")
+                    Task { @MainActor in
+                        DataSyncManager.shared.resetCrossDeviceFeedSync()
+                    }
                     continuation.resume()
                 }
             }
@@ -3087,6 +3556,8 @@ class PodcastViewModel: ObservableObject {
     @MainActor
     func initializeWithCloudKitSupport() {
         print("🚀 Initializing PodcastViewModel with CloudKit support...")
+        print("🚀 INIT: Current podcast feeds count: \(podcastFeeds.count)")
+        print("🚀 INIT: Current feed order count: \(podcastFeedOrder.count)")
         
         // Prevent multiple initializations
         guard !isLoading else {
@@ -3139,13 +3610,9 @@ class PodcastViewModel: ObservableObject {
             } else {
                 print("⚡ Skipping CloudKit episode state sync - loading from local storage only for better performance")
                 
-                // BANNER TEST: Periodically sync a subset of episodes to show CloudKit activity
-                // This ensures users see the banner working even on existing installations
-                let shouldPerformPeriodicSync = await shouldPerformPeriodicCloudKitSync()
-                if shouldPerformPeriodicSync {
-                    print("🔄 Performing periodic CloudKit episode state sync to demonstrate banner...")
-                    await performLightweightCloudKitSync()
-                }
+                // REAL-TIME SYNC FIX: Disabled periodic sync to prevent conflicts with real-time updates
+                // Periodic sync was overriding real-time CloudKit changes and causing sync clearing
+                print("⚡ Skipping periodic CloudKit sync to preserve real-time episode state updates")
                 
                 // Just refresh local episode states from EpisodeStateManager
                 await MainActor.run {
@@ -4803,14 +5270,39 @@ extension PodcastViewModel {
     private func removeDuplicatesFromEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
         guard !episodes.isEmpty else { return [] }
         
+        // Quick check: if all episodes have unique IDs, no deduplication needed
+        let episodeIds = episodes.map { $0.id }
+        let uniqueIds = Set(episodeIds)
+        if episodeIds.count == uniqueIds.count {
+            // No duplicates found, just sync with EpisodeStateManager and return
+            return episodes.map { episode in
+                var episodeWithState = episode
+                let currentProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                let isPlayed = currentProgress >= 0.99
+                
+                episodeWithState.state = EpisodeState(
+                    isPlayed: isPlayed || episode.state.isPlayed || currentProgress >= 1.0,
+                    isFavorite: isFavorite || episode.state.isFavorite,
+                    progress: max(currentProgress, episode.state.progress),
+                    isDownloaded: isDownloaded || episode.state.isDownloaded
+                )
+                return episodeWithState
+            }.sorted { $0.publicationDate > $1.publicationDate }
+        }
+        
         var uniqueEpisodes: [String: PodcastEpisode] = [:]
         var seenIds = Set<String>()
+        var duplicateCount = 0
         
         // Sort episodes by publication date (newest first) to prioritize recent versions
         let sortedEpisodes = episodes.sorted { $0.publicationDate > $1.publicationDate }
         
         for episode in sortedEpisodes {
             if seenIds.contains(episode.id) {
+                duplicateCount += 1
+                
                 // This is a duplicate - merge state data from EpisodeStateManager
                 if var existingEpisode = uniqueEpisodes[episode.id] {
                     // Get the most accurate state from EpisodeStateManager
@@ -4850,8 +5342,6 @@ extension PodcastViewModel {
                         // Keep the existing episode with merged state
                         uniqueEpisodes[episode.id] = existingEpisode
                     }
-                    
-                    print("🔄 DUPLICATE MERGE: Merged duplicate episode '\(episode.title)' - Progress: \(maxProgress), Favorite: \(mergedFavorite), Downloaded: \(mergedDownloaded)")
                 }
             } else {
                 // First occurrence of this episode - sync with EpisodeStateManager
@@ -4878,8 +5368,9 @@ extension PodcastViewModel {
         
         let result = Array(uniqueEpisodes.values).sorted { $0.publicationDate > $1.publicationDate }
         
-        if episodes.count != result.count {
-            print("🧹 DUPLICATE REMOVAL: Removed \(episodes.count - result.count) duplicate episodes (from \(episodes.count) to \(result.count))")
+        // Only log if duplicates were actually found and removed
+        if duplicateCount > 0 {
+            print("🧹 DUPLICATE REMOVAL: Removed \(duplicateCount) duplicate episodes (from \(episodes.count) to \(result.count))")
         }
         
         return result

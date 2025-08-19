@@ -92,7 +92,12 @@ class RadioStationCloudKitManager: ObservableObject {
                 case InstantSyncKeys.bulkStationDeleted:
                     self.handleInstantBulkStationDeletedSync()
                 default:
-                    os_log("📡 RADIO SYNC: Unknown sync key: %@", log: self.log, type: .debug, key)
+                    // Ignore podcast-related instant sync keys (handled by PodcastCloudKitManager)
+                    if key.hasPrefix("instant_podcast_") || key.hasPrefix("StreamRadios_Episode") {
+                        os_log("📡 RADIO SYNC: Ignoring podcast-related key: %@", log: self.log, type: .debug, key)
+                    } else {
+                        os_log("📡 RADIO SYNC: Unknown sync key: %@", log: self.log, type: .debug, key)
+                    }
                 }
             }
         }
