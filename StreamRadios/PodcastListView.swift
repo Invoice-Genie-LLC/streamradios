@@ -136,8 +136,6 @@ struct PodcastListView: View {
                }
                .onChange(of: viewModel.podcastFeeds.count) { _, newCount in
                    // React to ALL feed count changes (including clearing)
-                   print("🎯 UI: Detected feed count change to \(newCount) - refreshing view")
-                   
                    if newCount > 0 {
                        // Cancel monitoring timer since data is now available
                        dataCheckTimer?.invalidate()
@@ -434,19 +432,14 @@ struct PodcastListView: View {
                 .environment(\.editMode, .constant(isEditing ? .active : .inactive))
                 .onReceive(NotificationCenter.default.publisher(for: .podcastAddedForFocus)) { notification in
                     if let podcastId = notification.object as? String {
-                        print("🎯 PodcastListView: Received focus notification for podcast ID: \(podcastId)")
-                        print("🎯 PodcastListView: Current feed order: \(viewModel.podcastFeedOrder)")
-                        print("🎯 PodcastListView: Current feeds count: \(viewModel.podcastFeeds.count)")
                         newlyAddedPodcastId = podcastId
                         
                         // Check if the podcast is already in the list and trigger scroll immediately
                         if viewModel.podcastFeedOrder.contains(podcastId),
                            viewModel.podcastFeeds.contains(where: { $0.id == podcastId }) {
-                            print("🎯 PodcastListView: Podcast already in list - triggering immediate scroll")
                             
                             // Use a longer delay to ensure UI is fully updated
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                print("🎯 PodcastListView: Executing immediate scroll to podcast: \(podcastId)")
                                 
                                 // First, highlight the podcast
                                 highlightedPodcastId = podcastId
@@ -464,27 +457,21 @@ struct PodcastListView: View {
                                 // Clear the newly added podcast ID after scrolling
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                     newlyAddedPodcastId = nil
-                                    print("🎯 PodcastListView: Cleared newlyAddedPodcastId after immediate scroll")
                                 }
                             }
                         } else {
-                            print("🎯 PodcastListView: Podcast not yet in list - will wait for onChange trigger")
                         }
                     }
                 }
                 .onChange(of: viewModel.podcastFeedOrder) { _ in
-                    print("🎯 PodcastListView: podcastFeedOrder changed, count: \(viewModel.podcastFeedOrder.count)")
-                    print("🎯 PodcastListView: newlyAddedPodcastId: \(newlyAddedPodcastId ?? "nil")")
                     
                     // Check if a new podcast was added and scroll to it
                     if let newPodcastId = newlyAddedPodcastId,
                        viewModel.podcastFeedOrder.contains(newPodcastId),
                        viewModel.podcastFeeds.contains(where: { $0.id == newPodcastId }) {
                         
-                        print("🎯 PodcastListView: Found new podcast to scroll to: \(newPodcastId)")
                         
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            print("🎯 PodcastListView: Attempting to scroll to podcast: \(newPodcastId)")
                             
                             // First, highlight the podcast
                             highlightedPodcastId = newPodcastId
@@ -502,14 +489,10 @@ struct PodcastListView: View {
                             // Clear the newly added podcast ID after scrolling
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                 newlyAddedPodcastId = nil
-                                print("🎯 PodcastListView: Cleared newlyAddedPodcastId")
                             }
                         }
                     } else {
                         if let newPodcastId = newlyAddedPodcastId {
-                            print("🎯 PodcastListView: New podcast ID exists but conditions not met:")
-                            print("🎯   - ID in feedOrder: \(viewModel.podcastFeedOrder.contains(newPodcastId))")
-                            print("🎯   - Feed exists: \(viewModel.podcastFeeds.contains(where: { $0.id == newPodcastId }))")
                         }
                     }
                 }
@@ -564,9 +547,10 @@ struct PodcastListView: View {
     
     private func onAppear() {
         os_log("PodcastListView appeared", log: log, type: .info)
-        print("🎯 UI: PodcastListView appeared - using environment object data")
-        print("🎯 UI: Current feeds count: \(viewModel.podcastFeeds.count)")
-        print("🎯 UI: Current feed order count: \(viewModel.podcastFeedOrder.count)")
+        
+        // AUTOMATIC CLOUDKIT SYNC: Trigger sync on view load to check for new feeds and episode updates
+        print("🔄 UI: PodcastListView appeared - triggering automatic CloudKit sync")
+        viewModel.automaticCloudKitSync()
         
         // Set up notification observer for fresh install data (with debouncing)
         NotificationCenter.default.addObserver(
@@ -609,11 +593,9 @@ struct PodcastListView: View {
             
             // Reduce logging frequency to avoid spam
             if checkCount % 5 == 1 {
-                print("🔍 UI: Monitoring fresh install data - Feeds: \(feedCount) (check \(checkCount))")
             }
             
             if feedCount > 0 {
-                print("🎯 UI: Fresh install data detected (\(feedCount) feeds) - refreshing view")
                 DispatchQueue.main.async {
                     self.refreshID = UUID()
                     timer.invalidate()
@@ -770,12 +752,10 @@ struct PodcastListView: View {
            let lastFeedId = viewModel.podcastFeedOrder.last,
            viewModel.podcastFeeds.contains(where: { $0.id == lastFeedId }) {
             
-            print("🎯 Auto-focus: Detected potential new podcast with ID: \(lastFeedId)")
             
             // Set the newly added podcast ID to trigger auto-scroll
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 newlyAddedPodcastId = lastFeedId
-                print("🎯 Auto-focus: Set newlyAddedPodcastId to \(lastFeedId)")
             }
         }
     }
@@ -1169,7 +1149,7 @@ struct EpisodeRowView: View {
                             .frame(height: 3)
                             .background(Color.adaptiveBorder)
                             .cornerRadius(1.5)
-                            .animation(.easeInOut(duration: 0.3), value: currentProgress)
+                            .animation(podcastPlayer.isInitialProgressLoad ? nil : .easeInOut(duration: 0.3), value: currentProgress)
                     }
                     
                     // Compact metadata row (priority-based truncation)
@@ -1816,7 +1796,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         .frame(height: 3)
                         .background(Color.adaptiveBorder)
                         .cornerRadius(1.5)
-                        .animation(.easeInOut(duration: 0.3), value: currentProgress)
+                        .animation(podcastPlayer.isInitialProgressLoad ? nil : .easeInOut(duration: 0.3), value: currentProgress)
                 }
                 
                 // Compact metadata row (priority-based truncation)

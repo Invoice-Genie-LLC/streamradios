@@ -4306,6 +4306,206 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    /// Automatically trigger CloudKit sync for both feeds and episode states
+    /// This should be called when PodcastListView loads to check for new content
+    @MainActor
+    func automaticCloudKitSync() {
+        print("🔄 Automatically triggering CloudKit sync for feeds and episode states...")
+        
+        // Prevent multiple concurrent CloudKit syncs
+        guard !cloudKitSyncInProgress else {
+            print("⚠️ CloudKit sync already in progress, skipping automatic sync")
+            return
+        }
+        
+        Task {
+            await performAutomaticCloudKitCheck()
+        }
+    }
+    
+    /// Perform automatic CloudKit check for new feeds and updated episode states
+    /// This runs silently without triggering progress banners
+    private func performAutomaticCloudKitCheck() async {
+        cloudKitSyncInProgress = true
+        defer { 
+            cloudKitSyncInProgress = false
+            print("🔄 Automatic CloudKit sync completed")
+        }
+        
+        print("🔄 AUTO SYNC: Silently checking CloudKit for new feeds and episode updates...")
+        
+        do {
+            // STEP 1: Check for new feeds from other devices (SILENT)
+            print("🔄 AUTO SYNC: Checking for new feeds from CloudKit...")
+            let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
+            
+            if !cloudKitFeeds.isEmpty {
+                print("🔄 AUTO SYNC: Found \(cloudKitFeeds.count) feeds in CloudKit")
+                // Merge any new feeds that aren't already local (SILENT - no banner)
+                await mergeCloudKitFeedsSilently(cloudKitFeeds)
+            } else {
+                print("🔄 AUTO SYNC: No feeds found in CloudKit")
+            }
+            
+            // STEP 2: Check if episode states need syncing (SILENT)
+            let hasEpisodeStatesSynced = UserDefaults.standard.bool(forKey: "HasEpisodeStatesSynced")
+            let timeSinceLastSync = UserDefaults.standard.double(forKey: "LastEpisodeStatesSyncTime")
+            let currentTime = Date().timeIntervalSince1970
+            let oneHourAgo = currentTime - 3600 // 1 hour in seconds
+            
+            // Sync episode states if never synced or if it's been more than 1 hour (SILENT)
+            if !hasEpisodeStatesSynced || timeSinceLastSync < oneHourAgo {
+                print("🔄 AUTO SYNC: Silently syncing episode states from CloudKit...")
+                
+                let syncSuccess = await syncEpisodeStatesFromCloudKitSilently(isFreshInstall: false)
+                if syncSuccess {
+                    // Update last sync time
+                    UserDefaults.standard.set(currentTime, forKey: "LastEpisodeStatesSyncTime")
+                    print("✅ AUTO SYNC: Episode states synced successfully (silent)")
+                } else {
+                    print("⚠️ AUTO SYNC: Episode states sync failed (silent)")
+                }
+            } else {
+                print("⚡ AUTO SYNC: Episode states recently synced, skipping")
+            }
+            
+            // STEP 3: Final UI refresh
+            await MainActor.run {
+                self.throttledUIUpdate()
+                print("🔄 AUTO SYNC: UI refreshed after automatic sync")
+            }
+            
+        } catch {
+            print("❌ AUTO SYNC: CloudKit check failed: \(error)")
+        }
+    }
+    
+    /// Silently merge CloudKit feeds without triggering progress banners
+    /// Used for automatic background sync to avoid disrupting user experience
+    private func mergeCloudKitFeedsSilently(_ cloudKitFeeds: [PodcastFeed]) async {
+        print("🔄 SILENT MERGE: Processing \(cloudKitFeeds.count) CloudKit feeds without banners")
+        
+        // Identify which feeds are actually new
+        let (newFeeds, existingFeedsCount) = await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.newBackgroundContext()
+            context.perform {
+                do {
+                    let existingFeeds = try context.fetch(FeedModel.fetchRequest())
+                    let existingFeedIds = Set(existingFeeds.compactMap { $0.id })
+                    let existingFeedUrls = Set(existingFeeds.compactMap { $0.url })
+                    let existingFeedTitles = Set(existingFeeds.compactMap { $0.title })
+                    
+                    var feedsToAdd: [PodcastFeed] = []
+                    for cloudFeed in cloudKitFeeds {
+                        let isDuplicateById = existingFeedIds.contains(cloudFeed.id)
+                        let isDuplicateByUrl = existingFeedUrls.contains(cloudFeed.url)
+                        let isDuplicateByTitle = existingFeedTitles.contains(cloudFeed.title)
+                        
+                        if !isDuplicateById && !isDuplicateByUrl && !isDuplicateByTitle {
+                            print("🔄 SILENT MERGE: Found new feed - \(cloudFeed.title)")
+                            feedsToAdd.append(cloudFeed)
+                        }
+                    }
+                    
+                    continuation.resume(returning: (feedsToAdd, existingFeeds.count))
+                } catch {
+                    print("❌ SILENT MERGE: Failed to identify new feeds: \(error)")
+                    continuation.resume(returning: ([], 0))
+                }
+            }
+        }
+        
+        if !newFeeds.isEmpty {
+            print("🔄 SILENT MERGE: Adding \(newFeeds.count) new feeds to Core Data")
+            
+            // Add feeds to Core Data silently
+            await withCheckedContinuation { continuation in
+                let context = CoreDataStack.shared.newBackgroundContext()
+                context.perform {
+                    do {
+                        for cloudFeed in newFeeds {
+                            let feedModel = FeedModel(context: context)
+                            feedModel.update(from: cloudFeed)
+                            print("📥 SILENT MERGE: Added feed - \(cloudFeed.title)")
+                        }
+                        
+                        try context.save()
+                        print("✅ SILENT MERGE: Successfully added \(newFeeds.count) feeds")
+                        continuation.resume()
+                    } catch {
+                        print("❌ SILENT MERGE: Failed to save feeds: \(error)")
+                        continuation.resume()
+                    }
+                }
+            }
+            
+            // Update UI with new feeds
+            await MainActor.run {
+                self.loadFeedsFromCoreData()
+                self.throttledUIUpdate()
+                print("🔄 SILENT MERGE: UI updated with new feeds")
+            }
+        } else {
+            print("🔄 SILENT MERGE: No new feeds to add")
+        }
+    }
+    
+    /// Silently sync episode states from CloudKit without triggering progress banners
+    /// Used for automatic background sync to avoid disrupting user experience
+    private func syncEpisodeStatesFromCloudKitSilently(isFreshInstall: Bool) async -> Bool {
+        print("🔄 SILENT EPISODE SYNC: Starting silent episode state sync")
+        
+        do {
+            // Get all episode IDs for syncing (without triggering banner)
+            let allEpisodeIds = await getAllEpisodeIdsFromCoreData()
+            
+            if allEpisodeIds.isEmpty {
+                print("🔄 SILENT EPISODE SYNC: No episodes found to sync")
+                return true
+            }
+            
+            print("🔄 SILENT EPISODE SYNC: Syncing \(allEpisodeIds.count) episodes silently")
+            
+            // Perform the actual CloudKit sync without DataSyncManager calls
+            let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+                for: allEpisodeIds,
+                isFreshInstall: isFreshInstall
+            )
+            
+            let coreDataUpdates = syncResult.updates
+            let syncSuccess = syncResult.success
+            
+            if syncSuccess {
+                print("✅ SILENT EPISODE SYNC: Successfully synced episode states")
+                
+                // Save updates to Core Data if there are any
+                if !coreDataUpdates.isEmpty {
+                    do {
+                        try await episodeManager.updateEpisodeStates(coreDataUpdates)
+                        print("💾 SILENT EPISODE SYNC: Saved \(coreDataUpdates.count) episode states to Core Data")
+                    } catch {
+                        print("❌ SILENT EPISODE SYNC: Failed to save episode states: \(error)")
+                    }
+                }
+                
+                // Refresh episode states silently
+                await MainActor.run {
+                    self.refreshEpisodeStatesFromManager()
+                    print("🔄 SILENT EPISODE SYNC: Episode states refreshed")
+                }
+                
+                return true
+            } else {
+                print("⚠️ SILENT EPISODE SYNC: Episode state sync failed")
+                return false
+            }
+            
+        } catch {
+            print("❌ SILENT EPISODE SYNC: Error during sync: \(error)")
+            return false
+        }
+    }
+    
     /// Check if we should perform a periodic CloudKit sync to demonstrate banner functionality
     private func shouldPerformPeriodicCloudKitSync() async -> Bool {
         // Perform a lightweight sync every 5 app launches to demonstrate the banner
