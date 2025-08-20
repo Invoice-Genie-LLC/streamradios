@@ -7,6 +7,7 @@
 
 import AVFoundation
 import Combine
+import CoreData
 import MediaPlayer
 import os
 import Reachability
@@ -392,6 +393,17 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 let progress = duration > 0 ? currentTime / duration : 0
                 stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: reason, feedId: currentEpisode.feedId)
                 print("📡 ⚡ REAL-TIME APP LIFECYCLE SYNC: Triggered for \(reason)")
+                
+                // DIAGNOSTIC: Let's see what happens when app is backgrounded
+                if reason == "app_background" {
+                    print("🔍 BACKGROUND DIAGNOSTIC - Episode: \(currentEpisode.title)")
+                    print("🔍 BACKGROUND DIAGNOSTIC - Progress being saved: \(progress)")
+                    print("🔍 BACKGROUND DIAGNOSTIC - Current time: \(currentTime), Duration: \(duration)")
+                    
+                    // Check if CoreData is updated immediately
+                    let immediateProgress = loadProgressFromCoreData(episodeId: currentEpisode.id)
+                    print("🔍 BACKGROUND DIAGNOSTIC - CoreData immediate read: \(immediateProgress)")
+                }
             }
             
             // Ensure progress is saved when app is force closed or goes to background
@@ -855,10 +867,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             os_log("Rewound and playing episode: %@", log: log, type: .info, episode.title)
         } else {
-            // Different episode - load it and start from beginning
+            // Different episode - but this was called from rewindAndPlay, so the user wants to restart this episode too
+            // Force start from beginning since rewindAndPlay was explicitly called
             shouldStartFromBeginning = true
-            playEpisode(episode, feed: feed)
-            os_log("Loaded new episode and playing from beginning: %@", log: log, type: .info, episode.title)
+            if let currentFeed = currentFeed {
+                playEpisode(episode, feed: currentFeed)
+                os_log("Loaded different episode with rewind - starting from beginning: %@", log: log, type: .info, episode.title)
+            } else {
+                os_log("❌ No current feed available for rewindAndPlay", log: log, type: .error)
+            }
         }
         
         isPlaying = true
@@ -886,7 +903,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 updatedEpisode.state.progress = progress
                 
                 // Save to CloudKit when user navigates away
-                saveProgressToCloudKit(for: currentEpisode, progress: progress, reason: "user navigated away from episode")
+                saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user navigated away from episode")
                 
                 // Preserve existing "finished" status - only mark as finished if progress >= 0.99
                 // but don't unmark episodes that were already marked as finished
@@ -929,6 +946,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
+        os_log("🔍 ===== PLAY EPISODE CALLED ===== Episode: %@ (ID: %@)", log: log, type: .info, episode.title, episode.id)
+        print("🔍 ===== PLAY EPISODE CALLED ===== Episode: \(episode.title) (ID: \(episode.id))")
+        
+        // Debug: Load episode progress from Core Data (primary storage)
+        print("🔍 APP STARTUP DIAGNOSTIC - playEpisode called for: \(episode.title)")
+        print("🔍 APP STARTUP DIAGNOSTIC - Episode ID: \(episode.id)")
+        print("🔍 APP STARTUP DIAGNOSTIC - shouldStartFromBeginning: \(shouldStartFromBeginning)")
+        
         // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps play
         loadingEpisodeId = episode.id
         connectionState = .loading
@@ -983,24 +1008,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Initialize time and duration for the new episode
         duration = episode.duration
         
-        // CRITICAL FIX: Initialize progress immediately to match what the progress bar shows
-        // This prevents the episode from starting at 0% when the UI shows different progress
-        let episodeStateProgress = episode.state.progress
-        let stateManagerProgress = stateManager.getProgress(for: episode.id)
-        
-        // Use the highest progress value (most recent) to match the progress bar
-        // Note: viewModel.episodeProgress requires main actor access, so we'll rely on stateManager and episode state
-        let initialProgress = max(episodeStateProgress, stateManagerProgress)
-        
-        if initialProgress > 0 && initialProgress < 1.0 {
-            currentProgress = initialProgress
-            currentTime = initialProgress * duration
-            os_log("🔍 IMMEDIATE: Set initial progress to %.2f%% (%.1f seconds) for episode: %@", 
-                   log: log, type: .info, initialProgress * 100, currentTime, episode.title)
-        } else {
-            currentProgress = 0
-            currentTime = 0
-        }
+        // Initialize progress to 0 - will be set correctly in the UserDefaults loading section below
+        currentProgress = 0
+        currentTime = 0
         
         // Reset position restoration flag for the new episode
         hasRestoredPositionForCurrentEpisode = false
@@ -1085,21 +1095,65 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("Failed to find index for current episode", log: log, type: .error)
         }
         
-        // Initialize progress from saved state, but only for episodes that have been played before
+        // Initialize progress from Core Data first (primary source), then sync with CloudKit in background
+        os_log("🔍 EPISODE DEBUG - shouldStartFromBeginning flag: %@", log: log, type: .info, shouldStartFromBeginning ? "true" : "false")
         if !shouldStartFromBeginning {
-            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
-            let savedProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
+            // CRITICAL FIX: Load progress ONLY from Core Data, completely bypassing EpisodeStateManager
+            // This eliminates all race conditions during app startup
+            os_log("🔍 PROGRESS DEBUG - Episode: %@", log: log, type: .info, episode.title)
+            print("🔍 STARTUP FIX - Loading progress directly from Core Data, bypassing EpisodeStateManager")
             
-            // Only restore progress if the episode is not new (has been played before)
-            if episodeState != .new && savedProgress > 0 {
-                currentProgress = savedProgress
-                os_log("🎯 Preserving existing progress: %.2f%% for episode: %@ (state: %@)", log: log, type: .info, savedProgress * 100, episode.title, episodeState.rawValue)
+            // STEP 1: Load progress ONLY from Core Data (authoritative source)
+            let coreDataProgress = loadProgressFromCoreData(episodeId: episode.id)
+            os_log("🔍 PROGRESS DEBUG - Core Data Progress (ONLY SOURCE): %.4f", log: log, type: .info, coreDataProgress)
+            print("🔍 PROGRESS DEBUG - Core Data Progress (ONLY SOURCE): \(coreDataProgress)")
+            
+            // STEP 2: Use Core Data progress as the ONLY source of truth
+            let primaryProgress = coreDataProgress
+            os_log("🔍 PROGRESS DEBUG - Primary Progress (final): %.4f", log: log, type: .info, primaryProgress)
+            
+            // STEP 3: Sync EpisodeStateManager in background (non-blocking)
+            if coreDataProgress > 0 {
+                Task.detached(priority: .utility) { 
+                    EpisodeStateManager.shared.setProgressSilently(for: episode.id, progress: coreDataProgress)
+                    print("🔄 BACKGROUND SYNC - Updated EpisodeStateManager with Core Data progress: \(coreDataProgress)")
+                }
+            }
+            
+            // STEP 4: Start CloudKit sync in background to keep data in sync (non-blocking)
+            Task {
+                await syncWithCloudKitInBackground(for: episode.id, currentProgress: primaryProgress)
+            }
+            
+            // CORE DATA PRIORITY: Use Core Data progress if available, as it's the authoritative source
+            // This ensures we respect the Core Data progress which contains the most reliable data
+            if primaryProgress > 0 {
+                currentProgress = primaryProgress
+                currentTime = primaryProgress * duration
+                os_log("🎯 ✅ PROGRESS LOADED - Setting currentProgress to: %.4f (%.1f seconds) for episode: %@", log: log, type: .info, currentProgress, currentTime, episode.title)
+                print("🎯 ✅ PROGRESS LOADED - Setting currentProgress to: \(currentProgress) (\(currentTime) seconds) for episode: \(episode.title)")
+                
+                // Visual feedback: Show alert for testing
+                DispatchQueue.main.async { [self] in
+                    // This will show as a banner/notification that progress was loaded
+                    print("VISUAL: Progress \(Int(currentProgress * 100))% loaded from Core Data for: \(episode.title)")
+                }
             } else {
                 currentProgress = 0
+                currentTime = 0
+                os_log("🎯 ⚠️ PROGRESS RESET - Setting currentProgress to 0 for episode: %@ (Core Data: %.4f)", log: log, type: .info, episode.title, primaryProgress)
+                print("🎯 ⚠️ PROGRESS RESET - Setting currentProgress to 0 for episode: \(episode.title) - Core Data: \(primaryProgress)")
+                
+                // Visual feedback: Show alert for testing
+                DispatchQueue.main.async {
+                    print("VISUAL: Progress RESET to 0% for: \(episode.title) - Check Core Data!")
+                }
             }
         } else {
             // Only reset to 0 if explicitly starting from beginning
             currentProgress = 0
+            currentTime = 0
+            os_log("🎯 ⚠️ FORCED RESET - shouldStartFromBeginning=true - setting currentProgress to 0 for episode: %@", log: log, type: .info, episode.title)
         }
         
         // Set up observers first so we can properly seek when ready
@@ -1201,7 +1255,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 self.stateManager.completeEpisode(episodeId: currentEpisode.id)
                 
                 // Save to CloudKit when episode completes
-                self.saveProgressToCloudKit(for: currentEpisode, progress: 1.0, reason: "episode completed")
+                self.saveProgressWithCoreDataPriority(for: currentEpisode, progress: 1.0, reason: "episode completed")
                 
                 // Mark episode as completed (deprecated method for compatibility)
                 self.viewModel?.markEpisodeAsCompleted(currentEpisode)
@@ -1267,22 +1321,30 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // CRITICAL FIX: Prevent seeking if audio is already playing and we're close to the expected position
         // This prevents the "first sentence repeats twice" issue after sync
-        if isPlaying && currentTime > 0 {
+        // BUT: Only check this for already-playing episodes, NOT during app startup
+        let actualPlayerTime = player?.currentTime().seconds ?? 0
+        let isAppStartup = !isPlaying && (currentEpisodeIdForRestoration != currentEpisode.id)
+        
+        if isPlaying && currentTime > 0 && !isAppStartup {
             let expectedProgress = max(
                 stateManager.getProgress(for: currentEpisode.id),
                 currentEpisode.state.progress
             )
             let expectedTime = expectedProgress * duration
-            let timeDifference = abs(currentTime - expectedTime)
+            let timeDifference = abs(actualPlayerTime - expectedTime)  // Use actual player time, not currentTime variable
+            
+            print("🔍 SEEK CHECK - Playing: \(isPlaying), CurrentTime: \(currentTime), PlayerTime: \(actualPlayerTime), Expected: \(expectedTime), Diff: \(timeDifference)")
             
             // If we're within 3 seconds of the expected position and audio is playing, don't seek
             if timeDifference <= 3.0 {
                 os_log("🔍 ⚡ SKIP SEEK: Already playing at correct position (%.1fs vs expected %.1fs) - preventing repetition", 
-                       log: log, type: .info, currentTime, expectedTime)
+                       log: log, type: .info, actualPlayerTime, expectedTime)
                 hasRestoredPositionForCurrentEpisode = true
                 currentEpisodeIdForRestoration = currentEpisode.id
                 return
             }
+        } else if isAppStartup {
+            print("🔍 ⚡ APP STARTUP: Forcing seek operation to restore progress (bypassing skip-seek logic)")
         }
         
         // If this is a replay action, always start from the beginning
@@ -1299,10 +1361,59 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return
         }
         
-        // CRITICAL: Check if this is a new episode - if so, always start from beginning
-        let episodeState = EpisodeStateManager.shared.getState(for: currentEpisode.id)
+        // CORE DATA PRIORITY: Don't override progress based on EpisodeStateManager state
+        // The currentProgress was already set from Core Data in playEpisode() method
+        // We respect that as the authoritative source
         
-        if episodeState == .new {
+        // ENHANCEMENT: Check for latest progress from other devices before resuming
+        // But only if we're not already playing to prevent interrupting playback
+        if !isPlaying {
+            await checkForLatestCrossDeviceProgress(for: currentEpisode.id)
+        }
+        
+        // CORE DATA PRIORITY: Use the progress already loaded from Core Data in playEpisode
+        // This ensures consistency with our Core Data priority approach
+        let savedProgress: Double = currentProgress
+        let progressSource = "Core Data (from playEpisode)"
+        
+        os_log("🔍 SEEK DEBUG - Episode: %@", log: log, type: .info, currentEpisode.title)
+        os_log("🔍 SEEK DEBUG - currentProgress from playEpisode: %.4f", log: log, type: .info, currentProgress)
+        os_log("🔍 SEEK DEBUG - savedProgress: %.4f", log: log, type: .info, savedProgress)
+        os_log("🔍 SEEK DEBUG - duration: %.4f", log: log, type: .info, duration)
+        
+        // Use the Core Data progress already loaded in playEpisode method
+        if savedProgress > 0 && duration > 0 {
+            let targetTime = savedProgress * duration
+            
+            os_log("🔍 SEEK DEBUG - Will seek to targetTime: %.4f seconds (%.4f progress)", log: log, type: .info, targetTime, savedProgress)
+            
+            await MainActor.run {
+                currentTime = targetTime
+                currentProgress = savedProgress
+                os_log("🔍 SEEK DEBUG - Set currentTime: %.4f, currentProgress: %.4f", log: self.log, type: .info, currentTime, currentProgress)
+            }
+            
+            // Seek to the Core Data progress position
+            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
+                if completed {
+                    DispatchQueue.main.async {
+                        self?.currentTime = targetTime
+                        self?.currentProgress = savedProgress
+                        self?.updatePlaybackInfo()
+                        self?.updateNowPlayingInfo()
+                        self?.hasRestoredPositionForCurrentEpisode = true
+                        self?.currentEpisodeIdForRestoration = currentEpisode.id
+                        os_log("🔍 ✅ SEEK DEBUG - RESTORED Core Data position to %.4f seconds (%.4f progress)", log: self?.log ?? OSLog.default, type: .info, targetTime, savedProgress)
+                    }
+                } else {
+                    os_log("🔍 ❌ SEEK DEBUG - Seek failed", log: self?.log ?? OSLog.default, type: .error)
+                }
+            }
+            return
+        }
+        else {
+            // No progress found - start from beginning
+            os_log("🔍 SEEK DEBUG - No progress (%.4f) or no duration (%.4f) - starting from beginning", log: log, type: .info, savedProgress, duration)
             await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             await MainActor.run {
                 currentTime = 0
@@ -1311,134 +1422,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 currentEpisodeIdForRestoration = currentEpisode.id
             }
             updateNowPlayingInfo()
-            return
-        }
-        
-        // ENHANCEMENT: Check for latest progress from other devices before resuming
-        // But only if we're not already playing to prevent interrupting playback
-        if !isPlaying {
-            await checkForLatestCrossDeviceProgress(for: currentEpisode.id)
-        }
-        
-        // Try to get saved progress from multiple sources for better reliability
-        var savedProgress: Double = 0.0
-        var progressSource = "none"
-        
-        // 1. Check EpisodeStateManager first (most up-to-date from episode switches and cross-device sync)
-        let stateManagerProgress = stateManager.getProgress(for: currentEpisode.id)
-        let stateManagerCurrentTime = stateManager.getCurrentTime(for: currentEpisode.id)
-        
-        // 2. Check episode state directly
-        let episodeStateProgress = currentEpisode.state.progress
-        
-        // Note: viewModel.episodeProgress requires main actor access, so we'll use async access if needed
-        var viewModelProgress: Double = 0.0
-        if let viewModel = self.viewModel {
-            // Use Task to safely access main actor properties
-            viewModelProgress = await MainActor.run {
-                return viewModel.episodeProgress[currentEpisode.id] ?? 0.0
-            }
-        }
-        
-        os_log("🔍 Progress sources - StateManager: %.3f, ViewModel: %.3f, EpisodeState: %.3f", 
-               log: log, type: .info, stateManagerProgress, viewModelProgress, episodeStateProgress)
-        
-        // PRIORITIZE CURRENT TIME OVER PROGRESS for accuracy
-        if stateManagerCurrentTime > 0 && duration > 0 {
-            let targetTime = stateManagerCurrentTime
-            let targetProgress = targetTime / duration
-            
-            await MainActor.run {
-                currentTime = targetTime
-                currentProgress = targetProgress
-            }
-            
-            // Seek to the exact saved time
-            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
-                if completed {
-                    DispatchQueue.main.async {
-                        self?.currentTime = targetTime
-                        self?.currentProgress = targetProgress
-                        self?.updatePlaybackInfo()
-                        self?.updateNowPlayingInfo()
-                        self?.hasRestoredPositionForCurrentEpisode = true
-                        self?.currentEpisodeIdForRestoration = currentEpisode.id
-                        os_log("🔍 ✅ RESTORED position to %.1f seconds (%.2f%%)", log: self?.log ?? OSLog.default, type: .info, targetTime, targetProgress * 100)
-                    }
-                }
-            }
-            return
-        }
-        else {
-            // CRITICAL FIX: Use the highest progress value (most recent) to match what the progress bar shows
-            // This ensures playback starts where the progress bar indicates
-            let maxProgress = max(stateManagerProgress, viewModelProgress, episodeStateProgress)
-            
-            if maxProgress > 0 {
-                savedProgress = maxProgress
-                
-                // Determine the source for logging
-                if maxProgress == viewModelProgress && viewModelProgress > 0 {
-                    progressSource = "viewModel"
-                } else if maxProgress == stateManagerProgress && stateManagerProgress > 0 {
-                    progressSource = "stateManager"
-                } else if maxProgress == episodeStateProgress && episodeStateProgress > 0 {
-                    progressSource = "episodeState"
-                }
-                
-                os_log("🔍 Using progress from %@ source: %.3f", log: log, type: .info, progressSource, savedProgress)
-            }
-        }
-        
-        if savedProgress > 0 && savedProgress < 1.0 {
-            let targetTime = savedProgress * duration
-            
-            // Update currentTime immediately BEFORE seeking to fix progress bar
-            await MainActor.run {
-                currentTime = targetTime
-                currentProgress = savedProgress
-            }
-            
-            os_log("🔍 SEEKING to %.1f seconds (%.2f%%) from %@ source", log: log, type: .info, targetTime, savedProgress * 100, progressSource)
-            
-            // Seek to the saved position
-            player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
-                if completed {
-                    DispatchQueue.main.async {
-                        // Ensure the time is correctly set after seeking
-                        self?.currentTime = targetTime
-                        self?.currentProgress = savedProgress
-                        self?.updatePlaybackInfo()
-                        // Update Now Playing info with correct elapsed time
-                        self?.updateNowPlayingInfo()
-                        self?.hasRestoredPositionForCurrentEpisode = true
-                        self?.currentEpisodeIdForRestoration = currentEpisode.id
-                        os_log("🔍 ✅ RESTORED position to %.1f seconds (%.2f%%)", log: self?.log ?? OSLog.default, type: .info, targetTime, savedProgress * 100)
-                    }
-                } else {
-                    // Even if seeking fails, update Now Playing info
-                    DispatchQueue.main.async {
-                        self?.updateNowPlayingInfo()
-                        self?.hasRestoredPositionForCurrentEpisode = true
-                        self?.currentEpisodeIdForRestoration = currentEpisode.id
-                    }
-                }
-            }
-        } else {
-            // Don't reset progress if it was already set from playEpisode - only reset if truly no progress exists
-            if currentProgress == 0 && currentTime == 0 {
-                await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-                await MainActor.run {
-                    currentTime = 0
-                    currentProgress = 0
-                }
-            }
-            // Update Now Playing info immediately
-            updateNowPlayingInfo()
-            
-            // Mark restoration as complete even if no seeking was needed
-            hasRestoredPositionForCurrentEpisode = true
-            currentEpisodeIdForRestoration = currentEpisode.id
+            os_log("🔍 SEEK DEBUG - Set to beginning: currentTime=0, currentProgress=0", log: log, type: .info)
         }
     }
     
@@ -1547,7 +1531,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         saveProgressIfNeeded()
         
         // Save to CloudKit when user pauses
-        saveProgressToCloudKit(for: currentEpisode, progress: progress, reason: "user paused episode")
+        saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user paused episode")
         
         // Update StateManager with current progress when pausing
         let actualCurrentTime = player.currentTime().seconds
@@ -1602,7 +1586,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             
             // Save progress when stopping
             saveProgressIfNeeded()
-            saveProgressToCloudKit(for: currentEpisode, progress: progress, reason: "user stopped episode")
+            saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user stopped episode")
             
             // Update StateManager
             let actualCurrentTime = player.currentTime().seconds
@@ -1816,6 +1800,205 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
+    /// Save progress with Core Data priority: Core Data first, then CloudKit
+    private func saveProgressWithCoreDataPriority(for episode: PodcastEpisode, progress: Double, reason: String) {
+        os_log("💾 Saving episode progress (Core Data priority) due to: %@ - Episode: %@, Progress: %.2f", 
+               log: log, type: .info, reason, episode.title, progress)
+        
+        // STEP 1: Save to Core Data immediately (synchronous for reliability)
+        saveProgressToCoreDataSync(episodeId: episode.id, progress: progress)
+        
+        // STEP 2: Update EpisodeStateManager to stay in sync
+        EpisodeStateManager.shared.updateProgress(for: episode.id, progress: progress, isPlaying: isPlaying, currentTime: currentTime)
+        
+        // STEP 3: Save to CloudKit as backup/sync (asynchronous)
+        saveProgressToCloudKit(for: episode, progress: progress, reason: reason)
+    }
+    
+    /// Save progress directly to Core Data for immediate persistence
+    private func saveProgressToCoreDataSync(episodeId: String, progress: Double) {
+        os_log("💾 Saving episode progress to Core Data - Episode: %@, Progress: %.2f",
+               log: log, type: .info, episodeId, progress)
+        
+        let context = CoreDataStack.shared.context
+        context.performAndWait {
+            do {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.fetchLimit = 1
+                
+                if let episode = try context.fetch(fetchRequest).first {
+                    episode.progress = progress
+                    episode.isPlayed = progress >= 0.99
+                    try context.save()
+                    
+                    os_log("✅ Saved progress to Core Data: %@ - %.2f%%", 
+                           log: log, type: .info, episodeId, progress * 100)
+                } else {
+                    os_log("⚠️ Episode not found in Core Data: %@", log: log, type: .default, episodeId)
+                }
+            } catch {
+                os_log("❌ Failed to save progress to Core Data: %@", log: log, type: .default, error.localizedDescription)
+            }
+        }
+    }
+    
+    /// Load progress from Core Data (primary source of truth) - SYNCHRONOUS
+    private func loadProgressFromCoreData(episodeId: String) -> Double {
+        print("🔍 DIAGNOSTIC - loadProgressFromCoreData called for episode: \(episodeId)")
+        
+        let context = CoreDataStack.shared.context
+        var progress: Double = 0.0
+        var episodeFound = false
+        var fetchCount = 0
+        
+        // CRITICAL FIX: Use performAndWait to ensure synchronous execution
+        // This prevents race conditions during app startup
+        context.performAndWait {
+            do {
+                print("🔍 DIAGNOSTIC - About to perform Core Data fetch for episode: \(episodeId)")
+                
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.fetchLimit = 1
+                
+                let episodes = try context.fetch(fetchRequest)
+                fetchCount = episodes.count
+                
+                if let episode = episodes.first {
+                    episodeFound = true
+                    progress = episode.progress
+                    print("📱 Core Data SYNC LOAD SUCCESS - Episode: \(episodeId), Progress: \(progress), Title: \(episode.title ?? "Unknown")")
+                    os_log("📱 Core Data synchronous load SUCCESS: Episode %@ has progress %.4f", 
+                           log: log, type: .info, episodeId, progress)
+                } else {
+                    print("📱 Core Data SYNC LOAD NOT FOUND - Episode: \(episodeId), Fetch count: \(fetchCount)")
+                    os_log("📱 Core Data synchronous load: Episode %@ not found in database", 
+                           log: log, type: .info, episodeId)
+                    
+                    // DIAGNOSTIC: Let's also try to see how many episodes total we have
+                    let allEpisodesRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    let allEpisodes = try context.fetch(allEpisodesRequest)
+                    print("🔍 DIAGNOSTIC - Total episodes in Core Data: \(allEpisodes.count)")
+                    
+                    // DIAGNOSTIC: Let's also check if there are any episodes with progress > 0
+                    let progressRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    progressRequest.predicate = NSPredicate(format: "progress > 0")
+                    let episodesWithProgress = try context.fetch(progressRequest)
+                    print("🔍 DIAGNOSTIC - Episodes with progress > 0: \(episodesWithProgress.count)")
+                    for ep in episodesWithProgress.prefix(3) {
+                        print("🔍 DIAGNOSTIC - Episode with progress: ID=\(ep.id ?? "nil"), Progress=\(ep.progress), Title=\(ep.title ?? "nil")")
+                    }
+                }
+            } catch {
+                print("❌ Core Data SYNC LOAD ERROR - Episode: \(episodeId), Error: \(error)")
+                os_log("❌ Failed to load progress from Core Data for episode %@: %@", 
+                       log: log, type: .error, episodeId, error.localizedDescription)
+            }
+        }
+        
+        print("🔍 DIAGNOSTIC - loadProgressFromCoreData returning: \(progress) for episode: \(episodeId) (found: \(episodeFound), fetchCount: \(fetchCount))")
+        return progress
+    }
+    
+    /// Sync with CloudKit in background while ensuring Core Data stays authoritative
+    private func syncWithCloudKitInBackground(for episodeId: String, currentProgress: Double) async {
+        os_log("🔄 Background CloudKit sync for episode: %@", log: log, type: .info, episodeId)
+        
+        do {
+            // Fetch latest from CloudKit
+            if let cloudState = try await PodcastCloudKitManager.shared.fetchEpisodeStateFromCloudKit(episodeId) {
+                let cloudProgress = cloudState.progress
+                
+                // Compare Core Data (authoritative) vs CloudKit
+                if cloudProgress > currentProgress {
+                    // CloudKit has newer data - update Core Data and EpisodeStateManager
+                    os_log("☁️ CloudKit has newer progress (%.2f%%) vs Core Data (%.2f%%) - updating Core Data", 
+                           log: log, type: .info, cloudProgress * 100, currentProgress * 100)
+                    
+                    // Update Core Data (primary storage)
+                    updateProgressInCoreData(episodeId: episodeId, progress: cloudProgress, isPlayed: cloudState.isPlayed)
+                    
+                    // Update EpisodeStateManager to stay in sync
+                    EpisodeStateManager.shared.setProgressSilently(for: episodeId, progress: cloudProgress)
+                    EpisodeStateManager.shared.setFavoriteSilently(episodeId, isFavorite: cloudState.isFavorite)
+                    EpisodeStateManager.shared.setPlayedSilently(episodeId, isPlayed: cloudState.isPlayed)
+                    
+                    // If this episode is currently playing, update the player progress
+                    await MainActor.run {
+                        if self.currentEpisode?.id == episodeId {
+                            self.currentProgress = cloudProgress
+                            
+                            // Seek to the new position if we haven't restored position yet
+                            if self.hasRestoredPositionForCurrentEpisode == false && self.duration > 0 {
+                                let seekTime = CMTime(seconds: cloudProgress * self.duration, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+                                Task {
+                                    await self.player?.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero)
+                                    await MainActor.run {
+                                        self.currentTime = cloudProgress * self.duration
+                                    }
+                                }
+                            }
+                            
+                            os_log("🎯 Updated playing episode progress to CloudKit value: %.2f%%", 
+                                   log: self.log, type: .info, cloudProgress * 100)
+                        }
+                    }
+                } else if currentProgress > cloudProgress {
+                    // Core Data has newer data - update CloudKit
+                    os_log("📱 Core Data has newer progress (%.2f%%) vs CloudKit (%.2f%%) - updating CloudKit", 
+                           log: log, type: .info, currentProgress * 100, cloudProgress * 100)
+                    
+                    // Update CloudKit to match Core Data
+                    if let currentEpisode = self.currentEpisode, currentEpisode.id == episodeId {
+                        self.saveProgressToCloudKit(for: currentEpisode, progress: currentProgress, reason: "Core Data has newer progress")
+                    }
+                } else {
+                    os_log("✅ Core Data and CloudKit are in sync (%.2f%%) for episode: %@", 
+                           log: log, type: .info, currentProgress * 100, episodeId)
+                }
+            } else {
+                // No CloudKit data - push Core Data to CloudKit if we have progress
+                if currentProgress > 0, let currentEpisode = self.currentEpisode, currentEpisode.id == episodeId {
+                    os_log("📤 No CloudKit data found - pushing Core Data progress to CloudKit: %.2f%%", 
+                           log: log, type: .info, currentProgress * 100)
+                    self.saveProgressToCloudKit(for: currentEpisode, progress: currentProgress, reason: "Initial CloudKit sync from Core Data")
+                }
+            }
+        } catch {
+            // Don't fail if CloudKit is unavailable - Core Data remains authoritative
+            os_log("⚠️ CloudKit sync failed for episode %@: %@ - Core Data remains authoritative", 
+                   log: log, type: .default, episodeId, error.localizedDescription)
+        }
+    }
+    
+    /// Update progress in Core Data synchronously
+    private func updateProgressInCoreData(episodeId: String, progress: Double, isPlayed: Bool) {
+        let context = CoreDataStack.shared.context
+        context.performAndWait {
+            do {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
+                fetchRequest.fetchLimit = 1
+                
+                if let episode = try context.fetch(fetchRequest).first {
+                    episode.progress = progress
+                    episode.isPlayed = isPlayed || progress >= 0.99
+                    try context.save()
+                    
+                    os_log("✅ Updated Core Data with CloudKit progress %.2f%% for episode: %@", 
+                           log: log, type: .info, progress * 100, episodeId)
+                } else {
+                    os_log("⚠️ Episode not found in Core Data for CloudKit sync: %@", log: log, type: .default, episodeId)
+                }
+            } catch {
+                os_log("❌ Failed to update Core Data with CloudKit progress: %@", log: log, type: .default, error.localizedDescription)
+            }
+        }
+    }
+    
+
+    
     private func saveProgressForEpisodeSwitch(_ episode: PodcastEpisode, progress: Double, actualTime: Double? = nil) {
         // Ensure progress is saved immediately when switching episodes
         guard duration > 0 else { return }
@@ -1823,8 +2006,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let timeToSave = actualTime ?? currentTime
         os_log("🔄 Saving progress immediately for episode switch: %@ (%.2f%% | %.1fs)", log: log, type: .info, episode.title, progress * 100, timeToSave)
         
-        // Save to CloudKit when switching episodes
-        saveProgressToCloudKit(for: episode, progress: progress, reason: "user switched to another episode")
+        // Save to Core Data first, then CloudKit when switching episodes
+        saveProgressWithCoreDataPriority(for: episode, progress: progress, reason: "user switched to another episode")
         
         // 1. Update progress in state manager FIRST (highest priority for seeking)
         stateManager.updateProgress(for: episode.id, progress: progress, isPlaying: false, currentTime: timeToSave)
@@ -2271,17 +2454,17 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             os_log("🛑 App force close/background - saving progress for episode: %@ (calculated: %.2f%%, existing: %.2f%%, current: %.2f%% -> final: %.2f%%)", 
                    log: log, type: .info, currentEpisode.title, calculatedProgress * 100, existingProgress * 100, currentProgress * 100, maxProgress * 100)
             
-            // Save to CloudKit when app is force closed
-            saveProgressToCloudKit(for: currentEpisode, progress: maxProgress, reason: "app force closed")
+            // CRITICAL FIX: Use Core Data priority approach for force close
+            // This ensures Core Data is saved first, then CloudKit syncs afterward
+            saveProgressWithCoreDataPriority(for: currentEpisode, progress: maxProgress, reason: "app force closed")
             
             // Save to StateManager with maximum progress (synchronous and reliable)
-            stateManager.updateProgress(for: currentEpisode.id, progress: maxProgress, isPlaying: false, currentTime: finalCurrentTime)
             stateManager.pausePlayback(episodeId: currentEpisode.id, progress: maxProgress)
             
             // Force synchronize UserDefaults immediately
             UserDefaults.standard.synchronize()
             
-            // Update in-memory cache directly without triggering CloudKit saves (avoid complex Core Data operations during termination)
+            // Update in-memory cache directly
             Task { @MainActor in
                 viewModel?.episodeProgress[currentEpisode.id] = maxProgress
             }

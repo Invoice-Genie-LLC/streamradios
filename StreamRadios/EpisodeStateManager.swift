@@ -564,21 +564,24 @@ class EpisodeStateManager: ObservableObject {
     }
     
     /// Load episode states from Core Data (new primary method)
-    /// Thread-safe: Uses background context to prevent concurrent access issues
+    /// CRITICAL FIX: Now synchronous to ensure data is available immediately during app startup
     private func loadFromCoreData() {
-        let context = CoreDataStack.shared.newBackgroundContext()
-        context.perform {
+        let context = CoreDataStack.shared.context
+        
+        var loadedProgress: [String: Double] = [:]
+        var loadedFavorites: [String: Bool] = [:]
+        var loadedDownloads: [String: Bool] = [:]
+        var loadedStates: [String: EpisodePlaybackState] = [:]
+        
+        // CRITICAL: Use performAndWait for synchronous loading during app startup
+        // This ensures episode progress is available immediately when episodes are played
+        context.performAndWait {
             do {
                 // Fetch all episodes that have state data
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 fetchRequest.predicate = NSPredicate(format: "progress > 0 OR isFavorite == YES OR isDownloaded == YES OR isPlayed == YES")
                 
                 let episodes = try context.fetch(fetchRequest)
-                
-                var loadedProgress: [String: Double] = [:]
-                var loadedFavorites: [String: Bool] = [:]
-                var loadedDownloads: [String: Bool] = [:]
-                var loadedStates: [String: EpisodePlaybackState] = [:]
                 
                 for episode in episodes {
                     guard let episodeId = episode.id else { continue }
@@ -611,28 +614,23 @@ class EpisodeStateManager: ObservableObject {
                     }
                 }
                 
-                // Update in-memory dictionaries on main thread
-                DispatchQueue.main.async {
-                    self.episodeProgress = loadedProgress
-                    self.episodeFavorites = loadedFavorites
-                    self.episodeDownloads = loadedDownloads
-                    self.episodeStates = loadedStates
-                    
-                    print("✅ EpisodeStateManager: Loaded from Core Data - Progress: \(loadedProgress.count), Favorites: \(loadedFavorites.count), Downloads: \(loadedDownloads.count), States: \(loadedStates.count)")
-                    
-                    // Fallback: If no Core Data found, try loading from UserDefaults (for migration)
-                    if loadedProgress.isEmpty && loadedFavorites.isEmpty && loadedDownloads.isEmpty {
-                        self.loadFromUserDefaultsAsFallback()
-                    }
-                }
-                
             } catch {
                 print("❌ EpisodeStateManager: Failed to load from Core Data: \(error)")
-                // Fallback to UserDefaults loading
-                DispatchQueue.main.async {
-                    self.loadFromUserDefaultsAsFallback()
-                }
+                // Continue with empty dictionaries for fallback loading
             }
+        }
+        
+        // Update in-memory dictionaries immediately (we're already on main thread during init)
+        self.episodeProgress = loadedProgress
+        self.episodeFavorites = loadedFavorites
+        self.episodeDownloads = loadedDownloads
+        self.episodeStates = loadedStates
+        
+        print("✅ EpisodeStateManager: Loaded from Core Data synchronously - Progress: \(loadedProgress.count), Favorites: \(loadedFavorites.count), Downloads: \(loadedDownloads.count), States: \(loadedStates.count)")
+        
+        // Fallback: If no Core Data found, try loading from UserDefaults (for migration)
+        if loadedProgress.isEmpty && loadedFavorites.isEmpty && loadedDownloads.isEmpty {
+            self.loadFromUserDefaultsAsFallback()
         }
     }
     

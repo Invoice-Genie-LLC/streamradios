@@ -69,6 +69,7 @@
 		77A2F8062C5874360015C398 /* AlarmConfigurationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */; };
 		77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */; };
 		77AAED6A2CE2873C009B2A00 /* EpisodeStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */; };
+
 		77AE62EC2C16063500F02B33 /* PlayerSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */; };
 		77B327A12E27F9D000ABDD89 /* SubscriptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B327A02E27F9D000ABDD89 /* SubscriptionManager.swift */; };
 		77B4E0F12E086FEF0034F886 /* PodcastCoreDataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B4E0EC2E086FEF0034F886 /* PodcastCoreDataManager.swift */; };
@@ -194,6 +195,7 @@
 		77A2F8052C5874360015C398 /* AlarmConfigurationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmConfigurationView.swift; sourceTree = "<group>"; };
 		77A2F8072C587E570015C398 /* AlarmTriggeredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTriggeredView.swift; sourceTree = "<group>"; };
 		77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeStateManager.swift; sourceTree = "<group>"; };
+
 		77AE62EB2C16063500F02B33 /* PlayerSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSheetView.swift; sourceTree = "<group>"; };
 		77B327A02E27F9D000ABDD89 /* SubscriptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionManager.swift; sourceTree = "<group>"; };
 		77B4E0EB2E086FEF0034F886 /* PodcastCloudKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastCloudKitManager.swift; sourceTree = "<group>"; };
@@ -309,6 +311,7 @@
 				77DD9D172C96698000C7BA3C /* NotificationCenterProtocol.swift */,
 				7746A49C2C6D07C10025C215 /* ReachabilityCheck.swift */,
 				77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */,
+
 				7778807B2CAF31320013AA62 /* ScrollOffsetTracker.swift */,
 				778610612E50263D00108721 /* PodcastChaptersNotesView.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
@@ -582,6 +585,7 @@
 				775D04382C28E89300E99061 /* LyricsView.swift in Sources */,
 				7715BD9A2C4CA97300FA7CB1 /* ExportSheet.swift in Sources */,
 				77AAED6A2CE2873C009B2A00 /* EpisodeStateManager.swift in Sources */,
+
 				77B4E0F12E086FEF0034F886 /* PodcastCoreDataManager.swift in Sources */,
 				77B4E0F22E086FEF0034F886 /* PodcastFeedManager.swift in Sources */,
 				77B4E0F32E086FEF0034F886 /* PodcastEpisodeManager.swift in Sources */,
