@@ -2069,6 +2069,10 @@ class PodcastViewModel: ObservableObject {
                 await MainActor.run {
                     self.isLoadingEpisodes = false
                     self.operationInProgress = false
+                    
+                    // CRITICAL FIX: Force UI refresh after pull-to-refresh to ensure view updates
+                    self.throttledUIUpdate()
+                    print("🔄 PULL-TO-REFRESH: UI refreshed to show updated episodes and states")
                 }
                 
             } catch {
@@ -2076,6 +2080,10 @@ class PodcastViewModel: ObservableObject {
                     self.error = "Failed to refresh feed: \(error.localizedDescription)"
                     self.isLoadingEpisodes = false
                     self.operationInProgress = false
+                    
+                    // UI refresh in error case to ensure loading states are cleared
+                    self.throttledUIUpdate()
+                    
                     os_log("❌ Failed to refresh feed: %@", log: self.log, type: .error, error.localizedDescription)
                 }
             }
