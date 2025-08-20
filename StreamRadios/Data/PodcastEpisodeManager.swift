@@ -53,7 +53,30 @@ class PodcastEpisodeManager {
             return cachedResult
         }
         
-        // Load from Core Data
+        // PRIORITIZED LOADING: For large feeds and first page, use optimized approach
+        if page == 1 && filter == .all && searchQuery == nil {
+            // Check if this is a large feed that needs prioritized loading
+            let totalEpisodeCount = try await getTotalEpisodeCount(feedId: feedId)
+            if totalEpisodeCount > 100 {
+                os_log("🚀 PRIORITIZED LOADING: Large feed detected (%d episodes), using fast-load approach", log: log, type: .info, totalEpisodeCount)
+                let result = try await loadWithPrioritizedApproach(
+                    feedId: feedId,
+                    pageSize: pageSize,
+                    filter: filter
+                )
+                
+                // Cache the result for future loads
+                if shouldUseCache {
+                    await cacheManager.cacheEpisodes(result, for: feedId, page: page, filter: filter, searchQuery: searchQuery)
+                }
+                
+                let endTime = CFAbsoluteTimeGetCurrent()
+                os_log("⚡ PRIORITIZED LOAD: %d episodes in %.3f seconds", log: log, type: .info, result.episodes.count, endTime - startTime)
+                return result
+            }
+        }
+        
+        // Load from Core Data using standard approach
         let result = try await loadFromCoreData(
             feedId: feedId,
             page: page,
@@ -68,7 +91,7 @@ class PodcastEpisodeManager {
         }
         
         let endTime = CFAbsoluteTimeGetCurrent()
-        os_log("⚡ Loaded %d episodes in %.3f seconds (filter: %@, cached: %@)", log: log, type: .info, result.episodes.count, filter.displayName, shouldUseCache ? "yes" : "no")
+        os_log("⚡ Loaded %d episodes in %.3f seconds (filter: %@, cached: %@)", log: log, type: .info, result.episodes.count, endTime - startTime, filter.displayName, shouldUseCache ? "yes" : "no")
         
         return result
     }
@@ -81,6 +104,98 @@ class PodcastEpisodeManager {
     /// Clear all cache - useful for debugging
     func clearAllCache() async {
         await cacheManager.clearAllCache()
+    }
+    
+    /// Get total episode count for a feed without loading all episodes
+    private func getTotalEpisodeCount(feedId: String) async throws -> Int {
+        return try await withCheckedThrowingContinuation { continuation in
+            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+            
+            backgroundContext.perform {
+                do {
+                    let countRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    countRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+                    countRequest.includesPropertyValues = false
+                    countRequest.includesSubentities = false
+                    
+                    let count = try backgroundContext.count(for: countRequest)
+                    continuation.resume(returning: count)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Load episodes with prioritized approach for large feeds - shows newest episodes immediately
+    private func loadWithPrioritizedApproach(
+        feedId: String,
+        pageSize: Int,
+        filter: EpisodeFilter
+    ) async throws -> EpisodeLoadResult {
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+            
+            backgroundContext.perform {
+                do {
+                    // PRIORITIZED FETCH: Only fetch the newest episodes first (limited set)
+                    let prioritizedFetchRequest = self.buildPrioritizedFetchRequest(
+                        feedId: feedId,
+                        maxEpisodes: pageSize
+                    )
+                    
+                    // Fetch only the newest episodes
+                    let newestManagedEpisodes = try backgroundContext.fetch(prioritizedFetchRequest)
+                    
+                    // Convert to domain models with EpisodeStateManager sync
+                    let newestEpisodes = self.convertToEpisodes(newestManagedEpisodes)
+                    
+                    // Apply filtering based on EpisodeStateManager (source of truth)
+                    let filteredEpisodes = self.applyStateBasedFiltering(newestEpisodes, filter: filter)
+                    
+                    // For prioritized loading, we show the filtered results immediately
+                    // and indicate there are more episodes available
+                    let result = EpisodeLoadResult(
+                        episodes: filteredEpisodes,
+                        hasMore: true, // Always indicate more episodes for large feeds
+                        totalCount: filteredEpisodes.count // Actual count will be updated later
+                    )
+                    
+                    continuation.resume(returning: result)
+                    
+                } catch {
+                    os_log("❌ Failed to load episodes with prioritized approach: %@", log: self.log, type: .error, error.localizedDescription)
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Build fetch request optimized for prioritized loading - only newest episodes
+    private func buildPrioritizedFetchRequest(
+        feedId: String,
+        maxEpisodes: Int
+    ) -> NSFetchRequest<PodcastModel> {
+        
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        
+        // Only filter by feedId for fastest query
+        fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+        
+        // Sort by publication date (newest first) - this is the key optimization
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+        
+        // CRITICAL: Limit to only the newest episodes for fast loading
+        fetchRequest.fetchLimit = maxEpisodes
+        
+        // Performance optimizations for fast loading
+        fetchRequest.fetchBatchSize = min(maxEpisodes, 50) // Smaller batch for speed
+        fetchRequest.includesPropertyValues = true
+        fetchRequest.returnsObjectsAsFaults = false
+        fetchRequest.relationshipKeyPathsForPrefetching = ["feed"]
+        
+        return fetchRequest
     }
     
     /// Clean up duplicate episodes in Core Data with conservative safety checks

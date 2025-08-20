@@ -1942,7 +1942,7 @@ class PodcastViewModel: ObservableObject {
             // Reduce logging during scrolling for better performance
             if !isUserScrolling {
                 print("🔍 DEBUG: Found \(feed.episodes.count) episodes already loaded in feed: \(feed.title)")
-                print("⚡ Using cached episodes - no network request needed")
+                print("⚡ Using cached episodes - displaying immediately while checking for new episodes")
             }
             
             // Refresh episode states from EpisodeStateManager to ensure they're current
@@ -1986,6 +1986,55 @@ class PodcastViewModel: ObservableObject {
                         print("📊 ⚡ Deduplicated \(filteredEpisodes.count) to \(uniqueFilteredEpisodes.count) episodes before display")
                     }
                     print("📊 ⚡ Using pre-loaded episodes with filter: \(self.currentEpisodes.count) episodes displayed instantly")
+                }
+            }
+            
+            // CRITICAL FIX: Check for new episodes in background even when we have cached episodes
+            // This ensures new episodes are detected on large feeds with existing episodes
+            let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
+            if shouldAutoRefresh {
+                print("🔄 Background RSS refresh needed for feed with \(feed.episodes.count) cached episodes")
+                // Do RSS refresh in background without blocking UI
+                Task.detached(priority: .background) {
+                    do {
+                        print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
+                        let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
+                        
+                        if !newEpisodes.isEmpty {
+                            print("✅ Found \(newEpisodes.count) new episodes - updating Core Data and UI")
+                            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                            
+                            // Update the feed in memory with new episodes on main thread
+                            await MainActor.run {
+                                if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+                                    var updatedFeedWithEpisodes = self.podcastFeeds[feedIndex]
+                                    // Merge existing episodes with new ones, avoiding duplicates
+                                    let existingEpisodeIds = Set(updatedFeedWithEpisodes.episodes.map { $0.id })
+                                    let uniqueNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
+                                    
+                                    // Only update if there are actually new episodes
+                                    if !uniqueNewEpisodes.isEmpty {
+                                        updatedFeedWithEpisodes.episodes.insert(contentsOf: uniqueNewEpisodes, at: 0)
+                                        updatedFeedWithEpisodes.episodes.sort { $0.publicationDate > $1.publicationDate }
+                                        self.podcastFeeds[feedIndex] = updatedFeedWithEpisodes
+                                        
+                                        // Reload the current view to show new episodes immediately
+                                        if self.selectedFeedId == feedId {
+                                            print("📱 Refreshing UI to show \(uniqueNewEpisodes.count) new episodes")
+                                            // Reload episodes to pick up new ones
+                                            Task {
+                                                await self.loadEpisodesForFeed(feedId)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            print("ℹ️ No new episodes found for feed \(feedId)")
+                        }
+                    } catch {
+                        print("❌ Failed to auto-refresh feed \(feedId): \(error)")
+                    }
                 }
             }
             
@@ -2033,7 +2082,8 @@ class PodcastViewModel: ObservableObject {
         
         refreshTask = Task {
             do {
-                os_log("🔄 Refreshing feed from RSS: %@", log: log, type: .info, feedId)
+                os_log("🔄 Manual refresh from RSS: %@", log: log, type: .info, feedId)
+                print("🔄 MANUAL REFRESH: Force refreshing feed regardless of timing")
                 
                 await MainActor.run {
                     // Only show loading if we don't have episodes to prevent UI jump
@@ -2042,9 +2092,14 @@ class PodcastViewModel: ObservableObject {
                     }
                 }
                 
+                // FORCE REFRESH: Update the last refresh time to force RSS check
+                let currentTime = Date().timeIntervalSince1970
+                let lastRefreshKey = "LastRSSRefresh_\(feedId)"
+                UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+                
                 // CRITICAL FIX: Actually refresh from RSS feed to get new episodes
                 let (updatedFeed, newEpisodes) = try await feedManager.refreshFeed(feedId)
-                print("✅ RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
+                print("✅ Manual RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
                 
                 // Update Core Data with new episodes
                 if !newEpisodes.isEmpty {
@@ -2090,6 +2145,30 @@ class PodcastViewModel: ObservableObject {
         }
         
         await refreshTask?.value
+    }
+    
+    /// Force refresh a specific feed ignoring timing restrictions
+    func forceRefreshFeed(_ feedId: String) async {
+        print("🔄 FORCE REFRESH: Refreshing feed \(feedId) regardless of timing")
+        
+        // Reset the last refresh time to force refresh
+        let lastRefreshKey = "LastRSSRefresh_\(feedId)"
+        UserDefaults.standard.set(0, forKey: lastRefreshKey) // Set to 0 to force refresh
+        
+        // Trigger a reload which will now force the RSS refresh
+        await loadEpisodesForFeed(feedId, isInitialLoad: false)
+    }
+    
+    /// Request immediate refresh for a feed (user initiated)
+    func requestFeedRefresh(_ feedId: String) {
+        print("🔄 USER REFRESH REQUEST: Marking feed \(feedId) for immediate refresh")
+        let userRefreshKey = "UserRequestedRefresh_\(feedId)"
+        UserDefaults.standard.set(true, forKey: userRefreshKey)
+        
+        // Trigger immediate reload
+        Task {
+            await loadEpisodesForFeed(feedId, isInitialLoad: true)
+        }
     }
     
     /// Update filter (All, Favorites, Downloads) with efficient reloading
@@ -2627,6 +2706,9 @@ class PodcastViewModel: ObservableObject {
             
             print("🔍 DEBUG: EpisodeManager returned \(result.episodes.count) episodes, hasMore: \(result.hasMore)")
             
+            // Check if this was a prioritized load (first page of large feed)
+            let wasPrioritizedLoad = page == 1 && result.episodes.count < episodesPerPage && result.hasMore
+            
             await MainActor.run {
                 if isAppending {
                     // CRITICAL FIX: Merge and deduplicate when appending
@@ -2657,6 +2739,14 @@ class PodcastViewModel: ObservableObject {
                 self.reportStatusToDataSyncManager()
             }
             
+            // BACKGROUND LOADING: If this was a prioritized load, continue loading more episodes in background
+            if wasPrioritizedLoad && isInitialLoad {
+                print("🚀 BACKGROUND LOADING: Starting background load for remaining episodes")
+                Task.detached(priority: .background) {
+                    await self.continueBackgroundLoading(feedId: feedId, startPage: 2)
+                }
+            }
+            
             // Update episode counts
             if page == 1 && !isAppending {
                 await updateEpisodeCountsForCurrentFeed()
@@ -2674,6 +2764,72 @@ class PodcastViewModel: ObservableObject {
         
         // CRITICAL: Always disable CloudKit priority mode after episode loading (success or failure)
         EpisodeStateManager.shared.disableCloudKitPriorityMode()
+    }
+    
+    /// Continue loading episodes in background after prioritized load completed
+    private func continueBackgroundLoading(feedId: String, startPage: Int) async {
+        print("🔄 BACKGROUND LOADING: Loading remaining episodes for feed \(feedId) starting from page \(startPage)")
+        
+        var currentBackgroundPage = startPage
+        let maxBackgroundPages = 10 // Limit background loading to prevent excessive resource use
+        
+        while currentBackgroundPage <= maxBackgroundPages {
+            // Check if user navigated away or if this feed is no longer selected
+            let isCurrentFeed = await MainActor.run {
+                return self.selectedFeedId == feedId
+            }
+            guard isCurrentFeed else {
+                print("🔄 BACKGROUND LOADING: User navigated away, stopping background load")
+                return
+            }
+            
+            do {
+                // Use standard loading (not prioritized) for background pages
+                let result = try await episodeManager.loadEpisodes(
+                    feedId: feedId,
+                    page: currentBackgroundPage,
+                    pageSize: episodesPerPage,
+                    filter: EpisodeFilter(rawValue: await MainActor.run { self.currentTab }) ?? .all,
+                    searchQuery: await MainActor.run { self.searchQuery.isEmpty ? nil : self.searchQuery }
+                )
+                
+                print("🔄 BACKGROUND LOADING: Page \(currentBackgroundPage) loaded \(result.episodes.count) episodes")
+                
+                // Update UI on main thread if episodes were found
+                if !result.episodes.isEmpty {
+                    await MainActor.run {
+                        // Silently append to currentEpisodes if user is still on the same feed
+                        if self.selectedFeedId == feedId {
+                            let combinedEpisodes = self.currentEpisodes + result.episodes
+                            let uniqueEpisodes = self.removeDuplicatesFromEpisodes(combinedEpisodes)
+                            self.currentEpisodes = uniqueEpisodes
+                            
+                            // Update hasMoreEpisodes based on background loading result
+                            self.hasMoreEpisodes = result.hasMore
+                            
+                            print("🔄 BACKGROUND LOADING: Silently updated to \(self.currentEpisodes.count) total episodes")
+                        }
+                    }
+                }
+                
+                // If no more episodes, stop background loading
+                if !result.hasMore {
+                    print("🔄 BACKGROUND LOADING: No more episodes, stopping background load")
+                    break
+                }
+                
+                currentBackgroundPage += 1
+                
+                // Add a small delay between background loads to not overwhelm the system
+                try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                
+            } catch {
+                print("🔄 BACKGROUND LOADING: Error on page \(currentBackgroundPage): \(error)")
+                break
+            }
+        }
+        
+        print("🔄 BACKGROUND LOADING: Completed for feed \(feedId)")
     }
     
     private func refreshEpisodeStatesFromManager() {
@@ -3899,7 +4055,7 @@ class PodcastViewModel: ObservableObject {
         // Check if feed has episodes in Core Data
         let episodeCount = await getEpisodeCountForFeed(feedId)
         
-        // CRITICAL: Only refresh from RSS if really needed to avoid delays
+        // ENHANCED: Aggressive refresh conditions to ensure new episodes are always detected
         
         // 1. If feed has no episodes at all, definitely refresh
         if episodeCount == 0 {
@@ -3908,26 +4064,65 @@ class PodcastViewModel: ObservableObject {
             return true
         }
         
-        // 2. If it's been more than 4 hours since last refresh, do background refresh
-        if hoursSinceLastRefresh >= 4.0 {
-            print("🔄 Feed \(feedId) needs refresh: \(Int(hoursSinceLastRefresh)) hours since last refresh")
+        // 2. For initial loads, be more aggressive - refresh if it's been 10+ minutes
+        if isInitialLoad && hoursSinceLastRefresh >= 0.17 {
+            print("🔄 Feed \(feedId) needs refresh: \(Int(hoursSinceLastRefresh * 60)) minutes since last refresh (initial load)")
             UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         
-        // 3. If feed has very few episodes (< 3), might need refresh
-        if episodeCount < 3 {
+        // 3. For regular loads, refresh if it's been 15+ minutes since last refresh
+        if !isInitialLoad && hoursSinceLastRefresh >= 0.25 {
+            print("🔄 Feed \(feedId) needs refresh: \(Int(hoursSinceLastRefresh * 60)) minutes since last refresh")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            return true
+        }
+        
+        // 4. If feed has very few episodes (< 10), might need refresh more often
+        if episodeCount < 10 && hoursSinceLastRefresh >= 0.5 {
             print("🔄 Feed \(feedId) needs refresh: only \(episodeCount) episodes available")
             UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         
-        // 4. For initial loads, only refresh if it's been more than 6 hours (reduced frequency)
-        if isInitialLoad && hoursSinceLastRefresh >= 6.0 {
-            print("🔄 Feed \(feedId) needs refresh on initial load: \(Int(hoursSinceLastRefresh)) hours since last refresh")
+        // 5. For large feeds, still check periodically but more frequently
+        if episodeCount >= 100 && hoursSinceLastRefresh >= 1.0 {
+            print("🔄 Feed \(feedId) needs refresh: large feed (\(episodeCount) episodes), \(Int(hoursSinceLastRefresh * 60)) minutes since last refresh")
             UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
+        
+        // 6. If this is the first time loading this feed (never refreshed), refresh it
+        if lastRefreshTime == 0 {
+            print("🔄 Feed \(feedId) needs refresh: never been refreshed before")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            return true
+        }
+        
+        // 7. Force refresh if user actively switched to this feed and it's been 10+ minutes
+        let lastViewKey = "LastFeedView_\(feedId)"
+        let lastViewTime = UserDefaults.standard.double(forKey: lastViewKey)
+        let timeSinceLastView = (currentTime - lastViewTime) / 60 // in minutes
+        
+        if timeSinceLastView >= 10 && hoursSinceLastRefresh >= 0.17 {
+            print("🔄 Feed \(feedId) needs refresh: user returned after \(Int(timeSinceLastView)) minutes, last refresh was \(Int(hoursSinceLastRefresh * 60)) minutes ago")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            UserDefaults.standard.set(currentTime, forKey: lastViewKey)
+            return true
+        }
+        
+        // 8. Check if user has explicitly requested refresh for this feed
+        let userRefreshKey = "UserRequestedRefresh_\(feedId)"
+        let userRequestedRefresh = UserDefaults.standard.bool(forKey: userRefreshKey)
+        if userRequestedRefresh {
+            print("🔄 Feed \(feedId) needs refresh: user explicitly requested refresh")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            UserDefaults.standard.removeObject(forKey: userRefreshKey) // Clear the flag
+            return true
+        }
+        
+        // Update last view time for this feed
+        UserDefaults.standard.set(currentTime, forKey: lastViewKey)
         
         print("⚡ Feed \(feedId) loading from Core Data: \(episodeCount) episodes available, last refreshed \(Int(hoursSinceLastRefresh * 60)) minutes ago")
         return false

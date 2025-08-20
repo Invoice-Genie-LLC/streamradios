@@ -347,6 +347,9 @@ struct PodcastListView: View {
                                 } else {
                                     // Normal mode, show podcast episodes
                                     selectedPodcast = feed
+                                    // Request immediate refresh when user selects a feed
+                                    print("🔄 USER SELECTED FEED: Requesting immediate refresh for \(feed.title)")
+                                    viewModel.requestFeedRefresh(feed.id)
                                 }
                             },
                             isExpanded: Binding(
@@ -2890,7 +2893,12 @@ struct PodcastList: View {
                         }
                     },
                     onStop: { podcastPlayer.togglePlayPause() },
-                    onTap: { selectedPodcast = feed },
+                    onTap: { 
+                        selectedPodcast = feed
+                        // Request immediate refresh when user selects a feed
+                        print("🔄 USER SELECTED FEED: Requesting immediate refresh for \(feed.title)")
+                        viewModel.requestFeedRefresh(feed.id)
+                    },
                     isExpanded: Binding(
                         get: { expandedFeedId == feed.id },
                         set: { isExpanded in

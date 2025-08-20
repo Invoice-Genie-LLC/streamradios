@@ -37,7 +37,7 @@ struct GlobalPlayerView: View {
                     onListButtonTap: {
                         // Switch to podcast tab and set the current feed
                         selectedPodcast = currentFeed
-                        podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                        podcastViewModel.requestFeedRefresh(currentFeed.id)
                         selectedTab = .podcast
                     },
                     onCloseButtonTap: {
@@ -49,7 +49,7 @@ struct GlobalPlayerView: View {
                     if let currentFeed = podcastPlayer.currentFeed {
                         // Switch to podcast tab and set the current feed
                         selectedPodcast = currentFeed
-                        podcastViewModel.fetchAllEpisodes(for: currentFeed)
+                        podcastViewModel.requestFeedRefresh(currentFeed.id)
                         selectedTab = .podcast
                     }
                 }
