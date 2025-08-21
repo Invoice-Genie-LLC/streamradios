@@ -105,10 +105,11 @@ struct PodcastListView: View {
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                             }
-                            // Description or notes snippet with highlighting
+                            // Description or notes snippet with highlighting (HTML stripped)
                             if !searchText.isEmpty {
-                                if ep.descriptionText.localizedCaseInsensitiveContains(searchText) {
-                                    let s = snippet(from: ep.descriptionText, query: searchText)
+                                let descPlain = htmlToPlainText(ep.descriptionText)
+                                if descPlain.localizedCaseInsensitiveContains(searchText) {
+                                    let s = snippet(from: descPlain, query: searchText)
                                     highlightedText(in: s, query: searchText)
                                         .font(.caption)
                                         .foregroundColor(.secondary)
