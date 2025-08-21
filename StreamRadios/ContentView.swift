@@ -294,10 +294,9 @@ struct ContentView: View {
             return true
         }
         
-        // Show radio global player only when app is active
-        // and user wants radio OR radio is playing/paused with a station
-        if scenePhase == .active, radioPlayer.userWantsToPlay { return true }
-        if scenePhase == .active, (radioPlayer.isPlaying || radioPlayer.connectionState == .paused) && radioPlayer.currentlyPlayingStation != nil, radioPlayer.userWantsToPlay {
+        // Show radio global player regardless of scene phase, based on user intent or active/paused playback
+        if radioPlayer.userWantsToPlay { return true }
+        if (radioPlayer.isPlaying || radioPlayer.connectionState == .paused) && radioPlayer.currentlyPlayingStation != nil, radioPlayer.userWantsToPlay {
             return true
         }
         return false
