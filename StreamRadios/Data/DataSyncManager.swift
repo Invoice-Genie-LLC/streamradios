@@ -340,6 +340,17 @@ class DataSyncManager: ObservableObject {
             // Start artwork download tracking after feeds are loaded
             startArtworkDownloadTracking(totalFeeds: finalCount)
             
+            // NEW: Auto-reset feed sync banner after brief completion display
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                self.podcastFeedsStatus = .none
+                self.podcastFeedsProgress = 0.0
+                self.podcastFeedsOperation = ""
+                // Optionally clear counts to be safe
+                self.podcastFeedsCurrentCount = 0
+                // Keep totalCount for analytics if needed; not required for UI gating
+            }
+            
         } catch {
             podcastFeedsStatus = .failed
             podcastFeedsOperation = "❌ Failed to load podcast feeds"
