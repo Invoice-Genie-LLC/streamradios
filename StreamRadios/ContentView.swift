@@ -269,10 +269,6 @@ struct ContentView: View {
                 podcastPlayer.userWantsToPlay = false
                 radioPlayer.userWantsToPlay = false
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                // When app is moving to background (potential close), dismiss the player UI
-                isPlayerSheetPresented = false
-            }
             
             // Full-screen data sync progress overlay for fresh installs
             DataSyncProgressView()
