@@ -185,6 +185,10 @@ class PodcastViewModel: ObservableObject {
     private let episodeManager = PodcastEpisodeManager()
     private let cloudKitManager = PodcastCloudKitManager.shared
     private var cancellables = Set<AnyCancellable>()
+
+    // MARK: - Global Episode Search State
+    @Published var globalEpisodeSearchResults: [PodcastEpisode] = []
+    private var globalSearchTask: Task<Void, Never>? = nil
     
     // Performance optimizations
     private let episodesPerPage = 100
@@ -2210,6 +2214,31 @@ class PodcastViewModel: ObservableObject {
             
             if let feedId = selectedFeedId {
                 await loadEpisodesForFeed(feedId)
+            }
+        }
+    }
+
+    /// Search episodes across all saved podcasts (debounced)
+    func searchSavedEpisodesAcrossPodcasts(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Cancel previous task
+        globalSearchTask?.cancel()
+
+        // Debounce and perform global search
+        globalSearchTask = Task { [weak self, trimmed] in
+            try? await Task.sleep(nanoseconds: 350_000_000) // 350ms debounce
+            guard !Task.isCancelled else { return }
+            guard let self = self else { return }
+            if trimmed.isEmpty {
+                await MainActor.run { self.globalEpisodeSearchResults = [] }
+                return
+            }
+            let results = await self.episodeManager.searchEpisodesAcrossFeeds(query: trimmed, limit: 50)
+            // Deduplicate and merge states just in case
+            let unique = self.removeDuplicatesFromEpisodes(results)
+            await MainActor.run {
+                self.globalEpisodeSearchResults = unique
             }
         }
     }

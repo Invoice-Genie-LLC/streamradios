@@ -95,6 +95,44 @@ class PodcastEpisodeManager {
         
         return result
     }
+
+    /// Search episodes across all saved podcasts (Core Data) by title or description
+    /// - Parameters:
+    ///   - query: Case/diacritic-insensitive search string
+    ///   - limit: Maximum number of results to return
+    /// - Returns: Matching `PodcastEpisode` list sorted by newest first
+    func searchEpisodesAcrossFeeds(query: String, limit: Int = 50) async -> [PodcastEpisode] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+
+        return await backgroundContext.perform { [weak self] in
+            guard let self = self else { return [] }
+            do {
+                let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                request.predicate = NSPredicate(
+                    format: "title CONTAINS[cd] %@ OR descriptionText CONTAINS[cd] %@",
+                    trimmed, trimmed
+                )
+                request.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                request.fetchLimit = limit
+
+                // Performance optimizations
+                request.fetchBatchSize = min(limit, self.batchSize)
+                request.includesPropertyValues = true
+                request.returnsObjectsAsFaults = false
+                request.relationshipKeyPathsForPrefetching = ["feed"]
+
+                let managed = try backgroundContext.fetch(request)
+                let episodes = self.convertToEpisodes(managed)
+                return episodes
+            } catch {
+                os_log("❌ Global episode search failed: %@", log: self.log, type: .error, error.localizedDescription)
+                return []
+            }
+        }
+    }
     
     /// Clear cache for a feed when episode states change
     func clearCacheForFeed(_ feedId: String) async {

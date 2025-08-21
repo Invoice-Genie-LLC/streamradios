@@ -249,25 +249,26 @@ class RadioPlayer: NSObject, ObservableObject {
         // Monitor buffer health and adapt UI accordingly with improved logic
         streamQualityManager.$bufferHealth
             .removeDuplicates()
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] health in
                 guard let self = self else { return }
-                
-                // When paused or not playing, never show buffering; keep paused/disconnected UI
-                if !self.isPlaying || self.connectionState == .paused {
-                    self.isBuffering = false
-                    return
+                // Avoid publishing from within view updates by deferring state writes
+                DispatchQueue.main.async {
+                    // When paused or not playing, never show buffering; keep paused/disconnected UI
+                    if !self.isPlaying || self.connectionState == .paused {
+                        self.isBuffering = false
+                        return
+                    }
+                    // Only show buffering if actively trying to play and the player is waiting
+                    if health < 0.05, self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                        self.connectionState = .buffering
+                        self.isBuffering = true
+                    } else if self.player?.timeControlStatus == .playing {
+                        // Actively playing
+                        self.connectionState = .connected
+                        self.isBuffering = false
+                    }
                 }
-                
-                // Only show buffering if actively trying to play and the player is waiting
-                if health < 0.05, self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate {
-                    self.connectionState = .buffering
-                    self.isBuffering = true
-                } else if self.player?.timeControlStatus == .playing {
-                    // Actively playing
-                    self.connectionState = .connected
-                    self.isBuffering = false
-                }
-                // Ignore minor fluctuations otherwise
             }
             .store(in: &cancellables)
     }
