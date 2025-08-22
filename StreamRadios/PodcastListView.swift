@@ -292,9 +292,9 @@ struct PodcastListView: View {
                }
                .onChange(of: selectedPodcast) { _, newValue in
                    // When selectedPodcast is set from outside (like from ContentView),
-                   // automatically show the episode list
+                   // automatically show the episode list and request a refresh
                    if let podcast = newValue {
-                       viewModel.fetchAllEpisodes(for: podcast)
+                       viewModel.requestFeedRefresh(podcast.id)
                    }
                }
                .onChange(of: viewModel.podcastFeeds.count) { _, newCount in

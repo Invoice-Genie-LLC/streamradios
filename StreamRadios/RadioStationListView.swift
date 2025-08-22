@@ -49,29 +49,13 @@ struct RadioStationListView: View {
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
-                // Show simple loading message - detailed progress is in the banner
-                VStack(alignment: .center, spacing: 8) {
-                    Text("Loading Stations")
-                        .font(.headline)
-                        .foregroundColor(.adaptivePrimaryText)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    
-                    if !viewModel.loadingPhase.isEmpty {
-                        HStack {
-                            Spacer()
-                            Text(viewModel.loadingPhase)
-                                .font(.subheadline)
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .lineLimit(nil)
-                                .animation(.easeInOut(duration: 0.2), value: viewModel.loadingPhase)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
+                StylishLoaderView(
+                    title: "Loading Stations",
+                    phase: viewModel.loadingPhase,
+                    progress: viewModel.loadingProgress,
+                    current: viewModel.loadingStationsCount,
+                    total: viewModel.totalStationsToLoad
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.adaptiveBackground)
             } else if viewModel.stations.isEmpty {
@@ -1140,6 +1124,94 @@ struct RadioStationListView: View {
         showDeleteAlert = true
     }
 
+}
+
+// MARK: - Stylish Loader (inlined to avoid project file changes)
+private struct StylishLoaderView: View {
+    let title: String
+    let phase: String
+    let progress: Double
+    let current: Int
+    let total: Int
+
+    @State private var animate = false
+
+    var percentageText: String {
+        let clamped = max(0.0, min(progress, 1.0))
+        return "\(Int(clamped * 100))%"
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            ZStack {
+                Circle()
+                    .stroke(Color.adaptiveSeparator.opacity(0.3), lineWidth: 10)
+                    .frame(width: 80, height: 80)
+
+                Circle()
+                    .trim(from: 0, to: CGFloat(max(0.02, min(progress, 1.0))))
+                    .stroke(
+                        AngularGradient(
+                            gradient: Gradient(colors: [Color.blue, Color.purple, Color.blue]),
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(animate ? 360 : 0))
+                    .animation(
+                        Animation.linear(duration: 1.2)
+                            .repeatForever(autoreverses: false),
+                        value: animate
+                    )
+                    .frame(width: 80, height: 80)
+
+                Text(percentageText)
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundColor(.adaptivePrimaryText)
+            }
+
+            VStack(spacing: 6) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundColor(.adaptivePrimaryText)
+
+                if !phase.isEmpty {
+                    Text(phase)
+                        .font(.subheadline)
+                        .foregroundColor(.adaptiveSecondaryText)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: 280)
+                        .animation(.easeInOut(duration: 0.2), value: phase)
+                }
+            }
+
+            VStack(spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.adaptiveSeparator.opacity(0.25))
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(LinearGradient(colors: [Color.blue, Color.purple], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: max(0, min(CGFloat(progress) * geo.size.width, geo.size.width)))
+                    }
+                }
+                .frame(height: 10)
+
+                if total > 0 {
+                    Text("\(current)/\(total) • \(percentageText)")
+                        .font(.caption)
+                        .foregroundColor(.adaptiveSecondaryText)
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.adaptiveBackground)
+        .onAppear { animate = true }
+    }
 }
 
 

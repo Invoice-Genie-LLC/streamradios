@@ -972,7 +972,8 @@ struct UnifiedPodcastPlayerView: View {
     private func navigateToCurrentEpisode() {
         print("Navigating to currently playing episode: \(currentEpisode.title)")
         selectedPodcast = currentFeed
-        viewModel.fetchAllEpisodes(for: currentFeed)
+        // Request immediate refresh to show latest episodes while displaying cached ones
+        viewModel.requestFeedRefresh(currentFeed.id)
         // Use the existing onListButtonTap functionality if available
         onListButtonTap?()
     }
