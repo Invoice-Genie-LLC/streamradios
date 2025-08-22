@@ -679,6 +679,7 @@ enum FeedError: Error, LocalizedError {
     case networkError
     case feedDataCorrupted
     case retryLimitExceeded
+    case missingRequiredData
     
     var errorDescription: String? {
         switch self {
@@ -694,6 +695,8 @@ enum FeedError: Error, LocalizedError {
             return "Feed data is corrupted or truncated"
         case .retryLimitExceeded:
             return "Maximum retry attempts exceeded"
+        case .missingRequiredData:
+            return "Feed is missing required data (title, episodes, etc.)"
         }
     }
 }
@@ -828,12 +831,26 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
     func parseComplete() throws -> (PodcastFeed, [PodcastEpisode]) {
         progressCallback?(0.1, "Starting RSS parsing...")
         
+        // Enhanced error handling for RSS parsing
         guard parser.parse() else {
-            throw FeedError.parsingFailed
+            if let parserError = parser.parserError {
+                os_log("❌ RSS Parser failed with error: %@", log: OSLog.default, type: .error, parserError.localizedDescription)
+                // Try to provide more specific error information
+                if (parserError as NSError).code == 4 {
+                    throw FeedError.feedDataCorrupted // XML parsing failed
+                } else {
+                    throw FeedError.parsingFailed
+                }
+            } else {
+                os_log("❌ RSS Parser failed with unknown error", log: OSLog.default, type: .error)
+                throw FeedError.parsingFailed
+            }
         }
         
-        guard let title = feedTitle else {
-            throw FeedError.parsingFailed
+        // Validate we have essential feed data
+        guard let title = feedTitle, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            os_log("❌ RSS Feed missing title or title is empty", log: OSLog.default, type: .error)
+            throw FeedError.missingRequiredData
         }
         
         // CRITICAL: Use deterministic feedId that matches episode feedId generation

@@ -85,17 +85,135 @@ class CoreDataStack {
         let context = persistentContainer.viewContext
         if context.hasChanges {
             do {
+                // Validate context before saving to catch constraint violations early
+                try context.obtainPermanentIDs(for: Array(context.insertedObjects))
+                
+                // Check for any constraint violations before saving
+                try validateConstraints(in: context)
+                
                 try context.save()
                 print("CoreData: Successfully saved changes to the context.")
 
             } catch let error as NSError {
                 print("CoreData: Failed to save context: \(error), \(error.userInfo)")
-                // DebugLogger.logError will be added when import is fixed
-                // ToDo: Handle the error according to your app's needs, e.g., showing UI to inform the user
+                
+                // Handle specific Core Data errors
+                if error.code == 1550 { // NSConstraintViolationError
+                    print("❌ CoreData: Constraint violation detected - attempting recovery")
+                    handleConstraintViolation(error: error, context: context)
+                } else if error.code == 133020 { // NSMergeConflictError
+                    print("❌ CoreData: Merge conflict detected - attempting recovery")
+                    handleMergeConflict(error: error, context: context)
+                } else {
+                    print("❌ CoreData: Other error: \(error.localizedDescription)")
+                }
             }
         } else {
             print("CoreData: No changes to save in context.")
-            // DebugLogger.logDebug will be added when import is fixed
+        }
+    }
+    
+    /// Validate Core Data constraints before saving
+    private func validateConstraints(in context: NSManagedObjectContext) throws {
+        // Check for potential constraint violations in inserted and updated objects
+        let objectsToValidate = context.insertedObjects.union(context.updatedObjects)
+        
+        for object in objectsToValidate {
+            do {
+                try object.validateForUpdate()
+            } catch {
+                print("❌ CoreData: Validation failed for object \(object): \(error)")
+                throw error
+            }
+        }
+    }
+    
+    /// Handle constraint violation errors by removing or fixing conflicting objects
+    private func handleConstraintViolation(error: NSError, context: NSManagedObjectContext) {
+        print("🔧 CoreData: Attempting to resolve constraint violation...")
+        
+        // Log detailed constraint violation information
+        if let conflictList = error.userInfo["conflictList"] as? [Any] {
+            print("❌ CoreData: Constraint violation details: \(conflictList)")
+        }
+        
+        // Try to fix common constraint violations
+        let insertedObjects = Array(context.insertedObjects)
+        
+        for object in insertedObjects {
+            // For stations, ensure unique ID constraints
+            if let station = object as? CDStation {
+                if let id = station.id, !id.isEmpty {
+                    // Check if a station with this ID already exists
+                    let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "id == %@", id)
+                    fetchRequest.fetchLimit = 1
+                    
+                    do {
+                        let existingStations = try context.fetch(fetchRequest)
+                        if !existingStations.isEmpty {
+                            print("🔧 CoreData: Removing duplicate station with ID: \(id)")
+                            context.delete(object)
+                        }
+                    } catch {
+                        print("❌ CoreData: Failed to check for existing station: \(error)")
+                        context.delete(object)
+                    }
+                } else {
+                    print("🔧 CoreData: Removing station with nil/empty ID")
+                    context.delete(object)
+                }
+            }
+            
+            // For podcast episodes, ensure unique ID constraints
+            if let episode = object as? PodcastModel {
+                if let id = episode.id, !id.isEmpty {
+                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "id == %@", id)
+                    fetchRequest.fetchLimit = 1
+                    
+                    do {
+                        let existingEpisodes = try context.fetch(fetchRequest)
+                        if !existingEpisodes.isEmpty {
+                            print("🔧 CoreData: Removing duplicate episode with ID: \(id)")
+                            context.delete(object)
+                        }
+                    } catch {
+                        print("❌ CoreData: Failed to check for existing episode: \(error)")
+                        context.delete(object)
+                    }
+                } else {
+                    print("🔧 CoreData: Removing episode with nil/empty ID")
+                    context.delete(object)
+                }
+            }
+        }
+        
+        // Try to save again after cleanup
+        if context.hasChanges {
+            do {
+                try context.save()
+                print("✅ CoreData: Successfully saved after constraint violation recovery")
+            } catch {
+                print("❌ CoreData: Failed to save even after constraint violation recovery: \(error)")
+            }
+        }
+    }
+    
+    /// Handle merge conflict errors
+    private func handleMergeConflict(error: NSError, context: NSManagedObjectContext) {
+        print("🔧 CoreData: Attempting to resolve merge conflict...")
+        
+        // For merge conflicts, refresh all objects and try again
+        context.refreshAllObjects()
+        
+        if context.hasChanges {
+            do {
+                try context.save()
+                print("✅ CoreData: Successfully saved after merge conflict recovery")
+            } catch {
+                print("❌ CoreData: Failed to save even after merge conflict recovery: \(error)")
+            }
         }
     }
 

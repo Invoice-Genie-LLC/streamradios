@@ -112,32 +112,67 @@ class RadioBrowserAPI: ObservableObject {
         var request = URLRequest(url: url)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 30
+        request.timeoutInterval = 60 // Increased timeout for better reliability
         
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw RadioBrowserError.invalidResponse
+        // Create a custom URLSession with retry configuration
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 120
+        config.waitsForConnectivity = true
+        let session = URLSession(configuration: config)
+        
+        // Implement retry logic for network timeouts
+        var lastError: Error?
+        let maxRetries = 3
+        
+        for attempt in 1...maxRetries {
+            do {
+                print("🔄 RadioBrowserAPI: Attempt \(attempt)/\(maxRetries) for country '\(countryCode)'")
+                let (data, response) = try await session.data(for: request)
+                
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw RadioBrowserError.invalidResponse
+                }
+                
+                print("📡 RadioBrowserAPI: HTTP Status \(httpResponse.statusCode) for country '\(countryCode)'")
+                
+                guard httpResponse.statusCode == 200 else {
+                    throw RadioBrowserError.httpError(httpResponse.statusCode)
+                }
+                
+                let stations = try JSONDecoder().decode([RadioBrowserStation].self, from: data)
+                print("✅ RadioBrowserAPI: Successfully decoded \(stations.count) stations for country '\(countryCode)'")
+                
+                return stations
+                
+            } catch let error as DecodingError {
+                print("❌ RadioBrowserAPI: JSON decoding failed for country '\(countryCode)': \(error)")
+                throw RadioBrowserError.decodingFailed(error)
+            } catch {
+                lastError = error
+                print("❌ RadioBrowserAPI: Network request failed (attempt \(attempt)/\(maxRetries)) for country '\(countryCode)': \(error)")
+                
+                // Check if it's a timeout error
+                if let urlError = error as? URLError, urlError.code == .timedOut {
+                    if attempt < maxRetries {
+                        let delay = Double(attempt * 2) // Progressive delay: 2s, 4s, 6s
+                        print("⏳ RadioBrowserAPI: Waiting \(delay) seconds before retry due to timeout...")
+                        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        continue
+                    }
+                }
+                
+                // For non-timeout errors, don't retry
+                throw RadioBrowserError.networkError(error)
             }
-            
-            print("📡 RadioBrowserAPI: HTTP Status \(httpResponse.statusCode) for country '\(countryCode)'")
-            
-            guard httpResponse.statusCode == 200 else {
-                throw RadioBrowserError.httpError(httpResponse.statusCode)
-            }
-            
-            let stations = try JSONDecoder().decode([RadioBrowserStation].self, from: data)
-            print("✅ RadioBrowserAPI: Successfully decoded \(stations.count) stations for country '\(countryCode)'")
-            
-            return stations
-            
-        } catch let error as DecodingError {
-            print("❌ RadioBrowserAPI: JSON decoding failed for country '\(countryCode)': \(error)")
-            throw RadioBrowserError.decodingFailed(error)
-        } catch {
-            print("❌ RadioBrowserAPI: Network request failed for country '\(countryCode)': \(error)")
-            throw RadioBrowserError.networkError(error)
+        }
+        
+        // All retries exhausted for timeout
+        if let lastError = lastError {
+            print("💥 RadioBrowserAPI: All \(maxRetries) attempts failed for country '\(countryCode)' - Final error: \(lastError)")
+            throw RadioBrowserError.networkError(lastError)
+        } else {
+            throw RadioBrowserError.networkError(NSError(domain: "RadioBrowserAPI", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown network error"]))
         }
     }
     
