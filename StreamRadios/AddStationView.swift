@@ -335,7 +335,8 @@ struct AddStationView: View {
         let success = viewModel.addStation(name: name, url: urlString, iconData: iconData, country: selectedCountry)
         
         if success {
-            viewModel.saveStationsToCoreData()
+            // CoreData persisted inside addStation; refresh UI and dismiss
+            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
             presentedSheet = nil
             onSave?(selectedCountry)
         } else {

@@ -350,6 +350,16 @@ struct ContentView: View {
                                     countries: viewModel.countries,
                                     stationCount: { country in
                                         viewModel.stations.filter { $0.country == country }.count
+                                    },
+                                    onSelect: { country in
+                                        // Trigger refresh even if same country tapped; also when empty
+                                        Task {
+                                            UIDevice.playHapticFeedback()
+                                            await viewModel.fetchStationsForSelectedCountry()
+                                            await MainActor.run {
+                                                viewModel.syncStationsWithCloudKit()
+                                            }
+                                        }
                                     }
                                 )
                                 
@@ -396,6 +406,25 @@ struct ContentView: View {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 )
+                .refreshable {
+                    // Top-level pull-to-refresh (applies to the stations List via hierarchy)
+                    guard viewModel.selectedTab == .radio else { return }
+                    UIDevice.playHapticFeedback()
+                    await viewModel.fetchStationsForSelectedCountry()
+                    await MainActor.run {
+                        viewModel.syncStationsWithCloudKit()
+                        viewModel.loadStationsFromCoreData()
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
+                    // Ensure the list reflects any add/save done elsewhere
+                    viewModel.loadStationsFromCoreData()
+                    // If newly added stations belong to current country, ensure All tab is visible
+                    let countryCount = viewModel.stations.filter { $0.country == viewModel.selectedCountry }.count
+                    if countryCount > 0 && viewModel.selectedSubTab != .all {
+                        viewModel.selectedSubTab = .all
+                    }
+                }
                 
                 if alertManager.showCustomAlert {
                     CustomAlertContainer()
@@ -407,6 +436,8 @@ struct ContentView: View {
                     AddStationView(activeSheet: $activeSheet, selectedCountry: viewModel.selectedCountry) { savedCountry in
                         viewModel.selectedCountry = savedCountry
                         viewModel.selectedSubTab = .all
+                        // Ensure fresh data is visible after adding a station
+                        viewModel.loadStationsFromCoreData()
                     }
                     .environmentObject(viewModel)
                 case .editStation:

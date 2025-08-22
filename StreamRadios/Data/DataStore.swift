@@ -178,7 +178,7 @@ class DataStore {
         }
     }
     
-    /// Enhanced async batch deletion with progress reporting and Apple best practices
+    /// Enhanced async batch deletion with progress reporting, adaptive splitting, and pacing to avoid throttling
     func deleteRecordsInBatchesAsync(
         recordIDs: [CKRecord.ID],
         progressHandler: @escaping (Double) -> Void = { _ in }
@@ -191,17 +191,18 @@ class DataStore {
             return
         }
         
-        let maxBatchSize = 400 // CloudKit limit
-        let batches = recordIDs.chunked(into: maxBatchSize)
+        // Start conservatively to reduce likelihood of throttling, can split further if needed
+        let initialBatchSize = 100
+        let batches = recordIDs.chunked(into: initialBatchSize)
         
         print("🗑️ Starting deletion of \(recordIDs.count) records in \(batches.count) batches")
         
         var completedBatches = 0
         var totalDeleted = 0
         
-        // Process batches sequentially for now to avoid complexity
+        // Process batches sequentially with light pacing
         for (batchIndex, batch) in batches.enumerated() {
-            let deletedInBatch = try await deleteBatchWithRetry(
+            let deletedInBatch = try await deleteBatchAdaptive(
                 batch: batch,
                 batchNumber: batchIndex + 1,
                 totalBatches: batches.count
@@ -217,11 +218,54 @@ class DataStore {
             }
             
             print("✅ Completed batch \(completedBatches)/\(batches.count) - Total deleted: \(totalDeleted)")
+            // Light pacing to reduce chance of rate limiting
+            try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
         }
         
         print("🎉 Successfully deleted all \(totalDeleted) records from CloudKit in \(batches.count) batches")
         await MainActor.run {
             progressHandler(1.0)
+        }
+    }
+    
+    /// Delete a batch adaptively: try whole batch, on throttling split into smaller sub-batches recursively
+    private func deleteBatchAdaptive(
+        batch: [CKRecord.ID],
+        batchNumber: Int,
+        totalBatches: Int,
+        minBatchSize: Int = 25
+    ) async throws -> Int {
+        do {
+            return try await deleteBatchWithRetry(
+                batch: batch,
+                batchNumber: batchNumber,
+                totalBatches: totalBatches,
+                maxRetries: 5
+            )
+        } catch {
+            // If throttled or server stressed, split batch and process smaller chunks
+            if let ckError = error as? CKError,
+               (ckError.code == .requestRateLimited || ckError.code == .serviceUnavailable || ckError.code == .limitExceeded),
+               batch.count > minBatchSize {
+                let midpoint = batch.count / 2
+                let firstHalf = Array(batch[..<midpoint])
+                let secondHalf = Array(batch[midpoint...])
+                print("⤵️ Throttled on batch \(batchNumber). Splitting into \(firstHalf.count)+\(secondHalf.count) and retrying adaptively…")
+                let firstDeleted = try await deleteBatchAdaptive(
+                    batch: firstHalf,
+                    batchNumber: batchNumber,
+                    totalBatches: totalBatches,
+                    minBatchSize: minBatchSize
+                )
+                let secondDeleted = try await deleteBatchAdaptive(
+                    batch: secondHalf,
+                    batchNumber: batchNumber,
+                    totalBatches: totalBatches,
+                    minBatchSize: minBatchSize
+                )
+                return firstDeleted + secondDeleted
+            }
+            throw error
         }
     }
     

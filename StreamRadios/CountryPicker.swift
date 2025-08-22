@@ -12,6 +12,7 @@ struct CountryPicker: View {
     @Binding var selectedCountry: String
     var countries: [Country]
     var stationCount: ((String) -> Int)?
+    var onSelect: ((String) -> Void)? = nil
     @Environment(\.presentationMode) var presentationMode
     
     @State private var searchText = ""
@@ -221,6 +222,7 @@ struct CountryPicker: View {
     
     private func selectCountry(_ countryName: String) {
         selectedCountry = countryName
+        onSelect?(countryName)
         saveRecentCountry(countryName)
         presentationMode.wrappedValue.dismiss()
     }
@@ -402,6 +404,7 @@ struct CountryPickerButton: View {
     @Binding var selectedCountry: String
     var countries: [Country]
     var stationCount: ((String) -> Int)?
+    var onSelect: ((String) -> Void)? = nil
     @State private var showingPicker = false
     
     var body: some View {
@@ -458,7 +461,11 @@ struct CountryPickerButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .sheet(isPresented: $showingPicker) {
-            CountryPicker(selectedCountry: $selectedCountry, countries: countries, stationCount: stationCount)
+            CountryPicker(selectedCountry: $selectedCountry, countries: countries, stationCount: stationCount, onSelect: { country in
+                onSelect?(country)
+                // Post to reload stations list if needed
+                NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+            })
         }
     }
 }

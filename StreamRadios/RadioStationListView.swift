@@ -107,6 +107,13 @@ struct RadioStationListView: View {
         .onDisappear(perform: cleanup)
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
             viewModel.loadStationsFromCoreData()
+            // If current tab filter hides results but country has stations, show All tab
+            DispatchQueue.main.async {
+                let countryCount = viewModel.stations.filter { $0.country == viewModel.selectedCountry }.count
+                if countryCount > 0 && selectedSubTab != .all {
+                    viewModel.selectedSubTab = .all
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StationArtworkUpdated"))) { notification in
             if let userInfo = notification.userInfo,
@@ -244,122 +251,7 @@ struct RadioStationListView: View {
             
             // Stations list using List for swipe actions with ScrollViewReader for tab focus
             ScrollViewReader { proxy in
-                List {
-                    ForEach(filteredStations) { station in
-                        stationRow(for: station)
-                            .id(station.id)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets())
-                    }
-                    .onMove(perform: selectedTab == .radio && isEditing && selectedSubTab == .favorites ? moveStations : nil)
-                    
-                    // Add extra space at the bottom for better scrolling when global player is visible
-                    Color.clear
-                        .frame(height: 120)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets())
-                }
-                .listStyle(PlainListStyle())
-                .background(Color.adaptiveBackground)
-                .scrollContentBackground(.hidden)
-                .environment(\.editMode, .constant(isEditing ? .active : .inactive))
-                .simultaneousGesture(
-                    DragGesture()
-                        .onChanged { _ in
-                            UserDefaults.standard.set(true, forKey: "isUserScrolling")
-                            // Post notification for PodcastPlayer scroll detection
-                            NotificationCenter.default.post(name: .userIsScrolling, object: nil)
-                        }
-                        .onEnded { _ in
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                UserDefaults.standard.set(false, forKey: "isUserScrolling")
-                                // Post notification for PodcastPlayer scroll detection
-                                NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
-                            }
-                        }
-                )
-                .onReceive(radioPlayer.$currentStationIndex) { currentIndex in
-                    if !isEditing {
-                        // Scroll when station index changes - indicates new station selection
-                        scrollToCurrentStation(proxy: proxy)
-                    }
-                }
-                .onReceive(radioPlayer.$isPlaying) { isPlaying in
-                    if !isEditing {
-                        // ONLY scroll when pausing (stopping) - NEVER when starting to play
-                        if !isPlaying {
-                            scrollToCurrentStation(proxy: proxy)
-                        }
-                    }
-                }
-                .onChange(of: selectedTab) { oldTab, newTab in
-                    // Handle tab changes - scroll to current station if switching to radio tab
-                    if newTab == .radio && !isEditing {
-                        // Use a more robust approach to ensure the view is updated before scrolling
-                        DispatchQueue.main.async {
-                            // First dispatch ensures the view updates with the new tab
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                // Second dispatch with shorter delay to ensure filteredStations is computed
-                                if !isEditing {
-                                    self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
-                                }
-                            }
-                        }
-                    }
-                }
-                .onChange(of: selectedSubTab) { oldSubTab, newSubTab in
-                    // Handle sub-tab changes - scroll to current station if it exists in new tab
-                    if !isEditing {
-                        // Use a more robust approach to ensure the view is updated before scrolling
-                        DispatchQueue.main.async {
-                            // First dispatch ensures the view updates with the new tab
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                // Second dispatch with shorter delay to ensure filteredStations is computed
-                                if !isEditing {
-                                    self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
-                                }
-                            }
-                        }
-                    }
-                }
-                .onChange(of: tappedStationId) { oldId, newId in
-                    // Handle immediate focus on tapped station
-                    if let stationId = newId, !isEditing {
-                        // Check if the tapped station exists in the current filtered list
-                        if filteredStations.contains(where: { $0.id == stationId }) {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                proxy.scrollTo(stationId, anchor: .center)
-                            }
-                            
-                            // Find station name for logging
-                            if let station = viewModel.stations.first(where: { $0.id == stationId }) {
-                                print("📱 Immediately scrolled to tapped station: \(station.name) in \(selectedSubTab.title) tab")
-                            }
-                        }
-                        
-                        // Clear the tapped station ID after handling to allow automatic scrolling
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            tappedStationId = nil
-                        }
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-                    // Scroll to playing station when app comes to foreground
-                    if !isEditing {
-                        // Use a more robust approach to ensure the view is updated before scrolling
-                        DispatchQueue.main.async {
-                            // First dispatch ensures the view updates
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                // Second dispatch with shorter delay to ensure filteredStations is computed
-                                if !isEditing {
-                                    self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
-                                }
-                            }
-                        }
-                    }
-                }
+                stationList(proxy: proxy)
             }
         }
         .frame(width: screenWidth)
@@ -372,6 +264,92 @@ struct RadioStationListView: View {
                     }
                 }
         )
+    }
+
+    // Extracted to reduce type-checking complexity
+    private func stationList(proxy: ScrollViewProxy) -> some View {
+        List {
+            ForEach(filteredStations) { station in
+                stationRow(for: station)
+                    .id(station.id)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets())
+            }
+            .onMove(perform: selectedTab == .radio && isEditing && selectedSubTab == .favorites ? moveStations : nil)
+            
+            // Add extra space at the bottom for better scrolling when global player is visible
+            Color.clear
+                .frame(height: 120)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets())
+        }
+        .listStyle(PlainListStyle())
+        .background(Color.adaptiveBackground)
+        .scrollContentBackground(.hidden)
+        .refreshable {
+            UIDevice.playHapticFeedback()
+            await viewModel.fetchStationsForSelectedCountry()
+            await MainActor.run {
+                viewModel.syncStationsWithCloudKit()
+                // Ensure UI reflects latest Core Data after sync
+                viewModel.loadStationsFromCoreData()
+            }
+        }
+        .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+        .onReceive(radioPlayer.$currentStationIndex) { _ in
+            if !isEditing { scrollToCurrentStation(proxy: proxy) }
+        }
+        .onReceive(radioPlayer.$isPlaying) { isPlaying in
+            if !isEditing && !isPlaying { scrollToCurrentStation(proxy: proxy) }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab == .radio && !isEditing {
+                DispatchQueue.main.async {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if !isEditing {
+                            self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: selectedSubTab) { _, _ in
+            if !isEditing {
+                DispatchQueue.main.async {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if !isEditing {
+                            self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: tappedStationId) { _, newId in
+            if let stationId = newId, !isEditing {
+                if filteredStations.contains(where: { $0.id == stationId }) {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(stationId, anchor: .center)
+                    }
+                    if let station = viewModel.stations.first(where: { $0.id == stationId }) {
+                        print("📱 Immediately scrolled to tapped station: \(station.name) in \(selectedSubTab.title) tab")
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { tappedStationId = nil }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            if !isEditing {
+                DispatchQueue.main.async {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if !isEditing {
+                            self.scrollToCurrentStationWithRetry(proxy: proxy, isOnLoadOrTabSwitch: true, retryCount: 0)
+                        }
+                    }
+                }
+            }
+        }
     }
     
     private func playFavoriteStation() {

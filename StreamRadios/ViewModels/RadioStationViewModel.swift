@@ -690,8 +690,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
         }
         
-        // Update the stations array with merged data
-        stations = mergedStations
+        // Update the stations array with merged data, but never drop local stations
+        // that aren't present in CloudKit yet (e.g., just-added API stations waiting for upload).
+        // Merge-in any local-only stations by URL to avoid duplicates.
+        var mergedByURL = Dictionary(uniqueKeysWithValues: mergedStations.map { ($0.url.lowercased(), $0) })
+        for local in stations {
+            let key = local.url.lowercased()
+            if mergedByURL[key] == nil {
+                mergedByURL[key] = local
+            }
+        }
+        stations = Array(mergedByURL.values)
         
         // Log recent stations count for verification
         let recentCount = stations.filter { $0.lastPlayed != nil }.count
@@ -1358,9 +1367,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
         
         if userDefaults.bool(forKey: hasLaunchedBeforeKey) == false {
             print("Initializing default stations for first time setup or new default stations detected.")
-                        
-            saveStationsToCloudKit()
+            
+            // Save locally first, then sync to CloudKit
             saveStationsToCoreData()
+            saveStationsToCloudKit()
             
             userDefaults.set(true, forKey: hasLaunchedBeforeKey)
             userDefaults.synchronize() // Ensure the flag is saved immediately
@@ -1416,6 +1426,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // ENHANCED CLOUDKIT SYNC: Sync favorite status and station data to CloudKit automatically
             print("📡 🚨 RADIO CLOUDKIT SYNC: Station \(updatedStation.id) favorite \(updatedStation.isFavorite)")
             
+            // Save locally first so UI and persistence are correct before remote sync
+            saveStationsToCoreData()
             Task {
                 do {
                     // Save the complete updated station to CloudKit
@@ -1434,7 +1446,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     print("📡 ❌ RADIO CLOUDKIT SYNC: Failed to sync favorite change: \(error)")
                 }
             }
-            saveStationsToCoreData()
         }
     }
     
@@ -1553,11 +1564,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
         stations.append(newStation)
         print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
+        // Force UI refresh and notify listeners that stations changed
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+        }
         
         // Mark that changes are expected on other devices after manual addition
         forceCloudKitCheckOnNextLaunch()
         
-        // ENHANCED CLOUDKIT SYNC: Save new station to CloudKit and sync across all devices
+        // ENHANCED CLOUDKIT SYNC: Save new station to CloudKit and sync across all devices (after local save)
         Task {
             do {
                 try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(newStation)
@@ -2220,13 +2236,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 print("🖼️ Using \(cachedFaviconCount) cached favicons, downloading \(uniqueNewStations.count - cachedFaviconCount) new ones")
             }
             
-            // Save to CoreData first
+            // Save to CoreData first and ensure UI sees the new items immediately
             await MainActor.run {
                 loadingPhase = "Preparing local storage"
                 loadingProgress = 0.85
             }
             
             saveStationsToCoreData()
+            DispatchQueue.main.async {
+                self.objectWillChange.send()
+                NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+            }
             
             await MainActor.run {
                 loadingPhase = "Saving to local storage"
@@ -2256,6 +2276,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         DataSyncManager.shared.radioStationsOperation = "Saved \(uniqueNewStations.count) new stations to iCloud"
                         DataSyncManager.shared.radioStationsProgress = 1.0
                         DataSyncManager.shared.radioStationsCurrentCount = uniqueNewStations.count
+                        // Re-save merged set to Core Data to ensure we don't lose just-added items
+                        self.saveStationsToCoreData()
+                        NotificationCenter.default.post(name: .stationsUpdated, object: nil)
                     } else {
                         print("📡 ⚠️ Failed to save some API-fetched stations to CloudKit for \(country.name)")
                         
