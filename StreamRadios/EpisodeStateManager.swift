@@ -166,6 +166,9 @@ class EpisodeStateManager: ObservableObject {
     private var cloudKitSyncProgress: CloudKitSyncProgress?
     private let syncProgressKey = "CloudKitSyncProgress"
     
+    // Readiness indicator to help avoid cold-start races
+    private(set) var isReady: Bool = false
+    
     private init() {
         // Try to use app group UserDefaults, fallback to standard if not available
         if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
@@ -204,6 +207,10 @@ class EpisodeStateManager: ObservableObject {
         Task.detached(priority: .utility) {
             await self.ensureAllFeedsHaveUniqueIds()
         }
+        
+        // Mark manager as ready and notify listeners
+        self.isReady = true
+        NotificationCenter.default.post(name: NSNotification.Name("EpisodeStateManagerReady"), object: nil)
     }
     
     // MARK: - Core Data Recreation Protection

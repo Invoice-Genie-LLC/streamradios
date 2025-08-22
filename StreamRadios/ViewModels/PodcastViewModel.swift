@@ -1902,9 +1902,21 @@ class PodcastViewModel: ObservableObject {
                     print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
                     let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
                     
+                    // Reconcile snapshot to respect feed's actual episode set
+                    // Parse the full episode list directly to avoid passing only "new" episodes
+                    do {
+                        let urlString: String? = await MainActor.run {
+                            self.podcastFeeds.first(where: { $0.id == feedId })?.url
+                        }
+                        if let urlString, let url = URL(string: urlString) {
+                            let parsedFull = try await self.parseRSSEpisodesOnly(from: url)
+                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: parsedFull)
+                        } else {
+                            print("❌ Snapshot reconcile failed: Missing feed URL for \(feedId)")
+                        }
+                    } catch { print("❌ Snapshot reconcile failed: \(error)") }
                     if !newEpisodes.isEmpty {
-                        print("✅ Found \(newEpisodes.count) new episodes - updating Core Data")
-                        try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                        print("✅ Found \(newEpisodes.count) new episodes - UI will reflect after reconcile")
                         
                         // Update the feed in memory with new episodes on main thread
                         await MainActor.run {
@@ -2004,9 +2016,21 @@ class PodcastViewModel: ObservableObject {
                         print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
                         let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
                         
+                        // Reconcile snapshot to respect feed's actual episode set
+                        // Parse the full episode list directly to avoid passing only "new" episodes
+                        do {
+                            let urlString: String? = await MainActor.run {
+                                self.podcastFeeds.first(where: { $0.id == feedId })?.url
+                            }
+                            if let urlString, let url = URL(string: urlString) {
+                                let parsedFull = try await self.parseRSSEpisodesOnly(from: url)
+                                try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: parsedFull)
+                            } else {
+                                print("❌ Snapshot reconcile failed: Missing feed URL for \(feedId)")
+                            }
+                        } catch { print("❌ Snapshot reconcile failed: \(error)") }
                         if !newEpisodes.isEmpty {
-                            print("✅ Found \(newEpisodes.count) new episodes - updating Core Data and UI")
-                            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                            print("✅ Found \(newEpisodes.count) new episodes - UI will reflect after reconcile")
                             
                             // Update the feed in memory with new episodes on main thread
                             await MainActor.run {
@@ -2105,11 +2129,15 @@ class PodcastViewModel: ObservableObject {
                 let (updatedFeed, newEpisodes) = try await feedManager.refreshFeed(feedId)
                 print("✅ Manual RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
                 
-                // Update Core Data with new episodes
-                if !newEpisodes.isEmpty {
-                    try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
-                    print("💾 Saved \(newEpisodes.count) new episodes to Core Data")
+                // Reconcile Core Data to match feed snapshot (use full parsed set)
+                if let feed = podcastFeeds.first(where: { $0.id == feedId }),
+                   let url = URL(string: feed.url) {
+                    let parsedFull = try await parseRSSEpisodesOnly(from: url)
+                    try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: parsedFull)
+                } else {
+                    print("❌ Manual refresh reconcile failed: Missing feed URL for \(feedId)")
                 }
+                if !newEpisodes.isEmpty { print("💾 Snapshot reconciled with \(newEpisodes.count) new episodes") }
                 
                 // Reload episodes from Core Data to show updated list including new episodes
                 await loadEpisodesForFeed(feedId)
@@ -3033,11 +3061,40 @@ class PodcastViewModel: ObservableObject {
             print("🔄 Refreshing local episode states for immediate display...")
         }
         
-        // Check if we have any episode progress data in EpisodeStateManager
+        // If EpisodeStateManager is not ready yet (cold start), wait briefly or until ready notification
+        if !EpisodeStateManager.shared.isReady {
+            let ready = await withTaskGroup(of: Bool.self) { group -> Bool in
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s max wait
+                    return EpisodeStateManager.shared.isReady
+                }
+                return await group.next() ?? true
+            }
+            if !ready {
+                print("⚠️ EpisodeStateManager not ready after brief wait; proceeding with whatever is loaded")
+            }
+        }
+        
+        // Apply locally available states to current in-memory episodes for instant UI accuracy
+        await MainActor.run {
+            if !self.currentEpisodes.isEmpty {
+                var updated: [PodcastEpisode] = []
+                updated.reserveCapacity(self.currentEpisodes.count)
+                for var ep in self.currentEpisodes {
+                    ep.state.progress = EpisodeStateManager.shared.getProgress(for: ep.id)
+                    ep.state.isFavorite = EpisodeStateManager.shared.isFavorite(ep.id)
+                    ep.state.isDownloaded = EpisodeStateManager.shared.isDownloaded(ep.id)
+                    ep.state.isPlayed = ep.state.progress >= 0.99
+                    updated.append(ep)
+                }
+                self.currentEpisodes = updated
+            }
+        }
+        
+        // Log availability snapshot
         let progressCount = EpisodeStateManager.shared.episodeProgress.count
         let favoritesCount = EpisodeStateManager.shared.episodeFavorites.count
         let downloadsCount = EpisodeStateManager.shared.episodeDownloads.count
-        
         print("✅ Local episode states available: \(progressCount) progress, \(favoritesCount) favorites, \(downloadsCount) downloads")
         
         // Mark as completed to prevent unnecessary sync attempts
@@ -4601,7 +4658,11 @@ class PodcastViewModel: ObservableObject {
                 print("⚡ AUTO SYNC: Episode states recently synced, skipping")
             }
             
-            // STEP 3: Final UI refresh
+            // STEP 3: Check feeds for RSS updates (NEW)
+            print("🔄 AUTO SYNC: Checking feeds for latest RSS content...")
+            await checkFeedsForRSSUpdates()
+            
+            // STEP 4: Final UI refresh
             await MainActor.run {
                 self.throttledUIUpdate()
                 print("🔄 AUTO SYNC: UI refreshed after automatic sync")
@@ -4609,6 +4670,60 @@ class PodcastViewModel: ObservableObject {
             
         } catch {
             print("❌ AUTO SYNC: CloudKit check failed: \(error)")
+        }
+    }
+    
+    /// Check all feeds for RSS updates during automatic sync
+    private func checkFeedsForRSSUpdates() async {
+        print("🔄 RSS CHECK: Evaluating \(podcastFeeds.count) feeds for updates...")
+        
+        var feedsToRefresh: [(PodcastFeed, String)] = []
+        
+        // Check each feed to see if it needs RSS refresh
+        for feed in podcastFeeds {
+            let shouldRefresh = await shouldRefreshFeedFromRSS(feedId: feed.id, isInitialLoad: false)
+            if shouldRefresh {
+                print("📡 RSS CHECK: Feed '\(feed.title)' needs refresh")
+                feedsToRefresh.append((feed, feed.id))
+            }
+        }
+        
+        if !feedsToRefresh.isEmpty {
+            print("🔄 RSS CHECK: Refreshing \(feedsToRefresh.count) feeds with stale content...")
+            
+            // Refresh feeds in parallel for better performance
+            await withTaskGroup(of: Void.self) { group in
+                for (feed, feedId) in feedsToRefresh {
+                    group.addTask { [weak self] in
+                        do {
+                            print("📡 RSS CHECK: Refreshing '\(feed.title)'...")
+                            let (_, newEpisodes) = try await self?.feedManager.refreshFeed(feedId) ?? (feed, [])
+                            
+                            // Reconcile with full parsed episodes to ensure accurate episode count
+                            if let url = URL(string: feed.url) {
+                                let parsedFull = try await self?.parseRSSEpisodesOnly(from: url) ?? []
+                                try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: parsedFull)
+                            }
+                            
+                            if !newEpisodes.isEmpty {
+                                print("✅ RSS CHECK: Found \(newEpisodes.count) new episodes for '\(feed.title)'")
+                            } else {
+                                print("⚡ RSS CHECK: No new episodes for '\(feed.title)'")
+                            }
+                        } catch {
+                            print("❌ RSS CHECK: Failed to refresh '\(feed.title)': \(error)")
+                        }
+                    }
+                }
+            }
+            
+            // Reload UI after RSS updates
+            await MainActor.run {
+                self.loadFeedsFromCoreData()
+                print("🔄 RSS CHECK: UI reloaded after feed updates")
+            }
+        } else {
+            print("⚡ RSS CHECK: All feeds are up to date")
         }
     }
     

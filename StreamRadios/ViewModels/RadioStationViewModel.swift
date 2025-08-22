@@ -693,7 +693,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Update the stations array with merged data, but never drop local stations
         // that aren't present in CloudKit yet (e.g., just-added API stations waiting for upload).
         // Merge-in any local-only stations by URL to avoid duplicates.
-        var mergedByURL = Dictionary(uniqueKeysWithValues: mergedStations.map { ($0.url.lowercased(), $0) })
+        // Handle potential duplicate URLs in mergedStations
+        var mergedByURL: [String: RadioStation] = [:]
+        for station in mergedStations {
+            let key = station.url.lowercased()
+            if mergedByURL[key] != nil {
+                print("🔄 Duplicate station URL '\(key)' found in CloudKit merge - keeping first occurrence")
+            } else {
+                mergedByURL[key] = station
+            }
+        }
         for local in stations {
             let key = local.url.lowercased()
             if mergedByURL[key] == nil {
@@ -2107,7 +2116,23 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             // Convert API stations to app stations, preserving existing favicon data if available
-            let existingStationsMap = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
+            // Handle duplicates in stations array before creating dictionary
+            var stationsByID: [String: RadioStation] = [:]
+            for station in stations {
+                if let existingStation = stationsByID[station.id] {
+                    // Keep the station with more recent lastPlayed date, or existing if dates are equal
+                    if let stationLastPlayed = station.lastPlayed,
+                       let existingLastPlayed = existingStation.lastPlayed,
+                       stationLastPlayed > existingLastPlayed {
+                        stationsByID[station.id] = station
+                        print("🔄 Duplicate station ID '\(station.id)' found - keeping newer (API conversion)")
+                    }
+                    // Otherwise keep existing
+                } else {
+                    stationsByID[station.id] = station
+                }
+            }
+            let existingStationsMap = stationsByID
             var cachedFaviconCount = 0
             var conversionProcessedCount = 0
             
@@ -2170,7 +2195,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Download favicons in background only for stations that don't have them (non-blocking)
             let stationsNeedingFavicons = newStations.filter { $0.iconData == nil }
             if !stationsNeedingFavicons.isEmpty {
-                let apiStationsMap = Dictionary(uniqueKeysWithValues: processedAPIStations.map { ($0.stationuuid, $0) })
+                // Handle potential duplicate stationuuid in API data
+                var apiStationsMap: [String: RadioBrowserStation] = [:]
+                for apiStation in processedAPIStations {
+                    if apiStationsMap[apiStation.stationuuid] != nil {
+                        print("🔄 Duplicate API station UUID '\(apiStation.stationuuid)' found - keeping first occurrence")
+                    } else {
+                        apiStationsMap[apiStation.stationuuid] = apiStation
+                    }
+                }
                 let correspondingAPIStations = stationsNeedingFavicons.compactMap { station in
                     apiStationsMap[station.id]
                 }
@@ -2485,7 +2518,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         print("🖼️ Downloading favicons for \(stations.count) stations (others already cached)")
-        let stationAPIMap = Dictionary(uniqueKeysWithValues: zip(stations.map { $0.id }, apiStations))
+        
+        // Handle duplicates when creating station-to-API mapping
+        var stationAPIMap: [String: RadioBrowserStation] = [:]
+        for (station, apiStation) in zip(stations, apiStations) {
+            if stationAPIMap[station.id] != nil {
+                print("🔄 Duplicate station ID '\(station.id)' found in favicon download - keeping first occurrence")
+            } else {
+                stationAPIMap[station.id] = apiStation
+            }
+        }
         
         // Create URLSession with timeout for favicon downloads
         let config = URLSessionConfiguration.default
@@ -2565,16 +2607,61 @@ class RadioStationViewModel: NSObject, ObservableObject {
 
 extension RadioStationViewModel {
     func saveStationsToCoreData() {
-        let context = CoreDataStack.shared.persistentContainer.viewContext
+        // Use a background context to avoid blocking main thread and reduce merge conflicts
+        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
         
-        // Fetch existing stations
-        let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
-        
-        do {
-            let existingStations = try context.fetch(fetchRequest)
-            let existingDict = Dictionary(uniqueKeysWithValues: existingStations.map { ($0.id!, $0) })
+        backgroundContext.perform {
+            // Configure merge policy to handle conflicts automatically
+            backgroundContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
             
-            for (index, station) in stations.enumerated() {
+            // Fetch existing stations in background context
+            let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            
+            do {
+                let existingStations = try backgroundContext.fetch(fetchRequest)
+            
+            // Detect and clean up duplicates before creating dictionary
+            var stationsByID: [String: CDStation] = [:]
+            var duplicatesToDelete: [CDStation] = []
+            
+            for station in existingStations {
+                guard let stationId = station.id else {
+                    print("⚠️ Found station with nil ID, deleting it")
+                    duplicatesToDelete.append(station)
+                    continue
+                }
+                
+                if let existingStation = stationsByID[stationId] {
+                    // Found duplicate - keep the one with more recent data or better metadata
+                    let keepExisting = self.shouldKeepExistingStation(existing: existingStation, duplicate: station)
+                    if keepExisting {
+                        duplicatesToDelete.append(station)
+                        print("🔄 Duplicate station ID '\(stationId)' found - keeping existing, deleting duplicate")
+                    } else {
+                        duplicatesToDelete.append(existingStation)
+                        stationsByID[stationId] = station
+                        print("🔄 Duplicate station ID '\(stationId)' found - keeping newer, deleting old")
+                    }
+                } else {
+                    stationsByID[stationId] = station
+                }
+            }
+            
+                // Delete duplicates first
+                for duplicate in duplicatesToDelete {
+                    backgroundContext.delete(duplicate)
+                print("🗑️ Deleted duplicate/invalid station: \(duplicate.name ?? "Unknown")")
+            }
+            
+                // Save deletion changes before proceeding
+                if !duplicatesToDelete.isEmpty {
+                    try backgroundContext.save()
+                    print("✅ Cleaned up \(duplicatesToDelete.count) duplicate/invalid stations")
+                }
+            
+            let existingDict = stationsByID
+            
+                for (index, station) in self.stations.enumerated() {
                 if let existingStation = existingDict[station.id] {
                     // Update existing station
                     existingStation.name = station.name
@@ -2592,7 +2679,7 @@ extension RadioStationViewModel {
                     existingStation.lastPlayed = station.lastPlayed
                 } else {
                     // Create new station if it doesn't exist
-                    let newStation = CDStation(context: context)
+                    let newStation = CDStation(context: backgroundContext)
                     newStation.id = station.id
                     newStation.name = station.name
                     newStation.url = station.url
@@ -2610,25 +2697,89 @@ extension RadioStationViewModel {
                 }
             }
             
-            // Remove stations that are no longer in the array
-            let stationIDs = Set(stations.map { $0.id })
-            for existingStation in existingStations {
-                if !stationIDs.contains(existingStation.id!) {
-                    context.delete(existingStation)
+                // Remove stations that are no longer in the array
+                let stationIDs = Set(self.stations.map { $0.id })
+                for existingStation in existingStations {
+                    // Skip stations with nil IDs (they should have been cleaned up in duplicate detection above)
+                    guard let existingStationId = existingStation.id else {
+                        print("⚠️ Found existing station with nil ID during cleanup, deleting it: \(existingStation.name ?? "Unknown")")
+                        backgroundContext.delete(existingStation)
+                        continue
+                    }
+                    
+                    if !stationIDs.contains(existingStationId) {
+                        print("🗑️ Removing station no longer in current set: \(existingStation.name ?? "Unknown")")
+                        backgroundContext.delete(existingStation)
+                    }
+                }
+                
+                // Save changes in background context
+                let hasChanges = backgroundContext.hasChanges
+                try backgroundContext.save()
+                
+                // Push changes to parent context (main context) in background
+                if backgroundContext.parent?.hasChanges == true {
+                    try backgroundContext.parent?.save()
+                }
+                
+                // Only log if there were actual changes
+                if hasChanges {
+                    DispatchQueue.main.async {
+                        print("✅ CoreData stations updated successfully.")
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    print("❌ Failed to update stations in CoreData: \(error)")
+                    if let nsError = error as NSError? {
+                        print("❌ Error details: \(nsError.localizedDescription)")
+                        print("❌ Error userInfo: \(nsError.userInfo)")
+                    }
                 }
             }
-            
-            // Save changes
-            let hasChanges = context.hasChanges
-            try context.save()
-            
-            // Only log if there were actual changes
-            if hasChanges {
-                print("CoreData stations updated successfully.")
-            }
-        } catch {
-            print("Failed to update stations in CoreData: \(error)")
         }
+    }
+    
+    // Helper method to decide which duplicate station to keep
+    private func shouldKeepExistingStation(existing: CDStation, duplicate: CDStation) -> Bool {
+        // Prefer station with more complete data
+        let existingScore = stationDataScore(existing)
+        let duplicateScore = stationDataScore(duplicate)
+        
+        if existingScore != duplicateScore {
+            return existingScore > duplicateScore
+        }
+        
+        // If scores are equal, prefer the one with more recent lastPlayed
+        if let existingLastPlayed = existing.lastPlayed,
+           let duplicateLastPlayed = duplicate.lastPlayed {
+            return existingLastPlayed > duplicateLastPlayed
+        }
+        
+        // If one has lastPlayed and other doesn't, prefer the one with lastPlayed
+        if existing.lastPlayed != nil && duplicate.lastPlayed == nil {
+            return true
+        }
+        if existing.lastPlayed == nil && duplicate.lastPlayed != nil {
+            return false
+        }
+        
+        // Default to keeping existing
+        return true
+    }
+    
+    // Score station based on data completeness
+    private func stationDataScore(_ station: CDStation) -> Int {
+        var score = 0
+        
+        if station.name?.isEmpty == false { score += 1 }
+        if station.url?.isEmpty == false { score += 1 }
+        if station.iconData != nil { score += 2 }
+        if station.country?.isEmpty == false { score += 1 }
+        if station.isFavorite { score += 1 }
+        if station.lastPlayed != nil { score += 1 }
+        
+        return score
     }
     
     func loadStationsFromCoreData() {

@@ -44,6 +44,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             // Initialize enhanced CloudKit sync for cross-device sync notifications
             _ = PodcastCloudKitManager.shared
             _ = RadioStationCloudKitManager.shared
+            
+            // Prewarm EpisodeStateManager to avoid cold-start race conditions for UI
+            _ = EpisodeStateManager.shared
+            print("🔥 Prewarmed EpisodeStateManager at launch; isReady=\(EpisodeStateManager.shared.isReady)")
             print("📡 Enhanced CloudKit sync initialized for podcasts and radio stations")
             
             checkBackgroundRefreshStatus()

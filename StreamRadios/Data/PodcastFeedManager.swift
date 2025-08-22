@@ -198,12 +198,18 @@ class PodcastFeedManager {
             }
         }
         
-        // Update feed and add new episodes
-        return try await updateFeedWithNewEpisodes(
+        // Update feed metadata first
+        let result = try await updateFeedWithNewEpisodes(
             existingFeed: existingFeed,
             updatedFeed: feedWithArtwork,
             newEpisodes: newEpisodes
         )
+        
+        // Reconcile Core Data to exactly match the latest parsed feed content to prevent accumulation
+        // Use the parsed episodes from the RSS (complete set) as the source of truth
+        try await PodcastCoreDataManager.shared.reconcileEpisodes(for: existingFeed.id, parsedEpisodes: newEpisodes)
+        
+        return result
     }
     
     // MARK: - Private Methods

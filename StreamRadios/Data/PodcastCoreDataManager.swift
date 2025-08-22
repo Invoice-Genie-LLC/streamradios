@@ -281,6 +281,54 @@ class PodcastCoreDataManager {
         }
     }
     
+    /// Reconcile episodes for a feed to match exactly the parsed feed items (no accumulation)
+    /// - Ensures Core Data contains exactly the set of episodes from the latest RSS parse
+    /// - Upserts parsed episodes and deletes any that are no longer present in the feed
+    func reconcileEpisodes(for feedId: String, parsedEpisodes: [PodcastEpisode]) async throws {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        try await backgroundContext.perform {
+            // Fetch existing episodes for this feed
+            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+            fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+            
+            let existingManaged = try backgroundContext.fetch(fetchRequest)
+            var existingById: [String: PodcastModel] = [:]
+            for e in existingManaged { if let id = e.id { existingById[id] = e } }
+            
+            // Upsert parsed episodes
+            var parsedIds = Set<String>()
+            for ep in parsedEpisodes {
+                parsedIds.insert(ep.id)
+                if let managed = existingById[ep.id] {
+                    // Preserve download data then update metadata
+                    let preservedLocalPath = managed.localFilePath
+                    let preservedFileSize = managed.fileSize
+                    managed.update(from: ep)
+                    managed.feedId = feedId
+                    managed.localFilePath = preservedLocalPath
+                    managed.fileSize = preservedFileSize
+                } else {
+                    // Insert new episode
+                    let managed = PodcastModel(context: backgroundContext)
+                    managed.update(from: ep)
+                    managed.feedId = feedId
+                }
+            }
+            
+            // Delete episodes that are no longer present in the feed
+            let toDelete = existingManaged.filter { model in
+                guard let id = model.id else { return false }
+                return !parsedIds.contains(id)
+            }
+            for model in toDelete { backgroundContext.delete(model) }
+            
+            try backgroundContext.save()
+            os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted/updated %d, deleted %d", log: self.log, type: .info, feedId, parsedIds.count, parsedEpisodes.count, toDelete.count)
+        }
+    }
+    
     /// Get existing episode IDs for deduplication
     private func getExistingEpisodeIds(for feedId: String, in context: NSManagedObjectContext) throws -> Set<String> {
         let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
