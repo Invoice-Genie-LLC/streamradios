@@ -30,6 +30,21 @@ class PodcastCloudKitManager: ObservableObject {
     
     @Published var lastInstantSyncDate: Date?
     
+    // MARK: - Shared Data Structure Keys (to prevent quota exceeded)
+    private enum SharedDataKeys {
+        static let episodeProgress = "podcast_episodes_progress"
+        static let episodeFavorites = "podcast_episodes_favorites"
+        static let episodeDownloads = "podcast_episodes_downloads"
+        static let episodePlayed = "podcast_episodes_played"
+        static let lastCleanupDate = "ubiquitous_store_last_cleanup"
+    }
+    
+    // Maximum entries per shared collection to prevent size issues
+    private let maxEntriesPerCollection = 200
+    
+    // Cleanup interval (7 days)
+    private let cleanupInterval: TimeInterval = 7 * 24 * 60 * 60
+    
     // CloudKit Record Types
     private enum RecordType {
         static let episodeState = "EpisodeState"
@@ -40,6 +55,7 @@ class PodcastCloudKitManager: ObservableObject {
         self.privateDatabase = container.privateCloudDatabase
         setupInstantSync()
         setupCloudKitSubscriptions()
+        performUbiquitousStoreCleanup()
     }
     
     // MARK: - Instant Sync Setup
@@ -206,6 +222,126 @@ class PodcastCloudKitManager: ObservableObject {
         
         ubiquitousStore.synchronize()
         print("📡 ✅ All test sync data cleared")
+    }
+    
+    // MARK: - Ubiquitous Store Cleanup
+    
+    /// Perform cleanup of old ubiquitous store keys to prevent quota exceeded
+    private func performUbiquitousStoreCleanup() {
+        let now = Date().timeIntervalSince1970
+        let lastCleanup = ubiquitousStore.double(forKey: SharedDataKeys.lastCleanupDate)
+        
+        // Only cleanup if it's been more than cleanup interval since last cleanup
+        guard lastCleanup == 0 || (now - lastCleanup) > cleanupInterval else {
+            print("📡 🧹 CLEANUP: Skipping cleanup - last cleanup was recent")
+            return
+        }
+        
+        print("📡 🧹 CLEANUP: Starting ubiquitous store cleanup to prevent quota exceeded")
+        
+        // Clean up old per-episode keys that may exist from previous versions
+        let allKeys = ubiquitousStore.dictionaryRepresentation.keys
+        var removedCount = 0
+        
+        for key in allKeys {
+            // Remove old unique episode keys
+            if key.hasPrefix("instant_podcast_progress_") ||
+               key.hasPrefix("instant_podcast_favorite_") ||
+               key.hasPrefix("instant_podcast_download_") ||
+               key.hasPrefix("instant_podcast_played_") {
+                ubiquitousStore.removeObject(forKey: key)
+                removedCount += 1
+            }
+        }
+        
+        if removedCount > 0 {
+            print("📡 🧹 CLEANUP: Removed \(removedCount) old episode-specific keys")
+            ubiquitousStore.synchronize()
+        }
+        
+        // Clean up oversized collections
+        cleanupSharedDataCollections()
+        
+        // Record cleanup date
+        ubiquitousStore.set(now, forKey: SharedDataKeys.lastCleanupDate)
+        ubiquitousStore.synchronize()
+        
+        print("📡 🧹 CLEANUP: Completed ubiquitous store cleanup")
+    }
+    
+    /// Clean up shared data collections to keep them under size limits
+    private func cleanupSharedDataCollections() {
+        cleanupCollection(key: SharedDataKeys.episodeProgress, maxEntries: maxEntriesPerCollection)
+        cleanupCollection(key: SharedDataKeys.episodeFavorites, maxEntries: maxEntriesPerCollection)
+        cleanupCollection(key: SharedDataKeys.episodeDownloads, maxEntries: maxEntriesPerCollection)
+        cleanupCollection(key: SharedDataKeys.episodePlayed, maxEntries: maxEntriesPerCollection)
+    }
+    
+    /// Clean up a specific collection by removing oldest entries
+    private func cleanupCollection(key: String, maxEntries: Int) {
+        guard let collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] else {
+            return
+        }
+        
+        if collection.count <= maxEntries {
+            return
+        }
+        
+        print("📡 🧹 CLEANUP: Collection \(key) has \(collection.count) entries, trimming to \(maxEntries)")
+        
+        // Sort by timestamp and keep only the most recent entries
+        let sortedEntries = collection.sorted { entry1, entry2 in
+            let timestamp1 = (entry1.value["timestamp"] as? Double) ?? 0
+            let timestamp2 = (entry2.value["timestamp"] as? Double) ?? 0
+            return timestamp1 > timestamp2
+        }
+        
+        let trimmedArray = Array(sortedEntries.prefix(maxEntries))
+        let trimmedCollection = Dictionary(trimmedArray, uniquingKeysWith: { _, second in second })
+        ubiquitousStore.set(trimmedCollection, forKey: key)
+        
+        print("📡 🧹 CLEANUP: Trimmed \(key) from \(collection.count) to \(trimmedCollection.count) entries")
+    }
+    
+    // MARK: - Shared Collection Management
+    
+    /// Update episode data in a shared collection
+    private func updateEpisodeInSharedCollection(key: String, episodeId: String, data: [String: Any]) {
+        var collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] ?? [:]
+        collection[episodeId] = data
+        
+        // Trim collection if it gets too large
+        if collection.count > maxEntriesPerCollection {
+            print("📡 🧹 AUTO-TRIM: Collection \(key) has \(collection.count) entries, auto-trimming")
+            
+            // Sort by timestamp and keep most recent entries
+            let sortedEntries = collection.sorted { entry1, entry2 in
+                let timestamp1 = (entry1.value["timestamp"] as? Double) ?? 0
+                let timestamp2 = (entry2.value["timestamp"] as? Double) ?? 0
+                return timestamp1 > timestamp2
+            }
+            
+            let trimmedArray = Array(sortedEntries.prefix(maxEntriesPerCollection))
+            collection = Dictionary(trimmedArray, uniquingKeysWith: { _, second in second })
+            print("📡 🧹 AUTO-TRIM: Trimmed to \(collection.count) entries")
+        }
+        
+        ubiquitousStore.set(collection, forKey: key)
+    }
+    
+    /// Get episode data from a shared collection
+    private func getEpisodeFromSharedCollection(key: String, episodeId: String) -> [String: Any]? {
+        guard let collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] else {
+            return nil
+        }
+        return collection[episodeId]
+    }
+    
+    /// Remove episode data from a shared collection
+    private func removeEpisodeFromSharedCollection(key: String, episodeId: String) {
+        var collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] ?? [:]
+        collection.removeValue(forKey: episodeId)
+        ubiquitousStore.set(collection, forKey: key)
     }
     
     /// Diagnostic method to help troubleshoot account validation issues
@@ -610,25 +746,25 @@ class PodcastCloudKitManager: ObservableObject {
             self.lastInstantSyncDate = Date()
             
             for key in keys {
-                // Handle unique episode-specific keys with pattern matching
-                if key.hasPrefix("instant_podcast_progress_") {
-                    let episodeId = String(key.dropFirst("instant_podcast_progress_".count))
-                    print("📡 🔔 Processing instant podcast progress sync for episode: \(episodeId)")
-                    self.handleInstantPodcastProgressSync(for: episodeId, uniqueKey: key)
-                } else if key.hasPrefix("instant_podcast_favorite_") {
-                    let episodeId = String(key.dropFirst("instant_podcast_favorite_".count))
-                    print("📡 🔔 FAVORITE SYNC TRIGGER: Processing instant podcast episode favorite sync for episode: \(episodeId)")
-                    print("📡 🔔 FAVORITE SYNC TRIGGER: This device received a favorite change from another device")
-                    self.handleInstantPodcastFavoriteSync(for: episodeId, uniqueKey: key)
-                } else if key.hasPrefix("instant_podcast_download_") {
-                    let episodeId = String(key.dropFirst("instant_podcast_download_".count))
-                    print("📡 🔔 Processing instant podcast episode download sync for episode: \(episodeId)")
-                    self.handleInstantPodcastDownloadSync(for: episodeId, uniqueKey: key)
-                } else if key.hasPrefix("instant_podcast_played_") {
-                    let episodeId = String(key.dropFirst("instant_podcast_played_".count))
-                    print("📡 🔔 PLAYED SYNC TRIGGER: Processing instant podcast episode played sync for episode: \(episodeId)")
-                    print("📡 🔔 PLAYED SYNC TRIGGER: This device received a played change from another device")
-                    self.handleInstantPodcastPlayedSync(for: episodeId, uniqueKey: key)
+                // Handle shared collection keys for episode data
+                if key == SharedDataKeys.episodeProgress {
+                    print("📡 🔔 Processing shared episode progress collection sync")
+                    self.handleSharedCollectionSync(key: key, dataType: "progress")
+                } else if key == SharedDataKeys.episodeFavorites {
+                    print("📡 🔔 Processing shared episode favorites collection sync")
+                    self.handleSharedCollectionSync(key: key, dataType: "favorites")
+                } else if key == SharedDataKeys.episodeDownloads {
+                    print("📡 🔔 Processing shared episode downloads collection sync")
+                    self.handleSharedCollectionSync(key: key, dataType: "downloads")
+                } else if key == SharedDataKeys.episodePlayed {
+                    print("📡 🔔 Processing shared episode played collection sync")
+                    self.handleSharedCollectionSync(key: key, dataType: "played")
+                } else if key.hasPrefix("instant_podcast_progress_") ||
+                          key.hasPrefix("instant_podcast_favorite_") ||
+                          key.hasPrefix("instant_podcast_download_") ||
+                          key.hasPrefix("instant_podcast_played_") {
+                    // Legacy unique episode keys - ignore (will be cleaned up)
+                    print("📡 🧹 LEGACY KEY IGNORED: \(key) (will be cleaned up)")
                 } else {
                     // Handle legacy global keys and other types
                     switch key {
@@ -666,6 +802,60 @@ class PodcastCloudKitManager: ObservableObject {
                 }
             }
         }
+    }
+    
+    // MARK: - Shared Collection Sync Handlers
+    
+    /// Handle sync for shared collections
+    private func handleSharedCollectionSync(key: String, dataType: String) {
+        guard let collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] else {
+            print("📡 ❌ SHARED SYNC: No data found for collection \(key)")
+            return
+        }
+        
+        print("📡 📊 SHARED SYNC: Processing \(collection.count) episodes in \(dataType) collection")
+        
+        // Process each episode in the collection
+        for (episodeId, episodeData) in collection {
+            // Validate iCloud account to prevent cross-account contamination
+            if !validateSyncAccount(syncData: episodeData) {
+                print("📡 ❌ SHARED SYNC REJECTED: Invalid iCloud account for episode \(episodeId)")
+                continue
+            }
+            
+            switch dataType {
+            case "progress":
+                if let progress = episodeData["progress"] as? Double {
+                    processProgressDataFromSharedCollection(episodeData, expectedEpisodeId: episodeId)
+                }
+            case "favorites":
+                if let isFavorite = episodeData["isFavorite"] as? Bool {
+                    processFavoriteData(episodeData, expectedEpisodeId: episodeId)
+                }
+            case "downloads":
+                if let isDownloaded = episodeData["isDownloaded"] as? Bool {
+                    processDownloadData(episodeData, expectedEpisodeId: episodeId)
+                }
+            case "played":
+                if let isPlayed = episodeData["isPlayed"] as? Bool {
+                    processPlayedData(episodeData, expectedEpisodeId: episodeId)
+                }
+            default:
+                print("📡 ⚠️ SHARED SYNC: Unknown data type \(dataType)")
+            }
+        }
+    }
+    
+    /// Process progress data from shared collection
+    private func processProgressDataFromSharedCollection(_ episodeData: [String: Any], expectedEpisodeId: String) {
+        guard let progress = episodeData["progress"] as? Double,
+              let timestamp = episodeData["timestamp"] as? Double else {
+            print("📡 ❌ SHARED PROGRESS: Invalid progress data for episode \(expectedEpisodeId)")
+            return
+        }
+        
+        print("📡 ✅ SHARED PROGRESS: Found data for episode \(expectedEpisodeId) - progress: \(String(format: "%.1f", progress * 100))%")
+        self.processProgressSync(episodeId: expectedEpisodeId, progress: progress, timestamp: timestamp)
     }
     
     // New unique-key handler for progress sync
@@ -1223,10 +1413,9 @@ class PodcastCloudKitManager: ObservableObject {
         }
         
         // Check if we're already syncing this exact progress to avoid loops
-        if let existing = ubiquitousStore.object(forKey: "instant_podcast_progress") as? [String: Any],
-           let existingEpisodeId = existing["episodeId"] as? String,
-           let existingProgress = existing["progress"] as? Double,
-           existingEpisodeId == episodeId && abs(existingProgress - progress) < 0.001 {
+        if let existingProgress = getEpisodeFromSharedCollection(key: SharedDataKeys.episodeProgress, episodeId: episodeId),
+           let existingProgressValue = existingProgress["progress"] as? Double,
+           abs(existingProgressValue - progress) < 0.001 {
             print("📡 📊 SYNC SKIP: Already synced this exact progress for \(episodeId)")
             return
         }
@@ -1240,13 +1429,11 @@ class PodcastCloudKitManager: ObservableObject {
             "device_id": UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
         ]
         
-        // STEP 1: Instant sync via NSUbiquitousKeyValueStore for immediate cross-device notification
-        // Use unique key per episode to prevent overwrites from multiple episodes
-        let uniqueProgressKey = "instant_podcast_progress_\(episodeId)"
-        ubiquitousStore.set(progressData, forKey: uniqueProgressKey)
+        // STEP 1: Store in shared collection to prevent quota exceeded
+        updateEpisodeInSharedCollection(key: SharedDataKeys.episodeProgress, episodeId: episodeId, data: progressData)
         let syncResult = ubiquitousStore.synchronize()
         
-        print("📡 🔑 PROGRESS SYNC: Using unique key '\(uniqueProgressKey)'")
+        print("📡 🔑 PROGRESS SYNC: Using shared collection for episode \(episodeId)")
         print("📡 ⏰ PROGRESS SYNC: Storing progress \(String(format: "%.1f", progress * 100))% for episode \(episodeId)")
         
         // STEP 2: Persist to CloudKit for permanent storage across devices
@@ -1304,12 +1491,10 @@ class PodcastCloudKitManager: ObservableObject {
         print("📡 📋 RESUME SYNC: No recent remote progress data for episode \(episodeId)")
     }
     
-    /// Fetch the latest instant progress data for an episode from CloudKit (used by pull-to-refresh)
+    /// Fetch the latest instant progress data for an episode from shared collection (used by pull-to-refresh)
     func fetchLatestInstantProgress(for episodeId: String) async throws -> (progress: Double, timestamp: Double)? {
-        // Use the same unique key format as syncPodcastProgressInstantly
-        let uniqueProgressKey = "instant_podcast_progress_\(episodeId)"
-        
-        guard let progressData = ubiquitousStore.object(forKey: uniqueProgressKey) as? [String: Any],
+        // Get progress from shared collection
+        guard let progressData = getEpisodeFromSharedCollection(key: SharedDataKeys.episodeProgress, episodeId: episodeId),
               let progress = progressData["progress"] as? Double,
               let timestamp = progressData["timestamp"] as? Double else {
             return nil
@@ -1491,13 +1676,11 @@ class PodcastCloudKitManager: ObservableObject {
         
         print("📡 🚀 FAVORITE SYNC DATA: Sending data: \(favoriteData)")
         
-        // STEP 1: Instant sync via NSUbiquitousKeyValueStore for immediate cross-device notification
-        // Use unique key per episode to prevent overwrites from multiple episodes
-        let uniqueFavoriteKey = "instant_podcast_favorite_\(episodeId)"
-        ubiquitousStore.set(favoriteData, forKey: uniqueFavoriteKey)
+        // STEP 1: Store in shared collection to prevent quota exceeded
+        updateEpisodeInSharedCollection(key: SharedDataKeys.episodeFavorites, episodeId: episodeId, data: favoriteData)
         let syncResult = ubiquitousStore.synchronize()
         
-        print("📡 🔑 FAVORITE SYNC: Using unique key '\(uniqueFavoriteKey)'")
+        print("📡 🔑 FAVORITE SYNC: Using shared collection for episode \(episodeId)")
         print("📡 ⭐ FAVORITE SYNC: Storing favorite=\(isFavorite) for episode \(episodeId)")
         
         print("📡 🚀 FAVORITE SYNC RESULT: iCloud sync result: \(syncResult ? "✅ SUCCESS" : "❌ FAILED")")
@@ -1527,11 +1710,11 @@ class PodcastCloudKitManager: ObservableObject {
         
         os_log("📡 Instantly synced podcast favorite: %@ (favorite: %@) - Result: %@", log: log, type: .info, episodeId, isFavorite ? "YES" : "NO", syncResult ? "SUCCESS" : "FAILED")
         
-        // Also log the ubiquitous store status using the same unique key
-        if let storedData = ubiquitousStore.object(forKey: uniqueFavoriteKey) as? [String: Any] {
-            print("📡 🚀 FAVORITE SYNC VERIFY: Data successfully stored in iCloud: \(storedData)")
+        // Verify data was stored in shared collection
+        if let storedData = getEpisodeFromSharedCollection(key: SharedDataKeys.episodeFavorites, episodeId: episodeId) {
+            print("📡 🚀 FAVORITE SYNC VERIFY: Data successfully stored in shared collection: \(storedData)")
         } else {
-            print("📡 ❌ FAVORITE SYNC ERROR: Failed to verify data storage in iCloud")
+            print("📡 ❌ FAVORITE SYNC ERROR: Failed to verify data storage in shared collection")
         }
     }
     
@@ -1552,22 +1735,20 @@ class PodcastCloudKitManager: ObservableObject {
         
         print("📡 🚀 DOWNLOAD SYNC DATA: Sending data: \(downloadData)")
         
-        // STEP 1: Instant sync via NSUbiquitousKeyValueStore for immediate cross-device notification
-        // Use unique key per episode to prevent overwrites from multiple episodes
-        let uniqueDownloadKey = "instant_podcast_download_\(episodeId)"
-        ubiquitousStore.set(downloadData, forKey: uniqueDownloadKey)
+        // STEP 1: Store in shared collection to prevent quota exceeded
+        updateEpisodeInSharedCollection(key: SharedDataKeys.episodeDownloads, episodeId: episodeId, data: downloadData)
         let syncResult = ubiquitousStore.synchronize()
         
-        print("📡 🔑 DOWNLOAD SYNC: Using unique key '\(uniqueDownloadKey)'")
+        print("📡 🔑 DOWNLOAD SYNC: Using shared collection for episode \(episodeId)")
         print("📡 📥 DOWNLOAD SYNC: Storing downloaded=\(isDownloaded) for episode \(episodeId)")
         
         print("📡 🚀 DOWNLOAD SYNC RESULT: iCloud sync result: \(syncResult ? "✅ SUCCESS" : "❌ FAILED")")
         
-        // Also log the ubiquitous store status using the same unique key
-        if let storedData = ubiquitousStore.object(forKey: uniqueDownloadKey) as? [String: Any] {
-            print("📡 🚀 DOWNLOAD SYNC VERIFY: Data successfully stored in iCloud: \(storedData)")
+        // Verify data was stored in shared collection
+        if let storedData = getEpisodeFromSharedCollection(key: SharedDataKeys.episodeDownloads, episodeId: episodeId) {
+            print("📡 🚀 DOWNLOAD SYNC VERIFY: Data successfully stored in shared collection: \(storedData)")
         } else {
-            print("📡 ❌ DOWNLOAD SYNC ERROR: Failed to verify data storage in iCloud")
+            print("📡 ❌ DOWNLOAD SYNC ERROR: Failed to verify data storage in shared collection")
         }
         
         // STEP 2: Persist to CloudKit for permanent storage across devices
@@ -1594,13 +1775,6 @@ class PodcastCloudKitManager: ObservableObject {
         }
         
         os_log("📡 Instantly synced podcast download: %@ (downloaded: %@) - Result: %@", log: log, type: .info, episodeId, isDownloaded ? "YES" : "NO", syncResult ? "SUCCESS" : "FAILED")
-        
-        // Also log the ubiquitous store status using the same unique key
-        if let storedData = ubiquitousStore.object(forKey: uniqueDownloadKey) as? [String: Any] {
-            print("📡 🚀 DOWNLOAD SYNC VERIFY: Data successfully stored in iCloud: \(storedData)")
-        } else {
-            print("📡 ❌ DOWNLOAD SYNC ERROR: Failed to verify data storage in iCloud")
-        }
     }
     
     /// Instantly sync podcast episode played status across devices
@@ -1620,22 +1794,20 @@ class PodcastCloudKitManager: ObservableObject {
         
         print("📡 🚀 PLAYED SYNC DATA: Sending data: \(playedData)")
         
-        // STEP 1: Instant sync via NSUbiquitousKeyValueStore for immediate cross-device notification
-        // Use unique key per episode to prevent overwrites from multiple episodes
-        let uniquePlayedKey = "instant_podcast_played_\(episodeId)"
-        ubiquitousStore.set(playedData, forKey: uniquePlayedKey)
+        // STEP 1: Store in shared collection to prevent quota exceeded
+        updateEpisodeInSharedCollection(key: SharedDataKeys.episodePlayed, episodeId: episodeId, data: playedData)
         let syncResult = ubiquitousStore.synchronize()
         
-        print("📡 🔑 PLAYED SYNC: Using unique key '\(uniquePlayedKey)'")
+        print("📡 🔑 PLAYED SYNC: Using shared collection for episode \(episodeId)")
         print("📡 ✅ PLAYED SYNC: Storing played=\(isPlayed) for episode \(episodeId)")
         
         print("📡 🚀 PLAYED SYNC RESULT: iCloud sync result: \(syncResult ? "✅ SUCCESS" : "❌ FAILED")")
         
-        // Also log the ubiquitous store status using the same unique key
-        if let storedData = ubiquitousStore.object(forKey: uniquePlayedKey) as? [String: Any] {
-            print("📡 🚀 PLAYED SYNC VERIFY: Data successfully stored in iCloud: \(storedData)")
+        // Verify data was stored in shared collection
+        if let storedData = getEpisodeFromSharedCollection(key: SharedDataKeys.episodePlayed, episodeId: episodeId) {
+            print("📡 🚀 PLAYED SYNC VERIFY: Data successfully stored in shared collection: \(storedData)")
         } else {
-            print("📡 ❌ PLAYED SYNC ERROR: Failed to verify data storage in iCloud")
+            print("📡 ❌ PLAYED SYNC ERROR: Failed to verify data storage in shared collection")
         }
         
         // STEP 2: Persist to CloudKit for permanent storage across devices

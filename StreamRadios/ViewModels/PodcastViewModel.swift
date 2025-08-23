@@ -1922,24 +1922,24 @@ class PodcastViewModel: ObservableObject {
                         await MainActor.run {
                             if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
                                 var updatedFeedWithEpisodes = self.podcastFeeds[feedIndex]
-                                // Merge existing episodes with new ones, avoiding duplicates
-                                let existingEpisodeIds = Set(updatedFeedWithEpisodes.episodes.map { $0.id })
-                                let uniqueNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
-                                
-                                // Only update if there are actually new episodes to avoid unnecessary UI jumps
-                                if !uniqueNewEpisodes.isEmpty {
-                                    print("🔄 Adding \(uniqueNewEpisodes.count) new episodes to UI for feed \(feedId)")
-                                    updatedFeedWithEpisodes.episodes.append(contentsOf: uniqueNewEpisodes)
-                                    updatedFeedWithEpisodes.episodes.sort { $0.publicationDate > $1.publicationDate }
+                                // After reconcile, replace episodes with the exact Core Data snapshot to prevent accumulation
+                                do {
+                                    let context = CoreDataStack.shared.context
+                                    let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                                    request.predicate = NSPredicate(format: "feedId == %@", feedId)
+                                    request.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                                    let managed = try context.fetch(request)
+                                    let exactEpisodes = managed.compactMap { $0.toPodcastEpisode() }
+                                    updatedFeedWithEpisodes.episodes = self.removeDuplicatesFromEpisodes(exactEpisodes)
                                     self.podcastFeeds[feedIndex] = updatedFeedWithEpisodes
                                     
                                     // SMOOTH UPDATE: Only refresh if this is the currently selected feed AND user isn't scrolling
                                     if self.selectedFeedId == feedId && !self.isUserScrolling {
-                                        // Use a gentle update instead of full refresh to prevent jumping
                                         self.objectWillChange.send()
                                     }
-                                } else {
-                                    print("ℹ️ No new episodes to add for feed \(feedId) - UI stays stable")
+                                    print("✅ Replaced in-memory feed episodes with exact snapshot: \(updatedFeedWithEpisodes.episodes.count)")
+                                } catch {
+                                    print("❌ Failed to reload exact episodes snapshot for feed \(feedId): \(error)")
                                 }
                             }
                         }
@@ -2036,24 +2036,24 @@ class PodcastViewModel: ObservableObject {
                             await MainActor.run {
                                 if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
                                     var updatedFeedWithEpisodes = self.podcastFeeds[feedIndex]
-                                    // Merge existing episodes with new ones, avoiding duplicates
-                                    let existingEpisodeIds = Set(updatedFeedWithEpisodes.episodes.map { $0.id })
-                                    let uniqueNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
-                                    
-                                    // Only update if there are actually new episodes
-                                    if !uniqueNewEpisodes.isEmpty {
-                                        updatedFeedWithEpisodes.episodes.insert(contentsOf: uniqueNewEpisodes, at: 0)
-                                        updatedFeedWithEpisodes.episodes.sort { $0.publicationDate > $1.publicationDate }
+                                    // After reconcile, replace episodes with the exact Core Data snapshot to prevent accumulation
+                                    do {
+                                        let context = CoreDataStack.shared.context
+                                        let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                                        request.predicate = NSPredicate(format: "feedId == %@", feedId)
+                                        request.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                                        let managed = try context.fetch(request)
+                                        let exactEpisodes = managed.compactMap { $0.toPodcastEpisode() }
+                                        updatedFeedWithEpisodes.episodes = self.removeDuplicatesFromEpisodes(exactEpisodes)
                                         self.podcastFeeds[feedIndex] = updatedFeedWithEpisodes
                                         
-                                        // Reload the current view to show new episodes immediately
+                                        // Reload the current view to show updated episodes immediately
                                         if self.selectedFeedId == feedId {
-                                            print("📱 Refreshing UI to show \(uniqueNewEpisodes.count) new episodes")
-                                            // Reload episodes to pick up new ones
-                                            Task {
-                                                await self.loadEpisodesForFeed(feedId)
-                                            }
+                                            print("📱 Replaced UI episodes with exact snapshot: \(updatedFeedWithEpisodes.episodes.count)")
+                                            Task { await self.loadEpisodesForFeed(feedId) }
                                         }
+                                    } catch {
+                                        print("❌ Failed to reload exact episodes snapshot for feed \(feedId): \(error)")
                                     }
                                 }
                             }
