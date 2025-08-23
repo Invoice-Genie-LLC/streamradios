@@ -77,6 +77,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var loadingProgress: Double = 0.0
     @Published var loadingStationsCount: Int = 0
     @Published var totalStationsToLoad: Int = 0
+    
+    // Track stations currently being processed for favicon updates to prevent duplicates
+    private var stationsBeingProcessed: Set<String> = []
+    private let processingQueue = DispatchQueue(label: "com.streamradios.favicon", qos: .utility)
+    
+    // Track current API fetch task to prevent multiple concurrent fetches
+    private var currentFetchTask: Task<Void, Never>?
     @Published var loadingPhase: String = ""
     
     // Flag to prevent infinite loop in favorite timestamp migration
@@ -94,8 +101,8 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 // Automatically fetch stations for the newly selected country if it has no stations
                 print("🌍 Triggering API fetch for newly selected country: \(selectedCountry)")
-                Task { @MainActor in
-                    await fetchStationsForSelectedCountry()
+                Task { @MainActor [weak self] in
+                    await self?.fetchStationsForSelectedCountry()
                 }
             } else if oldValue == selectedCountry {
                 print("🌍 Country selection unchanged, skipping API fetch")
@@ -1985,23 +1992,27 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 loadingProgress = 0.05
             }
             
-            // Start progress simulation during API call
-            let progressTask = Task { @MainActor in
+            // Start progress simulation during API call with weak self capture
+            let progressTask = Task { @MainActor [weak self] in
+                guard let self = self else { return }
                 var currentProgress = 0.05
                 while currentProgress < 0.25 && !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
                     currentProgress += 0.02
-                    loadingProgress = currentProgress
+                    
+                    // Check if self is still valid before updating
+                    guard !Task.isCancelled else { break }
+                    self.loadingProgress = currentProgress
                     
                     // Update phase messages during download
                     if currentProgress < 0.1 {
-                        loadingPhase = "Connecting to radio database."
+                        self.loadingPhase = "Connecting to radio database."
                     } else if currentProgress < 0.15 {
-                        loadingPhase = "Downloading station data"
+                        self.loadingPhase = "Downloading station data"
                     } else if currentProgress < 0.2 {
-                        loadingPhase = "Receiving stations"
+                        self.loadingPhase = "Receiving stations"
                     } else {
-                        loadingPhase = "Finishing download"
+                        self.loadingPhase = "Finishing download"
                     }
                 }
             }
@@ -2383,10 +2394,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
             forceCloudKitCheckOnNextLaunch()
         }
         
-        // Reset progress values after a short delay
-        Task {
+        // Reset progress values after a short delay with weak self capture
+        Task { [weak self] in
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
             await MainActor.run {
+                guard let self = self else { return }
                 self.loadingProgress = 0.0
                 self.loadingStationsCount = 0
                 self.totalStationsToLoad = 0
@@ -2441,28 +2453,44 @@ class RadioStationViewModel: NSObject, ObservableObject {
     func fetchStationsForSelectedCountry() async {
         print("🌐 Radio Browser API: fetchStationsForSelectedCountry called for country: \(selectedCountry)")
         
-        // First try to find the country in the existing countries array
-        var currentCountry = countries.first(where: { $0.name == selectedCountry })
+        // Cancel any ongoing fetch to prevent memory issues and conflicts
+        currentFetchTask?.cancel()
         
-        // If not found (common on fresh install), create a country object as fallback
-        if currentCountry == nil && selectedCountry != "Select Country" {
-            print("🌐 Radio Browser API: Country not found in array, creating fallback country object for: \(selectedCountry)")
-            currentCountry = Country(name: selectedCountry, flag: "")
-            print("🌐 Radio Browser API: Created fallback country with API code: \(currentCountry?.apiCountryCode ?? "nil")")
+        // Create new fetch task
+        currentFetchTask = Task { [weak self] in
+            guard let self = self else { return }
+            
+            // Capture values synchronously to avoid await issues
+            let selectedCountryName = self.selectedCountry
+            let countriesArray = self.countries
+            
+            // First try to find the country in the existing countries array
+            var currentCountry = countriesArray.first(where: { $0.name == selectedCountryName })
+            
+            // If not found (common on fresh install), create a country object as fallback
+            if currentCountry == nil && selectedCountryName != "Select Country" {
+                print("🌐 Radio Browser API: Country not found in array, creating fallback country object for: \(selectedCountryName)")
+                currentCountry = Country(name: selectedCountryName, flag: "")
+                print("🌐 Radio Browser API: Created fallback country with API code: \(currentCountry?.apiCountryCode ?? "nil")")
+            }
+            
+            guard let country = currentCountry else {
+                print("🌐 Radio Browser API: No country selected or could not create country object for: \(selectedCountryName)")
+                return
+            }
+            
+            print("🌐 Radio Browser API: Found/created country: \(country.name) with API code: \(country.apiCountryCode)")
+            
+            // Check if task was cancelled before proceeding
+            guard !Task.isCancelled else {
+                print("🌐 Radio Browser API: Fetch task was cancelled before execution")
+                return
+            }
+            
+            await self.fetchStationsFromAPI(for: country)
         }
         
-        guard let country = currentCountry else {
-            print("🌐 Radio Browser API: No country selected or could not create country object for: \(selectedCountry)")
-            return
-        }
-        
-        print("🌐 Radio Browser API: Found/created country: \(country.name) with API code: \(country.apiCountryCode)")
-        
-        // Always fetch stations for the selected country to get the latest available stations
-        // The duplicate prevention logic in fetchStationsFromAPI will filter out any existing stations
-        let existingStationsForCountry = stations.filter { $0.country == selectedCountry }
-        print("🌐 Radio Browser API: Current stations for \(selectedCountry): \(existingStationsForCountry.count). Fetching latest stations")
-        await fetchStationsFromAPI(for: country)
+        await currentFetchTask?.value
     }
     
     func reportStationClick(for station: RadioStation) {
@@ -2571,9 +2599,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     self.stations[index].iconData = iconData
                     print("✅ Favicon downloaded and cached for station: \(self.stations[index].name)")
                     
-                    // Save to Core Data in background for persistent caching
-                    Task.detached {
-                        await self.updateStationIconInCoreData(stationId: stationId, iconData: iconData)
+                    // Save to Core Data in background for persistent caching with weak self
+                    Task.detached { [weak self] in
+                        await self?.updateStationIconInCoreData(stationId: stationId, iconData: iconData)
                     }
                 }
             }
@@ -2584,22 +2612,74 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     private func updateStationIconInCoreData(stationId: String, iconData: String) async {
+        // Check if this station is already being processed to prevent duplicate updates
+        let shouldProcess = await withCheckedContinuation { continuation in
+            processingQueue.async {
+                guard !self.stationsBeingProcessed.contains(stationId) else {
+                    print("📷 Station \(stationId) is already being processed for favicon update - skipping")
+                    continuation.resume(returning: false)
+                    return
+                }
+                self.stationsBeingProcessed.insert(stationId)
+                continuation.resume(returning: true)
+            }
+        }
+        
+        guard shouldProcess else { return }
+        
+        // Ensure we clean up the processing state when done
+        defer {
+            processingQueue.async {
+                self.stationsBeingProcessed.remove(stationId)
+            }
+        }
+        
         let context = CoreDataStack.shared.persistentContainer.newBackgroundContext()
+        
+        // Set merge policy to handle conflicts automatically
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        context.automaticallyMergesChangesFromParent = true
         
         await context.perform {
             let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "id == %@", stationId)
+            fetchRequest.returnsObjectsAsFaults = false // Ensure we get the full object
             
             do {
                 if let station = try context.fetch(fetchRequest).first {
-                    station.iconData = iconData
-                    try context.save()
-                    print("💾 Favicon cached to Core Data for station: \(station.name ?? "Unknown")")
+                    // Check if the station already has icon data to avoid unnecessary updates
+                    if station.iconData == nil || station.iconData?.isEmpty == true {
+                        station.iconData = iconData
+                        
+                        // Only save if there are actual changes
+                        if context.hasChanges {
+                            try context.save()
+                            print("💾 Favicon cached to Core Data for station: \(station.name ?? "Unknown")")
+                        } else {
+                            print("📷 Station \(station.name ?? "Unknown") already has favicon data - skipping update")
+                        }
+                    } else {
+                        print("📷 Station \(station.name ?? "Unknown") already has favicon data - skipping update")
+                    }
                 } else {
                     print("⚠️ Station not found in Core Data for favicon caching: \(stationId)")
                 }
-            } catch {
-                print("❌ Failed to cache favicon to Core Data: \(error)")
+            } catch let error as NSError {
+                if error.code == 133020 { // NSMergeConflictError
+                    print("🔄 Merge conflict detected for favicon update - attempting retry with refresh")
+                    // Refresh the context and try once more
+                    context.refreshAllObjects()
+                    do {
+                        if context.hasChanges {
+                            try context.save()
+                            print("✅ Successfully saved favicon after merge conflict resolution")
+                        }
+                    } catch {
+                        print("❌ Failed to save favicon even after merge conflict resolution: \(error)")
+                    }
+                } else {
+                    print("❌ Failed to cache favicon to Core Data: \(error)")
+                }
             }
         }
     }

@@ -351,13 +351,13 @@ struct ContentView: View {
                                     stationCount: { country in
                                         viewModel.stations.filter { $0.country == country }.count
                                     },
-                                    onSelect: { country in
+                                    onSelect: { [weak viewModel] country in
                                         // Trigger refresh even if same country tapped; also when empty
                                         Task {
                                             UIDevice.playHapticFeedback()
-                                            await viewModel.fetchStationsForSelectedCountry()
+                                            await viewModel?.fetchStationsForSelectedCountry()
                                             await MainActor.run {
-                                                viewModel.syncStationsWithCloudKit()
+                                                viewModel?.syncStationsWithCloudKit()
                                             }
                                         }
                                     }

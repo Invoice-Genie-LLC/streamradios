@@ -33,6 +33,11 @@ class CoreDataStack {
         
         container.loadPersistentStores { (storeDescription, error) in
             print("CoreData: Loaded store at \(storeDescription.url?.absoluteString ?? "Unknown URL")")
+            
+            // Configure merge policy for better conflict resolution
+            container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            container.viewContext.automaticallyMergesChangesFromParent = true
+            
             if let error = error as NSError? {
                 print("CoreData: Failed to load persistent stores: \(error), \(error.userInfo)")
                 // In case of migration issues, try to delete and recreate the store
