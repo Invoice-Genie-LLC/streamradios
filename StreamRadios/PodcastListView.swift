@@ -1200,6 +1200,7 @@ struct EpisodeRowView: View {
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
     @State private var refreshTrigger = UUID() // Force UI refresh when progress changes
+    @State private var downloadButtonPressed = false // For download button press animation
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
     
@@ -1259,7 +1260,7 @@ struct EpisodeRowView: View {
                     .foregroundColor(.white)
                     .padding(4)
                     .frame(maxWidth: .infinity)
-                    .background(Color.red)
+                    .background(bannerAlertMessage.hasPrefix("Download started") ? Color.blue : Color.red)
             }
             
             // Responsive Layout: Play Button | Episode Info | Action Buttons
@@ -1517,6 +1518,22 @@ struct EpisodeRowView: View {
     
     private var simplifiedDownloadButton: some View {
         Button(action: {
+            // Trigger button press animation
+            withAnimation(.easeInOut(duration: 0.1)) {
+                downloadButtonPressed = true
+            }
+            
+            // Reset animation after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    downloadButtonPressed = false
+                }
+            }
+            
+            // Add haptic feedback for button tap
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+            
             if isPlaying {
                 showBannerAlert(message: "You can't download episodes while playing.")
             } else if !episode.state.isDownloaded && !isDownloading {
@@ -1525,6 +1542,9 @@ struct EpisodeRowView: View {
                     showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
                     return
                 }
+                
+                // Show immediate feedback with a brief message
+                showBannerAlert(message: "Download started for \(episode.title)")
                 
                 viewModel.downloadEpisode(episode) { result in
                     // Download state is managed by the progress tracking
@@ -1575,6 +1595,7 @@ struct EpisodeRowView: View {
                 }
             }
         }
+        .scaleEffect(downloadButtonPressed ? 0.9 : 1.0) // Add scale animation for press feedback
         .disabled(isDownloading) // Disable button during download
     }
     
@@ -1669,6 +1690,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
     @State private var refreshTrigger = UUID() // Force UI refresh when progress/played state changes
+    @State private var downloadButtonPressed = false // For download button press animation
     
     // Cache expensive computations to avoid recalculation during scrolling
     private let cachedProgress: Double
@@ -1883,7 +1905,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
             .foregroundColor(.white)
             .padding(8)
             .frame(maxWidth: .infinity)
-            .background(Color.red)
+            .background(bannerAlertMessage.hasPrefix("Download started") ? Color.blue : Color.red)
             .cornerRadius(6)
             .padding(.horizontal, 16)
             .padding(.bottom, 4)
@@ -2127,6 +2149,22 @@ struct OptimizedEpisodeRowView: View, Equatable {
     
     private var simplifiedDownloadButton: some View {
         Button(action: {
+            // Trigger button press animation
+            withAnimation(.easeInOut(duration: 0.1)) {
+                downloadButtonPressed = true
+            }
+            
+            // Reset animation after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    downloadButtonPressed = false
+                }
+            }
+            
+            // Add haptic feedback for button tap
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+            
             if isPlaying {
                 showBannerAlert(message: "You can't download episodes while playing.")
             } else if !episode.state.isDownloaded && !isDownloading {
@@ -2135,6 +2173,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
                     showBannerAlert(message: "Podcast downloads are available with StreamRadios Pro. Upgrade to download episodes for offline listening.")
                     return
                 }
+                
+                // Show immediate feedback with a brief message
+                showBannerAlert(message: "Download started for \(episode.title)")
                 
                 viewModel.downloadEpisode(episode) { result in
                     // Download state is managed by the progress tracking
