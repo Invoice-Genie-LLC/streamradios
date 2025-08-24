@@ -8,11 +8,15 @@
 import Foundation
 import os.log
 import UIKit
+import Darwin
+import MachO
 
 /// Comprehensive error logging system for capturing all user exceptions and errors
-@MainActor
 class DebugLogger: ObservableObject {
     static let shared = DebugLogger()
+    
+    // Flag to prevent circular dependencies during initialization
+    private static var isInitializing = false
     
     // MARK: - Log Entry Structure
     struct LogEntry: Codable, Identifiable {
@@ -127,6 +131,11 @@ class DebugLogger: ObservableObject {
     private let logQueue = DispatchQueue(label: "com.streamradios.debuglogger", qos: .utility)
     private let maxLogEntries = 1000
     private var currentUserAction: String?
+    private var crashReportingInitialized = false
+    private var previousExceptionHandler: NSUncaughtExceptionHandler?
+    private var previousTerminateHandler: (@convention(c) () -> Void)?
+    private static var appStartTime = Date()
+    private var launchTime: Date
     
     // MARK: - File Management
     private static let logFileName = "streamradios_debug.log"
@@ -137,24 +146,45 @@ class DebugLogger: ObservableObject {
     
     // MARK: - Initialization
     private init() {
-        setupCrashReporting()
+        DebugLogger.isInitializing = true
+        launchTime = Date()
+        setupComprehensiveCrashReporting()
         loadPersistedLogs()
+        DebugLogger.isInitializing = false
+        // Note: Cannot use DebugLogger.logInfo here as it would create circular dependency
+        print("🔧 DebugLogger initialized - comprehensive crash detection enabled")
     }
     
     // MARK: - Public Logging Methods
     static func logCritical(_ message: String, category: String = "General", error: Error? = nil, jsonData: [String: Any]? = nil, file: String = #file, function: String = #function, line: Int = #line) {
+        guard !isInitializing else { 
+            print("🔧 [CRITICAL] \(message) (category: \(category))")
+            return 
+        }
         shared.log(level: .critical, message: message, category: category, error: error, jsonData: jsonData, file: file, function: function, line: line)
     }
     
     static func logError(_ message: String, category: String = "General", error: Error? = nil, jsonData: [String: Any]? = nil, file: String = #file, function: String = #function, line: Int = #line) {
+        guard !isInitializing else { 
+            print("🔧 [ERROR] \(message) (category: \(category))")
+            return 
+        }
         shared.log(level: .error, message: message, category: category, error: error, jsonData: jsonData, file: file, function: function, line: line)
     }
     
     static func logWarning(_ message: String, category: String = "General", error: Error? = nil, jsonData: [String: Any]? = nil, file: String = #file, function: String = #function, line: Int = #line) {
+        guard !isInitializing else { 
+            print("🔧 [WARNING] \(message) (category: \(category))")
+            return 
+        }
         shared.log(level: .warning, message: message, category: category, error: error, jsonData: jsonData, file: file, function: function, line: line)
     }
     
     static func logInfo(_ message: String, category: String = "General", jsonData: [String: Any]? = nil, file: String = #file, function: String = #function, line: Int = #line) {
+        guard !isInitializing else { 
+            print("🔧 [INFO] \(message) (category: \(category))")
+            return 
+        }
         shared.log(level: .info, message: message, category: category, jsonData: jsonData, file: file, function: function, line: line)
     }
     
@@ -253,67 +283,309 @@ class DebugLogger: ObservableObject {
         }
     }
     
-    // MARK: - Crash Reporting
-    private func setupCrashReporting() {
-        // Set up NSException handler
-        NSSetUncaughtExceptionHandler { exception in
-            let crashInfo = CrashInfo(
-                crashType: "NSException",
-                signal: nil,
-                exceptionName: exception.name.rawValue,
-                exceptionReason: exception.reason,
-                memoryFootprint: DebugLogger.shared.getMemoryFootprint()
-            )
-            
-            DebugLogger.shared.logCrash(
-                message: "Uncaught exception: \(exception.name.rawValue)",
-                crashInfo: crashInfo,
-                stackTrace: exception.callStackSymbols
-            )
+    // MARK: - Comprehensive Crash Reporting
+    private func setupComprehensiveCrashReporting() {
+        guard !crashReportingInitialized else {
+            print("⚠️ Crash reporting already initialized")
+            return
         }
         
-        // Set up signal handler for crashes
-        signal(SIGABRT) { _ in DebugLogger.shared.handleSignal("SIGABRT") }
-        signal(SIGILL) { _ in DebugLogger.shared.handleSignal("SIGILL") }
-        signal(SIGSEGV) { _ in DebugLogger.shared.handleSignal("SIGSEGV") }
-        signal(SIGFPE) { _ in DebugLogger.shared.handleSignal("SIGFPE") }
-        signal(SIGBUS) { _ in DebugLogger.shared.handleSignal("SIGBUS") }
-        signal(SIGPIPE) { _ in DebugLogger.shared.handleSignal("SIGPIPE") }
+        // Store previous handlers to allow chaining
+        previousExceptionHandler = NSGetUncaughtExceptionHandler()
+        
+        // Set up comprehensive NSException handler
+        NSSetUncaughtExceptionHandler { exception in
+            DebugLogger.shared.handleNSException(exception)
+            // Call previous handler if it existed
+            if let previousHandler = DebugLogger.shared.previousExceptionHandler {
+                previousHandler(exception)
+            }
+        }
+        
+        // Set up comprehensive signal handlers for all crash types
+        setupSignalHandlers()
+        
+        // Set up memory pressure monitoring
+        setupMemoryPressureMonitoring()
+        
+        // Set up app lifecycle monitoring for crash context
+        setupAppLifecycleMonitoring()
+        
+        // Set up watchdog timer for hanging detection
+        setupWatchdogTimer()
+        
+        crashReportingInitialized = true
+        print("🔧 Comprehensive crash reporting initialized")
     }
     
-    private func handleSignal(_ signal: String) {
+    private func setupSignalHandlers() {
+        let crashSignals = [
+            SIGABRT,  // Abort signal
+            SIGILL,   // Illegal instruction
+            SIGSEGV,  // Segmentation fault
+            SIGFPE,   // Floating point exception
+            SIGBUS,   // Bus error
+            SIGPIPE,  // Broken pipe
+            SIGTRAP,  // Trace/breakpoint trap
+            SIGXCPU,  // CPU time limit exceeded
+            SIGXFSZ,  // File size limit exceeded
+            SIGVTALRM, // Virtual timer expired
+            SIGPROF,  // Profiling timer expired
+            SIGSYS    // Bad system call
+        ]
+        
+        for signalType in crashSignals {
+            signal(signalType) { signalNumber in
+                DebugLogger.shared.handleSignalCrash(signalNumber)
+            }
+        }
+        
+        print("🔧 Signal handlers installed for \(crashSignals.count) crash signals")
+    }
+    
+    private func setupMemoryPressureMonitoring() {
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: .all, queue: logQueue)
+        source.setEventHandler {
+            let memoryUsage = self.getMemoryFootprint()
+            let pressureLevel = source.data
+            
+            var level = "Unknown"
+            if pressureLevel.contains(.normal) { level = "Normal" }
+            if pressureLevel.contains(.warning) { level = "Warning" }
+            if pressureLevel.contains(.critical) { level = "Critical" }
+            
+            DebugLogger.logWarning("Memory pressure detected: \(level), Usage: \(String(format: "%.1f MB", memoryUsage))", category: "MemoryPressure")
+            
+            if pressureLevel.contains(.critical) {
+                DebugLogger.logCritical("Critical memory pressure - potential crash imminent", category: "MemoryPressure")
+                self.persistLogsImmediately()
+            }
+        }
+        source.resume()
+    }
+    
+    private func setupAppLifecycleMonitoring() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.logCritical("App will terminate - saving final crash logs", category: "AppLifecycle")
+            self.persistLogsImmediately()
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            let memoryUsage = self.getMemoryFootprint()
+            DebugLogger.logWarning("Memory warning received - Usage: \(String(format: "%.1f MB", memoryUsage))", category: "MemoryWarning")
+        }
+    }
+    
+    private func setupWatchdogTimer() {
+        // Set up a watchdog timer to detect app hangs
+        let watchdogQueue = DispatchQueue(label: "com.streamradios.watchdog", qos: .utility)
+        var lastHeartbeat = Date()
+        
+        // Heartbeat on main queue
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            lastHeartbeat = Date()
+        }
+        
+        // Watchdog check on background queue
+        watchdogQueue.async {
+            while true {
+                Thread.sleep(forTimeInterval: 5.0)
+                let timeSinceHeartbeat = Date().timeIntervalSince(lastHeartbeat)
+                
+                if timeSinceHeartbeat > 8.0 { // 8 seconds without heartbeat
+                    DebugLogger.logCritical("App hang detected - no heartbeat for \(timeSinceHeartbeat) seconds", category: "Watchdog")
+                    self.persistLogsImmediately()
+                }
+            }
+        }
+    }
+    
+    private func handleNSException(_ exception: NSException) {
+        let memoryUsage = getMemoryFootprint()
+        let appRuntime = Date().timeIntervalSince(launchTime)
+        
         let crashInfo = CrashInfo(
-            crashType: "Signal",
-            signal: signal,
-            exceptionName: nil,
-            exceptionReason: "Application received signal \(signal)",
-            memoryFootprint: getMemoryFootprint()
+            crashType: "NSException",
+            signal: nil,
+            exceptionName: exception.name.rawValue,
+            exceptionReason: exception.reason,
+            memoryFootprint: memoryUsage
         )
         
+        let enhancedMessage = """
+        💥 FATAL NSException Crash Detected!
+        Exception: \(exception.name.rawValue)
+        Reason: \(exception.reason ?? "Unknown")
+        Memory: \(String(format: "%.1f MB", memoryUsage))
+        Runtime: \(String(format: "%.1f seconds", appRuntime))
+        User Action: \(currentUserAction ?? "None")
+        """
+        
         logCrash(
-            message: "Application crashed with signal: \(signal)",
+            message: enhancedMessage,
+            crashInfo: crashInfo,
+            stackTrace: exception.callStackSymbols
+        )
+    }
+    
+    private func handleSignalCrash(_ signalNumber: Int32) {
+        let signalName = getSignalName(signalNumber)
+        let memoryUsage = getMemoryFootprint()
+        let appRuntime = Date().timeIntervalSince(launchTime)
+        
+        let crashInfo = CrashInfo(
+            crashType: "Signal",
+            signal: signalName,
+            exceptionName: nil,
+            exceptionReason: "Application received fatal signal \(signalName) (\(signalNumber))",
+            memoryFootprint: memoryUsage
+        )
+        
+        let enhancedMessage = """
+        💥 FATAL Signal Crash Detected!
+        Signal: \(signalName) (\(signalNumber))
+        Description: \(getSignalDescription(signalNumber))
+        Memory: \(String(format: "%.1f MB", memoryUsage))
+        Runtime: \(String(format: "%.1f seconds", appRuntime))
+        User Action: \(currentUserAction ?? "None")
+        """
+        
+        logCrash(
+            message: enhancedMessage,
             crashInfo: crashInfo,
             stackTrace: Thread.callStackSymbols
         )
     }
     
+    private func getSignalName(_ signalNumber: Int32) -> String {
+        switch signalNumber {
+        case SIGABRT: return "SIGABRT"
+        case SIGILL: return "SIGILL"
+        case SIGSEGV: return "SIGSEGV"
+        case SIGFPE: return "SIGFPE"
+        case SIGBUS: return "SIGBUS"
+        case SIGPIPE: return "SIGPIPE"
+        case SIGTRAP: return "SIGTRAP"
+        case SIGXCPU: return "SIGXCPU"
+        case SIGXFSZ: return "SIGXFSZ"
+        case SIGVTALRM: return "SIGVTALRM"
+        case SIGPROF: return "SIGPROF"
+        case SIGSYS: return "SIGSYS"
+        default: return "UNKNOWN_SIGNAL"
+        }
+    }
+    
+    private func getSignalDescription(_ signalNumber: Int32) -> String {
+        switch signalNumber {
+        case SIGABRT: return "Abort - Program terminated abnormally"
+        case SIGILL: return "Illegal Instruction - Invalid machine instruction"
+        case SIGSEGV: return "Segmentation Fault - Invalid memory access"
+        case SIGFPE: return "Floating Point Exception - Math error"
+        case SIGBUS: return "Bus Error - Invalid memory alignment"
+        case SIGPIPE: return "Broken Pipe - Write to closed pipe"
+        case SIGTRAP: return "Trace/Breakpoint - Debugger trap"
+        case SIGXCPU: return "CPU Limit - CPU time exceeded"
+        case SIGXFSZ: return "File Size Limit - File too large"
+        case SIGVTALRM: return "Virtual Timer - Virtual alarm expired"
+        case SIGPROF: return "Profiling Timer - Profiling alarm expired"
+        case SIGSYS: return "Bad System Call - Invalid system call"
+        default: return "Unknown signal type"
+        }
+    }
+    
     private func logCrash(message: String, crashInfo: CrashInfo, stackTrace: [String]) {
+        let enhancedStackTrace = enhanceStackTrace(stackTrace)
+        let systemInfo = gatherSystemInfo()
+        
         let logEntry = LogEntry(
             level: .critical,
             message: message,
             category: "Crash",
-            file: "Unknown",
-            function: "Unknown",
+            file: "CrashHandler",
+            function: "handleCrash",
             line: 0,
-            stackTrace: stackTrace,
-            jsonData: nil,
+            stackTrace: enhancedStackTrace,
+            jsonData: systemInfo,
             userAction: currentUserAction,
             crashInfo: crashInfo
         )
         
-        // Immediately persist crash to disk
+        // Immediately persist crash to disk using synchronous write
         logEntries.append(logEntry)
-        persistLogs()
+        persistLogsImmediately()
+        
+        // Also write to system console for additional visibility
+        print("💥💥💥 CRASH DETECTED 💥💥💥")
+        print("Message: \(message)")
+        print("Stack: \(enhancedStackTrace.joined(separator: "\n"))")
+        
+        // Log to OS unified logging for crash reports
+        let logger = Logger(subsystem: "com.streamradios.crash", category: "Fatal")
+        logger.fault("💥 CRASH: \(message, privacy: .public)")
+    }
+    
+    private func enhanceStackTrace(_ stackTrace: [String]) -> [String] {
+        var enhanced: [String] = []
+        
+        enhanced.append("=== CRASH STACK TRACE ===")
+        enhanced.append("Timestamp: \(Date().formatted(.iso8601))")
+        enhanced.append("App Runtime: \(String(format: "%.1f seconds", Date().timeIntervalSince(launchTime)))")
+        enhanced.append("Memory Usage: \(String(format: "%.1f MB", getMemoryFootprint()))")
+        enhanced.append("Device: \(UIDevice.current.model) iOS \(UIDevice.current.systemVersion)")
+        enhanced.append("=========================")
+        enhanced.append("")
+        
+        for (index, frame) in stackTrace.enumerated() {
+            enhanced.append("\(String(format: "%2d", index)): \(frame)")
+        }
+        
+        return enhanced
+    }
+    
+    private func gatherSystemInfo() -> [String: Any] {
+        return [
+            "device_model": UIDevice.current.model,
+            "ios_version": UIDevice.current.systemVersion,
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "Unknown",
+            "build_version": Bundle.main.infoDictionary?["CFBundleVersion"] ?? "Unknown",
+            "bundle_id": Bundle.main.bundleIdentifier ?? "Unknown",
+            "memory_usage_mb": getMemoryFootprint(),
+            "app_runtime_seconds": Date().timeIntervalSince(launchTime),
+            "crash_timestamp": Date().timeIntervalSince1970,
+            "user_action": currentUserAction ?? "None",
+            "total_log_entries": logEntries.count
+        ]
+    }
+    
+    private func persistLogsImmediately() {
+        // Synchronous write to ensure crash data is saved
+        do {
+            let data = try JSONEncoder().encode(logEntries)
+            try data.write(to: Self.logFileURL, options: .atomic)
+            
+            // Also create a specific crash file
+            let crashFileName = "streamradios_crash_\(Date().timeIntervalSince1970).log"
+            let crashFileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(crashFileName)
+            
+            if let lastEntry = logEntries.last, lastEntry.level == .critical {
+                let crashData = try JSONEncoder().encode([lastEntry])
+                try crashData.write(to: crashFileURL, options: .atomic)
+            }
+            
+        } catch {
+            // If JSON encoding fails, write raw text
+            let textLog = DebugLogger.getAllLogsForSharing()
+            try? textLog.write(to: Self.logFileURL, atomically: true, encoding: String.Encoding.utf8)
+        }
     }
     
     // MARK: - Memory Management
@@ -342,6 +614,9 @@ class DebugLogger: ObservableObject {
                 try data.write(to: Self.logFileURL)
             } catch {
                 print("Failed to persist logs: \(error)")
+                // Fallback to text format if JSON fails
+                let textLog = DebugLogger.getAllLogsForSharing()
+                try? textLog.write(to: Self.logFileURL, atomically: true, encoding: String.Encoding.utf8)
             }
         }
     }
@@ -358,6 +633,45 @@ class DebugLogger: ObservableObject {
             } catch {
                 // No existing logs or corrupted file
                 print("No existing logs to load: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Enhanced Crash Detection Methods
+    
+    /// Log a potential crash before it happens (e.g., unrecoverable error)
+    static func logPotentialCrash(_ message: String, category: String = "PreCrash", error: Error? = nil, file: String = #file, function: String = #function, line: Int = #line) {
+        shared.currentUserAction = "Potential crash detected"
+        logCritical("🚨 POTENTIAL CRASH: \(message)", category: category, error: error, file: file, function: function, line: line)
+        shared.persistLogsImmediately()
+    }
+    
+    /// Log when app becomes unresponsive
+    static func logAppHang(_ message: String, duration: TimeInterval) {
+        let hangMessage = "🔒 APP HANG: \(message) - Duration: \(String(format: "%.1f seconds", duration))"
+        shared.log(level: .critical, message: hangMessage, category: "AppHang", file: "HangDetector", function: "detectHang", line: 0)
+        shared.persistLogsImmediately()
+    }
+    
+    /// Monitor for main thread blocks
+    static func startMainThreadMonitoring() {
+        let monitorQueue = DispatchQueue(label: "com.streamradios.mainthread.monitor", qos: .utility)
+        var lastMainThreadActivity = Date()
+        
+        // Update activity on main thread
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            lastMainThreadActivity = Date()
+        }
+        
+        // Monitor from background
+        monitorQueue.async {
+            while true {
+                Thread.sleep(forTimeInterval: 1.0)
+                let timeSinceActivity = Date().timeIntervalSince(lastMainThreadActivity)
+                
+                if timeSinceActivity > 5.0 {
+                    logAppHang("Main thread blocked", duration: timeSinceActivity)
+                }
             }
         }
     }
@@ -469,7 +783,7 @@ class DebugLogger: ObservableObject {
 
 // MARK: - Error Extension
 extension Error {
-    func logError(category: String = "Error", jsonData: [String: Any]? = nil, file: String = #file, function: String = #function, line: Int = #line) {
+    @MainActor func logError(category: String = "Error", jsonData: [String: Any]? = nil, file: String = #file, function: String = #function, line: Int = #line) {
         DebugLogger.logError(
             self.localizedDescription,
             category: category,

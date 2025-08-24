@@ -81,10 +81,13 @@ class CoreDataStack {
     }
     
     func newBackgroundContext() -> NSManagedObjectContext {
-            let newContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
-            newContext.parent = context
-            return newContext
-        }
+        // Create independent background context connected directly to persistent store coordinator
+        // This avoids parent-child threading issues and provides better performance
+        let newContext = persistentContainer.newBackgroundContext()
+        newContext.automaticallyMergesChangesFromParent = true
+        newContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        return newContext
+    }
 
     func saveContext() {
         let context = persistentContainer.viewContext

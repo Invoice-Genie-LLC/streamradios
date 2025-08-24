@@ -85,21 +85,34 @@ class PodcastFeedManager {
     }
     
     /// Add new feed with background processing and episode parsing
-    func addFeed(from url: URL, customTitle: String? = nil, forceRefresh: Bool = false) async throws -> PodcastFeed {
+    func addFeed(from url: URL, customTitle: String? = nil, forceRefresh: Bool = false, enableProgressReporting: Bool = true) async throws -> PodcastFeed {
         os_log("🆕 Adding new feed from: %@", log: log, type: .info, url.absoluteString)
         
-        // Parse RSS feed in background with robust error handling and retry mechanism
-        let feedData = try await fetchRSSDataWithRetry(url: url, feedTitle: customTitle ?? "New Feed")
-        let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString) { progress, message in
-            Task { @MainActor in
-                DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
+        // Parse RSS feed in background with robust error handling and retry mechanism - use detached task to prevent main thread blocking
+        let (parsedFeed, episodes) = try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .userInitiated) {
+                do {
+                    let feedData = try await self.fetchRSSDataWithRetry(url: url, feedTitle: customTitle ?? "New Feed")
+                    // PERFORMANCE FIX: Only use progress callback for user-initiated operations
+                    let progressCallback: ((Double, String) -> Void)? = enableProgressReporting ? { progress, message in
+                        Task { @MainActor in
+                            DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
+                        }
+                    } : nil
+                    let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: progressCallback)
+                    let result = try await parser.parseComplete()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
         }
-        let (parsedFeed, episodes) = try parser.parseComplete()
         
-        // Report episode parsing progress
-        Task { @MainActor in
-            DataSyncManager.shared.updateFeedParsingProgress(0.8, message: "Saving \(episodes.count) episodes to database...")
+        // Report episode parsing progress only for user-initiated operations
+        if enableProgressReporting {
+            Task { @MainActor in
+                DataSyncManager.shared.updateFeedParsingProgress(0.8, message: "Saving \(episodes.count) episodes to database...")
+            }
         }
         
         // Use custom title if provided, otherwise use RSS feed title
@@ -152,14 +165,21 @@ class PodcastFeedManager {
         
         os_log("🔄 Refreshing feed: %@", log: log, type: .info, existingFeed.title)
         
-        // Parse RSS feed with robust error handling and retry mechanism
-        let feedData = try await fetchRSSDataWithRetry(url: URL(string: existingFeed.url)!, feedTitle: existingFeed.title)
-        let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url) { progress, message in
-            Task { @MainActor in
-                DataSyncManager.shared.updateFeedParsingProgress(progress, message: message)
+        // Parse RSS feed with robust error handling and retry mechanism - use detached task to prevent main thread blocking
+        // PERFORMANCE FIX: No progress reporting for auto-refresh to prevent main thread blocking
+        let (updatedFeed, newEpisodes) = try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .userInitiated) {
+                do {
+                    let feedData = try await self.fetchRSSDataWithRetry(url: URL(string: existingFeed.url)!, feedTitle: existingFeed.title)
+                    // Use parser without progress callback to prevent main thread blocking during auto-refresh
+                    let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url, progressCallback: nil)
+                    let result = try await parser.parseComplete()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
         }
-        let (updatedFeed, newEpisodes) = try parser.parseComplete()
         
         // Download artwork if URL changed or if we don't have artwork yet (original implementation)
         var feedWithArtwork = updatedFeed
@@ -719,7 +739,9 @@ extension PodcastFeedManager {
                 request.setValue("application/rss+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
                 request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
                 
-                let (data, response) = try await URLSession.shared.data(for: request)
+                // Use URLSession with dedicated configuration to prevent main thread blocking
+                let session = URLSession(configuration: .default)
+                let (data, response) = try await session.data(for: request)
                 
                 // Validate HTTP response
                 if let httpResponse = response as? HTTPURLResponse {
@@ -828,24 +850,40 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
         self.parser.delegate = self
     }
     
-    func parseComplete() throws -> (PodcastFeed, [PodcastEpisode]) {
-        progressCallback?(0.1, "Starting RSS parsing...")
-        
-        // Enhanced error handling for RSS parsing
-        guard parser.parse() else {
-            if let parserError = parser.parserError {
-                os_log("❌ RSS Parser failed with error: %@", log: OSLog.default, type: .error, parserError.localizedDescription)
-                // Try to provide more specific error information
-                if (parserError as NSError).code == 4 {
-                    throw FeedError.feedDataCorrupted // XML parsing failed
-                } else {
-                    throw FeedError.parsingFailed
+    func parseComplete() async throws -> (PodcastFeed, [PodcastEpisode]) {
+        return try await withCheckedThrowingContinuation { continuation in
+            // Move XML parsing to background queue to prevent main thread blocking
+            DispatchQueue.global(qos: .userInitiated).async {
+                self.progressCallback?(0.1, "Starting RSS parsing...")
+                
+                // Enhanced error handling for RSS parsing
+                guard self.parser.parse() else {
+                    if let parserError = self.parser.parserError {
+                        os_log("❌ RSS Parser failed with error: %@", log: OSLog.default, type: .error, parserError.localizedDescription)
+                        // Try to provide more specific error information
+                        if (parserError as NSError).code == 4 {
+                            continuation.resume(throwing: FeedError.feedDataCorrupted)
+                        } else {
+                            continuation.resume(throwing: FeedError.parsingFailed)
+                        }
+                    } else {
+                        os_log("❌ RSS Parser failed with unknown error", log: OSLog.default, type: .error)
+                        continuation.resume(throwing: FeedError.parsingFailed)
+                    }
+                    return
                 }
-            } else {
-                os_log("❌ RSS Parser failed with unknown error", log: OSLog.default, type: .error)
-                throw FeedError.parsingFailed
+                
+                do {
+                    let result = try self.buildResult()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
         }
+    }
+    
+    private func buildResult() throws -> (PodcastFeed, [PodcastEpisode]) {
         
         // Validate we have essential feed data
         guard let title = feedTitle, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

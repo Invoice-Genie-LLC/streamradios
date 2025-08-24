@@ -97,6 +97,8 @@
 		CARPLAY001234567890ABCDEF /* CarPlay.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CARPLAY123456789ABCDEF01 /* CarPlay.framework */; };
 		CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */; };
 		ELEGANTPICKER123456789ABC /* CountryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEGANTPICKER987654321DEF /* CountryPicker.swift */; };
+		DEBUGLOGGER123456789ABCD /* DebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBUGLOGGERFILE987654321 /* DebugLogger.swift */; };
+		CRASHDETECT123456789ABCD /* CrashDetectionUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = CRASHDETECTFILE987654321 /* CrashDetectionUtility.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -218,6 +220,8 @@
 		CARPLAY123456789ABCDEF01 /* CarPlay.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CarPlay.framework; path = System/Library/Frameworks/CarPlay.framework; sourceTree = SDKROOT; };
 		CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
 		ELEGANTPICKER987654321DEF /* CountryPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryPicker.swift; sourceTree = "<group>"; };
+		DEBUGLOGGERFILE987654321 /* DebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogger.swift; sourceTree = "<group>"; };
+		CRASHDETECTFILE987654321 /* CrashDetectionUtility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashDetectionUtility.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -319,6 +323,8 @@
 				7780E9702C3F2110009CCF6F /* CustomAlertView.swift */,
 				7780E9632C3CE2F7009CCF6F /* StyledPickerView.swift */,
 				ELEGANTPICKER987654321DEF /* CountryPicker.swift */,
+				DEBUGLOGGERFILE987654321 /* DebugLogger.swift */,
+				CRASHDETECTFILE987654321 /* CrashDetectionUtility.swift */,
 				775D04582C2B20BE00E99061 /* EditStationView.swift */,
 				778F746F2C2F13CE00AB81CD /* PlayerView.swift */,
 				779352212C1A118A008F8416 /* AlbumArtView.swift */,
@@ -555,6 +561,8 @@
 			files = (
 				7780E9642C3CE2F7009CCF6F /* StyledPickerView.swift in Sources */,
 				ELEGANTPICKER123456789ABC /* CountryPicker.swift in Sources */,
+				DEBUGLOGGER123456789ABCD /* DebugLogger.swift in Sources */,
+				CRASHDETECT123456789ABCD /* CrashDetectionUtility.swift in Sources */,
 				7750B1F42C165E6100374957 /* SettingsView.swift in Sources */,
 				7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */,
 				77CCE95B2C161E910098EE74 /* SideMenuView.swift in Sources */,

@@ -720,7 +720,9 @@ struct PodcastListView: View {
         
         // AUTOMATIC CLOUDKIT SYNC: Trigger sync on view load to check for new feeds and episode updates
         print("🔄 UI: PodcastListView appeared - triggering automatic CloudKit sync")
-        viewModel.automaticCloudKitSync()
+        Task.detached(priority: .userInitiated) {
+            await viewModel.automaticCloudKitSync()
+        }
         
         // Set up notification observer for fresh install data (with debouncing)
         NotificationCenter.default.addObserver(

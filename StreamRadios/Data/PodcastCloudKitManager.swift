@@ -742,10 +742,26 @@ class PodcastCloudKitManager: ObservableObject {
             print("📡 🎯 CRITICAL DELETION KEY DETECTED: instant_podcast_feed_removed")
         }
         
-        DispatchQueue.main.async {
-            self.lastInstantSyncDate = Date()
+        // Use background queue for sync processing to prevent main thread blocking
+        DispatchQueue.global(qos: .userInitiated).async {
+            let syncDate = Date()
             
-            for key in keys {
+            // Filter out radio-related keys early to prevent processing conflicts
+            let podcastKeys = keys.filter { key in
+                key.hasPrefix("instant_podcast_") || 
+                key.hasPrefix("StreamRadios_Episode") ||
+                key == SharedDataKeys.episodeProgress ||
+                key == SharedDataKeys.episodeFavorites ||
+                key == SharedDataKeys.episodeDownloads ||
+                key == SharedDataKeys.episodePlayed
+            }
+            
+            // Only process if we have podcast-related keys
+            guard !podcastKeys.isEmpty else {
+                return // Silently ignore radio-only notifications
+            }
+            
+            for key in podcastKeys {
                 // Handle shared collection keys for episode data
                 if key == SharedDataKeys.episodeProgress {
                     print("📡 🔔 Processing shared episode progress collection sync")
@@ -765,41 +781,41 @@ class PodcastCloudKitManager: ObservableObject {
                           key.hasPrefix("instant_podcast_played_") {
                     // Legacy unique episode keys - ignore (will be cleaned up)
                     print("📡 🧹 LEGACY KEY IGNORED: \(key) (will be cleaned up)")
+                } else if key.hasPrefix("StreamRadios_Episode") {
+                    // Handle episode state keys - process silently without unknown key warnings
+                    print("📡 🔄 EPISODE STATE SYNC: Processing episode state key \(key)")
+                    // Individual episode state keys are handled by shared collection sync
                 } else {
                     // Handle legacy global keys and other types
                     switch key {
                     case "instant_podcast_progress":
                         print("📡 🔔 Processing legacy instant podcast progress sync")
-                        self.handleInstantPodcastProgressSync()
-                    case "instant_radio_favorite":
-                        print("📡 🔔 Processing instant radio favorite sync")
-                        self.handleInstantRadioFavoriteSync()
-                    case "instant_radio_station_added":
-                        print("📡 🔔 Processing instant radio station added sync")
-                        self.handleInstantRadioStationAddedSync()
-                    case "instant_radio_station_removed":
-                        print("📡 🔔 Processing instant radio station removed sync")
-                        self.handleInstantRadioStationRemovedSync()
+                        Task { @MainActor in self.handleInstantPodcastProgressSync() }
                     case "instant_podcast_feed_added":
                         print("📡 🔔 Processing instant podcast feed added sync")
-                        self.handleInstantPodcastFeedAddedSync()
+                        Task { @MainActor in self.handleInstantPodcastFeedAddedSync() }
                     case "instant_podcast_feed_progress":
                         print("📡 🔔 Processing instant podcast feed progress sync")
-                        self.handleInstantPodcastFeedProgressSync()
+                        Task { @MainActor in self.handleInstantPodcastFeedProgressSync() }
                     case "instant_podcast_feed_removed":
                         print("📡 🔔 CRITICAL: Processing instant podcast feed DELETION sync")
-                        self.handleInstantPodcastFeedRemovedSync()
+                        Task { @MainActor in self.handleInstantPodcastFeedRemovedSync() }
                     case "instant_podcast_episode_favorite":
                         print("📡 🔔 LEGACY FAVORITE SYNC: Processing old format favorite sync")
-                        self.handleInstantPodcastFavoriteSync()
+                        Task { @MainActor in self.handleInstantPodcastFavoriteSync() }
                     case "instant_podcast_episode_download":
                         print("📡 🔔 LEGACY DOWNLOAD SYNC: Processing old format download sync")
-                        self.handleInstantPodcastDownloadSync()
+                        Task { @MainActor in self.handleInstantPodcastDownloadSync() }
                     default:
-                        print("📡 ⚠️ Unknown sync key received: \(key)")
+                        // Silently ignore unknown podcast keys to prevent log spam
                         break
                     }
                 }
+            }
+            
+            // Update sync date on main actor
+            Task { @MainActor in
+                self.lastInstantSyncDate = syncDate
             }
         }
     }
@@ -1960,6 +1976,16 @@ class PodcastCloudKitManager: ObservableObject {
     /// - For upgrade: sync both isFavorite and isDownloaded (files might still exist)
     /// - Returns: Tuple of (Array of episode state updates that should be saved to Core Data, Boolean indicating success)
     func syncEpisodeStatesFromCloudKit(for episodeIds: [String], isFreshInstall: Bool) async -> (updates: [EpisodeStateUpdate], success: Bool) {
+        // Ensure CloudKit operations run on dedicated background queue to prevent main thread blocking
+        return await withCheckedContinuation { continuation in
+            Task.detached(priority: .userInitiated) {
+                let result = await self.performEpisodeStateSync(episodeIds: episodeIds, isFreshInstall: isFreshInstall)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+    
+    private func performEpisodeStateSync(episodeIds: [String], isFreshInstall: Bool) async -> (updates: [EpisodeStateUpdate], success: Bool) {
         // UPGRADE PROTECTION: Use EpisodeStateManager's robust upgrade detection
         let isDefiniteUpgrade = EpisodeStateManager.shared.isUpgradeScenario()
         let finalIsFreshInstall = isFreshInstall && !isDefiniteUpgrade
@@ -1998,13 +2024,16 @@ class PodcastCloudKitManager: ObservableObject {
                 // Only process if this episode exists locally
                 guard episodeIdSet.contains(episodeId) else { continue }
 
-                // Update progress tracking
+                // Update progress tracking less frequently to reduce main thread pressure
                 processedCount += 1
-                if processedCount % 10 == 0 || processedCount == totalCloudStates {
-                    await DataSyncManager.shared.updateEpisodeStateProgress(
-                        currentCount: processedCount * episodeIds.count / max(totalCloudStates, 1) / 2,
-                        operation: "Processing \(processedCount)/\(totalCloudStates) episode states..."
-                    )
+                if processedCount % 50 == 0 || processedCount == totalCloudStates {
+                    // Use Task to avoid blocking current background processing
+                    Task { @MainActor in
+                        await DataSyncManager.shared.updateEpisodeStateProgress(
+                            currentCount: processedCount * episodeIds.count / max(totalCloudStates, 1) / 2,
+                            operation: "Processing \(processedCount)/\(totalCloudStates) episode states..."
+                        )
+                    }
                 }
 
                 // Always sync progress, isFavorite, and isPlayed to EpisodeStateManager SILENTLY

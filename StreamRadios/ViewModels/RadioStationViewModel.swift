@@ -2793,14 +2793,10 @@ extension RadioStationViewModel {
                     }
                 }
                 
-                // Save changes in background context
+                // Save changes in background context (independent context auto-merges with main context)
                 let hasChanges = backgroundContext.hasChanges
                 try backgroundContext.save()
-                
-                // Push changes to parent context (main context) in background
-                if backgroundContext.parent?.hasChanges == true {
-                    try backgroundContext.parent?.save()
-                }
+                // No need to manually save parent - independent context automatically merges changes
                 
                 // Only log if there were actual changes
                 if hasChanges {

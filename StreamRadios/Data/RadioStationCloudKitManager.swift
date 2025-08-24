@@ -68,36 +68,61 @@ class RadioStationCloudKitManager: ObservableObject {
             return
         }
         
-        os_log("📡 🚨 RADIO SYNC NOTIFICATION RECEIVED: Keys changed: %@", log: log, type: .info, keys.joined(separator: ", "))
-        print("📡 🚨 RADIO SYNC NOTIFICATION RECEIVED: Keys changed: \(keys.joined(separator: ", "))")
-        print("📡 📝 Full notification userInfo: \(userInfo)")
+        // Filter out podcast-related keys early to prevent processing
+        let radioKeys = keys.filter { key in
+            !key.hasPrefix("instant_podcast_") && !key.hasPrefix("StreamRadios_Episode")
+        }
         
-        DispatchQueue.main.async {
-            self.lastInstantSyncDate = Date()
+        // Only process if we have radio-related keys
+        guard !radioKeys.isEmpty else {
+            return // Silently ignore podcast-only notifications
+        }
+        
+        os_log("📡 🚨 RADIO SYNC NOTIFICATION RECEIVED: Keys changed: %@", log: log, type: .info, radioKeys.joined(separator: ", "))
+        
+        // Use background queue for sync processing to prevent main thread blocking
+        DispatchQueue.global(qos: .userInitiated).async {
+            let syncDate = Date()
             
-            for key in keys {
+            for key in radioKeys {
                 switch key {
                 case InstantSyncKeys.stationUpdated:
-                    self.handleInstantStationUpdatedSync()
-                case InstantSyncKeys.stationDeleted:
-                    self.handleInstantStationDeletedSync()
-                case InstantSyncKeys.stationAdded:
-                    self.handleInstantStationAddedSync()
-                case InstantSyncKeys.favoriteChanged:
-                    self.handleInstantFavoriteChangedSync()
-                case InstantSyncKeys.orderChanged:
-                    self.handleInstantOrderChangedSync()
-                case InstantSyncKeys.bulkStationUpdated:
-                    self.handleInstantBulkStationUpdatedSync()
-                case InstantSyncKeys.bulkStationDeleted:
-                    self.handleInstantBulkStationDeletedSync()
-                default:
-                    // Ignore podcast-related instant sync keys (handled by PodcastCloudKitManager)
-                    if key.hasPrefix("instant_podcast_") || key.hasPrefix("StreamRadios_Episode") {
-                        os_log("📡 RADIO SYNC: Ignoring podcast-related key: %@", log: self.log, type: .debug, key)
-                    } else {
-                        os_log("📡 RADIO SYNC: Unknown sync key: %@", log: self.log, type: .debug, key)
+                    Task { @MainActor in
+                        self.lastInstantSyncDate = syncDate
+                        self.handleInstantStationUpdatedSync()
                     }
+                case InstantSyncKeys.stationDeleted:
+                    Task { @MainActor in
+                        self.lastInstantSyncDate = syncDate
+                        self.handleInstantStationDeletedSync()
+                    }
+                case InstantSyncKeys.stationAdded:
+                    Task { @MainActor in
+                        self.lastInstantSyncDate = syncDate
+                        self.handleInstantStationAddedSync()
+                    }
+                case InstantSyncKeys.favoriteChanged:
+                    Task { @MainActor in
+                        self.lastInstantSyncDate = syncDate
+                        self.handleInstantFavoriteChangedSync()
+                    }
+                case InstantSyncKeys.orderChanged:
+                    Task { @MainActor in
+                        self.lastInstantSyncDate = syncDate
+                        self.handleInstantOrderChangedSync()
+                    }
+                case InstantSyncKeys.bulkStationUpdated:
+                    Task { @MainActor in
+                        self.lastInstantSyncDate = syncDate
+                        self.handleInstantBulkStationUpdatedSync()
+                    }
+                case InstantSyncKeys.bulkStationDeleted:
+                    Task { @MainActor in
+                        self.lastInstantSyncDate = syncDate
+                        self.handleInstantBulkStationDeletedSync()
+                    }
+                default:
+                    os_log("📡 RADIO SYNC: Unknown radio sync key: %@", log: self.log, type: .debug, key)
                 }
             }
         }

@@ -26,6 +26,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     private var pendingAlarmStationID: String?
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                    // Initialize enhanced crash logging first
+        initializeEnhancedCrashLogging()
+            
             if isFirstLaunch() {
                 deleteLocalCoreDataStore()
             }
@@ -65,10 +68,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 }
             }
             
+            // Log successful app launch  
+            DebugLogger.logInfo("App launched successfully", category: "AppLifecycle")
+            DebugLogger.setUserAction("App Launch Completed")
+            
             return true
         }
     
     func applicationWillTerminate(_ application: UIApplication) {
+        // Log app termination for crash analysis
+        DebugLogger.logCritical("App will terminate - saving all state", category: "AppLifecycle")
+        DebugLogger.setUserAction("App Termination")
+        
         // Immediately save current state when app is terminated
         updatePodcastStateAndSave()
         PodcastPlayer.shared.handleAppWillTerminate()
@@ -78,9 +89,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // Force synchronize UserDefaults to ensure data persistence
         UserDefaults.standard.synchronize()
+        
+        // Final crash log save
+        DebugLogger.logInfo("App termination completed successfully", category: "AppLifecycle")
     }
     
     func applicationWillResignActive(_ application: UIApplication) {
+        // Log potential force close scenario
+        DebugLogger.logWarning("App will resign active - potential force close", category: "AppLifecycle")
+        DebugLogger.setUserAction("App Resign Active")
+        
         // Save state immediately when app resigns active status (might be force closed)
         updatePodcastStateAndSave()
         PodcastPlayer.shared.handleAppWillTerminate()
@@ -204,6 +222,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
 
      func applicationDidEnterBackground(_ application: UIApplication) {
+         // Log background transition for crash context
+         DebugLogger.logInfo("App entered background", category: "AppLifecycle")
+         DebugLogger.setUserAction("App Background")
+         
          // App entered background - save all current state immediately
          updatePodcastStateAndSave()
          PodcastPlayer.shared.handleAppWillTerminate()
@@ -566,6 +588,120 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             // Fallback: if we can't determine the type, try both managers
             await PodcastCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
             await RadioStationCloudKitManager.shared.handleCloudKitSubscriptionNotification(userInfo)
+        }
+    }
+    
+    // MARK: - Enhanced Crash Logging Integration (Temporarily Disabled)
+    
+    /*
+    private func initializeEnhancedCrashLogging() {
+        // Initialize the DebugLogger to set up crash reporting
+        _ = DebugLogger.shared
+        
+        // Start main thread monitoring for hang detection
+        DebugLogger.startMainThreadMonitoring()
+        
+        // Set up additional crash context
+        setupCrashContext()
+        
+        DebugLogger.logInfo("Enhanced crash logging initialized with comprehensive monitoring", category: "CrashReporting")
+    }
+    
+    private func setupCrashContext() {
+        // Set up notification observers for crash context
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("RadioPlaybackStarted"),
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.setUserAction("Radio Playback Started")
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("PodcastPlaybackStarted"),
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.setUserAction("Podcast Playback Started")
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.logInfo("App became active", category: "AppLifecycle")
+            DebugLogger.setUserAction("App Became Active")
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.logWarning("Memory warning received", category: "MemoryWarning")
+            DebugLogger.setUserAction("Memory Warning")
+        }
+    }
+    */
+    
+    // MARK: - Enhanced Crash Logging Integration
+    
+    private func initializeEnhancedCrashLogging() {
+        do {
+            // Initialize the DebugLogger to set up crash reporting
+            print("🔧 Initializing DebugLogger...")
+            _ = DebugLogger.shared
+            print("🔧 DebugLogger shared instance created successfully")
+            
+            // Start main thread monitoring for hang detection
+            DebugLogger.startMainThreadMonitoring()
+            
+            // Set up additional crash context
+            setupCrashContext()
+            
+            DebugLogger.logInfo("Enhanced crash logging initialized with comprehensive monitoring", category: "CrashReporting")
+            print("🔧 Enhanced crash logging fully initialized")
+        } catch {
+            print("❌ Failed to initialize DebugLogger: \(error)")
+            // Continue without crash logging rather than crashing the app
+        }
+    }
+    
+    private func setupCrashContext() {
+        // Set up notification observers for crash context
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("RadioPlaybackStarted"),
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.setUserAction("Radio Playback Started")
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("PodcastPlaybackStarted"),
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.setUserAction("Podcast Playback Started")
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.logInfo("App became active", category: "AppLifecycle")
+            DebugLogger.setUserAction("App Became Active")
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            DebugLogger.logWarning("Memory warning received", category: "MemoryWarning")
+            DebugLogger.setUserAction("Memory Warning")
         }
     }
 }

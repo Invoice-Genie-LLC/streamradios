@@ -348,7 +348,7 @@ struct PodcastPreviewView: View {
                 print("Loading episodes from: \(feedURL)")
                 let (feedData, _) = try await URLSession.shared.data(from: feedURL)
                 let parser = RSSFeedParser(data: feedData, feedUrl: podcast.url)
-                let (_, parsedEpisodes) = try parser.parseComplete()
+                let (_, parsedEpisodes) = try await parser.parseComplete()
                 
                 await MainActor.run {
                     print("Successfully loaded \(parsedEpisodes.count) episodes")

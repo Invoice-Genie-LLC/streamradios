@@ -284,7 +284,50 @@ class PodcastCoreDataManager {
     /// Reconcile episodes for a feed to match exactly the parsed feed items (no accumulation)
     /// - Ensures Core Data contains exactly the set of episodes from the latest RSS parse
     /// - Upserts parsed episodes and deletes any that are no longer present in the feed
+    /// - Uses optimized processing to prevent duplicates and avoid main thread blocking
     func reconcileEpisodes(for feedId: String, parsedEpisodes: [PodcastEpisode]) async throws {
+        // Ensure all episodes have unique IDs to prevent duplicates from the start
+        let uniqueEpisodes = removeDuplicatesFromParsedEpisodes(parsedEpisodes)
+        let totalEpisodes = uniqueEpisodes.count
+        
+        os_log("🔄 Starting reconciliation for feed %@ with %d episodes (%d after deduplication)", log: self.log, type: .info, feedId, totalEpisodes, parsedEpisodes.count - totalEpisodes)
+        
+        // Use Task.detached to ensure complete background processing and prevent main thread blocking
+        try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .userInitiated) {
+                do {
+                    try await self.performBackgroundReconciliation(feedId: feedId, episodes: uniqueEpisodes)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Remove duplicates from parsed episodes before Core Data processing
+    private func removeDuplicatesFromParsedEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+        var uniqueEpisodes: [String: PodcastEpisode] = [:]
+        var duplicatesRemoved = 0
+        
+        for episode in episodes {
+            if uniqueEpisodes[episode.id] != nil {
+                duplicatesRemoved += 1
+                os_log("🗑️ Removing duplicate episode from parsed data: %@", log: self.log, type: .debug, episode.id)
+                continue
+            }
+            uniqueEpisodes[episode.id] = episode
+        }
+        
+        if duplicatesRemoved > 0 {
+            os_log("✅ Removed %d duplicate episodes from parsed data", log: self.log, type: .info, duplicatesRemoved)
+        }
+        
+        return Array(uniqueEpisodes.values).sorted { $0.publicationDate > $1.publicationDate }
+    }
+    
+    /// Perform the actual reconciliation on a background context with optimized processing
+    private func performBackgroundReconciliation(feedId: String, episodes: [PodcastEpisode]) async throws {
         let backgroundContext = coreDataStack.newBackgroundContext()
         
         try await backgroundContext.perform {
@@ -295,37 +338,83 @@ class PodcastCoreDataManager {
             
             let existingManaged = try backgroundContext.fetch(fetchRequest)
             var existingById: [String: PodcastModel] = [:]
-            for e in existingManaged { if let id = e.id { existingById[id] = e } }
             
-            // Upsert parsed episodes
-            var parsedIds = Set<String>()
-            for ep in parsedEpisodes {
-                parsedIds.insert(ep.id)
-                if let managed = existingById[ep.id] {
-                    // Preserve download data then update metadata
-                    let preservedLocalPath = managed.localFilePath
-                    let preservedFileSize = managed.fileSize
-                    managed.update(from: ep)
-                    managed.feedId = feedId
-                    managed.localFilePath = preservedLocalPath
-                    managed.fileSize = preservedFileSize
+            // Build existing episodes dictionary and detect Core Data duplicates
+            var coreDataDuplicates: [PodcastModel] = []
+            for episode in existingManaged {
+                guard let id = episode.id else { continue }
+                
+                if existingById[id] != nil {
+                    // Found Core Data duplicate - mark for deletion
+                    coreDataDuplicates.append(episode)
+                    os_log("🗑️ Core Data duplicate detected: %@", log: self.log, type: .debug, id)
                 } else {
-                    // Insert new episode
-                    let managed = PodcastModel(context: backgroundContext)
-                    managed.update(from: ep)
-                    managed.feedId = feedId
+                    existingById[id] = episode
+                }
+            }
+            
+            // Remove Core Data duplicates immediately
+            for duplicate in coreDataDuplicates {
+                backgroundContext.delete(duplicate)
+            }
+            
+            if !coreDataDuplicates.isEmpty {
+                os_log("✅ Removed %d Core Data duplicates", log: self.log, type: .info, coreDataDuplicates.count)
+            }
+            
+            // Process episodes in smaller chunks to avoid blocking
+            let chunkSize = 100  // Reduced chunk size for better performance
+            var parsedIds = Set<String>()
+            var processed = 0
+            var insertedCount = 0
+            var updatedCount = 0
+            
+            for chunk in episodes.chunked(into: chunkSize) {
+                for episode in chunk {
+                    parsedIds.insert(episode.id)
+                    
+                    if let existing = existingById[episode.id] {
+                        // Update existing episode while preserving download data
+                        let preservedLocalPath = existing.localFilePath
+                        let preservedFileSize = existing.fileSize
+                        existing.update(from: episode)
+                        existing.feedId = feedId
+                        existing.localFilePath = preservedLocalPath
+                        existing.fileSize = preservedFileSize
+                        updatedCount += 1
+                    } else {
+                        // Insert new episode and add to tracking dictionary to prevent duplicates
+                        let managed = PodcastModel(context: backgroundContext)
+                        managed.update(from: episode)
+                        managed.feedId = feedId
+                        existingById[episode.id] = managed  // Track new episodes to prevent duplicates
+                        insertedCount += 1
+                    }
+                }
+                
+                processed += chunk.count
+                
+                // Save frequently to avoid large transactions and provide progress
+                if processed % chunkSize == 0 {
+                    try backgroundContext.save()
+                    os_log("🔄 Processed %d/%d episodes for feed %@", log: self.log, type: .debug, processed, episodes.count, feedId)
                 }
             }
             
             // Delete episodes that are no longer present in the feed
             let toDelete = existingManaged.filter { model in
                 guard let id = model.id else { return false }
-                return !parsedIds.contains(id)
+                return !parsedIds.contains(id) && !coreDataDuplicates.contains(model)  // Don't double-count duplicates
             }
-            for model in toDelete { backgroundContext.delete(model) }
+            var deletedCount = 0
+            for model in toDelete { 
+                backgroundContext.delete(model)
+                deletedCount += 1
+            }
             
+            // Final save
             try backgroundContext.save()
-            os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted/updated %d, deleted %d", log: self.log, type: .info, feedId, parsedIds.count, parsedEpisodes.count, toDelete.count)
+            os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted %d, updated %d, deleted %d", log: self.log, type: .info, feedId, parsedIds.count, insertedCount, updatedCount, deletedCount + coreDataDuplicates.count)
         }
     }
     
