@@ -807,6 +807,21 @@ struct RadioStationListView: View {
             return []
         }
         
+        // UNIVERSAL SEARCH: When user is searching, search across ALL countries and ALL stations
+        if !searchText.isEmpty {
+            let allStations = viewModel.stations
+            let filtered = allStations.filter { station in
+                station.name.localizedCaseInsensitiveContains(searchText) ||
+                station.country.localizedCaseInsensitiveContains(searchText)
+            }
+            // Preserve existing sort toggle behavior when searching
+            if viewModel.isAscendingSort {
+                return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            } else {
+                return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+            }
+        }
+        
         var stations: [RadioStation]
         
         switch selectedSubTab {
@@ -832,14 +847,6 @@ struct RadioStationListView: View {
             // Favorites must always respect CloudKit-synced favoriteOrder.
             // Do NOT apply alphabetical sorting here, otherwise it overrides the persisted order.
             stations = viewModel.favoriteStations()
-        }
-        
-        // Apply search filter if search text is not empty
-        if !searchText.isEmpty {
-            stations = stations.filter { station in
-                station.name.localizedCaseInsensitiveContains(searchText) ||
-                station.country.localizedCaseInsensitiveContains(searchText)
-            }
         }
         
         return stations
