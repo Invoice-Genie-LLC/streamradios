@@ -612,10 +612,10 @@ class EpisodeStateManager: ObservableObject {
                     if episode.isPlayed {
                         loadedStates[episodeId] = .played
                         print("💾 LOADED PLAYED: Episode \(episodeId) loaded as .played from Core Data")
-                    } else if episode.progress >= 0.99 {
+                    } else if episode.progress >= 1.0 {
                         // Episode completed but not explicitly marked as played - mark it
                         loadedStates[episodeId] = .played
-                        print("💾 LOADED PLAYED: Episode \(episodeId) loaded as .played from progress (≥99%)")
+                        print("💾 LOADED PLAYED: Episode \(episodeId) loaded as .played from progress (100%)")
                     } else if episode.progress > 0 {
                         loadedStates[episodeId] = .inProgress
                     }
@@ -969,7 +969,7 @@ class EpisodeStateManager: ObservableObject {
                         } else {
                             // Fallback: If no explicit state, derive from progress
                             let progress = self.episodeProgress[episodeId] ?? 0.0
-                            let derivedPlayed = progress >= 0.99
+                            let derivedPlayed = progress >= 1.0
                             if episode.isPlayed != derivedPlayed {
                                 episode.isPlayed = derivedPlayed
                                 hasChanges = true
@@ -1242,7 +1242,8 @@ class EpisodeStateManager: ObservableObject {
                 let currentState = episodeStates[currentPlayingId] ?? .new
                 if currentState != .played {
                     // Only update to inProgress if it wasn't already marked as played
-                    if currentProgress >= 0.99 {
+                    // FIXED: Use 1.0 (100%) instead of 0.99 (99%) to ensure complete playback
+                    if currentProgress >= 1.0 {
                         episodeStates[currentPlayingId] = .played
                     } else {
                         episodeStates[currentPlayingId] = .inProgress
@@ -1263,7 +1264,7 @@ class EpisodeStateManager: ObservableObject {
     func pausePlayback(episodeId: String, progress: Double) {
         episodeProgress[episodeId] = progress
         
-        if progress >= 0.99 {
+        if progress >= 1.0 {
             episodeStates[episodeId] = .played
         } else if progress > 0 {
             episodeStates[episodeId] = .inProgress
@@ -1288,7 +1289,8 @@ class EpisodeStateManager: ObservableObject {
             let currentState = episodeStates[previousEpisodeId] ?? .new
             if currentState != .played {
                 // Only update to inProgress if it wasn't already marked as played
-                if previousProgress >= 0.99 {
+                // FIXED: Use 1.0 (100%) instead of 0.99 (99%) to ensure complete playback
+                if previousProgress >= 1.0 {
                     episodeStates[previousEpisodeId] = .played
                 } else {
                     episodeStates[previousEpisodeId] = .inProgress
@@ -1328,7 +1330,8 @@ class EpisodeStateManager: ObservableObject {
                 let currentState = episodeStates[currentPlayingId] ?? .new
                 if currentState != .played {
                     // Only update to inProgress if it wasn't already marked as played
-                    if currentProgress >= 0.99 {
+                    // FIXED: Use 1.0 (100%) instead of 0.99 (99%) to ensure complete playback
+                    if currentProgress >= 1.0 {
                         episodeStates[currentPlayingId] = .played
                     } else {
                         episodeStates[currentPlayingId] = .inProgress
@@ -1400,7 +1403,7 @@ class EpisodeStateManager: ObservableObject {
             newState = .played
             currentlyPlayingEpisodeId = nil
             print("💾 PLAYED STATE: Preserving existing played state for episode \(episodeId)")
-        } else if effectiveProgress >= 0.99 {
+        } else if effectiveProgress >= 1.0 {
             newState = .played
             currentlyPlayingEpisodeId = nil
         } else if effectiveProgress > 0 {
@@ -1441,7 +1444,7 @@ class EpisodeStateManager: ObservableObject {
         
         // Update state based on final progress
         let newState: EpisodePlaybackState
-        if finalProgress >= 0.99 {
+        if finalProgress >= 1.0 {
             newState = .played
         } else if finalProgress > 0 {
             newState = .inProgress
@@ -1601,9 +1604,9 @@ class EpisodeStateManager: ObservableObject {
         // Final fallback to progress calculation if Core Data doesn't have the episode
         if !result {
             let progress = getProgress(for: episodeId)
-            result = progress >= 0.99
+            result = progress >= 1.0
             if result {
-                print("💾 PLAYED CHECK: Episode \(episodeId) is played (from progress ≥99%: \(progress))")
+                print("💾 PLAYED CHECK: Episode \(episodeId) is played (from progress 100%: \(progress))")
             }
         }
         
@@ -2045,7 +2048,7 @@ extension EpisodeStateManager {
         // CRITICAL FIX: Update episode state based on final progress (just like setProgress does)
         // This ensures "NEW" changes to "IN PROGRESS" immediately when synced from other devices
         let newState: EpisodePlaybackState
-        if finalProgress >= 0.99 {
+        if finalProgress >= 1.0 {
             newState = .played
         } else if finalProgress > 0 {
             newState = .inProgress

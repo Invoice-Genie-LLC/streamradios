@@ -40,6 +40,9 @@ struct ContentView: View {
     @State private var scrollToEpisodeID: String?
 
     @State private var searchText = ""
+    
+    // Add state to force UI refresh when sync completes
+    @State private var syncCompletionRefreshID = UUID()
 
     init() {
         // Always start on the radio tab regardless of previous state
@@ -207,6 +210,7 @@ struct ContentView: View {
                 
                 // Podcast Tab
                 PodcastListView(selectedPodcast: $selectedPodcast)
+                .id("podcast-\(syncCompletionRefreshID)") // Force PodcastListView to recreate when sync completes
                 .environmentObject(podcastPlayer)
                 .environmentObject(podcastViewModel)
                 .tabItem {
@@ -228,6 +232,7 @@ struct ContentView: View {
                 }
                 .tag(Tab.settings)
             }
+            .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
             .environment(\.horizontalSizeClass, .compact)
             .accentColor(.blue)
             .onAppear {
@@ -273,6 +278,14 @@ struct ContentView: View {
             // Full-screen data sync progress overlay for fresh installs
             DataSyncProgressView()
 
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("FreshInstallDataAvailable"))) { _ in
+            // Force UI refresh when sync completes
+            print("📢 ContentView: Received FreshInstallDataAvailable - forcing complete UI refresh")
+            DispatchQueue.main.async {
+                self.syncCompletionRefreshID = UUID()
+                print("🔄 ContentView: Updated syncCompletionRefreshID to force UI refresh")
+            }
         }
     }
     

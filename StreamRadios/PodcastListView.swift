@@ -299,15 +299,26 @@ struct PodcastListView: View {
                }
                .onChange(of: viewModel.podcastFeeds.count) { _, newCount in
                    // React to ALL feed count changes (including clearing)
+                   print("🔄 UI: Podcast feeds count changed to \(newCount)")
+                   
                    if newCount > 0 {
                        // Cancel monitoring timer since data is now available
                        dataCheckTimer?.invalidate()
                        dataCheckTimer = nil
+                       print("✅ UI: Data detected, cancelled monitoring timer")
+                       
+                       // IMMEDIATE: Force comprehensive UI refresh when feeds become available
+                       DispatchQueue.main.async {
+                           self.refreshID = UUID()
+                           self.viewModel.objectWillChange.send()
+                           print("🔄 UI: Immediate refresh triggered for new feeds")
+                       }
                    }
                    
                    // Always refresh when count changes (including when cleared to 0)
                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                        self.refreshID = UUID()
+                       print("🔄 UI: Delayed refresh completed for count change")
                    }
                }
                .id(refreshID)
@@ -485,11 +496,13 @@ struct PodcastListView: View {
             ScrollViewReader { proxy in
                 List {
                     if viewModel.podcastFeeds.isEmpty {
+                        let _ = print("🔍 UI DEBUG: Showing 'No podcast feeds available' - podcastFeeds.count=\(viewModel.podcastFeeds.count), podcastFeedOrder.count=\(viewModel.podcastFeedOrder.count)")
                         Text("No podcast feeds available")
                             .foregroundColor(.adaptiveSecondaryText)
                             .italic()
                             .padding()
                     }
+                    let _ = print("🔍 UI DEBUG: About to iterate ForEach - podcastFeedOrder.count=\(viewModel.podcastFeedOrder.count), filteredPodcasts.count=\(filteredPodcasts.count)")
                     ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
                     if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
                        filteredPodcasts.contains(where: { $0.id == feedId }) {
@@ -718,31 +731,87 @@ struct PodcastListView: View {
     private func onAppear() {
         os_log("PodcastListView appeared", log: log, type: .info)
         
+        // DEBUG: Log the exact state of viewModel when onAppear is called
+        print("🔍 UI DEBUG: PodcastListView onAppear() called")
+        print("🔍 UI DEBUG: viewModel.podcastFeeds.count = \(viewModel.podcastFeeds.count)")
+        print("🔍 UI DEBUG: viewModel.podcastFeedOrder.count = \(viewModel.podcastFeedOrder.count)")
+        print("🔍 UI DEBUG: viewModel.isLoading = \(viewModel.isLoading)")
+        print("🔍 UI DEBUG: First few feed IDs: \(Array(viewModel.podcastFeedOrder.prefix(3)))")
+        
         // AUTOMATIC CLOUDKIT SYNC: Trigger sync on view load to check for new feeds and episode updates
         print("🔄 UI: PodcastListView appeared - triggering automatic CloudKit sync")
         Task.detached(priority: .userInitiated) {
             await viewModel.automaticCloudKitSync()
         }
         
-        // Set up notification observer for fresh install data (with debouncing)
+        // Set up notification observer for fresh install data (with comprehensive refresh)
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("FreshInstallDataAvailable"),
             object: nil,
             queue: .main
         ) { _ in
             print("📢 UI: Received FreshInstallDataAvailable notification - refreshing view")
+            print("📊 UI: Current feeds count: \(self.viewModel.podcastFeeds.count)")
             
-            // SwiftUI-compatible debouncing using DispatchQueue
+            // IMMEDIATE: Force complete view refresh with multiple mechanisms
             DispatchQueue.main.async {
+                // 1. Update refresh ID to force view re-render
                 self.refreshID = UUID()
+                print("🔄 UI: Updated refreshID to force view re-render")
+                
+                // 2. Trigger view model change notification
+                self.viewModel.objectWillChange.send()
+                print("🔄 UI: Triggered viewModel.objectWillChange.send()")
+                
+                // 3. Force load feeds from Core Data again to ensure data consistency
+                self.viewModel.loadFeedsFromCoreData()
+                print("🔄 UI: Triggered viewModel.loadFeedsFromCoreData()")
+                
+                // 4. CRITICAL: Force re-evaluation of computed properties
+                _ = self.filteredPodcasts // Force computed property evaluation
+                print("🔄 UI: Forced filteredPodcasts re-evaluation")
             }
             
-            // Cancel any existing timer since data is now available
-            self.dataCheckTimer?.invalidate()
-            self.dataCheckTimer = nil
+            // 4. Schedule additional refresh attempts to handle edge cases
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("🔄 UI: Secondary refresh - feeds count: \(self.viewModel.podcastFeeds.count)")
+                if self.viewModel.podcastFeeds.count > 0 {
+                    self.refreshID = UUID()
+                    self.viewModel.objectWillChange.send()
+                    print("🔄 UI: Secondary refresh completed successfully")
+                } else {
+                    print("⚠️ UI: Secondary refresh - still no feeds found, triggering third attempt")
+                    // Try one more time
+                    self.viewModel.loadFeedsFromCoreData()
+                }
+            }
+            
+            // 5. Final fallback refresh
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                print("🔄 UI: Final fallback refresh - feeds count: \(self.viewModel.podcastFeeds.count)")
+                self.refreshID = UUID()
+                self.viewModel.objectWillChange.send()
+            }
         }
         
-                // Check if data is already available (in case we missed the notification)
+        // ADDITIONAL: Set up notification observer for general podcast data updates
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("PodcastDataUpdated"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            print("📢 UI: Received PodcastDataUpdated notification - refreshing view")
+            print("📊 UI: Current feeds count: \(self.viewModel.podcastFeeds.count)")
+            
+            // Immediate UI refresh
+            DispatchQueue.main.async {
+                self.refreshID = UUID()
+                self.viewModel.objectWillChange.send()
+                print("🔄 UI: PodcastDataUpdated refresh completed")
+            }
+        }
+        
+        // Check if data is already available (in case we missed the notification)
         if viewModel.podcastFeeds.isEmpty {
             print("🔄 UI: No feeds found - starting minimal monitoring")
             
@@ -768,12 +837,15 @@ struct PodcastListView: View {
             }
             
             if feedCount > 0 {
+                print("✅ UI: Fresh install data detected - \(feedCount) feeds found, stopping monitoring")
                 DispatchQueue.main.async {
                     self.refreshID = UUID()
+                    self.viewModel.objectWillChange.send()
                     timer.invalidate()
                     self.dataCheckTimer = nil
+                    print("🔄 UI: Triggered UI refresh for detected feeds")
                 }
-            } else if checkCount > 30 { // Stop after 9 seconds (30 * 0.3)
+            } else if checkCount > 50 { // Stop after 15 seconds (50 * 0.3)
                 print("🔄 UI: Stopping fresh install monitoring after timeout")
                 timer.invalidate()
                 self.dataCheckTimer = nil
@@ -902,13 +974,16 @@ struct PodcastListView: View {
     }
     
     var filteredPodcasts: [PodcastFeed] {
+        print("🔍 UI DEBUG: filteredPodcasts computed - viewModel.podcastFeeds.count = \(viewModel.podcastFeeds.count), searchText.isEmpty = \(searchText.isEmpty)")
         if searchText.isEmpty {
             return viewModel.podcastFeeds
         } else {
-            return viewModel.podcastFeeds.filter { feed in
+            let filtered = viewModel.podcastFeeds.filter { feed in
                 feed.title.lowercased().contains(searchText.lowercased()) ||
                 (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
             }
+            print("🔍 UI DEBUG: filteredPodcasts computed - filtered.count = \(filtered.count)")
+            return filtered
         }
     }
     

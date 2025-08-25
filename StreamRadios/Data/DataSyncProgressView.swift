@@ -7,7 +7,10 @@ struct DataSyncProgressView: View {
     @State private var animateProgress = false
     
     var body: some View {
-        if syncManager.isSyncing {
+        // Debug logging for sync states
+        let _ = print("🎭 DataSyncProgressView: isSyncing=\(syncManager.isSyncing), isFreshInstallUIReady=\(syncManager.isFreshInstallUIReady)")
+        
+        if syncManager.isSyncing && !syncManager.isFreshInstallUIReady {
             ZStack {
                 // Background overlay
                 Color.black.opacity(0.4)

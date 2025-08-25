@@ -51,6 +51,7 @@ class DataSyncManager: ObservableObject {
     @Published var isSyncing = false
     @Published var overallProgress: Double = 0.0
     @Published var currentOperation = ""
+    @Published var isFreshInstallUIReady = false
     
     // Radio Stations
     @Published var radioStationsStatus: DataSyncStatus = .none
@@ -114,6 +115,19 @@ class DataSyncManager: ObservableObject {
     
     private init() {
         setupProgressCalculation()
+        
+        // If this is not a fresh install, mark UI as ready immediately
+        let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+        let hasSyncCompleted = UserDefaults.standard.bool(forKey: "DataSyncCompleted")
+        
+        print("🎯 DataSyncManager init: isFreshInstall=\(isFreshInstall), hasSyncCompleted=\(hasSyncCompleted)")
+        
+        if !isFreshInstall && hasSyncCompleted {
+            isFreshInstallUIReady = true
+            print("🎯 DataSyncManager init: Set isFreshInstallUIReady=true (not fresh install)")
+        } else {
+            print("🎯 DataSyncManager init: Set isFreshInstallUIReady=false (fresh install or sync not completed)")
+        }
     }
     
     // MARK: - Public Methods
@@ -124,6 +138,7 @@ class DataSyncManager: ObservableObject {
         
         Task { @MainActor in
             isSyncing = true
+            isFreshInstallUIReady = false
             resetProgress()
             
             print("🔄 Starting fresh install data synchronization...")
@@ -856,6 +871,10 @@ class DataSyncManager: ObservableObject {
         
         currentOperation = "Synchronization completed!"
         
+        // CRITICAL: Force Core Data save and reload before any verification
+        print("🚀 CRITICAL: Forcing Core Data save and reload before UI refresh")
+        await podcastViewModel.forceSaveAndReload()
+        
         // IMMEDIATE: Trigger PodcastViewModel UI refresh as soon as sync completes
         print("🚀 IMMEDIATE: Triggering UI refresh for fresh install completion")
         await podcastViewModel.ensureFeedsAreLoaded()
@@ -864,6 +883,52 @@ class DataSyncManager: ObservableObject {
         NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
         print("📢 IMMEDIATE: Posted fresh install notification from DataSyncManager")
         
+        // CRITICAL: Wait for UI to process the notification and refresh before hiding progress view
+        print("⏳ Waiting for UI to process notification and refresh...")
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1.0 seconds for UI to update
+        
+        // Verify that PodcastListView has actually refreshed by checking if feeds are visible
+        // This ensures the UI has processed the notification before we hide the progress view
+        var uiUpdateAttempts = 0
+        let maxUIUpdateAttempts = 15 // Increased attempts for more robust checking
+        
+        while uiUpdateAttempts < maxUIUpdateAttempts {
+            // Check if podcast feeds are available in the view model
+            let feedCount = podcastViewModel.podcastFeeds.count
+            let feedOrderCount = podcastViewModel.podcastFeedOrder.count
+            
+            if feedCount > 0 && feedOrderCount > 0 {
+                print("✅ UI Update verified: \(feedCount) feeds and \(feedOrderCount) feed order items are now available")
+                
+                // Additional verification: make sure Core Data also has the feeds
+                let coreDataHasFeeds = await verifyCoreDataHasFeeds()
+                if coreDataHasFeeds {
+                    print("✅ Core Data verification passed - feeds are properly persisted")
+                    break
+                } else {
+                    print("⚠️ Core Data verification failed - feeds not found in Core Data, continuing wait...")
+                }
+            } else {
+                print("⏳ Waiting for UI to show feeds... attempt \(uiUpdateAttempts + 1) - Feeds: \(feedCount), Order: \(feedOrderCount)")
+                
+                // If we're taking too long, try to force a refresh
+                if uiUpdateAttempts > 7 {
+                    print("🔧 Taking too long - forcing additional refresh attempt")
+                    await podcastViewModel.loadFeedsFromCoreData()
+                    try? await Task.sleep(nanoseconds: 500_000_000) // Wait longer after forced refresh
+                } else {
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+                }
+                uiUpdateAttempts += 1
+            }
+        }
+        
+        // Final check and warning if feeds are still not available
+        if podcastViewModel.podcastFeeds.isEmpty {
+            print("⚠️ WARNING: UI update verification failed - no feeds found after \(maxUIUpdateAttempts) attempts")
+            print("⚠️ This may indicate a data synchronization issue")
+        }
+        
         // Mark sync as completed only after everything is truly ready
         UserDefaults.standard.set(true, forKey: "DataSyncCompleted")
         UserDefaults.standard.synchronize()
@@ -871,11 +936,76 @@ class DataSyncManager: ObservableObject {
         print("🎉 Fresh install data synchronization completed successfully!")
         print("📊 Final state: Podcast feeds: \(podcastViewModel.podcastFeeds.count), Radio stations: \(radioStationViewModel.stations.count)")
         
-        // Brief pause for visual feedback
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        // Additional pause to ensure UI is fully updated before hiding progress view
+        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds for visual feedback
         
-        // Hide the sync view only after everything is complete
-        isSyncing = false
+        // CRITICAL: Force complete UI refresh to ensure SwiftUI properly reflects the data changes
+        await forceCompleteUIRefresh(podcastViewModel)
+        
+        // FINAL: Verify that PodcastListView actually has feeds loaded before showing UI
+        let finalFeedCount = podcastViewModel.podcastFeeds.count
+        let finalFeedOrderCount = podcastViewModel.podcastFeedOrder.count
+        
+        print("🎯 FINAL VERIFICATION: podcastFeeds.count=\(finalFeedCount), podcastFeedOrder.count=\(finalFeedOrderCount)")
+        print("🎯 FINAL VERIFICATION: Current isFreshInstallUIReady=\(isFreshInstallUIReady)")
+        
+        if finalFeedCount > 0 && finalFeedOrderCount > 0 {
+            print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds and \(finalFeedOrderCount) feed order items")
+            isFreshInstallUIReady = true
+            isSyncing = false
+            print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds")
+        } else {
+            print("❌ FINAL ERROR: UI still not ready - feeds: \(finalFeedCount), order: \(finalFeedOrderCount)")
+            print("🔧 Forcing final refresh attempt...")
+            
+            // One final aggressive attempt
+            await podcastViewModel.forceSaveAndReload()
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 more second
+            
+            let retryFeedCount = podcastViewModel.podcastFeeds.count
+            let retryFeedOrderCount = podcastViewModel.podcastFeedOrder.count
+            
+            if retryFeedCount > 0 && retryFeedOrderCount > 0 {
+                print("✅ RETRY SUCCESS: UI is ready with \(retryFeedCount) feeds after final attempt")
+                isFreshInstallUIReady = true
+                isSyncing = false
+            } else {
+                print("❌ RETRY FAILED: Still no feeds after final attempt - allowing UI to show anyway")
+                isFreshInstallUIReady = true
+                isSyncing = false
+            }
+        }
+    }
+    
+    /// Force complete UI refresh to ensure SwiftUI properly reflects data changes
+    @MainActor
+    private func forceCompleteUIRefresh(_ podcastViewModel: PodcastViewModel) async {
+        print("🚀 FORCE UI REFRESH: Starting complete UI refresh sequence")
+        
+        // 1. Force PodcastViewModel to reload its data from Core Data
+        await podcastViewModel.forceSaveAndReload()
+        print("🚀 FORCE UI REFRESH: Completed forceSaveAndReload")
+        
+        // 2. Manually trigger objectWillChange on PodcastViewModel to notify all SwiftUI views
+        podcastViewModel.objectWillChange.send()
+        print("🚀 FORCE UI REFRESH: Triggered PodcastViewModel.objectWillChange.send()")
+        
+        // 3. Force our own DataSyncManager to notify SwiftUI views observing it
+        objectWillChange.send()
+        print("🚀 FORCE UI REFRESH: Triggered DataSyncManager.objectWillChange.send()")
+        
+        // 4. Post multiple notifications to trigger all possible UI refresh mechanisms
+        NotificationCenter.default.post(name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
+        NotificationCenter.default.post(name: NSNotification.Name("PodcastDataUpdated"), object: nil)
+        print("🚀 FORCE UI REFRESH: Posted refresh notifications")
+        
+        // 5. Give SwiftUI time to process the changes
+        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+        
+        // 6. Verify that the changes are reflected in the ViewModel
+        let feedsAfterRefresh = podcastViewModel.podcastFeeds.count
+        let orderAfterRefresh = podcastViewModel.podcastFeedOrder.count
+        print("🚀 FORCE UI REFRESH: After refresh - Feeds: \(feedsAfterRefresh), Order: \(orderAfterRefresh)")
     }
     
     /// Wait for radio stations to load
@@ -928,6 +1058,25 @@ class DataSyncManager: ObservableObject {
         try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
         
         print("✅ CloudKit initialization completed")
+    }
+    
+    /// Verify that Core Data actually contains podcast feeds
+    private func verifyCoreDataHasFeeds() async -> Bool {
+        return await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.newBackgroundContext()
+            context.perform {
+                let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
+                do {
+                    let results = try context.fetch(request)
+                    let hasFeeds = !results.isEmpty
+                    print("🔍 Core Data verification: Found \(results.count) feeds in Core Data")
+                    continuation.resume(returning: hasFeeds)
+                } catch {
+                    print("❌ Core Data verification error: \(error)")
+                    continuation.resume(returning: false)
+                }
+            }
+        }
     }
     
     /// Initialize CloudKit feeds for fresh install (with RSS processing)

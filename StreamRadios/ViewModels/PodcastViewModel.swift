@@ -1991,6 +1991,55 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    /// Force Core Data to save any pending changes and reload feeds
+    func forceSaveAndReload() async {
+        print("🔧 FORCING Core Data save and reload...")
+        
+        // Force save the Core Data context
+        await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                if context.hasChanges {
+                    do {
+                        try context.save()
+                        print("✅ FORCED: Core Data context saved successfully")
+                    } catch {
+                        print("❌ FORCED: Failed to save Core Data context: \(error)")
+                    }
+                } else {
+                    print("ℹ️ FORCED: No pending Core Data changes to save")
+                }
+                continuation.resume()
+            }
+        }
+        
+        // Force reload feeds from Core Data with aggressive UI refresh
+        await MainActor.run {
+            print("🔧 FORCING: Reloading feeds from Core Data...")
+            loadFeedsFromCoreData()
+            
+            // Immediately notify SwiftUI that this object is about to change
+            self.objectWillChange.send()
+            print("🔧 FORCING: Triggered objectWillChange.send() after reload")
+        }
+        
+        // Wait for the reload to complete
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        
+        // Final verification and manual UI trigger
+        await MainActor.run {
+            let currentFeedCount = self.podcastFeeds.count
+            let currentOrderCount = self.podcastFeedOrder.count
+            print("🔧 FORCING: After reload verification - Feeds: \(currentFeedCount), Order: \(currentOrderCount)")
+            
+            // Force another UI update notification to ensure SwiftUI picks up the changes
+            self.objectWillChange.send()
+            print("🔧 FORCING: Final objectWillChange.send() triggered")
+        }
+        
+        print("✅ FORCED: Save and reload completed - feeds count: \(podcastFeeds.count)")
+    }
+    
     // MARK: - Public Interface
     
 
@@ -3532,7 +3581,9 @@ class PodcastViewModel: ObservableObject {
                 
                 // Load feeds from Core Data
                 await MainActor.run {
+                    print("🎯 EXISTING INSTALL: About to call loadFeedsFromCoreData()")
                     self.loadFeedsFromCoreData()
+                    print("🎯 EXISTING INSTALL: After loadFeedsFromCoreData() - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
                     
                     // Still trigger UI refresh for consistency
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -3809,8 +3860,31 @@ class PodcastViewModel: ObservableObject {
         // CRITICAL: Clear episode cache and reload feeds from Core Data AFTER all RSS processing and cleanup
         await episodeManager.clearAllCache()
         
-        // CRITICAL: Wait briefly for main context synchronization to complete
-        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+        // CRITICAL: Wait for all Core Data save operations to complete  
+        print("⏳ Waiting for all Core Data save operations to complete...")
+        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds for all async saves to complete
+        
+        // Force a final Core Data save to ensure everything is persisted
+        await withCheckedContinuation { continuation in
+            let context = CoreDataStack.shared.context
+            context.perform {
+                if context.hasChanges {
+                    do {
+                        try context.save()
+                        print("✅ FINAL: Forced Core Data save after fresh install processing")
+                    } catch {
+                        print("❌ FINAL: Failed to save Core Data after fresh install: \(error)")
+                    }
+                } else {
+                    print("ℹ️ FINAL: No pending Core Data changes after fresh install")
+                }
+                continuation.resume()
+            }
+        }
+        
+        // Verify feeds are actually saved to Core Data
+        let savedFeedCount = await countExistingFeeds()
+        print("🔍 VERIFICATION: Found \(savedFeedCount) feeds in Core Data after fresh install processing")
         
         // CRITICAL: Trigger UI refresh after fresh install processing
         print("🔄 Triggered UI refresh after fresh install RSS processing")
@@ -3825,10 +3899,37 @@ class PodcastViewModel: ObservableObject {
         // Force reload feeds from Core Data to pick up newly saved data
         loadFeedsFromCoreData()
         
-        // Explicit UI refresh with a slight delay to ensure Core Data operations complete
+        // Force immediate object change notification
+        self.objectWillChange.send()
+        print("🔄 FRESH INSTALL: Sent objectWillChange notification")
+        
+        // Multiple explicit UI refresh attempts with increasing delays
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            print("🔄 FRESH INSTALL: First refresh attempt - Feeds: \(self.podcastFeeds.count)")
+            if self.podcastFeeds.isEmpty {
+                // If still empty, try loading again
+                self.loadFeedsFromCoreData()
+            }
             self.throttledUIUpdate()
-            print("🎯 FRESH INSTALL: Triggered explicit UI refresh - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            print("🔄 FRESH INSTALL: Second refresh attempt - Feeds: \(self.podcastFeeds.count)")
+            if self.podcastFeeds.isEmpty {
+                // If still empty, try loading again
+                self.loadFeedsFromCoreData()
+            }
+            self.throttledUIUpdate()
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            print("🔄 FRESH INSTALL: Final refresh attempt - Feeds: \(self.podcastFeeds.count), Order: \(self.podcastFeedOrder.count)")
+            if self.podcastFeeds.isEmpty {
+                print("⚠️ FRESH INSTALL: Still no feeds after multiple refresh attempts!")
+            } else {
+                print("✅ FRESH INSTALL: Successfully loaded \(self.podcastFeeds.count) feeds")
+            }
+            self.throttledUIUpdate()
         }
         
         // Set loading to false after refresh
@@ -4321,7 +4422,8 @@ class PodcastViewModel: ObservableObject {
         
         // Start with Core Data load for immediate UI
         loadFeedsFromCoreData()
-        print("📊 Loaded \(podcastFeeds.count) feeds from Core Data")
+        print("📊 INITIAL LOAD: Loaded \(podcastFeeds.count) feeds from Core Data after loadFeedsFromCoreData()")
+        print("📊 INITIAL LOAD: podcastFeedOrder has \(podcastFeedOrder.count) items")
         
         // Single CloudKit sync in background
         Task {
@@ -5811,6 +5913,10 @@ extension PodcastViewModel {
             return
         }
         
+        print("🎯 CORE DATA LOAD: Starting loadFeedsFromCoreData() - Current feeds: \(podcastFeeds.count)")
+        print("🎯 CORE DATA LOAD: Current podcastFeedOrder: \(podcastFeedOrder.count)")
+        print("🎯 CORE DATA LOAD: isLoadingFromCoreData: \(isLoadingFromCoreData), isLoading: \(isLoading)")
+        
         isLoadingFromCoreData = true
         isLoading = true  // Set main loading flag for UI coordination
         
@@ -5826,6 +5932,7 @@ extension PodcastViewModel {
         let backgroundContext = CoreDataStack.shared.newBackgroundContext()
         
         await backgroundContext.perform {
+            print("🎯 CORE DATA LOAD: About to perform Core Data fetch for FeedModel")
             let request: NSFetchRequest<FeedModel> = FeedModel.fetchRequest()
             
             // Add a sort descriptor to ensure feeds are loaded in the correct order
@@ -5834,6 +5941,7 @@ extension PodcastViewModel {
             
             do {
                 let results = try backgroundContext.fetch(request)
+                print("🎯 CORE DATA LOAD: Fetch completed - found \(results.count) FeedModel objects in Core Data")
             if results.isEmpty {
                 print("📡 No podcast feeds found in CoreData.")
                 // CRITICAL: Clear in-memory arrays when no feeds found in Core Data

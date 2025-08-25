@@ -2345,28 +2345,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
         }
         
-        // Check for episode completion AFTER saving progress
-        if remainingTime < 1 || progress >= 0.99 {
-            await MainActor.run {
-                viewModel?.markEpisodeAsCompleted(currentEpisode)
-            }
-            os_log("Episode marked as completed: %@", log: log, type: .info, currentEpisode.title)
-            
-            // Mark episode as completed in EpisodeStateManager
-            stateManager.completeEpisode(episodeId: currentEpisode.id)
-            
-            // PERFORMANCE: Only send completion notification when not scrolling
-            if !isUserScrolling {
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("EpisodeCompleted"),
-                    object: nil,
-                    userInfo: [
-                        "episodeId": currentEpisode.id,
-                        "isCompleted": true
-                    ]
-                )
-            }
-        }
+        // REMOVED: Premature completion logic that was cutting off the last few seconds
+        // Episodes should only be marked complete when AVPlayerItemDidPlayToEndTime fires
+        // This ensures 100% of the audio is played before marking as complete
         
         // PERFORMANCE: Completely disable objectWillChange.send() to eliminate scrolling lag
         // UI updates will happen naturally through @Published properties and SwiftUI's observation system

@@ -15,7 +15,7 @@ struct RadioStreamApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var alertManager = AlertManager()
-    @StateObject private var podcastViewModel = PodcastViewModel()
+    @StateObject private var podcastViewModel = PodcastViewModel.shared
     @StateObject private var subscriptionManager = SubscriptionManager.shared
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     var radioPlayer = RadioPlayer.shared
@@ -54,6 +54,8 @@ struct RadioStreamApp: App {
     }
 
     private func setupApp() {
+        print("🎯 SETUP APP: Starting setupApp() method")
+        
         // Set up the remote command center
         radioPlayer.setupRemoteCommandCenter()
 
@@ -87,7 +89,9 @@ struct RadioStreamApp: App {
         }
         
         // Initialize podcast system with CloudKit support
+        print("🎯 SETUP APP: About to call podcastViewModel.initializeWithCloudKitSupport()")
         podcastViewModel.initializeWithCloudKitSupport()
+        print("🎯 SETUP APP: Completed podcastViewModel.initializeWithCloudKitSupport()")
         
         // Initialize subscription system - this will load products and check subscription status
         Task {
