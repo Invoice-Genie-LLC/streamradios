@@ -154,6 +154,10 @@ class PodcastViewModel: ObservableObject {
     // MARK: - RSS Processing Queue
     private let rssProcessingQueue = DispatchQueue(label: "com.streamradios.rss.processing", qos: .userInitiated)
     
+    // MARK: - RSS Task Management for Cancellation
+    private var rssParsingTasks: [String: Task<Void, Error>] = [:]
+    private let rssTaskQueue = DispatchQueue(label: "com.streamradios.rss.tasks", qos: .utility)
+    
     // MARK: - Published Properties
     @Published var currentEpisodes: [PodcastEpisode] = []
     @Published var podcastFeeds: [PodcastFeed] = []
@@ -1223,21 +1227,200 @@ class PodcastViewModel: ObservableObject {
     private func parseRSSEpisodesOnly(from url: URL) async throws -> [PodcastEpisode] {
         print("🔍 Parsing RSS episodes from: \(url.absoluteString)")
         
+        // CRITICAL: Check for user scrolling and abort parsing if detected
+        if isUserScrolling {
+            print("🚫 User is scrolling - aborting RSS parsing to maintain UI responsiveness")
+            throw CancellationError()
+        }
+        
         // Ensure RSS operations happen on dedicated background queue to prevent main thread blocking
         return try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .userInitiated) {
+            Task.detached(priority: .background) {
                 do {
+                    // Check for cancellation and scrolling before starting
+                    try Task.checkCancellation()
+                    
+                    // Double-check scrolling state
+                    if await MainActor.run(body: { self.isUserScrolling }) {
+                        print("🚫 User scrolling detected during parsing - aborting")
+                        throw CancellationError()
+                    }
+                    
                     // Fetch RSS data with robust error handling for large feeds and decode issues
                     let feedData = try await self.fetchRSSDataWithRetry(url: url, feedTitle: url.absoluteString)
+                    
+                    // Check for cancellation and scrolling after fetch
+                    try Task.checkCancellation()
+                    if await MainActor.run(body: { self.isUserScrolling }) {
+                        print("🚫 User scrolling detected after fetch - aborting")
+                        throw CancellationError()
+                    }
+                    
+                    // CRITICAL: Yield between fetch and parse to allow UI updates
+                    await Task.yield()
                     
                     // PERFORMANCE FIX: Parse RSS without progress tracking for auto-refresh to prevent main thread blocking
                     let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: nil)
                     let (_, episodes) = try await parser.parseComplete()
                     
+                    // Check for cancellation and scrolling after parsing
+                    try Task.checkCancellation()
+                    if await MainActor.run(body: { self.isUserScrolling }) {
+                        print("🚫 User scrolling detected after parsing - aborting")
+                        throw CancellationError()
+                    }
+                    
                     print("🔍 Parsed \(episodes.count) episodes from RSS")
                     continuation.resume(returning: episodes)
                 } catch {
                     print("❌ Failed to parse RSS episodes: \(error)")
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Parse RSS feed intelligently and return only new episodes that don't exist in Core Data
+    /// Uses timestamp comparison to stop parsing once we reach episodes we already have
+    private func parseNewEpisodesOnly(from url: URL, feedId: String) async throws -> [PodcastEpisode] {
+        print("🔍 Parsing RSS for new episodes only from: \(url.absoluteString)")
+        
+        // CRITICAL: Check for user scrolling and abort parsing if detected
+        if isUserScrolling {
+            print("🚫 User is scrolling - aborting new episode parsing to maintain UI responsiveness")
+            throw CancellationError()
+        }
+        
+        // Get the most recent episode date from Core Data to use as cutoff
+        let mostRecentEpisodeDate = await getMostRecentEpisodeDate(for: feedId)
+        print("📅 Most recent episode date: \(mostRecentEpisodeDate?.description ?? "none")")
+        
+        // Get existing episode IDs from Core Data to compare
+        let existingEpisodeIds = await getExistingEpisodeIds(for: feedId)
+        print("📋 Found \(existingEpisodeIds.count) existing episodes for comparison")
+        
+        // Parse episodes from RSS with intelligent stopping
+        let newEpisodes = try await parseRSSEpisodesWithCutoff(from: url, cutoffDate: mostRecentEpisodeDate, existingIds: existingEpisodeIds)
+        
+        print("🆕 Found \(newEpisodes.count) new episodes using intelligent parsing")
+        return newEpisodes
+    }
+    
+    /// Get existing episode IDs for a feed from Core Data
+    private func getExistingEpisodeIds(for feedId: String) async -> Set<String> {
+        return await withCheckedContinuation { continuation in
+            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+            backgroundContext.perform {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+                fetchRequest.propertiesToFetch = ["id"] // Only fetch IDs for performance
+                
+                do {
+                    let results = try backgroundContext.fetch(fetchRequest)
+                    let episodeIds = Set(results.compactMap { $0.id })
+                    continuation.resume(returning: episodeIds)
+                } catch {
+                    print("❌ Failed to fetch existing episode IDs: \(error)")
+                    continuation.resume(returning: Set<String>())
+                }
+            }
+        }
+    }
+    
+    /// Get the most recent episode publication date for a feed from Core Data
+    private func getMostRecentEpisodeDate(for feedId: String) async -> Date? {
+        return await withCheckedContinuation { continuation in
+            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+            backgroundContext.perform {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+                fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                fetchRequest.fetchLimit = 1
+                fetchRequest.propertiesToFetch = ["publicationDate"]
+                
+                do {
+                    let results = try backgroundContext.fetch(fetchRequest)
+                    let mostRecentDate = results.first?.publicationDate
+                    continuation.resume(returning: mostRecentDate)
+                } catch {
+                    print("❌ Failed to fetch most recent episode date: \(error)")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+    
+    /// Parse RSS episodes with intelligent cutoff based on existing episode dates
+    private func parseRSSEpisodesWithCutoff(from url: URL, cutoffDate: Date?, existingIds: Set<String>) async throws -> [PodcastEpisode] {
+        print("🧠 Smart parsing RSS episodes from: \(url.absoluteString)")
+        
+        // CRITICAL: Check for user scrolling and abort parsing if detected
+        if isUserScrolling {
+            print("🚫 User is scrolling - aborting smart RSS parsing to maintain UI responsiveness")
+            throw CancellationError()
+        }
+        
+        // For new feeds (no cutoff date), parse all episodes
+        if cutoffDate == nil {
+            print("🆕 New feed detected - parsing all episodes")
+            return try await parseRSSEpisodesOnly(from: url)
+        }
+        
+        // For existing feeds, parse with intelligent cutoff
+        return try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .background) {
+                do {
+                    // Check for cancellation and scrolling before starting
+                    try Task.checkCancellation()
+                    
+                    if await MainActor.run(body: { self.isUserScrolling }) {
+                        print("🚫 User scrolling detected during smart parsing - aborting")
+                        throw CancellationError()
+                    }
+                    
+                    // Fetch RSS data
+                    let feedData = try await self.fetchRSSDataWithRetry(url: url, feedTitle: url.absoluteString)
+                    
+                    // Check for cancellation and scrolling after fetch
+                    try Task.checkCancellation()
+                    if await MainActor.run(body: { self.isUserScrolling }) {
+                        print("🚫 User scrolling detected after fetch - aborting smart parsing")
+                        throw CancellationError()
+                    }
+                    
+                    // CRITICAL: Yield between fetch and parse
+                    await Task.yield()
+                    
+                    // Parse with regular parser and filter intelligently
+                    let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: nil)
+                    let (_, allEpisodes) = try await parser.parseComplete()
+                    
+                    // Filter to only new episodes based on cutoff date and existing IDs
+                    let newEpisodes = allEpisodes.filter { episode in
+                        // Skip if episode already exists
+                        if existingIds.contains(episode.id) {
+                            return false
+                        }
+                        
+                        // Skip if episode is older than our cutoff (episodes are typically ordered newest first)
+                        if let cutoff = cutoffDate, episode.publicationDate < cutoff {
+                            return false
+                        }
+                        
+                        return true
+                    }
+                    
+                    // Check for cancellation and scrolling after parsing
+                    try Task.checkCancellation()
+                    if await MainActor.run(body: { self.isUserScrolling }) {
+                        print("🚫 User scrolling detected after smart parsing - aborting")
+                        throw CancellationError()
+                    }
+                    
+                    print("🧠 Smart parsing found \(newEpisodes.count) new episodes")
+                    continuation.resume(returning: newEpisodes)
+                } catch {
+                    print("❌ Failed to smart parse RSS episodes: \(error)")
                     continuation.resume(throwing: error)
                 }
             }
@@ -1252,6 +1435,9 @@ class PodcastViewModel: ObservableObject {
             do {
                 print("🔄 Fetching RSS data (attempt \(attempt)/\(maxRetries)) for: \(feedTitle)")
                 
+                // CRITICAL: Yield control to allow UI updates
+                await Task.yield()
+                
                 // Configure URLSession with longer timeout for large feeds and dedicated background queue
                 var request = URLRequest(url: url)
                 request.timeoutInterval = 30.0 // Increased timeout for large episodes
@@ -1259,9 +1445,15 @@ class PodcastViewModel: ObservableObject {
                 request.setValue("application/rss+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
                 request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
                 
+                // CRITICAL: Another yield point before network operation
+                await Task.yield()
+                
                 // Use URLSession with background configuration to prevent main thread blocking
                 let session = URLSession(configuration: .default)
                 let (data, response) = try await session.data(for: request)
+                
+                // CRITICAL: Yield after network operation completes
+                await Task.yield()
                 
                 // Validate HTTP response
                 if let httpResponse = response as? HTTPURLResponse {
@@ -1278,6 +1470,9 @@ class PodcastViewModel: ObservableObject {
                     }
                 }
                 
+                // CRITICAL: Yield before data validation
+                await Task.yield()
+                
                 // Validate data size and content
                 guard !data.isEmpty else {
                     throw NSError(domain: "FeedError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty data received"])
@@ -1287,6 +1482,9 @@ class PodcastViewModel: ObservableObject {
                 guard data.count > 100 else { // Minimum viable RSS feed should be larger
                     throw NSError(domain: "FeedError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Data too small (\(data.count) bytes)"])
                 }
+                
+                // CRITICAL: Yield before XML validation
+                await Task.yield()
                 
                 // Validate XML structure - check if data starts with valid XML
                 let dataPrefix = String(data: data.prefix(200), encoding: .utf8) ?? ""
@@ -1312,6 +1510,9 @@ class PodcastViewModel: ObservableObject {
                 
                 print("❌ Fetch attempt \(attempt)/\(maxRetries) failed for: \(feedTitle) - Error: \(error.localizedDescription)")
                 
+                // CRITICAL: Yield before retry delay to allow UI updates
+                await Task.yield()
+                
                 // For decode errors, wait longer between retries
                 if isDecodeError && attempt < maxRetries {
                     let delay = Double(attempt) * 2.0 // Progressive delay: 2s, 4s, 6s
@@ -1321,6 +1522,9 @@ class PodcastViewModel: ObservableObject {
                     // Standard retry delay for other errors
                     try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 }
+                
+                // CRITICAL: Yield after retry delay before next attempt
+                await Task.yield()
             }
         }
         
@@ -1660,6 +1864,38 @@ class PodcastViewModel: ObservableObject {
         refreshTask?.cancel()
         uiUpdateTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
+        
+        // Cancel all RSS parsing tasks directly
+        for (feedId, task) in rssParsingTasks {
+            print("🚫 Cancelling RSS parsing for feed: \(feedId)")
+            task.cancel()
+        }
+    }
+    
+    // MARK: - RSS Task Management for View Switching
+    
+    /// Cancel all RSS parsing tasks immediately when switching views
+    private func cancelAllRSSParsingTasks() {
+        for (feedId, task) in rssParsingTasks {
+            print("🚫 Cancelling RSS parsing for feed: \(feedId)")
+            task.cancel()
+        }
+        rssParsingTasks.removeAll()
+    }
+    
+    /// Cancel RSS parsing for a specific feed
+    func cancelRSSParsingForFeed(_ feedId: String) {
+        if let task = rssParsingTasks[feedId] {
+            print("🚫 Cancelling RSS parsing for specific feed: \(feedId)")
+            task.cancel()
+            rssParsingTasks.removeValue(forKey: feedId)
+        }
+    }
+    
+    /// Cancel all RSS operations immediately (public method for view switching)
+    func cancelAllRSSOperations() {
+        print("🚫 Cancelling all RSS operations due to view switch")
+        cancelAllRSSParsingTasks()
     }
     
     /// Setup coordination with DataSyncManager
@@ -1873,6 +2109,9 @@ class PodcastViewModel: ObservableObject {
         // Cancel any existing loading task
         loadingTask?.cancel()
         
+        // CRITICAL: Cancel all RSS operations when switching feeds for immediate responsiveness
+        cancelAllRSSOperations()
+        
         selectedFeedId = feedId
         currentPage = 1
         
@@ -1906,9 +2145,17 @@ class PodcastViewModel: ObservableObject {
         if shouldAutoRefresh {
             // PERFORMANCE: Do RSS refresh in background to not block UI loading
             // Add a small delay to ensure UI is fully loaded first
-            Task.detached(priority: .background) {
+            
+            // Cancel any existing RSS parsing for this feed
+            self.cancelRSSParsingForFeed(feedId)
+            
+            let rssTask = Task.detached(priority: .background) {
                 // Wait a moment for UI to settle before starting background refresh
                 try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
+                
+                // Check for cancellation before starting expensive work
+                try Task.checkCancellation()
+                
                 do {
                     print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
                     let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
@@ -1920,8 +2167,19 @@ class PodcastViewModel: ObservableObject {
                             self.podcastFeeds.first(where: { $0.id == feedId })?.url
                         }
                         if let urlString, let url = URL(string: urlString) {
-                            let parsedFull = try await self.parseRSSEpisodesOnly(from: url)
-                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: parsedFull)
+                            // Use smart parsing to only get new episodes
+                            let newEpisodes = try await self.parseNewEpisodesOnly(from: url, feedId: feedId)
+                            
+                            // Check for cancellation after parsing
+                            try Task.checkCancellation()
+                            
+                            // Only reconcile if we found new episodes
+                            if !newEpisodes.isEmpty {
+                                print("🆕 Processing \(newEpisodes.count) new episodes for feed \(feedId)")
+                                try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                            } else {
+                                print("✅ No new episodes found for feed \(feedId)")
+                            }
                         } else {
                             print("❌ Snapshot reconcile failed: Missing feed URL for \(feedId)")
                         }
@@ -1964,10 +2222,20 @@ class PodcastViewModel: ObservableObject {
                     } else {
                         print("ℹ️ No new episodes found for feed \(feedId)")
                     }
+                } catch is CancellationError {
+                    print("🚫 RSS refresh cancelled for feed \(feedId)")
                 } catch {
                     print("❌ Failed to auto-refresh feed \(feedId): \(error)")
                 }
+                
+                // Clean up task from tracking
+                await MainActor.run {
+                    self.rssParsingTasks.removeValue(forKey: feedId)
+                }
             }
+            
+            // Store task for potential cancellation
+            rssParsingTasks[feedId] = rssTask
         }
         
         // First check if episodes are already loaded in the feed object
@@ -2029,8 +2297,14 @@ class PodcastViewModel: ObservableObject {
             let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
             if shouldAutoRefresh {
                 print("🔄 Background RSS refresh needed for feed with \(feed.episodes.count) cached episodes")
+                
+                // Cancel any existing RSS parsing for this feed
+                self.cancelRSSParsingForFeed(feedId)
+                
                 // Do RSS refresh in background without blocking UI
-                Task.detached(priority: .background) {
+                let rssTask = Task.detached(priority: .background) {
+                    // Check for cancellation before starting expensive work
+                    try Task.checkCancellation()
                     do {
                         print("🔄 Auto-refreshing feed \(feedId) from RSS for new episodes...")
                         let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
@@ -2042,8 +2316,19 @@ class PodcastViewModel: ObservableObject {
                                 self.podcastFeeds.first(where: { $0.id == feedId })?.url
                             }
                             if let urlString, let url = URL(string: urlString) {
-                                let parsedFull = try await self.parseRSSEpisodesOnly(from: url)
-                                try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: parsedFull)
+                                // Use smart parsing to only get new episodes
+                                let newEpisodes = try await self.parseNewEpisodesOnly(from: url, feedId: feedId)
+                                
+                                // Check for cancellation after parsing
+                                try Task.checkCancellation()
+                                
+                                // Only add if we found new episodes
+                                if !newEpisodes.isEmpty {
+                                    print("🆕 Processing \(newEpisodes.count) new episodes for feed \(feedId)")
+                                    try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                                } else {
+                                    print("✅ No new episodes found for feed \(feedId)")
+                                }
                             } else {
                                 print("❌ Snapshot reconcile failed: Missing feed URL for \(feedId)")
                             }
@@ -2069,7 +2354,8 @@ class PodcastViewModel: ObservableObject {
                                 }
                             }
                             
-                            let processedEpisodes = await PodcastViewModel.removeDuplicatesFromEpisodes(exactEpisodes)
+                            // PERFORMANCE FIX: Move episode processing to background to prevent main thread blocking
+                            let processedEpisodes = await self.processEpisodesInBackground(exactEpisodes)
                             await MainActor.run {
                                 if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == feedId }) {
                                     var updatedFeedWithEpisodes = self.podcastFeeds[feedIndex]
@@ -2086,10 +2372,20 @@ class PodcastViewModel: ObservableObject {
                         } else {
                             print("ℹ️ No new episodes found for feed \(feedId)")
                         }
+                    } catch is CancellationError {
+                        print("🚫 RSS refresh cancelled for feed \(feedId)")
                     } catch {
                         print("❌ Failed to auto-refresh feed \(feedId): \(error)")
                     }
+                    
+                    // Clean up task from tracking
+                    await MainActor.run {
+                        self.rssParsingTasks.removeValue(forKey: feedId)
+                    }
                 }
+                
+                // Store task for potential cancellation
+                rssParsingTasks[feedId] = rssTask
             }
             
             // PERFORMANCE: Clean up pending task before early return
@@ -2158,11 +2454,16 @@ class PodcastViewModel: ObservableObject {
                         let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
                         print("✅ Manual RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
                         
-                        // Reconcile Core Data to match feed snapshot (use full parsed set)
+                        // Reconcile Core Data with smart parsing (only new episodes)
                         if let feed = await MainActor.run(body: { self.podcastFeeds.first(where: { $0.id == feedId }) }),
                            let url = URL(string: feed.url) {
-                            let parsedFull = try await self.parseRSSEpisodesOnly(from: url)
-                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: parsedFull)
+                            let newEpisodesFromParsing = try await self.parseNewEpisodesOnly(from: url, feedId: feedId)
+                            if !newEpisodesFromParsing.isEmpty {
+                                print("🆕 Manual refresh found \(newEpisodesFromParsing.count) additional new episodes")
+                                try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodesFromParsing, to: feedId)
+                            } else {
+                                print("✅ Manual refresh - no additional new episodes found")
+                            }
                         } else {
                             print("❌ Manual refresh reconcile failed: Missing feed URL for \(feedId)")
                         }
@@ -2245,6 +2546,9 @@ class PodcastViewModel: ObservableObject {
     /// Update filter (All, Favorites, Downloads) with efficient reloading
     func updateFilter(tab: Int) {
         guard currentTab != tab else { return }
+        
+        // CRITICAL: Cancel all RSS operations when switching tabs for immediate responsiveness
+        cancelAllRSSOperations()
         
         // Save current episode progress to CloudKit when switching tabs
         if let currentEpisode = PodcastPlayer.shared.currentEpisode, PodcastPlayer.shared.isPlaying {
@@ -3857,6 +4161,9 @@ class PodcastViewModel: ObservableObject {
                 } else {
                     print("⚠️ Episode states sync failed for fresh install - will retry on next launch")
                 }
+                
+                // CRITICAL: After CloudKit sync, check if any feeds need episode refreshing
+                await refreshFeedsWithoutEpisodes()
             } else if isDefiniteUpgrade {
                 print("🔄 App upgrade - syncing episode states with download protection...")
                 let syncSuccess = await syncEpisodeStatesFromCloudKit(isFreshInstall: false)
@@ -3865,6 +4172,9 @@ class PodcastViewModel: ObservableObject {
                 } else {
                     print("⚠️ Episode states sync failed for app upgrade - will retry on next launch")
                 }
+                
+                // CRITICAL: After CloudKit sync, check if any feeds need episode refreshing
+                await refreshFeedsWithoutEpisodes()
             } else {
                 print("⚡ Existing installation - skipping CloudKit episode state sync for better performance")
                 // Just refresh local episode states from EpisodeStateManager
@@ -4174,97 +4484,38 @@ class PodcastViewModel: ObservableObject {
     
     /// Check if a feed should be refreshed from RSS for new episodes
     private func shouldRefreshFeedFromRSS(feedId: String, isInitialLoad: Bool) async -> Bool {
-        // Check last refresh time first
-        let lastRefreshKey = "LastRSSRefresh_\(feedId)"
-        let lastRefreshTime = UserDefaults.standard.double(forKey: lastRefreshKey)
-        let currentTime = Date().timeIntervalSince1970
-        let hoursSinceLastRefresh = (currentTime - lastRefreshTime) / 3600
+        // CRITICAL CHANGE: Only allow RSS parsing for feeds with no episodes
+        // Special handling for fresh installs where feeds come from CloudKit
         
         // Check if feed has episodes in Core Data
         let episodeCount = await getEpisodeCountForFeed(feedId)
         
-        // ENHANCED: Aggressive refresh conditions to ensure new episodes are always detected
-        
-        // 1. If feed has no episodes at all, definitely refresh
+        // ONLY refresh if this feed has no episodes (covers both new feeds and fresh installs)
         if episodeCount == 0 {
-            print("🔄 Feed \(feedId) needs refresh: no episodes found")
+            let currentTime = Date().timeIntervalSince1970
+            let lastRefreshKey = "LastRSSRefresh_\(feedId)"
+            
+            print("🆕 Feed \(feedId) has no episodes - allowing RSS parsing (could be new feed or fresh install)")
             UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         
-        // 2. For initial loads, be more aggressive - refresh if it's been 10+ minutes
-        if isInitialLoad && hoursSinceLastRefresh >= 0.17 {
-            print("🔄 Feed \(feedId) needs refresh: \(Int(hoursSinceLastRefresh * 60)) minutes since last refresh (initial load)")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-            return true
-        }
-        
-        // 3. For regular loads, refresh if it's been 15+ minutes since last refresh
-        if !isInitialLoad && hoursSinceLastRefresh >= 0.25 {
-            print("🔄 Feed \(feedId) needs refresh: \(Int(hoursSinceLastRefresh * 60)) minutes since last refresh")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-            return true
-        }
-        
-        // 4. If feed has very few episodes (< 10), might need refresh more often
-        if episodeCount < 10 && hoursSinceLastRefresh >= 0.5 {
-            print("🔄 Feed \(feedId) needs refresh: only \(episodeCount) episodes available")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-            return true
-        }
-        
-        // 5. For large feeds, still check periodically but more frequently
-        if episodeCount >= 100 && hoursSinceLastRefresh >= 1.0 {
-            print("🔄 Feed \(feedId) needs refresh: large feed (\(episodeCount) episodes), \(Int(hoursSinceLastRefresh * 60)) minutes since last refresh")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-            return true
-        }
-        
-        // 6. If this is the first time loading this feed (never refreshed), refresh it
-        if lastRefreshTime == 0 {
-            print("🔄 Feed \(feedId) needs refresh: never been refreshed before")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-            return true
-        }
-        
-        // 7. Force refresh if user actively switched to this feed and it's been 10+ minutes
-        let lastViewKey = "LastFeedView_\(feedId)"
-        let lastViewTime = UserDefaults.standard.double(forKey: lastViewKey)
-        let timeSinceLastView = (currentTime - lastViewTime) / 60 // in minutes
-        
-        if timeSinceLastView >= 10 && hoursSinceLastRefresh >= 0.17 {
-            print("🔄 Feed \(feedId) needs refresh: user returned after \(Int(timeSinceLastView)) minutes, last refresh was \(Int(hoursSinceLastRefresh * 60)) minutes ago")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-            UserDefaults.standard.set(currentTime, forKey: lastViewKey)
-            return true
-        }
-        
-        // 8. Check if user has explicitly requested refresh for this feed
-        let userRefreshKey = "UserRequestedRefresh_\(feedId)"
-        let userRequestedRefresh = UserDefaults.standard.bool(forKey: userRefreshKey)
-        if userRequestedRefresh {
-            print("🔄 Feed \(feedId) needs refresh: user explicitly requested refresh")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-            UserDefaults.standard.removeObject(forKey: userRefreshKey) // Clear the flag
-            return true
-        }
-        
-        // Update last view time for this feed
-        UserDefaults.standard.set(currentTime, forKey: lastViewKey)
-        
-        print("⚡ Feed \(feedId) loading from Core Data: \(episodeCount) episodes available, last refreshed \(Int(hoursSinceLastRefresh * 60)) minutes ago")
+        // All existing feeds with episodes - no RSS parsing needed
+        print("⚡ Feed \(feedId) loading from Core Data: \(episodeCount) episodes available - skipping RSS parsing")
         return false
     }
     
     /// Refresh any feeds that don't have episodes by re-parsing their RSS
+    /// CRITICAL CHANGE: Handles both new feeds and fresh install scenarios
     private func refreshFeedsWithoutEpisodes() async {
-        print("🔍 Checking for feeds without episodes...")
+        print("🔍 Checking for feeds without episodes that need RSS parsing...")
         
         // Check each feed for episode count
         var feedsToRefresh: [PodcastFeed] = []
         
         for feed in podcastFeeds {
             let episodeCount = await getEpisodeCountForFeed(feed.id)
+            
             if episodeCount == 0 {
                 print("📡 Feed '\(feed.title)' has 0 episodes, needs refresh")
                 feedsToRefresh.append(feed)
@@ -4301,7 +4552,7 @@ class PodcastViewModel: ObservableObject {
                 print("🎉 Completed refreshing feeds without episodes")
             }
         } else {
-            print("✅ All feeds have episodes")
+            print("✅ All feeds have episodes - no RSS parsing needed")
             // Complete artwork tracking immediately if no feeds need refreshing
             await MainActor.run {
                 DataSyncManager.shared.startArtworkDownloadTracking(totalFeeds: 0)
@@ -5586,16 +5837,17 @@ extension PodcastViewModel {
             if results.isEmpty {
                 print("📡 No podcast feeds found in CoreData.")
                 // CRITICAL: Clear in-memory arrays when no feeds found in Core Data
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.podcastFeeds.removeAll()
                     self.podcastFeedOrder.removeAll()
                     self.currentEpisodes.removeAll()
                     self.throttledUIUpdate()
                     print("📡 ✅ MAIN THREAD: Cleared all in-memory podcast data due to empty Core Data")
+                    
+                    // PERFORMANCE: Reset flags on main thread
+                    self.isLoadingFromCoreData = false
+                    self.isLoading = false  // Clear main loading flag
                 }
-                // PERFORMANCE: Reset flag before early return
-                self.isLoadingFromCoreData = false
-                self.isLoading = false  // Clear main loading flag
                 return
             }
             

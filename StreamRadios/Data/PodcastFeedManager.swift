@@ -732,6 +732,9 @@ extension PodcastFeedManager {
             do {
                 os_log("🔄 Fetching RSS data (attempt %d/%d) for feed: %@", log: log, type: .info, attempt, maxRetries, feedTitle)
                 
+                // CRITICAL: Yield control to allow UI updates
+                await Task.yield()
+                
                 // Configure URLSession with longer timeout for large feeds
                 var request = URLRequest(url: url)
                 request.timeoutInterval = 30.0 // Increased timeout for large episodes
@@ -739,9 +742,15 @@ extension PodcastFeedManager {
                 request.setValue("application/rss+xml, application/xml, text/xml, */*", forHTTPHeaderField: "Accept")
                 request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
                 
+                // CRITICAL: Another yield point before network operation
+                await Task.yield()
+                
                 // Use URLSession with dedicated configuration to prevent main thread blocking
                 let session = URLSession(configuration: .default)
                 let (data, response) = try await session.data(for: request)
+                
+                // CRITICAL: Yield after network operation completes
+                await Task.yield()
                 
                 // Validate HTTP response
                 if let httpResponse = response as? HTTPURLResponse {
@@ -758,6 +767,9 @@ extension PodcastFeedManager {
                     }
                 }
                 
+                // CRITICAL: Yield before data validation
+                await Task.yield()
+                
                 // Validate data size and content
                 guard !data.isEmpty else {
                     os_log("❌ Empty data received for feed: %@", log: log, type: .error, feedTitle)
@@ -769,6 +781,9 @@ extension PodcastFeedManager {
                     os_log("❌ Data too small (%d bytes) for feed: %@", log: log, type: .error, data.count, feedTitle)
                     throw FeedError.feedDataCorrupted
                 }
+                
+                // CRITICAL: Yield before XML validation
+                await Task.yield()
                 
                 // Validate XML structure - check if data starts with valid XML
                 let dataPrefix = String(data: data.prefix(200), encoding: .utf8) ?? ""
@@ -794,6 +809,9 @@ extension PodcastFeedManager {
                 
                 os_log("❌ Fetch attempt %d/%d failed for feed: %@ - Error: %@", log: log, type: .error, attempt, maxRetries, feedTitle, error.localizedDescription)
                 
+                // CRITICAL: Yield before retry delay to allow UI updates
+                await Task.yield()
+                
                 // For decode errors, wait longer between retries
                 if isDecodeError && attempt < maxRetries {
                     let delay = Double(attempt) * 2.0 // Progressive delay: 2s, 4s, 6s
@@ -803,6 +821,9 @@ extension PodcastFeedManager {
                     // Standard retry delay for other errors
                     try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 }
+                
+                // CRITICAL: Yield after retry delay before next attempt
+                await Task.yield()
             }
         }
         
@@ -855,6 +876,11 @@ class RSSFeedParser: NSObject, XMLParserDelegate {
             // Move XML parsing to background queue to prevent main thread blocking
             DispatchQueue.global(qos: .userInitiated).async {
                 self.progressCallback?(0.1, "Starting RSS parsing...")
+                
+                // CRITICAL: Process in smaller chunks to allow cooperative multitasking
+                Task {
+                    await Task.yield() // Allow UI updates before starting parsing
+                }
                 
                 // Enhanced error handling for RSS parsing
                 guard self.parser.parse() else {

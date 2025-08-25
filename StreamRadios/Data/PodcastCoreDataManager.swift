@@ -286,6 +286,13 @@ class PodcastCoreDataManager {
     /// - Upserts parsed episodes and deletes any that are no longer present in the feed
     /// - Uses optimized processing to prevent duplicates and avoid main thread blocking
     func reconcileEpisodes(for feedId: String, parsedEpisodes: [PodcastEpisode]) async throws {
+        // CRITICAL: Check for user scrolling and abort reconciliation if detected
+        let isScrolling = UserDefaults.standard.bool(forKey: "isUserScrolling")
+        if isScrolling {
+            os_log("🚫 User is scrolling - aborting episode reconciliation to maintain UI responsiveness", log: self.log, type: .info)
+            throw CancellationError()
+        }
+        
         // Ensure all episodes have unique IDs to prevent duplicates from the start
         let uniqueEpisodes = removeDuplicatesFromParsedEpisodes(parsedEpisodes)
         let totalEpisodes = uniqueEpisodes.count
@@ -370,6 +377,13 @@ class PodcastCoreDataManager {
             var updatedCount = 0
             
             for chunk in episodes.chunked(into: chunkSize) {
+                // Check for user scrolling before processing each chunk
+                let isScrolling = UserDefaults.standard.bool(forKey: "isUserScrolling")
+                if isScrolling {
+                    os_log("🚫 User scrolling detected during reconciliation - aborting", log: self.log, type: .info)
+                    throw CancellationError()
+                }
+                
                 for episode in chunk {
                     parsedIds.insert(episode.id)
                     
