@@ -2428,9 +2428,28 @@ class PodcastViewModel: ObservableObject {
                                 updatedFeedWithEpisodes.episodes = processedEpisodes
                                 self.podcastFeeds[feedIndex] = updatedFeedWithEpisodes
                                 
-                                // SMOOTH UPDATE: Only refresh if this is the currently selected feed AND user isn't scrolling
-                                if self.selectedFeedId == feedId && !self.isUserScrolling {
-                                    self.objectWillChange.send()
+                                // UPDATE CURRENT VIEW: If this is the selected feed, update currentEpisodes immediately
+                                if self.selectedFeedId == feedId {
+                                    // Apply current filter to the new episodes and update currentEpisodes
+                                    let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+                                    let filteredEpisodes: [PodcastEpisode]
+                                    
+                                    switch filter {
+                                    case .all:
+                                        filteredEpisodes = processedEpisodes
+                                    case .favorites:
+                                        filteredEpisodes = processedEpisodes.filter { $0.state.isFavorite }
+                                    case .downloads:
+                                        filteredEpisodes = processedEpisodes.filter { $0.state.isDownloaded }
+                                    }
+                                    
+                                    Task {
+                                        let processedForDisplay = await self.processEpisodesInBackground(filteredEpisodes)
+                                        await MainActor.run {
+                                            self.currentEpisodes = processedForDisplay
+                                            print("🔄 Updated currentEpisodes with \(processedForDisplay.count) episodes from RSS refresh")
+                                        }
+                                    }
                                 }
                                 print("✅ Replaced in-memory feed episodes with exact snapshot: \(updatedFeedWithEpisodes.episodes.count)")
                             }
@@ -4755,24 +4774,35 @@ class PodcastViewModel: ObservableObject {
     
     /// Check if a feed should be refreshed from RSS for new episodes
     private func shouldRefreshFeedFromRSS(feedId: String, isInitialLoad: Bool) async -> Bool {
-        // CRITICAL CHANGE: Only allow RSS parsing for feeds with no episodes
-        // Special handling for fresh installs where feeds come from CloudKit
-        
         // Check if feed has episodes in Core Data
         let episodeCount = await getEpisodeCountForFeed(feedId)
         
-        // ONLY refresh if this feed has no episodes (covers both new feeds and fresh installs)
+        // ALWAYS refresh if this feed has no episodes (new feeds or fresh installs)
         if episodeCount == 0 {
             let currentTime = Date().timeIntervalSince1970
             let lastRefreshKey = "LastRSSRefresh_\(feedId)"
             
-            print("🆕 Feed \(feedId) has no episodes - allowing RSS parsing (could be new feed or fresh install)")
+            print("🆕 Feed \(feedId) has no episodes - allowing RSS parsing (new feed or fresh install)")
             UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         
-        // All existing feeds with episodes - no RSS parsing needed
-        print("⚡ Feed \(feedId) loading from Core Data: \(episodeCount) episodes available - skipping RSS parsing")
+        // For feeds with episodes, check time-based refresh policy
+        let currentTime = Date().timeIntervalSince1970
+        let lastRefreshKey = "LastRSSRefresh_\(feedId)"
+        let lastRefreshTime = UserDefaults.standard.double(forKey: lastRefreshKey)
+        
+        // Refresh policy: Check for new episodes every 30 minutes on first load
+        let refreshInterval: TimeInterval = isInitialLoad ? 30 * 60 : 60 * 60 // 30 min on first load, 1 hour otherwise
+        let timeSinceLastRefresh = currentTime - lastRefreshTime
+        
+        if timeSinceLastRefresh >= refreshInterval || lastRefreshTime == 0 {
+            print("🔄 Feed \(feedId) ready for RSS refresh - last check: \(Int(timeSinceLastRefresh/60)) min ago (\(episodeCount) episodes cached)")
+            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            return true
+        }
+        
+        print("⚡ Feed \(feedId) loading from Core Data: \(episodeCount) episodes, last refresh \(Int(timeSinceLastRefresh/60)) min ago - no RSS refresh needed")
         return false
     }
     
