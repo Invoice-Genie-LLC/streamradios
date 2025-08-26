@@ -741,7 +741,6 @@ class RadioStationViewModel: NSObject, ObservableObject {
                                 let estimatedTotal = Int(Double(count) / progress)
                                 DataSyncManager.shared.radioStationsTotalCount = max(DataSyncManager.shared.radioStationsTotalCount, estimatedTotal)
                             }
-                            print("📊 Auto-sync progress: \(Int(progress * 100))% - \(count) stations - \(message)")
                         }
                     },
                     completion: { [weak self] stations, error in

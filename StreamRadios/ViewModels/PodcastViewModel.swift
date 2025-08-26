@@ -1530,7 +1530,7 @@ class PodcastViewModel: ObservableObject {
                     let newEpisodes = allEpisodes.filter { episode in
                         // Skip if episode already exists
                         if existingIds.contains(episode.id) {
-                            print("🔍 FILTERING: Skipping existing episode: \(episode.title)")
+                            
                             return false
                         }
                         
@@ -4722,11 +4722,10 @@ class PodcastViewModel: ObservableObject {
     /// Quietly sync episode states for a specific feed without UI progress indicators
     /// This is used when feeds load to keep episode states current without user-visible operations
     private func quietSyncEpisodeStates(for feedId: String) async {
-        print("🔇 QUIET SYNC: Starting quiet episode state sync for feed \(feedId)")
         
         // EMERGENCY PERFORMANCE: Skip sync if large operation is already running
         if isLoadingEpisodes || operationInProgress {
-            print("🔇 QUIET SYNC: Skipping - major operation in progress")
+            
             return
         }
         
@@ -4734,7 +4733,7 @@ class PodcastViewModel: ObservableObject {
         let episodeIds = await getExistingEpisodeIds(for: feedId)
         
         guard !episodeIds.isEmpty else {
-            print("🔇 QUIET SYNC: No episodes found for feed \(feedId)")
+            
             return
         }
         

@@ -1014,9 +1014,6 @@ class EpisodeStateManager: ObservableObject {
                         if hasChanges {
                             savedCount += 1
                             
-                            // REAL-TIME SYNC ONLY: No automatic CloudKit sync from Core Data updates
-                            // CloudKit sync only happens under specific conditions via real-time sync methods
-                            print("📡 🔄 CORE DATA UPDATE: Episode state updated in Core Data for \(episodeId) - no automatic CloudKit sync")
                         }
                     }
                 } catch {
@@ -1029,7 +1026,6 @@ class EpisodeStateManager: ObservableObject {
             if savedCount > 0 {
                 do {
                     try context.save()
-                    print("✅ EpisodeStateManager: Saved \(savedCount) episodes to Core Data")
                 } catch {
                     print("❌ EpisodeStateManager: Failed to save to Core Data: \(error)")
                     errorCount += 1
@@ -2149,7 +2145,6 @@ extension EpisodeStateManager {
             )
         }
         
-        print("🔄 EpisodeStateManager: Set favorite silently for \(episodeId): \(isFavorite)")
     }
     
     /// Set download state silently without triggering CloudKit sync
@@ -2214,7 +2209,6 @@ extension EpisodeStateManager {
             )
         }
         
-        print("🔄 EpisodeStateManager: Set played silently for \(episodeId): \(isPlayed)")
     }
     
     // MARK: - Helper Methods
