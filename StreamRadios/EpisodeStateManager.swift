@@ -47,6 +47,14 @@ struct CloudKitSyncProgress: Codable {
     }
 }
 
+/// High-performance batch episode data structure for optimized loading
+struct EpisodeStateData {
+    let progress: Double
+    let state: EpisodePlaybackState
+    let isFavorite: Bool
+    let isDownloaded: Bool
+}
+
 enum EpisodePlaybackState: String, Codable, Equatable {
     case new
     case playing
@@ -266,35 +274,44 @@ class EpisodeStateManager: ObservableObject {
     
     /// Create emergency backup of all episode data to multiple locations
     private func createEmergencyBackup() {
-        let timestamp = Date().timeIntervalSince1970
-        let emergencyKey = "EmergencyBackup_\(timestamp)"
-        
-        var emergencyData: [String: Any] = [:]
-        
-        // Backup in-memory data (most current)
-        emergencyData["episodeStates"] = episodeStates.mapValues { $0.rawValue }
-        emergencyData["episodeProgress"] = episodeProgress
-        emergencyData["episodeFavorites"] = episodeFavorites
-        emergencyData["episodeDownloads"] = episodeDownloads
-        emergencyData["currentlyPlaying"] = currentlyPlayingEpisodeId
-        emergencyData["timestamp"] = timestamp
-        emergencyData["version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-        
-        // Store in multiple backup locations
-        if let emergencyBackupData = try? JSONSerialization.data(withJSONObject: emergencyData) {
-            // Primary emergency backup
-            userDefaults.set(emergencyBackupData, forKey: emergencyKey)
+        // EMERGENCY PERFORMANCE: Move backup creation to background queue to prevent main thread hangs
+        Task.detached(priority: .background) {
+            let timestamp = Date().timeIntervalSince1970
+            let emergencyKey = "EmergencyBackup_\(timestamp)"
             
-            // Secondary backup with fixed key (overwrites previous)
-            userDefaults.set(emergencyBackupData, forKey: "CoreDataEmergencyBackup")
+            var emergencyData: [String: Any] = [:]
             
-            // Tertiary backup in iCloud key-value storage if available
-            if let iCloudStore = NSUbiquitousKeyValueStore.default as NSUbiquitousKeyValueStore? {
-                iCloudStore.set(emergencyBackupData, forKey: "StreamRadios_EpisodeStates_Emergency")
-                iCloudStore.synchronize()
+            // Backup in-memory data (most current) - create a snapshot first
+            let statesSnapshot = self.episodeStates.mapValues { $0.rawValue }
+            let progressSnapshot = self.episodeProgress
+            let favoritesSnapshot = self.episodeFavorites
+            let downloadsSnapshot = self.episodeDownloads
+            let playingSnapshot = self.currentlyPlayingEpisodeId
+            
+            emergencyData["episodeStates"] = statesSnapshot
+            emergencyData["episodeProgress"] = progressSnapshot
+            emergencyData["episodeFavorites"] = favoritesSnapshot
+            emergencyData["episodeDownloads"] = downloadsSnapshot
+            emergencyData["currentlyPlaying"] = playingSnapshot
+            emergencyData["timestamp"] = timestamp
+            emergencyData["version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            
+            // Store in multiple backup locations
+            if let emergencyBackupData = try? JSONSerialization.data(withJSONObject: emergencyData) {
+                // Primary emergency backup
+                self.userDefaults.set(emergencyBackupData, forKey: emergencyKey)
+                
+                // Secondary backup with fixed key (overwrites previous)
+                self.userDefaults.set(emergencyBackupData, forKey: "CoreDataEmergencyBackup")
+                
+                // Tertiary backup in iCloud key-value storage if available
+                if let iCloudStore = NSUbiquitousKeyValueStore.default as NSUbiquitousKeyValueStore? {
+                    iCloudStore.set(emergencyBackupData, forKey: "StreamRadios_EpisodeStates_Emergency")
+                    iCloudStore.synchronize()
+                }
+                
+                print("💾 EpisodeStateManager: Created emergency backup with \(statesSnapshot.count) states, \(progressSnapshot.count) progress entries")
             }
-            
-            print("💾 EpisodeStateManager: Created emergency backup with \(episodeStates.count) states, \(episodeProgress.count) progress entries")
         }
     }
     
@@ -705,13 +722,14 @@ class EpisodeStateManager: ObservableObject {
         sendThrottledUpdate()
     }
     
-    /// Create emergency backup periodically (every 10 saves) to avoid excessive backup creation
+    /// Create emergency backup periodically (much less frequently) to avoid excessive backup creation
     private func createPeriodicEmergencyBackup() {
         // Use instance property instead of static to avoid Swift compilation error
         periodicBackupCounter += 1
         
-        // Create emergency backup every 10 saves or if significant data exists
-        if periodicBackupCounter % 10 == 0 || episodeStates.count >= 50 || episodeProgress.count >= 50 {
+        // EMERGENCY PERFORMANCE: Create backup much less frequently to prevent main thread hangs
+        // Only backup every 100 saves or when we have LOTS of data
+        if periodicBackupCounter % 100 == 0 || (episodeStates.count >= 500 && periodicBackupCounter % 50 == 0) {
             createEmergencyBackup()
         }
     }
@@ -1226,6 +1244,38 @@ class EpisodeStateManager: ObservableObject {
     func getProgress(for episodeId: String) -> Double {
         let progress = episodeProgress[episodeId] ?? 0.0
         return progress
+    }
+    
+    /// HIGH-PERFORMANCE: Batch episode data lookup for optimized episode list loading
+    /// This method eliminates individual lookups and provides all episode state data at once
+    func getBatchEpisodeData(for episodeIds: [String]) -> [String: EpisodeStateData] {
+        var batchData: [String: EpisodeStateData] = [:]
+        
+        // FAST BATCH PROCESSING: Build result dictionary in single pass
+        for episodeId in episodeIds {
+            let progress = episodeProgress[episodeId] ?? 0.0
+            let isFavorite = episodeFavorites[episodeId] ?? false
+            let isDownloaded = episodeDownloads[episodeId] ?? false
+            
+            // Determine state from progress
+            let state: EpisodePlaybackState
+            if progress >= 0.99 {
+                state = .played
+            } else if progress > 0 {
+                state = .inProgress
+            } else {
+                state = .new
+            }
+            
+            batchData[episodeId] = EpisodeStateData(
+                progress: progress,
+                state: state,
+                isFavorite: isFavorite,
+                isDownloaded: isDownloaded
+            )
+        }
+        
+        return batchData
     }
     
     func getCurrentTime(for episodeId: String) -> Double {

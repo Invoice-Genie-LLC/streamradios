@@ -44,6 +44,15 @@ struct PodcastListView: View {
     @State private var isEditDataReady = false
     @State private var isPreparingEditData = false
     
+    // PERFORMANCE: Memoized filtered podcasts to avoid expensive recomputation
+    @State private var cachedFilteredPodcasts: [PodcastFeed] = []
+    @State private var lastSearchText: String = ""
+    @State private var lastPodcastFeedsCount: Int = 0
+    
+    // PERFORMANCE: Fast feed lookup cache
+    @State private var feedLookupCache: [String: PodcastFeed] = [:]
+    @State private var filteredFeedOrderCache: [String] = []
+    
 
     
     private let log = OSLog(subsystem: "com.yourapp.StreamRadios", category: "PodcastListView")
@@ -260,7 +269,7 @@ struct PodcastListView: View {
                        .simultaneousGesture(
                            // DEBUG: Triple tap to trigger CloudKit sync and show banner
                            TapGesture(count: 3).onEnded { _ in
-                               print("🔄 DEBUG: Triple tap detected - triggering CloudKit sync...")
+
                                viewModel.manuallyTriggerCloudKitSync()
                            }
                        )
@@ -299,26 +308,16 @@ struct PodcastListView: View {
                }
                .onChange(of: viewModel.podcastFeeds.count) { _, newCount in
                    // React to ALL feed count changes (including clearing)
-                   print("🔄 UI: Podcast feeds count changed to \(newCount)")
-                   
                    if newCount > 0 {
                        // Cancel monitoring timer since data is now available
                        dataCheckTimer?.invalidate()
                        dataCheckTimer = nil
-                       print("✅ UI: Data detected, cancelled monitoring timer")
                        
                        // IMMEDIATE: Force comprehensive UI refresh when feeds become available
                        DispatchQueue.main.async {
                            self.refreshID = UUID()
-                           self.viewModel.objectWillChange.send()
-                           print("🔄 UI: Immediate refresh triggered for new feeds")
+                           self.initializeCaches()
                        }
-                   }
-                   
-                   // Always refresh when count changes (including when cleared to 0)
-                   DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                       self.refreshID = UUID()
-                       print("🔄 UI: Delayed refresh completed for count change")
                    }
                }
                .id(refreshID)
@@ -496,16 +495,13 @@ struct PodcastListView: View {
             ScrollViewReader { proxy in
                 List {
                     if viewModel.podcastFeeds.isEmpty {
-                        let _ = print("🔍 UI DEBUG: Showing 'No podcast feeds available' - podcastFeeds.count=\(viewModel.podcastFeeds.count), podcastFeedOrder.count=\(viewModel.podcastFeedOrder.count)")
                         Text("No podcast feeds available")
                             .foregroundColor(.adaptiveSecondaryText)
                             .italic()
                             .padding()
                     }
-                    let _ = print("🔍 UI DEBUG: About to iterate ForEach - podcastFeedOrder.count=\(viewModel.podcastFeedOrder.count), filteredPodcasts.count=\(filteredPodcasts.count)")
-                    ForEach(viewModel.podcastFeedOrder, id: \.self) { feedId in
-                    if let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }),
-                       filteredPodcasts.contains(where: { $0.id == feedId }) {
+                    ForEach(getFilteredFeedOrder(), id: \.self) { feedId in
+                    if let feed = getFeedById(feedId) {
                         PodcastRowView(
                             feed: feed,
                             isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
@@ -731,94 +727,25 @@ struct PodcastListView: View {
     private func onAppear() {
         os_log("PodcastListView appeared", log: log, type: .info)
         
-        // DEBUG: Log the exact state of viewModel when onAppear is called
-        print("🔍 UI DEBUG: PodcastListView onAppear() called")
-        print("🔍 UI DEBUG: viewModel.podcastFeeds.count = \(viewModel.podcastFeeds.count)")
-        print("🔍 UI DEBUG: viewModel.podcastFeedOrder.count = \(viewModel.podcastFeedOrder.count)")
-        print("🔍 UI DEBUG: viewModel.isLoading = \(viewModel.isLoading)")
-        print("🔍 UI DEBUG: First few feed IDs: \(Array(viewModel.podcastFeedOrder.prefix(3)))")
+        // PERFORMANCE: Initialize caches immediately for fast rendering
+        initializeCaches()
         
-        // AUTOMATIC CLOUDKIT SYNC: Trigger sync on view load to check for new feeds and episode updates
-        print("🔄 UI: PodcastListView appeared - triggering automatic CloudKit sync")
-        Task.detached(priority: .userInitiated) {
+        // DEFERRED: Move heavy CloudKit sync off main thread with lower priority
+        Task.detached(priority: .background) {
+            // Add small delay to let UI render first
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
             await viewModel.automaticCloudKitSync()
         }
         
-        // Set up notification observer for fresh install data (with comprehensive refresh)
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("FreshInstallDataAvailable"),
-            object: nil,
-            queue: .main
-        ) { _ in
-            print("📢 UI: Received FreshInstallDataAvailable notification - refreshing view")
-            print("📊 UI: Current feeds count: \(self.viewModel.podcastFeeds.count)")
-            
-            // IMMEDIATE: Force complete view refresh with multiple mechanisms
-            DispatchQueue.main.async {
-                // 1. Update refresh ID to force view re-render
-                self.refreshID = UUID()
-                print("🔄 UI: Updated refreshID to force view re-render")
-                
-                // 2. Trigger view model change notification
-                self.viewModel.objectWillChange.send()
-                print("🔄 UI: Triggered viewModel.objectWillChange.send()")
-                
-                // 3. Force load feeds from Core Data again to ensure data consistency
-                self.viewModel.loadFeedsFromCoreData()
-                print("🔄 UI: Triggered viewModel.loadFeedsFromCoreData()")
-                
-                // 4. CRITICAL: Force re-evaluation of computed properties
-                _ = self.filteredPodcasts // Force computed property evaluation
-                print("🔄 UI: Forced filteredPodcasts re-evaluation")
-            }
-            
-            // 4. Schedule additional refresh attempts to handle edge cases
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                print("🔄 UI: Secondary refresh - feeds count: \(self.viewModel.podcastFeeds.count)")
-                if self.viewModel.podcastFeeds.count > 0 {
-                    self.refreshID = UUID()
-                    self.viewModel.objectWillChange.send()
-                    print("🔄 UI: Secondary refresh completed successfully")
-                } else {
-                    print("⚠️ UI: Secondary refresh - still no feeds found, triggering third attempt")
-                    // Try one more time
-                    self.viewModel.loadFeedsFromCoreData()
-                }
-            }
-            
-            // 5. Final fallback refresh
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                print("🔄 UI: Final fallback refresh - feeds count: \(self.viewModel.podcastFeeds.count)")
-                self.refreshID = UUID()
-                self.viewModel.objectWillChange.send()
-            }
+        // DEFERRED: Set up notification observers with minimal impact
+        Task.detached(priority: .background) {
+            await self.setupNotificationObservers()
         }
         
-        // ADDITIONAL: Set up notification observer for general podcast data updates
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("PodcastDataUpdated"),
-            object: nil,
-            queue: .main
-        ) { _ in
-            print("📢 UI: Received PodcastDataUpdated notification - refreshing view")
-            print("📊 UI: Current feeds count: \(self.viewModel.podcastFeeds.count)")
-            
-            // Immediate UI refresh
-            DispatchQueue.main.async {
-                self.refreshID = UUID()
-                self.viewModel.objectWillChange.send()
-                print("🔄 UI: PodcastDataUpdated refresh completed")
-            }
-        }
-        
-        // Check if data is already available (in case we missed the notification)
+        // LIGHTWEIGHT: Check for existing data without heavy operations
         if viewModel.podcastFeeds.isEmpty {
-            print("🔄 UI: No feeds found - starting minimal monitoring")
-            
             // Start lightweight monitoring without heavy reload operations
             self.startFreshInstallDataMonitoring()
-        } else {
-            print("✅ UI: Data already available - \(viewModel.podcastFeeds.count) feeds found")
         }
     }
     
@@ -826,30 +753,45 @@ struct PodcastListView: View {
         // Cancel any existing timer
         dataCheckTimer?.invalidate()
         
-        // Start a timer with reasonable interval to balance responsiveness and performance
+        // LIGHTWEIGHT: Start minimal monitoring with longer intervals
         var checkCount = 0
-        dataCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { timer in
+        dataCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
             checkCount += 1
-            let feedCount = viewModel.podcastFeeds.count
-            
-            // Reduce logging frequency to avoid spam
-            if checkCount % 5 == 1 {
-            }
+            let feedCount = self.viewModel.podcastFeeds.count
             
             if feedCount > 0 {
-                print("✅ UI: Fresh install data detected - \(feedCount) feeds found, stopping monitoring")
                 DispatchQueue.main.async {
                     self.refreshID = UUID()
-                    self.viewModel.objectWillChange.send()
+                    self.initializeCaches() // Refresh caches when data arrives
                     timer.invalidate()
                     self.dataCheckTimer = nil
-                    print("🔄 UI: Triggered UI refresh for detected feeds")
                 }
-            } else if checkCount > 50 { // Stop after 15 seconds (50 * 0.3)
-                print("🔄 UI: Stopping fresh install monitoring after timeout")
+            } else if checkCount > 15 { // Stop after 15 seconds
                 timer.invalidate()
                 self.dataCheckTimer = nil
             }
+        }
+    }
+    
+    // PERFORMANCE: Setup notification observers off main thread
+    @MainActor
+    private func setupNotificationObservers() {
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("FreshInstallDataAvailable"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            self.refreshID = UUID()
+            self.initializeCaches()
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("PodcastDataUpdated"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            self.refreshID = UUID()
+            self.initializeCaches()
         }
     }
     
@@ -973,18 +915,72 @@ struct PodcastListView: View {
         })
     }
     
-    var filteredPodcasts: [PodcastFeed] {
-        print("🔍 UI DEBUG: filteredPodcasts computed - viewModel.podcastFeeds.count = \(viewModel.podcastFeeds.count), searchText.isEmpty = \(searchText.isEmpty)")
-        if searchText.isEmpty {
-            return viewModel.podcastFeeds
-        } else {
-            let filtered = viewModel.podcastFeeds.filter { feed in
-                feed.title.lowercased().contains(searchText.lowercased()) ||
-                (feed.descriptionText?.lowercased().contains(searchText.lowercased()) ?? false)
-            }
-            print("🔍 UI DEBUG: filteredPodcasts computed - filtered.count = \(filtered.count)")
-            return filtered
+    // PERFORMANCE: Initialize all caches for fast rendering
+    private func initializeCaches() {
+        // Initialize feed lookup cache
+        feedLookupCache = Dictionary(uniqueKeysWithValues: viewModel.podcastFeeds.map { ($0.id, $0) })
+        
+        // Initialize filtered caches
+        cachedFilteredPodcasts = viewModel.podcastFeeds
+        lastSearchText = searchText
+        lastPodcastFeedsCount = viewModel.podcastFeeds.count
+        filteredFeedOrderCache = viewModel.podcastFeedOrder
+    }
+    
+    // PERFORMANCE: Fast feed lookup by ID
+    private func getFeedById(_ feedId: String) -> PodcastFeed? {
+        // Update cache if needed
+        if feedLookupCache.count != viewModel.podcastFeeds.count {
+            feedLookupCache = Dictionary(uniqueKeysWithValues: viewModel.podcastFeeds.map { ($0.id, $0) })
         }
+        return feedLookupCache[feedId]
+    }
+    
+    // PERFORMANCE: Get filtered feed order without expensive nested lookups
+    private func getFilteredFeedOrder() -> [String] {
+        // Use cached result if nothing changed
+        if searchText == lastSearchText && viewModel.podcastFeeds.count == lastPodcastFeedsCount {
+            return filteredFeedOrderCache
+        }
+        
+        let filteredIds = Set(filteredPodcasts.map { $0.id })
+        let result = viewModel.podcastFeedOrder.filter { filteredIds.contains($0) }
+        
+        // Cache the result
+        DispatchQueue.main.async {
+            self.filteredFeedOrderCache = result
+        }
+        
+        return result
+    }
+    
+    // PERFORMANCE: Optimized memoized filtered podcasts
+    private var filteredPodcasts: [PodcastFeed] {
+        // Use cached result if search text and podcast count haven't changed
+        if searchText == lastSearchText && viewModel.podcastFeeds.count == lastPodcastFeedsCount {
+            return cachedFilteredPodcasts
+        }
+        
+        // Update cache
+        let result: [PodcastFeed]
+        if searchText.isEmpty {
+            result = viewModel.podcastFeeds
+        } else {
+            let searchLower = searchText.lowercased()
+            result = viewModel.podcastFeeds.filter { feed in
+                feed.title.lowercased().contains(searchLower) ||
+                (feed.descriptionText?.lowercased().contains(searchLower) ?? false)
+            }
+        }
+        
+        // Cache the result
+        DispatchQueue.main.async {
+            self.cachedFilteredPodcasts = result
+            self.lastSearchText = self.searchText
+            self.lastPodcastFeedsCount = self.viewModel.podcastFeeds.count
+        }
+        
+        return result
     }
     
     // MARK: - Auto-focus on newly added podcast
@@ -2176,7 +2172,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
                episodeId == episode.id {
                 // Force view refresh when this episode's progress changes instantly
                 refreshTrigger = UUID()
-                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) progress updated")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodePlayedChangedInstantly"))) { notification in
@@ -2185,7 +2180,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
                episodeId == episode.id {
                 // Force view refresh when this episode's played state changes instantly
                 refreshTrigger = UUID()
-                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) played state updated")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeFavoriteChangedInstantly"))) { notification in
@@ -2194,7 +2188,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
                episodeId == episode.id {
                 // Force view refresh when this episode's favorite state changes instantly
                 refreshTrigger = UUID()
-                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) favorite state updated")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeDownloadChangedInstantly"))) { notification in
@@ -2203,7 +2196,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
                episodeId == episode.id {
                 // Force view refresh when this episode's download state changes instantly
                 refreshTrigger = UUID()
-                print("📡 ⚡ OPTIMIZED EPISODE ROW REFRESH: Episode \(episode.title) download state updated")
             }
         }
     }

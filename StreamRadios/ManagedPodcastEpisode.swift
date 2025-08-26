@@ -84,10 +84,12 @@ extension PodcastModel {
             var isDownloaded = self.isDownloaded
             let isPlayed = self.isPlayed
             
-            // DEBUG: Only log episodes with potential issues (downloaded or with paths)
-            if isDownloaded || self.localFilePath != nil {
-                print("🔍 CONVERT: Episode '\(self.title ?? "Unknown")' - Downloaded: \(isDownloaded), Path: \(self.localFilePath != nil ? "present" : "nil")")
+            // PERFORMANCE: Only log critical download/path issues, not every episode
+            #if DEBUG
+            if isDownloaded && self.localFilePath == nil {
+                print("⚠️ CONVERT: Downloaded episode missing path: '\(self.title ?? "Unknown")'")
             }
+            #endif
             
             // ROBUST PATH RESOLUTION: Handle iOS sandbox changes
             var resolvedLocalFilePath: String? = self.localFilePath
@@ -246,10 +248,12 @@ extension PodcastModel {
                 notes: notes
             )
             
-            // Only log final state for episodes with downloads or issues
-            if finalEpisode.state.isDownloaded || finalEpisode.localFilePath != nil {
-                print("🔍 CONVERT: Final - '\(finalEpisode.title)' Downloaded: \(finalEpisode.state.isDownloaded)")
+            // PERFORMANCE: Minimal logging for critical issues only
+            #if DEBUG
+            if finalEpisode.state.isDownloaded && finalEpisode.localFilePath == nil {
+                print("⚠️ CONVERT: Downloaded episode without file path: '\(finalEpisode.title)'")
             }
+            #endif
             
             return finalEpisode
         }

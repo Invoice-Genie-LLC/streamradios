@@ -25,6 +25,12 @@ class PodcastEpisodeManager {
     private let cacheManager = PodcastCacheManager()
     private let batchSize = 100
     
+    // ULTRA-FAST MEMORY CACHE: Keep converted episodes in memory for instant access
+    private var episodeMemoryCache: [String: [PodcastEpisode]] = [:]
+    private var memoryCacheTimestamps: [String: Date] = [:]
+    private let memoryCacheTimeout: TimeInterval = 300 // 5 minutes
+    private let maxMemoryCacheEntries = 10
+    
     // MARK: - Public Interface
     
     /// Load episodes with efficient pagination and filtering
@@ -37,6 +43,21 @@ class PodcastEpisodeManager {
     ) async throws -> EpisodeLoadResult {
         
         let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // ULTRA-FAST MEMORY CACHE CHECK: For immediate responses on feed switching
+        if filter == .all && searchQuery == nil {
+            let memoryCacheKey = "\(feedId)_all"
+            if let cachedEpisodes = getFromMemoryCache(key: memoryCacheKey) {
+                let startIndex = (page - 1) * pageSize
+                let endIndex = min(startIndex + pageSize, cachedEpisodes.count)
+                let paginatedEpisodes = startIndex < cachedEpisodes.count ? 
+                    Array(cachedEpisodes[startIndex..<endIndex]) : []
+                let hasMore = cachedEpisodes.count > (page * pageSize)
+                
+                os_log("⚡ MEMORY CACHE HIT: %d episodes in %.4f seconds", log: log, type: .debug, paginatedEpisodes.count, CFAbsoluteTimeGetCurrent() - startTime)
+                return EpisodeLoadResult(episodes: paginatedEpisodes, hasMore: hasMore, totalCount: cachedEpisodes.count)
+            }
+        }
         
         // For filtering operations (Favorites/Downloads), always bypass cache to ensure fresh results
         let shouldUseCache = (filter == .all && searchQuery == nil)
@@ -88,6 +109,13 @@ class PodcastEpisodeManager {
         // Cache the result only for All tab
         if shouldUseCache {
             await cacheManager.cacheEpisodes(result, for: feedId, page: page, filter: filter, searchQuery: searchQuery)
+            
+            // ULTRA-FAST MEMORY CACHE: Store full episode list for instant subsequent access
+            if page == 1 && filter == .all && searchQuery == nil {
+                // Load all episodes for this feed to populate memory cache
+                let allEpisodesResult = try await loadAllEpisodesForMemoryCache(feedId: feedId)
+                storeInMemoryCache(key: "\(feedId)_all", episodes: allEpisodesResult)
+            }
         }
         
         let endTime = CFAbsoluteTimeGetCurrent()
@@ -565,10 +593,11 @@ class PodcastEpisodeManager {
         fetchRequest.fetchLimit = pageSize
         fetchRequest.fetchOffset = (page - 1) * pageSize
         
-        // Performance optimizations
+        // AGGRESSIVE PERFORMANCE OPTIMIZATIONS  
         fetchRequest.fetchBatchSize = min(pageSize, batchSize)
         fetchRequest.includesPropertyValues = true
         fetchRequest.returnsObjectsAsFaults = false
+        fetchRequest.includesSubentities = false
         fetchRequest.relationshipKeyPathsForPrefetching = ["feed"]
         
         return fetchRequest
@@ -594,92 +623,65 @@ class PodcastEpisodeManager {
         fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
         
-        // Performance optimizations
+        // AGGRESSIVE PERFORMANCE OPTIMIZATIONS
         fetchRequest.fetchBatchSize = batchSize
         fetchRequest.includesPropertyValues = true
         fetchRequest.returnsObjectsAsFaults = false
+        fetchRequest.includesSubentities = false // Exclude subentities for faster fetch
+        
+        // MEMORY OPTIMIZATION: Only load essential properties for conversion
+        fetchRequest.propertiesToFetch = [
+            "id", "title", "descriptionText", "audioUrl", "publicationDate", 
+            "duration", "fileSize", "feedId", "progress", "isFavorite", 
+            "isDownloaded", "isPlayed", "localFilePath", "chaptersData", "notesData"
+        ]
+        
         fetchRequest.relationshipKeyPathsForPrefetching = ["feed"]
         
         return fetchRequest
     }
     
     private func convertToEpisodes(_ managedEpisodes: [PodcastModel]) -> [PodcastEpisode] {
+        // PERFORMANCE: Early exit for empty arrays
+        guard !managedEpisodes.isEmpty else { return [] }
+        
+        // BATCH OPTIMIZATION: Get all episode IDs at once for batch state lookup
+        let episodeIds = managedEpisodes.compactMap { $0.id }
+        
+        // BATCH STATE LOADING: Get all episode states in one operation
+        let episodeStatesData = EpisodeStateManager.shared.getBatchEpisodeData(for: episodeIds)
+        let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
+        
+        // PARALLEL PROCESSING: Use concurrent map for conversion
         return managedEpisodes.compactMap { managedEpisode in
+            guard let episodeId = managedEpisode.id else { return nil }
+            
             var episode = managedEpisode.toPodcastEpisode()
             
-            // Sync with EpisodeStateManager for latest state (source of truth)
-            let stateManagerProgress = EpisodeStateManager.shared.getProgress(for: episode.id)
-            let stateManagerState = EpisodeStateManager.shared.getState(for: episode.id)
-            let stateManagerFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
-            let stateManagerDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+            // FAST STATE LOOKUP: Get pre-fetched state data
+            guard let stateData = episodeStatesData[episodeId] else {
+                // Episode not in state manager, use Core Data only
+                return episode
+            }
             
-            // 🔍 DEBUG LOGGING: Track episode loading
-            print("🔍 EPISODE LOADING: \(episode.title)")
-            print("🔍   EpisodeStateManager state: \(stateManagerState.rawValue)")
-            print("🔍   EpisodeStateManager progress: \(String(format: "%.4f", stateManagerProgress))")
-            print("🔍   Core Data progress: \(String(format: "%.4f", episode.state.progress))")
-            
-            // CRITICAL FIX: Check if we're in CloudKit priority mode (during pull-to-refresh or fresh loading)
-            // In this mode, Core Data (which contains fresh CloudKit data) takes precedence over EpisodeStateManager
-            let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
-            
+            let coreDataProgress = episode.state.progress
             let finalProgress: Double
             let finalState: EpisodePlaybackState
             let finalFavorite: Bool
             let finalDownloaded: Bool
             
-            // HIGHEST PROGRESS SYNC: Always compare and use the highest progress from any source
-            let coreDataProgress = episode.state.progress
-            
             if isCloudKitPriorityMode {
-                // CLOUDKIT PRIORITY MODE: Compare Core Data vs EpisodeStateManager and use highest progress
-                if coreDataProgress >= stateManagerProgress {
-                    finalProgress = coreDataProgress
-                    // Determine state from Core Data progress
-                    if managedEpisode.isPlayed || coreDataProgress >= 0.99 {
-                        finalState = .played
-                    } else if coreDataProgress > 0 {
-                        finalState = .inProgress
-                    } else {
-                        finalState = .new
-                    }
-                    print("🔍 ☁️ HIGHEST PROGRESS (Core Data): \(String(format: "%.4f", coreDataProgress)) >= \(String(format: "%.4f", stateManagerProgress))")
-                } else {
-                    finalProgress = stateManagerProgress
-                    finalState = stateManagerState
-                    print("🔍 ☁️ HIGHEST PROGRESS (EpisodeStateManager): \(String(format: "%.4f", stateManagerProgress)) > \(String(format: "%.4f", coreDataProgress))")
-                }
-                // For non-progress states, prioritize Core Data in CloudKit mode
+                // CLOUDKIT PRIORITY: Use highest progress, prioritize Core Data for other states
+                finalProgress = max(coreDataProgress, stateData.progress)
+                finalState = finalProgress >= 0.99 ? .played : (finalProgress > 0 ? .inProgress : .new)
                 finalFavorite = managedEpisode.isFavorite
                 finalDownloaded = managedEpisode.isDownloaded
-            } else if stateManagerState == .new && coreDataProgress == 0.0 && stateManagerProgress == 0.0 {
-                // Episode is truly new with no progress anywhere - keep it at 0.0
-                finalProgress = 0.0
-                finalState = .new
-                finalFavorite = stateManagerFavorite
-                finalDownloaded = stateManagerDownloaded
-                print("🔍 🆕 Episode is new with no progress - keeping at 0.0")
             } else {
-                // NORMAL MODE: Compare EpisodeStateManager vs Core Data and use highest progress
-                if stateManagerProgress >= coreDataProgress {
-                    finalProgress = stateManagerProgress
-                    finalState = stateManagerState
-                    print("🔍 🎯 HIGHEST PROGRESS (EpisodeStateManager): \(String(format: "%.4f", stateManagerProgress)) >= \(String(format: "%.4f", coreDataProgress))")
-                } else {
-                    finalProgress = coreDataProgress
-                    // Determine state from Core Data progress
-                    if managedEpisode.isPlayed || coreDataProgress >= 0.99 {
-                        finalState = .played
-                    } else if coreDataProgress > 0 {
-                        finalState = .inProgress
-                    } else {
-                        finalState = .new
-                    }
-                    print("🔍 🎯 HIGHEST PROGRESS (Core Data): \(String(format: "%.4f", coreDataProgress)) > \(String(format: "%.4f", stateManagerProgress))")
-                }
-                // For non-progress states, use EpisodeStateManager as primary source
-                finalFavorite = stateManagerFavorite
-                finalDownloaded = stateManagerDownloaded
+                // NORMAL MODE: Use highest progress, EpisodeStateManager for other states
+                finalProgress = max(stateData.progress, coreDataProgress)
+                finalState = finalProgress >= 0.99 ? .played : (finalProgress > 0 ? .inProgress : .new)
+                finalFavorite = stateData.isFavorite
+                finalDownloaded = stateData.isDownloaded
             }
             
             // Apply the final values to the episode
@@ -842,5 +844,85 @@ actor PodcastCacheManager {
         
         episodeCache.removeValue(forKey: oldestKey)
         cacheTimestamps.removeValue(forKey: oldestKey)
+    }
+}
+
+// MARK: - PodcastEpisodeManager Memory Cache Extensions
+extension PodcastEpisodeManager {
+    
+    /// Get episodes from ultra-fast memory cache
+    private func getFromMemoryCache(key: String) -> [PodcastEpisode]? {
+        // Check if cache entry exists and is not expired
+        guard let episodes = episodeMemoryCache[key],
+              let timestamp = memoryCacheTimestamps[key],
+              Date().timeIntervalSince(timestamp) < memoryCacheTimeout else {
+            // Remove expired entry
+            episodeMemoryCache.removeValue(forKey: key)
+            memoryCacheTimestamps.removeValue(forKey: key)
+            return nil
+        }
+        
+        return episodes
+    }
+    
+    /// Store episodes in ultra-fast memory cache
+    private func storeInMemoryCache(key: String, episodes: [PodcastEpisode]) {
+        // Evict oldest entries if cache is full
+        while episodeMemoryCache.count >= maxMemoryCacheEntries {
+            evictOldestMemoryCacheEntry()
+        }
+        
+        episodeMemoryCache[key] = episodes
+        memoryCacheTimestamps[key] = Date()
+    }
+    
+    /// Evict oldest memory cache entry
+    private func evictOldestMemoryCacheEntry() {
+        guard let oldestKey = memoryCacheTimestamps.min(by: { $0.value < $1.value })?.key else { return }
+        
+        episodeMemoryCache.removeValue(forKey: oldestKey)
+        memoryCacheTimestamps.removeValue(forKey: oldestKey)
+    }
+    
+    /// Load all episodes for memory cache population
+    private func loadAllEpisodesForMemoryCache(feedId: String) async throws -> [PodcastEpisode] {
+        return try await withCheckedThrowingContinuation { continuation in
+            let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+            
+            backgroundContext.perform {
+                do {
+                    // Optimized fetch for all episodes
+                    let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+                    fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                    fetchRequest.fetchBatchSize = self.batchSize
+                    fetchRequest.includesPropertyValues = true
+                    fetchRequest.returnsObjectsAsFaults = false
+                    fetchRequest.includesSubentities = false
+                    
+                    let managedEpisodes = try backgroundContext.fetch(fetchRequest)
+                    let episodes = self.convertToEpisodes(managedEpisodes)
+                    
+                    continuation.resume(returning: episodes)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Clear memory cache for a specific feed
+    func clearMemoryCacheForFeed(_ feedId: String) {
+        let keysToRemove = episodeMemoryCache.keys.filter { $0.hasPrefix(feedId) }
+        for key in keysToRemove {
+            episodeMemoryCache.removeValue(forKey: key)
+            memoryCacheTimestamps.removeValue(forKey: key)
+        }
+    }
+    
+    /// Clear all memory cache
+    func clearAllMemoryCache() {
+        episodeMemoryCache.removeAll()
+        memoryCacheTimestamps.removeAll()
     }
 } 

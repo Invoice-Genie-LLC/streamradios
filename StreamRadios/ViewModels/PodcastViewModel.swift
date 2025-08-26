@@ -367,16 +367,12 @@ class PodcastViewModel: ObservableObject {
             return
         }
         
-        print("📡 ⚡ INSTANT PROGRESS UPDATE: Episode \(episodeId) progress \(String(format: "%.2f", progress * 100))%")
+        // ULTIMATE PERFORMANCE: Silent cache update without UI storms
+        episodeProgress[episodeId] = progress
         
-        DispatchQueue.main.async {
-            // Update episodeProgress cache for immediate UI refresh
-            self.episodeProgress[episodeId] = progress
-            
-            // Update UI state immediately
-            self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: progress)
-            
-            print("📡 ⚡ UI REFRESHED: Episode \(episodeId) progress updated to \(String(format: "%.2f", progress * 100))%")
+        // Single deferred UI update to prevent spam
+        Task { @MainActor in
+            self.objectWillChange.send()
         }
     }
     
@@ -884,7 +880,7 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Queue episode update for batch processing (optimized for large feeds)
+    /// ULTRA-OPTIMIZED: Silent episode update system - no UI storms
     private func queueEpisodeUpdate(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?, progress: Double?) {
         let update = EpisodeBatchUpdate(
             isFavorite: isFavorite,
@@ -900,10 +896,36 @@ class PodcastViewModel: ObservableObject {
             pendingUpdates[episodeId] = update
         }
         
-        print("📦 BATCH UPDATE: Queued update for episode \\(episodeId) (pending: \\(pendingUpdates.count))")
+        // ULTIMATE PERFORMANCE: Skip all individual UI updates for large operations
+        if pendingUpdates.count > 50 {
+            // Silent processing - no UI updates during bulk operations
+            processSilentBatchUpdates()
+            return
+        }
         
         // Schedule batch processing
         scheduleBatchUpdate()
+    }
+    
+    /// ULTIMATE PERFORMANCE: Silent batch processing without UI updates
+    private func processSilentBatchUpdates() {
+        guard !pendingUpdates.isEmpty else { return }
+        
+        // Process updates silently without triggering UI refresh storms
+        let updates = pendingUpdates
+        pendingUpdates.removeAll()
+        
+        // Update caches only - no UI updates
+        for (episodeId, update) in updates {
+            if let progress = update.progress {
+                episodeProgress[episodeId] = progress
+            }
+        }
+        
+        // Single consolidated UI refresh instead of individual updates
+        Task { @MainActor in
+            self.objectWillChange.send()
+        }
     }
     
     /// Schedule batch update processing
@@ -918,16 +940,31 @@ class PodcastViewModel: ObservableObject {
     private func processBatchUpdates() {
         guard !pendingUpdates.isEmpty else { return }
         
-        print("📦 BATCH UPDATE: Processing \\(pendingUpdates.count) pending episode updates...")
+        // EMERGENCY PERFORMANCE: Minimal logging for large batches
+        if pendingUpdates.count > 100 {
+            print("📦 BATCH UPDATE: Processing \\(pendingUpdates.count) updates")
+        }
         
         let updates = pendingUpdates
         pendingUpdates.removeAll()
+        
+        // EMERGENCY PERFORMANCE: Skip UI updates entirely if too many pending
+        if updates.count > 1000 {
+            // Just update caches, skip UI refresh to prevent hangs
+            for (episodeId, update) in updates {
+                if let progress = update.progress {
+                    episodeProgress[episodeId] = progress
+                }
+            }
+            print("📦 EMERGENCY: Skipped UI update for \\(updates.count) episodes to prevent hang")
+            return
+        }
         
         // Use efficient dictionary lookups for large datasets
         var currentEpisodesMap = Dictionary(uniqueKeysWithValues: currentEpisodes.enumerated().map { ($1.id, $0) })
         var updatedCurrentEpisodes = currentEpisodes
         
-        // Process updates efficiently
+        // Process updates efficiently (reduced operations for performance)
         for (episodeId, update) in updates {
             // Update episodeProgress cache
             if let progress = update.progress {
@@ -951,17 +988,23 @@ class PodcastViewModel: ObservableObject {
                 updatedCurrentEpisodes[index] = episode
             }
             
-            // Apply tab filtering
-            applyTabFiltering(episodeId: episodeId, isFavorite: update.isFavorite, isDownloaded: update.isDownloaded)
+            // EMERGENCY PERFORMANCE: Skip tab filtering for large batches
+            if updates.count <= 100 {
+                applyTabFiltering(episodeId: episodeId, isFavorite: update.isFavorite, isDownloaded: update.isDownloaded)
+            }
         }
         
         // Single UI update for all changes
         currentEpisodes = updatedCurrentEpisodes
         
-        // Update podcastFeeds efficiently (only for feeds with changes)
-        updatePodcastFeedsWithBatchChanges(updates)
+        // EMERGENCY PERFORMANCE: Skip podcastFeeds update for large batches to prevent hangs
+        if updates.count <= 200 {
+            updatePodcastFeedsWithBatchChanges(updates)
+        }
         
-        print("📦 BATCH UPDATE: ✅ Completed batch update of \\(updates.count) episodes")
+        if updates.count <= 100 {
+            print("📦 BATCH UPDATE: ✅ Completed batch update of \\(updates.count) episodes")
+        }
     }
     
     /// Update podcastFeeds with batch changes efficiently
@@ -2155,6 +2198,11 @@ class PodcastViewModel: ObservableObject {
         
         pendingInitializationTasks.insert(taskKey)
         
+        // AUTO QUIET SYNC: Automatically sync episode states when feed loads
+        Task.detached(priority: .background) {
+            await self.quietSyncEpisodeStates(for: feedId)
+        }
+        
         // Cancel any existing loading task
         loadingTask?.cancel()
         
@@ -2226,6 +2274,11 @@ class PodcastViewModel: ObservableObject {
                             if !newEpisodes.isEmpty {
                                 print("🆕 Processing \(newEpisodes.count) new episodes for feed \(feedId)")
                                 try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                                
+                                // QUIET SYNC: Sync episode states for new episodes
+                                Task.detached(priority: .background) {
+                                    await self.quietSyncEpisodeStates(for: feedId)
+                                }
                             } else {
                                 print("✅ No new episodes found for feed \(feedId)")
                             }
@@ -2375,6 +2428,11 @@ class PodcastViewModel: ObservableObject {
                                 if !newEpisodes.isEmpty {
                                     print("🆕 Processing \(newEpisodes.count) new episodes for feed \(feedId)")
                                     try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                                    
+                                    // QUIET SYNC: Sync episode states for new episodes
+                                    Task.detached(priority: .background) {
+                                        await self.quietSyncEpisodeStates(for: feedId)
+                                    }
                                 } else {
                                     print("✅ No new episodes found for feed \(feedId)")
                                 }
@@ -2510,6 +2568,11 @@ class PodcastViewModel: ObservableObject {
                             if !newEpisodesFromParsing.isEmpty {
                                 print("🆕 Manual refresh found \(newEpisodesFromParsing.count) additional new episodes")
                                 try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodesFromParsing, to: feedId)
+                                
+                                // QUIET SYNC: Sync episode states for new episodes
+                                Task.detached(priority: .background) {
+                                    await self.quietSyncEpisodeStates(for: feedId)
+                                }
                             } else {
                                 print("✅ Manual refresh - no additional new episodes found")
                             }
@@ -2863,6 +2926,8 @@ class PodcastViewModel: ObservableObject {
                 // Clear cache for this feed since episode states changed
                 if let feedId = self.selectedFeedId {
                     await self.episodeManager.clearCacheForFeed(feedId)
+                    // ULTRA-FAST CACHE: Also clear memory cache for immediate consistency
+                    self.episodeManager.clearMemoryCacheForFeed(feedId)
                 }
                 
                 // Immediately refresh the filtered list if we're on favorites or downloads tab
@@ -3285,26 +3350,16 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func refreshEpisodeStatesFromManager() {
-        print("🔄 Refreshing episode states from EpisodeStateManager for ALL feeds (real-time sync aware)")
+        // EMERGENCY PERFORMANCE FIX: Eliminate all heavy batch processing that causes 5-8 second hangs
+        // Episode states are now loaded lazily on-demand through individual getters
         
-        // REAL-TIME SYNC FIX: Only skip refresh for episodes that were recently synced
-        // This prevents global blocking that was causing subsequent episodes not to sync
-        print("🔄 REAL-TIME SYNC PROTECTION: Checking episode-specific sync timing instead of global timing")
-        
-        // Calculate total episodes for optimization decision
-        let totalEpisodes = podcastFeeds.reduce(0) { $0 + $1.episodes.count }
-        let isLargeFeed = totalEpisodes > 300
-        
-        if isLargeFeed {
-            print("📦 LARGE FEED OPTIMIZATION: Processing \(totalEpisodes) episodes with optimized batch refresh")
-            refreshEpisodeStatesOptimized()
-        } else {
-            print("🔄 STANDARD REFRESH: Processing \(totalEpisodes) episodes with standard method")
-            refreshEpisodeStatesStandard()
+        // Simply trigger a lightweight UI refresh without any heavy processing
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
         }
     }
     
-    /// Optimized refresh for large feeds (>300 episodes)
+    /// ULTRA-OPTIMIZED: Background episode state refresh to eliminate main thread hangs
     private func refreshEpisodeStatesOptimized() {
         // Batch collect all episode IDs for single bulk lookup
         var allEpisodeIds: [String] = []
@@ -3319,17 +3374,23 @@ class PodcastViewModel: ObservableObject {
         
         // Remove duplicates efficiently
         let uniqueEpisodeIds = Array(Set(allEpisodeIds))
-        print("📦 BATCH LOOKUP: Collecting states for \(uniqueEpisodeIds.count) unique episodes")
         
-        // Batch collect all states (more efficient than individual lookups)
+        // ULTIMATE PERFORMANCE: Move heavy batch lookup to background thread
+        Task.detached(priority: .background) {
+            await self.performBackgroundStateRefresh(episodeIds: uniqueEpisodeIds)
+        }
+    }
+    
+    /// BACKGROUND PROCESSING: Perform state lookup off main thread
+    private func performBackgroundStateRefresh(episodeIds: [String]) async {
+        // Batch collect all states on background thread (prevents main thread hangs)
         var progressMap: [String: Double] = [:]
         var favoriteMap: [String: Bool] = [:]
         var downloadMap: [String: Bool] = [:]
         
-        for episodeId in uniqueEpisodeIds {
+        for episodeId in episodeIds {
             // Skip episodes that were recently synced to prevent overriding real-time changes
             if EpisodeStateManager.shared.wasEpisodeRecentlySynced(episodeId, within: 2.0) {
-                print("⚡ EPISODE SYNC PROTECTION: Skipping refresh for recently synced episode \(episodeId)")
                 continue
             }
             
@@ -3337,6 +3398,15 @@ class PodcastViewModel: ObservableObject {
             favoriteMap[episodeId] = EpisodeStateManager.shared.isFavorite(episodeId)
             downloadMap[episodeId] = EpisodeStateManager.shared.isDownloaded(episodeId)
         }
+        
+        // MAIN THREAD: Apply results quickly without blocking UI
+        await MainActor.run {
+            self.applyBatchStateUpdates(progressMap: progressMap, favoriteMap: favoriteMap, downloadMap: downloadMap)
+        }
+    }
+    
+    /// MAIN THREAD: Quick application of background-processed results
+    private func applyBatchStateUpdates(progressMap: [String: Double], favoriteMap: [String: Bool], downloadMap: [String: Bool]) {
         
         // Update currentEpisodes efficiently
         for index in 0..<currentEpisodes.count {
@@ -3379,7 +3449,8 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        print("📦 ✅ OPTIMIZED REFRESH: Updated \(currentEpisodes.count) current episodes and \(podcastFeeds.count) feeds efficiently")
+        // Single UI refresh after all updates
+        objectWillChange.send()
     }
     
     /// Standard refresh for smaller feeds (<= 300 episodes)
@@ -4582,6 +4653,59 @@ class PodcastViewModel: ObservableObject {
                 print("📊 No episodes found for state sync")
             }
         }
+    }
+    
+    /// Quietly sync episode states for a specific feed without UI progress indicators
+    /// This is used when feeds load to keep episode states current without user-visible operations
+    private func quietSyncEpisodeStates(for feedId: String) async {
+        print("🔇 QUIET SYNC: Starting quiet episode state sync for feed \(feedId)")
+        
+        // EMERGENCY PERFORMANCE: Skip sync if large operation is already running
+        if isLoadingEpisodes || operationInProgress {
+            print("🔇 QUIET SYNC: Skipping - major operation in progress")
+            return
+        }
+        
+        // Get episode IDs for this specific feed
+        let episodeIds = await getExistingEpisodeIds(for: feedId)
+        
+        guard !episodeIds.isEmpty else {
+            print("🔇 QUIET SYNC: No episodes found for feed \(feedId)")
+            return
+        }
+        
+        // EMERGENCY PERFORMANCE: Limit sync to only recent episodes for large feeds to prevent hangs
+        let episodesToSync = episodeIds.count > 1000 ? Array(episodeIds.prefix(200)) : Array(episodeIds)
+        
+        // Perform quiet CloudKit sync (no UI progress indicators)
+        let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+            for: episodesToSync,
+            isFreshInstall: false
+        )
+        
+        let coreDataUpdates = syncResult.updates
+        let syncSuccess = syncResult.success
+        
+        // Save synced states to Core Data if there are updates
+        if !coreDataUpdates.isEmpty {
+            do {
+                try await episodeManager.updateEpisodeStates(coreDataUpdates)
+                print("🔇 QUIET SYNC: Updated \(coreDataUpdates.count) episode states for feed \(feedId)")
+            } catch {
+                print("🔇 QUIET SYNC: Failed to save episode states for feed \(feedId): \(error)")
+            }
+        }
+        
+        // EMERGENCY PERFORMANCE: Skip UI refresh for large updates to prevent main thread hangs
+        if coreDataUpdates.count <= 100 {
+            await MainActor.run {
+                self.refreshEpisodeStatesFromManager()
+            }
+        } else {
+            print("🔇 QUIET SYNC: Skipping UI refresh for \(coreDataUpdates.count) updates to prevent hang")
+        }
+        
+        print("🔇 QUIET SYNC: Completed for feed \(feedId) - Success: \(syncSuccess), Updates: \(coreDataUpdates.count)")
     }
     
     /// Check if a feed should be refreshed from RSS for new episodes
