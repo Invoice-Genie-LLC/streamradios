@@ -218,6 +218,9 @@ class PodcastViewModel: ObservableObject {
     private var isLoadingFromCoreData = false
     private var pendingInitializationTasks = Set<String>()
     
+    // IMMEDIATE NEW EPISODE CHECK: Track immediate check tasks
+    private var immediateCheckTasks: [String: Task<Void, Never>] = [:]
+    
     // Current state
     private var selectedFeedId: String?
     private var lastLoadTime: Date = Date()
@@ -1314,6 +1317,14 @@ class PodcastViewModel: ObservableObject {
                     }
                     
                     print("🔍 Parsed \(episodes.count) episodes from RSS")
+                    
+                    // ENHANCED LOGGING: Show episode date range
+                    if !episodes.isEmpty {
+                        let sortedEpisodes = episodes.sorted { $0.publicationDate > $1.publicationDate }
+                        let newestDate = sortedEpisodes.first?.publicationDate ?? Date()
+                        let oldestDate = sortedEpisodes.last?.publicationDate ?? Date()
+                    }
+                    
                     continuation.resume(returning: episodes)
                 } catch {
                     print("❌ Failed to parse RSS episodes: \(error)")
@@ -1324,6 +1335,78 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// Parse RSS feed intelligently and return only new episodes that don't exist in Core Data
+    /// IMMEDIATE NEW EPISODE CHECK: Check for new episodes when feed opens
+    /// This runs in background with high priority but doesn't block the UI
+    private func checkForNewEpisodesImmediately(feedId: String) async {
+        defer {
+            // Clean up task when completed
+            Task { @MainActor in
+                self.immediateCheckTasks.removeValue(forKey: feedId)
+            }
+        }
+        
+        guard let feedUrl = await MainActor.run(body: {
+            self.podcastFeeds.first(where: { $0.id == feedId })?.url
+        }), let url = URL(string: feedUrl) else {
+            print("⚠️ IMMEDIATE CHECK: Missing feed URL for \(feedId)")
+            return
+        }
+        
+        print("🚀 IMMEDIATE CHECK: Starting immediate new episode check for feed \(feedId)")
+        
+        do {
+            // Check for cancellation before starting work
+            try Task.checkCancellation()
+            
+            // Quick check for new episodes using our optimized parser
+            let newEpisodes = try await parseNewEpisodesOnly(from: url, feedId: feedId)
+            
+            // Check for cancellation after parsing
+            try Task.checkCancellation()
+            
+            guard !newEpisodes.isEmpty else {
+                print("✅ IMMEDIATE CHECK: No new episodes found for feed \(feedId)")
+                return
+            }
+            
+            print("🆕 IMMEDIATE CHECK: Found \(newEpisodes.count) new episodes for feed \(feedId)")
+            
+            // RECONCILE EPISODES: Replace with exact RSS feed contents to prevent accumulation
+            // Parse the complete feed to get all current episodes, not just new ones
+            let feedUrl = await MainActor.run(body: {
+                self.podcastFeeds.first(where: { $0.id == feedId })?.url
+            })
+            
+            if let urlString = feedUrl, let url = URL(string: urlString) {
+                let allCurrentEpisodes = try await parseRSSEpisodesOnly(from: url)
+                try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes)
+            } else {
+                // Fallback to adding new episodes if we can't get the full feed
+                try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+            }
+            
+            // Check for cancellation before UI update
+            try Task.checkCancellation()
+            
+            // Trigger quiet UI refresh on main thread
+            await MainActor.run {
+                self.objectWillChange.send()
+            }
+            
+            // Sync episode states for new episodes in background
+            Task.detached(priority: .background) {
+                await self.quietSyncEpisodeStates(for: feedId)
+            }
+            
+            print("✅ IMMEDIATE CHECK: Successfully processed \(newEpisodes.count) new episodes for feed \(feedId)")
+            
+        } catch is CancellationError {
+            print("🚫 IMMEDIATE CHECK: Cancelled for feed \(feedId)")
+        } catch {
+            print("❌ IMMEDIATE CHECK: Failed to check for new episodes: \(error)")
+        }
+    }
+    
     /// Uses timestamp comparison to stop parsing once we reach episodes we already have
     private func parseNewEpisodesOnly(from url: URL, feedId: String) async throws -> [PodcastEpisode] {
         print("🔍 Parsing RSS for new episodes only from: \(url.absoluteString)")
@@ -1438,16 +1521,29 @@ class PodcastViewModel: ObservableObject {
                     let parser = RSSFeedParser(data: feedData, feedUrl: url.absoluteString, progressCallback: nil)
                     let (_, allEpisodes) = try await parser.parseComplete()
                     
+                    print("🔍 PARSING: Found \(allEpisodes.count) total episodes in RSS feed")
+                    if let cutoff = cutoffDate {
+                        print("🔍 PARSING: Using cutoff date: \(cutoff) (with 30s buffer)")
+                    }
+                    
                     // Filter to only new episodes based on cutoff date and existing IDs
                     let newEpisodes = allEpisodes.filter { episode in
                         // Skip if episode already exists
                         if existingIds.contains(episode.id) {
+                            print("🔍 FILTERING: Skipping existing episode: \(episode.title)")
                             return false
                         }
                         
-                        // Skip if episode is older than our cutoff (episodes are typically ordered newest first)
-                        if let cutoff = cutoffDate, episode.publicationDate < cutoff {
-                            return false
+                        // HOURLY PODCAST FIX: For frequent releases (like hourly news), use buffer to account for date precision
+                        if let cutoff = cutoffDate {
+                            // Add 30-second buffer to handle hourly podcasts and date precision issues
+                            let cutoffWithBuffer = cutoff.addingTimeInterval(-30)
+                            if episode.publicationDate <= cutoffWithBuffer {
+                                print("🔍 FILTERING: Skipping old episode - Date: \(episode.publicationDate), Cutoff: \(cutoffWithBuffer)")
+                                return false
+                            } else {
+                                print("🆕 FILTERING: New episode found - Date: \(episode.publicationDate), Cutoff: \(cutoffWithBuffer)")
+                            }
                         }
                         
                         return true
@@ -1933,12 +2029,26 @@ class PodcastViewModel: ObservableObject {
             task.cancel()
             rssParsingTasks.removeValue(forKey: feedId)
         }
+        
+        // Also cancel immediate check for this feed
+        if let task = immediateCheckTasks[feedId] {
+            print("🚫 Cancelling immediate check for specific feed: \(feedId)")
+            task.cancel()
+            immediateCheckTasks.removeValue(forKey: feedId)
+        }
     }
     
     /// Cancel all RSS operations immediately (public method for view switching)
     func cancelAllRSSOperations() {
         print("🚫 Cancelling all RSS operations due to view switch")
         cancelAllRSSParsingTasks()
+        
+        // Cancel all immediate check tasks
+        for (feedId, task) in immediateCheckTasks {
+            print("🚫 Cancelling immediate check for feed: \(feedId)")
+            task.cancel()
+        }
+        immediateCheckTasks.removeAll()
     }
     
     /// Setup coordination with DataSyncManager
@@ -2237,6 +2347,14 @@ class PodcastViewModel: ObservableObject {
         // Disable CloudKit priority mode after local state refresh
         EpisodeStateManager.shared.disableCloudKitPriorityMode()
         
+        // IMMEDIATE NEW EPISODE CHECK: Always check for new episodes when feed opens
+        // Cancel any existing immediate check for this feed
+        immediateCheckTasks[feedId]?.cancel()
+        
+        immediateCheckTasks[feedId] = Task.detached(priority: .userInitiated) {
+            await self.checkForNewEpisodesImmediately(feedId: feedId)
+        }
+        
         // AUTO-REFRESH: Check if feed needs RSS refresh for new episodes
         let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
         if shouldAutoRefresh {
@@ -2270,17 +2388,13 @@ class PodcastViewModel: ObservableObject {
                             // Check for cancellation after parsing
                             try Task.checkCancellation()
                             
-                            // Only reconcile if we found new episodes
-                            if !newEpisodes.isEmpty {
-                                print("🆕 Processing \(newEpisodes.count) new episodes for feed \(feedId)")
-                                try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
-                                
-                                // QUIET SYNC: Sync episode states for new episodes
-                                Task.detached(priority: .background) {
-                                    await self.quietSyncEpisodeStates(for: feedId)
-                                }
-                            } else {
-                                print("✅ No new episodes found for feed \(feedId)")
+                            // RECONCILE FEED: Always reconcile to show exact RSS contents, not just new episodes
+                            let allCurrentEpisodes = try await self.parseRSSEpisodesOnly(from: url)
+                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes)
+                            
+                            // QUIET SYNC: Sync episode states for all episodes
+                            Task.detached(priority: .background) {
+                                await self.quietSyncEpisodeStates(for: feedId)
                             }
                         } else {
                             print("❌ Snapshot reconcile failed: Missing feed URL for \(feedId)")
@@ -2424,24 +2538,19 @@ class PodcastViewModel: ObservableObject {
                                 // Check for cancellation after parsing
                                 try Task.checkCancellation()
                                 
-                                // Only add if we found new episodes
-                                if !newEpisodes.isEmpty {
-                                    print("🆕 Processing \(newEpisodes.count) new episodes for feed \(feedId)")
-                                    try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
-                                    
-                                    // QUIET SYNC: Sync episode states for new episodes
-                                    Task.detached(priority: .background) {
-                                        await self.quietSyncEpisodeStates(for: feedId)
-                                    }
-                                } else {
-                                    print("✅ No new episodes found for feed \(feedId)")
+                                // RECONCILE FEED: Always reconcile to show exact RSS contents, not just new episodes
+                                let allCurrentEpisodes = try await self.parseRSSEpisodesOnly(from: url)
+                                try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes)
+                                
+                                // QUIET SYNC: Sync episode states for all episodes
+                                Task.detached(priority: .background) {
+                                    await self.quietSyncEpisodeStates(for: feedId)
                                 }
                             } else {
                                 print("❌ Snapshot reconcile failed: Missing feed URL for \(feedId)")
                             }
                         } catch { print("❌ Snapshot reconcile failed: \(error)") }
                         if !newEpisodes.isEmpty {
-                            print("✅ Found \(newEpisodes.count) new episodes - UI will reflect after reconcile")
                             
                             // Update the feed in memory with new episodes - fetch from background, update on main thread
                             let exactEpisodes = await withCheckedContinuation { continuation in
@@ -2471,7 +2580,6 @@ class PodcastViewModel: ObservableObject {
                                     
                                     // Reload the current view to show updated episodes immediately
                                     if self.selectedFeedId == feedId {
-                                        print("📱 Replaced UI episodes with exact snapshot: \(updatedFeedWithEpisodes.episodes.count)")
                                         Task { await self.loadEpisodesForFeed(feedId) }
                                     }
                                 }
@@ -2499,9 +2607,7 @@ class PodcastViewModel: ObservableObject {
             pendingInitializationTasks.remove(taskKey)
             return
         }
-        
-        print("🔍 DEBUG: No episodes found in feed object, loading from episode manager...")
-        
+                
         loadingTask = Task {
             await performEpisodeLoad(feedId: feedId, page: 1, isInitialLoad: isInitialLoad)
         }
@@ -2564,17 +2670,13 @@ class PodcastViewModel: ObservableObject {
                         // Reconcile Core Data with smart parsing (only new episodes)
                         if let feed = await MainActor.run(body: { self.podcastFeeds.first(where: { $0.id == feedId }) }),
                            let url = URL(string: feed.url) {
-                            let newEpisodesFromParsing = try await self.parseNewEpisodesOnly(from: url, feedId: feedId)
-                            if !newEpisodesFromParsing.isEmpty {
-                                print("🆕 Manual refresh found \(newEpisodesFromParsing.count) additional new episodes")
-                                try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodesFromParsing, to: feedId)
-                                
-                                // QUIET SYNC: Sync episode states for new episodes
-                                Task.detached(priority: .background) {
-                                    await self.quietSyncEpisodeStates(for: feedId)
-                                }
-                            } else {
-                                print("✅ Manual refresh - no additional new episodes found")
+                            // MANUAL REFRESH: Reconcile to show exact RSS contents
+                            let allCurrentEpisodes = try await self.parseRSSEpisodesOnly(from: url)
+                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes)
+                            
+                            // QUIET SYNC: Sync episode states for all episodes
+                            Task.detached(priority: .background) {
+                                await self.quietSyncEpisodeStates(for: feedId)
                             }
                         } else {
                             print("❌ Manual refresh reconcile failed: Missing feed URL for \(feedId)")
@@ -2596,14 +2698,10 @@ class PodcastViewModel: ObservableObject {
                 
                 // ENHANCED: Also refresh all episode states from EpisodeStateManager
                 // This ensures pull-to-refresh updates both episodes AND their states
-                print("🔄 PULL-TO-REFRESH: Refreshing all episode states...")
                 await refreshAllEpisodeStates()
-                print("✅ PULL-TO-REFRESH: Episode states refreshed")
                 
                 // REAL-TIME SYNC: Broadcast current playing progress and fetch latest from all devices
-                print("🔄 PULL-TO-REFRESH: Syncing real-time progress across all devices...")
                 await syncRealTimeProgressAcrossDevices()
-                print("✅ PULL-TO-REFRESH: Real-time progress synchronized")
                 
                 await MainActor.run {
                     self.isLoadingEpisodes = false
@@ -2611,7 +2709,6 @@ class PodcastViewModel: ObservableObject {
                     
                     // CRITICAL FIX: Force UI refresh after pull-to-refresh to ensure view updates
                     self.throttledUIUpdate()
-                    print("🔄 PULL-TO-REFRESH: UI refreshed to show updated episodes and states")
                 }
                 
             } catch {
@@ -2633,7 +2730,6 @@ class PodcastViewModel: ObservableObject {
     
     /// Force refresh a specific feed ignoring timing restrictions
     func forceRefreshFeed(_ feedId: String) async {
-        print("🔄 FORCE REFRESH: Refreshing feed \(feedId) regardless of timing")
         
         // Reset the last refresh time to force refresh
         let lastRefreshKey = "LastRSSRefresh_\(feedId)"
@@ -2645,7 +2741,6 @@ class PodcastViewModel: ObservableObject {
     
     /// Request immediate refresh for a feed (user initiated)
     func requestFeedRefresh(_ feedId: String) {
-        print("🔄 USER REFRESH REQUEST: Marking feed \(feedId) for immediate refresh")
         let userRefreshKey = "UserRequestedRefresh_\(feedId)"
         UserDefaults.standard.set(true, forKey: userRefreshKey)
         
@@ -2744,7 +2839,6 @@ class PodcastViewModel: ObservableObject {
             if let explicitProgress = progress {
                 // PROGRESS PROTECTION: Never allow progress to go backwards
                 if explicitProgress < currentProgress {
-                    print("🛡️ CORE DATA PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", explicitProgress)) < \(String(format: "%.4f", currentProgress)) - keeping higher value")
                     finalProgress = currentProgress // Keep the higher progress
                 } else {
                     // CORRUPTION PROTECTION: If episode is currently playing at 0.0 but we're being asked 
@@ -2791,21 +2885,16 @@ class PodcastViewModel: ObservableObject {
             // IMPORTANT: If no explicit progress and not currently playing, DON'T modify stored progress
             
             if let isFavorite = isFavorite {
-                print("📡 UPDATE EPISODE STATE: Setting favorite \(episodeId) to \(isFavorite)")
                 let feedId = await getFeedIdForEpisode(episodeId)
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite, feedId: feedId)
-                print("📡 UPDATE EPISODE STATE: EpisodeStateManager updated successfully")
                 
                 // CONDITIONAL SYNC: Favorite changes trigger immediate CloudKit sync (allowed condition)
                 
                 // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
                 await MainActor.run {
-                    print("📡 UI UPDATE: Triggering updateEpisodeUIState for \(episodeId)")
                     self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
-                    print("📡 UI UPDATE COMPLETED: Episode UI state updated")
                     
                     // 🚗 CARPLAY FIX: Notify CarPlay immediately about favorite state change
-                    print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for episode \(episodeId)")
                     NotificationCenter.default.post(
                         name: NSNotification.Name("EpisodeStateChanged"),
                         object: nil,
@@ -2814,7 +2903,6 @@ class PodcastViewModel: ObservableObject {
                             "isFavorite": isFavorite
                         ]
                     )
-                    print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent successfully")
                 }
             }
             if let isDownloaded = isDownloaded {
@@ -2828,7 +2916,6 @@ class PodcastViewModel: ObservableObject {
                     self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: isDownloaded)
                     
                     // 🚗 CARPLAY FIX: Notify CarPlay immediately about download state change
-                    print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for episode \(episodeId) download state")
                     NotificationCenter.default.post(
                         name: NSNotification.Name("EpisodeStateChanged"),
                         object: nil,
@@ -2837,7 +2924,6 @@ class PodcastViewModel: ObservableObject {
                             "isDownloaded": isDownloaded
                         ]
                     )
-                    print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent for download state")
                 }
             }
             
@@ -2950,13 +3036,11 @@ class PodcastViewModel: ObservableObject {
     /// Delete a podcast feed
     @MainActor
     func deletePodcastFeed(_ feed: PodcastFeed) {
-        print("🗑️ Starting comprehensive deletion of feed: \(feed.title)")
         NotificationManager.shared.notifyUserImmediate(title: "Deletion Started", message: "Deleting podcast '\(feed.title)' and all episodes...")
         
         // Step 1: Get all episode IDs BEFORE any deletion starts to ensure we capture all episodes
         Task {
             let episodeIds = await getEpisodeIdsForFeed(feed.id)
-            print("🗑️ Found \(episodeIds.count) episodes to clean up for feed: \(feed.title)")
             
             // Step 2: Immediate UI update - remove from arrays for instant feedback
             await MainActor.run {
@@ -2979,11 +3063,8 @@ class PodcastViewModel: ObservableObject {
             // This prevents CloudKit from restoring the deleted feed on other devices
             var cloudKitDeletionSucceeded = false
             do {
-                print("☁️ 🚨 CRITICAL STEP: Deleting from CloudKit BEFORE syncing to other devices")
-                print("☁️ Feed to delete: '\(feed.title)' (\(feed.id))")
                 
                 // Debug: List all feeds in CloudKit before deletion
-                print("🔍 DEBUG: Listing all feeds in CloudKit before deletion:")
                 await cloudKitManager.debugListAllFeeds()
                 
                 // Debug: Check if feed exists by exact ID
@@ -2992,18 +3073,10 @@ class PodcastViewModel: ObservableObject {
                 try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
                 cloudKitDeletionSucceeded = true
                 
-                print("☁️ ✅ SUCCESS: Feed deleted from CloudKit: \(feed.title)")
-                print("☁️ ✅ CloudKit deleted all \(episodeIds.count) related episode states")
-                
-                // Debug: Verify deletion worked
-                print("🔍 DEBUG: Verifying deletion in CloudKit:")
                 await cloudKitManager.debugCheckFeedExists(feed.id)
                 
             } catch {
                 cloudKitDeletionSucceeded = false
-                print("☁️ ❌ CRITICAL ERROR: Failed to delete from CloudKit: \(error)")
-                print("☁️ ❌ This may cause the feed to reappear on other devices!")
-                print("☁️ ❌ Error details: \(error.localizedDescription)")
                 if let ckError = error as? CKError {
                     print("☁️ ❌ CloudKit error code: \(ckError.code)")
                 }
@@ -3013,23 +3086,15 @@ class PodcastViewModel: ObservableObject {
             // This ensures other devices won't have CloudKit restore the deleted feed
             if cloudKitDeletionSucceeded {
                 await MainActor.run {
-                    print("📡 🚀 NOW SAFE TO SYNC: CloudKit deletion successful, syncing to other devices")
-                    print("📡 📝 Feed ID: \(feed.id)")
-                    print("📡 📝 Feed Title: \(feed.title)")
-                    print("📡 📝 Episode count: \(episodeIds.count)")
-                    
                     PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
                         feedId: feed.id,
                         feedTitle: feed.title,
                         episodeIds: episodeIds
                     )
                     
-                    print("📡 ✅ SYNC TRIGGERED: Other devices will now delete feed safely")
                 }
             } else {
                 await MainActor.run {
-                    print("📡 ⚠️ SYNC SKIPPED: CloudKit deletion failed, not syncing to prevent inconsistency")
-                    print("📡 ⚠️ Feed may still exist in CloudKit and could reappear")
                     
                     // Show user warning about potential issues
                     NotificationManager.shared.notifyUserImmediate(
@@ -3046,23 +3111,12 @@ class PodcastViewModel: ObservableObject {
                 for episodeId in episodeIds {
                     EpisodeStateManager.shared.clearEpisodeData(episodeId)
                 }
-                print("✅ Cleared \(episodeIds.count) episode states from EpisodeStateManager")
                 
                 // Delete downloaded episode files
                 await deleteDownloadedEpisodeFiles(episodeIds)
                 
                 // Delete from Core Data (episodes and feed) - CloudKit was already handled above
                 try await deleteFeedFromCoreData(feed)
-                print("💾 Deleted feed and \(episodeIds.count) episodes from Core Data: \(feed.title)")
-                
-                print("🎉 Successfully completed comprehensive deletion of: \(feed.title)")
-                print("📊 Final cleanup summary:")
-                print("   - CloudKit: ✅ Deleted FIRST (preventing restoration on other devices)")
-                print("   - Cross-device sync: ✅ Triggered AFTER CloudKit deletion")
-                print("   - EpisodeStateManager: ✅ \(episodeIds.count) episode states cleared")
-                print("   - Downloaded files: ✅ Cleaned up")
-                print("   - Core Data: ✅ Feed and episodes removed")
-                print("🚨 CRITICAL: Proper order prevents feed from reappearing on other devices!")
                 
                 // Notify user of successful deletion
                 await MainActor.run {
@@ -3123,7 +3177,6 @@ class PodcastViewModel: ObservableObject {
                 do {
                     let episodes = try context.fetch(request)
                     let feedId = episodes.first?.feedId
-                    print("🔍 Core Data lookup for episode \(episodeId) found feedId: \(feedId ?? "nil")")
                     continuation.resume(returning: feedId)
                 } catch {
                     print("❌ Failed to get feedId for episode \(episodeId): \(error)")
@@ -3202,8 +3255,6 @@ class PodcastViewModel: ObservableObject {
     }
     
     private func performEpisodeLoad(feedId: String, page: Int, isInitialLoad: Bool = false, isAppending: Bool = false) async {
-        os_log("📥 Loading episodes for feed %@ (page %d)", log: log, type: .info, feedId, page)
-        print("🔍 DEBUG: performEpisodeLoad called for feedId: \(feedId), page: \(page)")
         
         // CRITICAL: Enable CloudKit priority mode for Core Data loading
         // This ensures CloudKit data immediately replaces Core Data progress
@@ -3217,9 +3268,7 @@ class PodcastViewModel: ObservableObject {
                 filter: EpisodeFilter(rawValue: currentTab) ?? .all,
                 searchQuery: searchQuery.isEmpty ? nil : searchQuery
             )
-            
-            print("🔍 DEBUG: EpisodeManager returned \(result.episodes.count) episodes, hasMore: \(result.hasMore)")
-            
+                        
             // Check if this was a prioritized load (first page of large feed)
             let wasPrioritizedLoad = page == 1 && result.episodes.count < episodesPerPage && result.hasMore
             
@@ -3246,10 +3295,6 @@ class PodcastViewModel: ObservableObject {
                 self.hasMoreEpisodes = result.hasMore
                 self.isLoadingEpisodes = false
                 self.operationInProgress = false
-                
-                print("🔍 DEBUG: Updated currentEpisodes to \(self.currentEpisodes.count) episodes")
-                os_log("📊 Loaded %d episodes (page %d), hasMore: %@", 
-                      log: self.log, type: .info, result.episodes.count, page, result.hasMore ? "true" : "false")
                 
                 // Report status to DataSyncManager when loading completes
                 self.reportStatusToDataSyncManager()
