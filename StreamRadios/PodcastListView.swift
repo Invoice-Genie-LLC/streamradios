@@ -12,6 +12,7 @@ import AVKit
 
 struct PodcastListView: View {
     @EnvironmentObject private var viewModel: PodcastViewModel
+    @EnvironmentObject private var alertManager: AlertManager
     @StateObject private var subscriptionManager = SubscriptionManager.shared
     @State private var showingAddPodcast = false
     @State private var showingSearchPodcasts = false
@@ -283,7 +284,12 @@ struct PodcastListView: View {
                .toolbar {
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
                        if !isEditing {
-                           Button(action: { viewModel.sortFeedsAlphabetically() }) {
+                           Button(action: { 
+                               // Show confirmation alert for podcast sorting
+                               alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: { 
+                                   viewModel.sortFeedsAlphabetically()
+                               })
+                           }) {
                                Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
                            }
                            Button(action: { showingSearchPodcasts = true }) {
@@ -412,6 +418,28 @@ struct PodcastListView: View {
                    dismissButton: .default(Text("OK"))
                )
            }
+           .overlay(
+               Group {
+                   if alertManager.showCustomAlert {
+                       Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                       CustomAlertView(
+                           title: alertManager.customAlertTitle,
+                           message: alertManager.customAlertMessage,
+                           buttonText: alertManager.customAlertPrimaryButtonText,
+                           buttonAction: {
+                               alertManager.dismissAlert()
+                               alertManager.customAlertPrimaryAction?()
+                           },
+                           secondaryButtonText: alertManager.customAlertSecondaryButtonText,
+                           secondaryButtonAction: {
+                               alertManager.dismissAlert()
+                               alertManager.customAlertSecondaryAction?()
+                           }
+                       )
+                       .transition(.opacity)
+                   }
+               }
+           )
        }
     
     private var instructionText: some View {
@@ -938,9 +966,19 @@ struct PodcastListView: View {
     
     // PERFORMANCE: Get filtered feed order without expensive nested lookups
     private func getFilteredFeedOrder() -> [String] {
-        // Use cached result if nothing changed
-        if searchText == lastSearchText && viewModel.podcastFeeds.count == lastPodcastFeedsCount {
-            return filteredFeedOrderCache
+        // SORTING FIX: Invalidate cache when podcastFeedOrder changes to ensure sorting updates are visible
+        if searchText == lastSearchText && 
+           viewModel.podcastFeeds.count == lastPodcastFeedsCount &&
+           filteredFeedOrderCache.count == viewModel.podcastFeedOrder.count {
+            
+            // Additional check: verify the order hasn't changed by checking first few items
+            let currentOrder = viewModel.podcastFeedOrder.prefix(min(3, viewModel.podcastFeedOrder.count))
+            let cachedOrder = filteredFeedOrderCache.prefix(min(3, filteredFeedOrderCache.count))
+            
+            // Use cached result only if order is exactly the same
+            if Array(currentOrder) == Array(cachedOrder) {
+                return filteredFeedOrderCache
+            }
         }
         
         let filteredIds = Set(filteredPodcasts.map { $0.id })
@@ -949,6 +987,8 @@ struct PodcastListView: View {
         // Cache the result
         DispatchQueue.main.async {
             self.filteredFeedOrderCache = result
+            self.lastSearchText = self.searchText
+            self.lastPodcastFeedsCount = self.viewModel.podcastFeeds.count
         }
         
         return result

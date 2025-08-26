@@ -33,7 +33,7 @@ class AlertManager: ObservableObject {
                 self?.dismissAlert()
             }
             customAlertSecondaryAction = nil
-        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear, .confirmFavoritesSortChange:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear, .confirmFavoritesSortChange, .confirmPodcastSortChange:
             customAlertPrimaryAction = deleteAction
             customAlertSecondaryAction = { [weak self] in
                 self?.dismissAlert()
@@ -70,6 +70,7 @@ enum AlertType: Identifiable {
     case deletePodcastData
     case confirmImportWithDataClear
     case confirmFavoritesSortChange
+    case confirmPodcastSortChange
     
     var id: Int {
         switch self {
@@ -85,6 +86,7 @@ enum AlertType: Identifiable {
         case .deletePodcastData: return 9
         case .confirmImportWithDataClear: return 10
         case .confirmFavoritesSortChange: return 11
+        case .confirmPodcastSortChange: return 12
         }
     }
     
@@ -109,6 +111,8 @@ enum AlertType: Identifiable {
         case .confirmImportWithDataClear:
             return "Import Station Playlist"
         case .confirmFavoritesSortChange:
+            return "Change Sorting?"
+        case .confirmPodcastSortChange:
             return "Change Sorting?"
         }
     }
@@ -139,6 +143,8 @@ enum AlertType: Identifiable {
             return "Are you sure you want to import stations from this file? New stations will be added to your existing collection. Duplicate URLs will be skipped."
         case .confirmFavoritesSortChange:
             return "Sorting Favorites alphabetically will replace your custom order. This change will be saved to iCloud and affect your other devices."
+        case .confirmPodcastSortChange:
+            return "Sorting podcasts alphabetically will replace your custom order. This change will be saved to iCloud and affect your other devices."
         }
     }
     
@@ -152,12 +158,14 @@ enum AlertType: Identifiable {
             return "Import"
         case .confirmFavoritesSortChange:
             return "Sort Now"
+        case .confirmPodcastSortChange:
+            return "Sort Now"
         }
     }
     
     var secondaryButtonText: String? {
         switch self {
-        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear, .confirmFavoritesSortChange:
+        case .deleteAllData, .deleteStation, .clearAllPodcasts, .deleteAllAppData, .deleteStationData, .deletePodcastData, .confirmImportWithDataClear, .confirmFavoritesSortChange, .confirmPodcastSortChange:
             return "Cancel"
         default:
             return nil

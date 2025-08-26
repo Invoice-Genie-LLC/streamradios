@@ -237,6 +237,9 @@ class PodcastViewModel: ObservableObject {
         // Load last played episodes from UserDefaults
         loadLastPlayedEpisodes()
         
+        // Load sorting preferences from UserDefaults
+        loadSortingPreferences()
+        
         // Setup instant sync listener for real-time cross-device updates
         setupInstantSyncListener()
         
@@ -5869,6 +5872,27 @@ extension PodcastViewModel {
         
         // Update feed order to match sorted feeds
         podcastFeedOrder = podcastFeeds.map { $0.id }
+        
+        // SORTING FIX: Save the sorted order to Core Data to persist the changes
+        saveFeedsToCoreData()
+        
+        // Save sort direction to UserDefaults
+        UserDefaults.standard.set(isAscendingSort, forKey: "PodcastIsAscendingSort")
+        
+        // CRITICAL: Trigger UI refresh to show the sorted order immediately
+        objectWillChange.send()
+        print("🎯 SORTING: Applied \(isAscendingSort ? "A-Z" : "Z-A") sort and triggered UI refresh")
+    }
+    
+    /// Load sorting preferences from UserDefaults
+    private func loadSortingPreferences() {
+        if UserDefaults.standard.object(forKey: "PodcastIsAscendingSort") != nil {
+            isAscendingSort = UserDefaults.standard.bool(forKey: "PodcastIsAscendingSort")
+        } else {
+            isAscendingSort = true // Default to ascending (A-Z)
+            UserDefaults.standard.set(isAscendingSort, forKey: "PodcastIsAscendingSort")
+        }
+        print("🎯 SORTING: Loaded podcast sort direction: \(isAscendingSort ? "A-Z" : "Z-A")")
     }
     
     /// Sanitize filename by removing invalid characters
