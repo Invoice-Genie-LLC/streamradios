@@ -304,6 +304,7 @@ struct SimpleTextField: View {
                     .keyboardType(keyboardType)
                     .autocapitalization(.none)
                     .disableAutocorrection(keyboardType == .URL)
+                    .textSelection(.enabled) // Enable text selection for copy/paste
                     .onChange(of: text) { newValue in
                         if let maxLength = maxLength, newValue.count > maxLength {
                             text = String(newValue.prefix(maxLength))

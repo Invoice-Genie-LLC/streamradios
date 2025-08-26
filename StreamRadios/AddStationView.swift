@@ -84,13 +84,13 @@ struct AddStationView: View {
                     }
                     // Use a slightly different background for sheets to avoid
                     // blending with the underlying list on iPad
-                    .background(Color.adaptiveSheetBackground.ignoresSafeArea())
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        TapGesture().onEnded { _ in
-                            // Dismiss keyboard when tapping outside input fields
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        }
+                    .background(
+                        Color.adaptiveSheetBackground
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                // Dismiss keyboard when tapping on background areas only
+                                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            }
                     )
                 }
             }
@@ -398,6 +398,7 @@ struct AddSimpleTextField: View {
                         .keyboardType(keyboardType)
                         .autocapitalization(.none)
                         .disableAutocorrection(keyboardType == .URL)
+                        .textSelection(.enabled) // Enable text selection for copy/paste
                         .onChange(of: text) { oldValue, newValue in
                             if let maxLength = maxLength, newValue.count > maxLength {
                                 text = String(newValue.prefix(maxLength))
