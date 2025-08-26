@@ -2631,6 +2631,12 @@ struct InternalDataManagementView: View {
                 // IMMEDIATE UI REFRESH: Clear in-memory data and force UI update
                 self.viewModel.stations.removeAll()
                 
+                // RESET COUNTRY: When no stations exist, reset to "Select Country"
+                if self.viewModel.stations.isEmpty {
+                    print("🌍 RESET: No stations remaining after bulk deletion, resetting country to 'Select Country'")
+                    self.viewModel.selectedCountry = "Select Country"
+                }
+                
                 print("✅ DATA MANAGEMENT: Local station data cleared and UI immediately refreshed")
             }
             DispatchQueue.main.async {

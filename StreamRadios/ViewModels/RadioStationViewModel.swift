@@ -1324,6 +1324,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         self.stations.removeAll()
                         // Clear deleted stations list since all data is being removed
                         self.clearDeletedStationsList()
+                        
+                        // RESET COUNTRY: When no stations exist, reset to "Select Country"
+                        if self.stations.isEmpty {
+                            print("🌍 RESET: No stations remaining, resetting country to 'Select Country'")
+                            self.selectedCountry = "Select Country"
+                        }
+                        
                         self.isDeletingData = false
                         self.deletionComplete = true
                         print("✅ Radio station Core Data cleared successfully using batch deletion")
@@ -1687,6 +1694,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let remainingStations = try context.fetch(CDStation.fetchRequest())
             if remainingStations.isEmpty {
                 deleteLocalFile()
+                
+                // RESET COUNTRY: When no stations exist, reset to "Select Country"
+                print("🌍 RESET: No stations remaining after individual deletion, resetting country to 'Select Country'")
+                self.selectedCountry = "Select Country"
             }
             
             // ENHANCED CLOUDKIT SYNC: Delete from CloudKit and sync across all devices
