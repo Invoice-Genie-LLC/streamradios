@@ -46,6 +46,9 @@ struct RadioStationListView: View {
     // State tracking for logging optimization
     @State private var lastScrollSkipLog: Date?
     
+    // Country picker sheet state
+    @State private var showingCountryPicker = false
+    
     var body: some View {
         GeometryReader { geometry in
             if viewModel.isLoading {
@@ -58,7 +61,7 @@ struct RadioStationListView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.adaptiveBackground)
-            } else if viewModel.stations.isEmpty {
+            } else if filteredStations.isEmpty {
                 emptyStateView
             } else {
                 stationsListView(screenWidth: geometry.size.width)
@@ -200,25 +203,75 @@ struct RadioStationListView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingCountryPicker) {
+            CountryPicker(
+                selectedCountry: $viewModel.selectedCountry,
+                countries: viewModel.countries,
+                stationCount: { country in
+                    viewModel.stations.filter { $0.country == country }.count
+                },
+                onSelect: { country in
+                    // Trigger refresh when country is selected
+                    Task {
+                        UIDevice.playHapticFeedback()
+                        await viewModel.fetchStationsForSelectedCountry()
+                        await MainActor.run {
+                            viewModel.syncStationsWithCloudKit()
+                        }
+                    }
+                }
+            )
+        }
     }
     
     private var emptyStateView: some View {
         VStack {
-            Text("No stations configured")
-                .font(.headline)
-                .foregroundColor(.adaptivePrimaryText)
-                .padding(.bottom, 15)
-            Button(action: {
-                if viewModel.selectedCountry == "Select Country" {
-                    alertManager.showCustomAlert(for: .selectCountryBeforeAddingStation)
-                } else {
-                    self.selectedStationForEdit = nil
-                    self.activeSheet = .addStation
-                }}) {
-                    Image(systemName: "plus")
-                        .font(.title2)
-                        .foregroundColor(.blue)
+            // RECENT, FAVORITES & ALL TAB FIX: Don't show anything when stations exist but tabs are empty
+            if selectedSubTab == .recent || 
+               (selectedSubTab == .favorites && !viewModel.stations.isEmpty) ||
+               (selectedSubTab == .all && !viewModel.stations.isEmpty && viewModel.selectedCountry != "Select Country") {
+                // Show nothing for Recent tab when empty, Favorites tab when stations exist but no favorites,
+                // or All tab when stations exist but no stations for selected country
+                Color.clear
+            } else if viewModel.stations.isEmpty {
+                // No stations exist at all - show country selection button
+                Text("No stations configured")
+                    .font(.headline)
+                    .foregroundColor(.adaptivePrimaryText)
+                    .padding(.bottom, 15)
+                Button(action: {
+                    showingCountryPicker = true
+                }) {
+                    HStack {
+                        Image(systemName: "globe")
+                        Text("Select Country")
+                    }
+                    .font(.body)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.blue)
+                    .cornerRadius(8)
                 }
+            } else if viewModel.selectedCountry == "Select Country" {
+                // Stations exist but no country selected - show selection prompt
+                VStack(spacing: 12) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 40))
+                        .foregroundColor(.blue)
+                    Text("Select a Country")
+                        .font(.headline)
+                        .foregroundColor(.adaptivePrimaryText)
+                    Text("Choose a country from the settings to view available radio stations")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 40)
+            } else {
+                // Fallback case (should not normally be reached with new logic)
+                Color.clear
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.adaptiveBackground)
@@ -827,21 +880,31 @@ struct RadioStationListView: View {
         switch selectedSubTab {
         case .all:
             // All tab shows stations from the selected country only, sorted alphabetically
-            stations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
-            // Sort alphabetically by name based on toggle setting
-            if viewModel.isAscendingSort {
-                stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            // FRESH INSTALL FIX: Don't show any stations if no country is selected
+            if viewModel.selectedCountry == "Select Country" {
+                stations = []
             } else {
-                stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                stations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
+                // Sort alphabetically by name based on toggle setting
+                if viewModel.isAscendingSort {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                } else {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                }
             }
         case .recent:
             // Recent tab shows recent stations from ALL countries
-            stations = viewModel.recentStations()
-            // Allow alphabetical sorting toggle for Recent tab as well
-            if viewModel.isAscendingSort {
-                stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            // FRESH INSTALL FIX: Don't show any stations if no country is selected
+            if viewModel.selectedCountry == "Select Country" {
+                stations = []
             } else {
-                stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                stations = viewModel.recentStations()
+                // Allow alphabetical sorting toggle for Recent tab as well
+                if viewModel.isAscendingSort {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                } else {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                }
             }
         case .favorites:
             // Favorites must always respect CloudKit-synced favoriteOrder.
