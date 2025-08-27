@@ -602,8 +602,8 @@ struct ContentView: View {
             .background(Color.adaptiveSectionBackground)
             .cornerRadius(10)
             
-            // Sorting arrow - enabled for all radio sub-tabs when not editing
-            if selectedTab == .radio && !isEditingMode {
+            // Sorting arrow - enabled for All and Favorites tabs only (not Recent)
+            if selectedTab == .radio && !isEditingMode && viewModel.selectedSubTab != .recent {
                 Button(action: {
                     // If on Favorites, warn that custom order will be replaced
                     if viewModel.selectedSubTab == .favorites {

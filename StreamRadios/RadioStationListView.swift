@@ -867,11 +867,17 @@ struct RadioStationListView: View {
                 station.name.localizedCaseInsensitiveContains(searchText) ||
                 station.country.localizedCaseInsensitiveContains(searchText)
             }
-            // Preserve existing sort toggle behavior when searching
-            if viewModel.isAscendingSort {
-                return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            // Recent tab maintains chronological order even when searching
+            if selectedSubTab == .recent {
+                // Return search results sorted by lastPlayed (most recent first)
+                return filtered.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
             } else {
-                return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                // Preserve existing sort toggle behavior for All and Favorites tabs
+                if viewModel.isAscendingSort {
+                    return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                } else {
+                    return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                }
             }
         }
         
@@ -893,19 +899,9 @@ struct RadioStationListView: View {
                 }
             }
         case .recent:
-            // Recent tab shows recent stations from ALL countries
-            // FRESH INSTALL FIX: Don't show any stations if no country is selected
-            if viewModel.selectedCountry == "Select Country" {
-                stations = []
-            } else {
-                stations = viewModel.recentStations()
-                // Allow alphabetical sorting toggle for Recent tab as well
-                if viewModel.isAscendingSort {
-                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                } else {
-                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
-                }
-            }
+            // Recent tab shows recent stations from ALL countries regardless of country selection
+            // Always ordered chronologically (most recent first) - no alphabetical sorting
+            stations = viewModel.recentStations()
         case .favorites:
             // Favorites must always respect CloudKit-synced favoriteOrder.
             // Do NOT apply alphabetical sorting here, otherwise it overrides the persisted order.

@@ -1391,8 +1391,33 @@ class PodcastViewModel: ObservableObject {
             // Check for cancellation before UI update
             try Task.checkCancellation()
             
-            // Trigger quiet UI refresh on main thread
+            // CRITICAL FIX: Update currentEpisodes immediately if this is the selected feed
             await MainActor.run {
+                // If this is the currently selected feed, reload episodes from Core Data immediately
+                if self.selectedFeedId == feedId {
+                    print("🔄 IMMEDIATE CHECK: Refreshing episodes for currently selected feed")
+                    Task {
+                        do {
+                            let result = try await self.episodeManager.loadEpisodes(
+                                feedId: feedId,
+                                page: 1,
+                                pageSize: self.episodesPerPage,
+                                filter: EpisodeFilter(rawValue: self.currentTab) ?? .all,
+                                searchQuery: self.searchQuery.isEmpty ? nil : self.searchQuery
+                            )
+                            
+                            // Process and update episodes on main thread
+                            let processedEpisodes = await self.processEpisodesInBackground(result.episodes)
+                            await MainActor.run {
+                                self.currentEpisodes = processedEpisodes
+                                print("🔄 IMMEDIATE CHECK: Updated currentEpisodes with \(processedEpisodes.count) episodes")
+                            }
+                        } catch {
+                            print("❌ IMMEDIATE CHECK: Failed to reload episodes: \(error)")
+                        }
+                    }
+                }
+                
                 self.objectWillChange.send()
             }
             
