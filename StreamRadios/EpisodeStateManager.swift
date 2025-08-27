@@ -1404,8 +1404,14 @@ class EpisodeStateManager: ObservableObject {
         let shouldUpdateProgress: Bool
         
         if progress > 0 {
-            // PROGRESS PROTECTION: Only update if progress moves forward
-            if progress >= existingProgress {
+            // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
+            let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
+            
+            // PROGRESS PROTECTION: Only update if progress moves forward, unless in chapter protection
+            if progress >= existingProgress || isChapterProtected {
+                if isChapterProtected && progress < existingProgress {
+                    print("🎯 UPDATE CHAPTER PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - chapter seek override")
+                }
                 shouldUpdateProgress = true
                 episodeProgress[episodeId] = progress
             } else {
@@ -1475,15 +1481,21 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func setProgress(for episodeId: String, progress: Double) {
-        // PROGRESS PROTECTION: Never allow progress to go backwards
+        // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
+        let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
+        
+        // PROGRESS PROTECTION: Never allow progress to go backwards, unless in chapter protection
         let existingProgress = episodeProgress[episodeId] ?? 0.0
         let finalProgress: Double
         
-        if progress < existingProgress {
+        if progress < existingProgress && !isChapterProtected {
             print("🛡️ PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
             finalProgress = existingProgress // Keep the higher progress
         } else {
-            finalProgress = progress // Allow forward progress or same value
+            if isChapterProtected && progress < existingProgress {
+                print("🎯 CHAPTER PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - chapter seek override")
+            }
+            finalProgress = progress // Allow forward progress, same value, or chapter backward progress
         }
         
         episodeProgress[episodeId] = finalProgress
@@ -2078,15 +2090,21 @@ extension EpisodeStateManager {
     
     /// Set progress silently without triggering CloudKit sync (for incoming CloudKit updates)
     func setProgressSilently(for episodeId: String, progress: Double) {
-        // PROGRESS PROTECTION: Never allow progress to go backwards, even from CloudKit
+        // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
+        let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
+        
+        // PROGRESS PROTECTION: Never allow progress to go backwards, even from CloudKit, unless in chapter protection
         let existingProgress = episodeProgress[episodeId] ?? 0.0
         let finalProgress: Double
         
-        if progress < existingProgress {
+        if progress < existingProgress && !isChapterProtected {
             print("🛡️ CLOUDKIT PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
             finalProgress = existingProgress // Keep the higher progress
         } else {
-            finalProgress = progress // Allow forward progress or same value
+            if isChapterProtected && progress < existingProgress {
+                print("🎯 CLOUDKIT CHAPTER PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - chapter seek override")
+            }
+            finalProgress = progress // Allow forward progress, same value, or chapter backward progress
         }
         
         episodeProgress[episodeId] = finalProgress

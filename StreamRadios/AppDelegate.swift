@@ -116,8 +116,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 // Update progress locally
                 podcastViewModel.updateProgress(for: currentEpisode, progress: currentProgress)
                 
-                // Save to CloudKit when app goes to background
-                let progress = podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0
+                // CRITICAL FIX: Use currentProgress instead of recalculating to preserve chapter seek progress
+                let progress = currentProgress > 0 ? currentProgress : (podcastPlayer.duration > 0 ? podcastPlayer.currentTime / podcastPlayer.duration : 0)
                 Task.detached(priority: .userInitiated) {
                     await self.podcastViewModel.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: progress >= 0.99)
                 }
