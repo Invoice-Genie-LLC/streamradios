@@ -248,6 +248,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if progressDifference > significantDifferenceThreshold {
             let newTime = newProgress * duration
             
+            // CRITICAL FIX: Check if we're in chapter protection period before allowing CloudKit sync
+            let isChapterProtected = isInChapterProtectionPeriod()
+            
+            if isChapterProtected {
+                os_log("🛡️ CLOUDKIT SYNC BLOCKED: Skipping cross-device sync during chapter protection (%.2f%% -> %.2f%% blocked)", 
+                       log: log, type: .info, currentPlayerProgress * 100, newProgress * 100)
+                return // Block CloudKit sync during chapter seeks
+            }
+            
             os_log("🔄 Cross-device sync: Updating playback position from %.2f%% to %.2f%% (%.1f seconds)", 
                    log: log, type: .info, currentPlayerProgress * 100, newProgress * 100, newTime)
             
@@ -1690,7 +1699,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL: Mark when we did a chapter seek to protect from time observer override
         lastChapterSeekTime = Date()
         
-        os_log("🎯 CHAPTER SEEK: Starting seek to %.1fs (%.2f%%) in episode: %@ - protected for %.1fs", 
+        os_log("🎯 SEEK PROTECTION: Starting seek to %.1fs (%.2f%%) in episode: %@ - protected for %.1fs", 
                log: log, type: .info, time, newProgress * 100, currentEpisode.title, chapterSeekProtectionInterval)
         
         // Save progress immediately BEFORE seeking to prevent race conditions with background operations
@@ -1714,10 +1723,25 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             guard let self = self, completed else { return }
             
             DispatchQueue.main.async {
+                // CRITICAL FIX: Reconfirm the seek position after completion to prevent reversion
+                // The time observer might have slightly different values due to seek tolerances
+                self.currentTime = time
+                self.currentProgress = newProgress
+                
+                // CRITICAL FIX: Re-save progress after seek completion to prevent reversion
+                // This ensures the backwards seek position is permanently saved
+                self.saveProgressToCoreDataSync(episodeId: currentEpisode.id, progress: newProgress)
+                self.stateManager.updateProgress(
+                    for: currentEpisode.id, 
+                    progress: newProgress, 
+                    isPlaying: self.isPlaying, 
+                    currentTime: time
+                )
+                
                 // Update Now Playing info after successful seek
                 self.updateNowPlayingInfo()
                 
-                os_log("✅ CHAPTER SEEK: Successfully completed seek to %.1fs (%.2f%%) in episode: %@", 
+                os_log("✅ CHAPTER SEEK: Successfully completed seek to %.1fs (%.2f%%) in episode: %@ - position reconfirmed", 
                        log: self.log, type: .info, time, newProgress * 100, currentEpisode.title)
             }
         }
@@ -1925,6 +1949,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     // If this episode is currently playing, update the player progress
                     await MainActor.run {
                         if self.currentEpisode?.id == episodeId {
+                            // CRITICAL FIX: Check chapter protection before updating playing episode
+                            let isChapterProtected = self.isInChapterProtectionPeriod()
+                            
+                            if isChapterProtected {
+                                os_log("🛡️ CLOUDKIT BACKGROUND SYNC BLOCKED: Skipping progress update during chapter protection (%.2f%% blocked)", 
+                                       log: self.log, type: .info, cloudProgress * 100)
+                                return // Block CloudKit background sync during chapter seeks
+                            }
+                            
                             self.currentProgress = cloudProgress
                             
                             // Seek to the new position if we haven't restored position yet
@@ -2030,22 +2063,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func skipForward() {
         seek(by: 15)
-        if let currentEpisode = currentEpisode {
-            saveProgressIfNeeded()
-            // Update StateManager when user manually seeks
-            let actualCurrentTime = player?.currentTime().seconds ?? currentTime
-            stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: isPlaying, currentTime: actualCurrentTime)
-        }
+        // REMOVED: Redundant progress saving - seek(to:) already handles all progress saving with chapter protection
+        os_log("⏭️ SEEK FORWARD: 15s forward seek completed with chapter protection", log: log, type: .info)
     }
     
     func skipBackward() {
         seek(by: -15)
-        if let currentEpisode = currentEpisode {
-            saveProgressIfNeeded()
-            // Update StateManager when user manually seeks
-            let actualCurrentTime = player?.currentTime().seconds ?? currentTime
-            stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: isPlaying, currentTime: actualCurrentTime)
-        }
+        // REMOVED: Redundant progress saving - seek(to:) already handles all progress saving with chapter protection
+        os_log("⏪ SEEK BACKWARD: 15s backward seek completed with chapter protection", log: log, type: .info)
     }
     
     private func seek(by seconds: Double) {
@@ -2163,7 +2188,18 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 // Only update the time values - no heavy operations
                 await MainActor.run {
-                    self.currentTime = max(0, player.currentTime().seconds)
+                    // CRITICAL FIX: Check chapter protection before updating ANY time values
+                    let now = Date()
+                    let isProtectedFromChapterSeek = self.lastChapterSeekTime != nil && 
+                        now.timeIntervalSince(self.lastChapterSeekTime!) < self.chapterSeekProtectionInterval
+                    
+                    // Only update currentTime if we're not in chapter protection period
+                    if !isProtectedFromChapterSeek {
+                        self.currentTime = max(0, player.currentTime().seconds)
+                    } else {
+                        os_log("🛡️ TIME PROTECTION: Skipping currentTime update during chapter protection (%.1fs remaining)", 
+                               log: self.log, type: .debug, self.chapterSeekProtectionInterval - now.timeIntervalSince(self.lastChapterSeekTime!))
+                    }
                     
                     if let currentItem = player.currentItem {
                         let newDuration = currentItem.duration.seconds
@@ -2172,15 +2208,18 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         }
                     }
                     
-                    // CRITICAL FIX: Only update currentProgress if we haven't recently done a chapter seek
-                    // This prevents the time observer from overriding chapter-jumped progress
-                    let now = Date()
-                    let isProtectedFromChapterSeek = self.lastChapterSeekTime != nil && 
-                        now.timeIntervalSince(self.lastChapterSeekTime!) < self.chapterSeekProtectionInterval
-                    
                     if !isProtectedFromChapterSeek {
-                        // Normal progress calculation when not protected
-                        self.currentProgress = self.duration > 0 ? min(self.currentTime / self.duration, 1) : 0
+                        // CRITICAL FIX: Only recalculate progress if the time difference is significant
+                        // This prevents minor time observer fluctuations from overriding precise seek positions
+                        let calculatedProgress = self.duration > 0 ? min(self.currentTime / self.duration, 1) : 0
+                        let progressDifference = abs(calculatedProgress - self.currentProgress)
+                        
+                        // Only update if the difference is significant (more than 1 second of content)
+                        let significantThreshold = self.duration > 0 ? (1.0 / self.duration) : 0.01
+                        
+                        if progressDifference > significantThreshold {
+                            self.currentProgress = calculatedProgress
+                        }
                     } else {
                         // Protected mode: Keep the chapter-seek progress, just log that we're protecting it
                         os_log("🛡️ TIME OBSERVER: Protected chapter seek progress %.2f%% from override (%.1fs remaining)", 
@@ -2429,10 +2468,13 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func handleAppWillTerminate() {
         if let currentEpisode = currentEpisode {
-            // CRITICAL FIX: Prioritize currentProgress to preserve chapter seek progress
-            // Only use player time if currentProgress is invalid (0 or negative)
-            let actualCurrentTime = player?.currentTime().seconds ?? currentTime
+            // CRITICAL FIX: Prioritize currentTime over player time to prevent 3-4 second loss during force close
+            // The time observer (currentTime) is more accurate than AVPlayer's currentTime() during force close
+            let actualCurrentTime = currentTime // Use time observer value instead of player?.currentTime().seconds
             let calculatedProgress = duration > 0 ? actualCurrentTime / duration : 0
+            
+            os_log("🛑 FORCE CLOSE: Using currentTime=%.1fs instead of AVPlayer time to prevent progress loss", 
+                   log: log, type: .info, currentTime)
             
             // CRITICAL: Preserve maximum progress to prevent reset during force close
             // Get existing progress from StateManager and use the maximum value
@@ -2443,7 +2485,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let isProtectedFromChapterSeek = lastChapterSeekTime != nil && 
                 now.timeIntervalSince(lastChapterSeekTime!) < chapterSeekProtectionInterval
             
+            // CRITICAL FIX: Always prioritize currentProgress over calculated progress during force close
+            // currentProgress is updated by time observer and is more reliable than AVPlayer time
             let preferredProgress = currentProgress > 0 ? currentProgress : calculatedProgress
+            
+            os_log("🛑 FORCE CLOSE PROGRESS: currentProgress=%.2f%%, calculatedProgress=%.2f%%, using preferredProgress=%.2f%%", 
+                   log: log, type: .info, currentProgress * 100, calculatedProgress * 100, preferredProgress * 100)
             
             let maxProgress: Double
             if isProtectedFromChapterSeek {
