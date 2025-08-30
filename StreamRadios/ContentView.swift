@@ -547,6 +547,24 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToAlarmStation"))) { notification in
                 handleAlarmStationNavigation(notification)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .navigateToPodcastFeed)) { notification in
+                // Handle lock screen podcast feed navigation
+                if let userInfo = notification.userInfo,
+                   let feedId = userInfo["feedId"] as? String,
+                   let episodeId = userInfo["episodeId"] as? String {
+                    DispatchQueue.main.async {
+                        // Switch to podcast tab
+                        selectedTab = .podcast
+                        
+                        // Find and select the feed
+                        if let feed = podcastViewModel.podcastFeeds.first(where: { $0.id == feedId }) {
+                            selectedPodcast = feed
+                            scrollToEpisodeID = episodeId
+                            print("🧭 Main App: Navigating to podcast feed from lock screen: \(feed.title)")
+                        }
+                    }
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .switchToAllTab)) { _ in
                 handleSwitchToAllStations()
             }
@@ -1092,6 +1110,7 @@ struct UnifiedPodcastPlayerView: View {
                                     .background(Color.clear)
                             }
                             .allowsHitTesting(false) // Completely disable ALL touch interaction
+
                         }
                         
                         // Skip forward 30s - responsive size

@@ -3169,6 +3169,7 @@ extension Notification.Name {
     static let countrySelected = Notification.Name("countrySelected")
     static let stationsUpdated = Notification.Name("stationsUpdated")
     static let countryChanged = Notification.Name("countryChanged")
+    static let navigateToPodcastFeed = Notification.Name("navigateToPodcastFeed")
 }
 
 // Conform to UIDocumentPickerDelegate to handle document picker events

@@ -625,6 +625,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         commandCenter.skipBackwardCommand.removeTarget(nil)
         commandCenter.togglePlayPauseCommand.removeTarget(nil)
         
+        // Clear navigation command targets for episode list navigation
+        commandCenter.bookmarkCommand.removeTarget(nil)
+        if #available(iOS 16.0, *) {
+            commandCenter.likeCommand.removeTarget(nil)
+        }
+        
         commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [weak self] _ in
             if PlaybackManager.shared.activePlayer == .podcast {
@@ -694,6 +700,18 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return .commandFailed
         }
         
+        // Enable navigation to episode list via bookmark button in lock screen
+        commandCenter.bookmarkCommand.isEnabled = true
+        commandCenter.bookmarkCommand.localizedTitle = "Episodes"
+        commandCenter.bookmarkCommand.addTarget { [weak self] _ in
+            if PlaybackManager.shared.activePlayer == .podcast {
+                self?.navigateToFeedEpisodeList()
+                os_log("Remote Command: Navigate to episode list via bookmark button", log: self?.log ?? OSLog.default, type: .info)
+                return .success
+            }
+            return .commandFailed
+        }
+        
         // Disable commands that don't make sense for podcasts
         commandCenter.stopCommand.isEnabled = false
         commandCenter.seekForwardCommand.isEnabled = false
@@ -701,6 +719,36 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         commandCenter.changePlaybackRateCommand.isEnabled = false
         
         os_log("✅ Remote Command Center configured for Podcast - Skip Forward/Backward enabled, Station navigation disabled", log: log, type: .info)
+    }
+    
+    // MARK: - Navigation Handler
+    
+    /// Navigates to the podcast episode list for the currently playing feed
+    /// This is triggered when the user taps on the feed description in the lock screen
+    private func navigateToFeedEpisodeList() {
+        guard let currentEpisode = currentEpisode,
+              let currentFeed = currentFeed else {
+            os_log("Cannot navigate: no current episode or feed", log: log, type: .error)
+            return
+        }
+        
+        os_log("🧭 Navigating to feed episode list from lock screen: %@", log: log, type: .info, currentFeed.title)
+        
+        // Handle navigation on the main thread
+        DispatchQueue.main.async { [weak self] in
+            // Save current progress before navigating
+            self?.handleNavigationAway()
+            
+            // Post notification to navigate to podcast tab and select the current feed
+            NotificationCenter.default.post(
+                name: .navigateToPodcastFeed, 
+                object: nil, 
+                userInfo: [
+                    "feedId": currentFeed.id,
+                    "episodeId": currentEpisode.id
+                ]
+            )
+        }
     }
     
         private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
@@ -2412,8 +2460,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         var nowPlayingInfo = [String: Any]()
         nowPlayingInfo[MPMediaItemPropertyTitle] = currentEpisode.title
         nowPlayingInfo[MPMediaItemPropertyArtist] = currentFeed.title
-        // FIXED: Remove duplicate feed title from album field to avoid double display in CarPlay
-        // nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
+        // Use feed description as album title for lock screen navigation
+        // This enables users to tap on the description to navigate to the episode list
+        if let feedDescription = currentFeed.descriptionText, !feedDescription.isEmpty {
+            // Truncate description if too long for display
+            let truncatedDescription = feedDescription.count > 100 ? 
+                String(feedDescription.prefix(97)) + "..." : feedDescription
+            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = truncatedDescription
+        } else {
+            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = currentFeed.title
+        }
         
         // CRITICAL: Ensure elapsed time is correctly set for CarPlay progress bar
         let elapsedTime = max(0, currentTime)
@@ -2658,7 +2714,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         var nowPlayingInfo = [String: Any]()
         nowPlayingInfo[MPMediaItemPropertyTitle] = episode.title
         nowPlayingInfo[MPMediaItemPropertyArtist] = feed.title
-        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = feed.title
+        // Use feed description as album title for lock screen navigation
+        if let feedDescription = feed.descriptionText, !feedDescription.isEmpty {
+            let truncatedDescription = feedDescription.count > 100 ? 
+                String(feedDescription.prefix(97)) + "..." : feedDescription
+            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = truncatedDescription
+        } else {
+            nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = feed.title
+        }
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
         nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
