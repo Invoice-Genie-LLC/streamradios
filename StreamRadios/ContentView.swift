@@ -984,6 +984,11 @@ struct UnifiedPodcastPlayerView: View {
     // Navigation action to currently playing episode
     private func navigateToCurrentEpisode() {
         print("Navigating to currently playing episode: \(currentEpisode.title)")
+        
+        // CRITICAL FIX: Save current progress before navigating to episode list
+        // This ensures the episode list shows the live progress, not stale saved progress
+        podcastPlayer.handleNavigationAway()
+        
         selectedPodcast = currentFeed
         // Request immediate refresh to show latest episodes while displaying cached ones
         viewModel.requestFeedRefresh(currentFeed.id)
