@@ -1041,40 +1041,57 @@ struct UnifiedPodcastPlayerView: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         
-                        // Main play/pause button with timer below - centered
-                        VStack(spacing: 4) {
-                            Button(action: podcastPlayer.togglePlayPause) {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.blue)
-                                        .frame(width: playButtonSize, height: playButtonSize)
-                                    
-                                    if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
-                                        // Show loading spinner when episode is loading
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                            .scaleEffect(0.8)
-                                    } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
-                                        // Show spinning indicator when reconnecting or buffering
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                            .scaleEffect(0.8)
-                                    } else {
-                                        Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                            .font(.system(size: playIconSize))
-                                            .foregroundColor(.white)
+                        // CRITICAL FIX: Completely isolate play button from timer - use ZStack for independent positioning
+                        ZStack {
+                            // Play button only - completely isolated
+                            VStack(spacing: 4) {
+                                Button(action: {
+                                    podcastPlayer.togglePlayPause()
+                                }) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.blue)
+                                            .frame(width: playButtonSize, height: playButtonSize)
+                                        
+                                        if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
+                                            // Show loading spinner when episode is loading
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                .scaleEffect(0.8)
+                                        } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                            // Show spinning indicator when reconnecting or buffering
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                .scaleEffect(0.8)
+                                        } else {
+                                            Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                                .font(.system(size: playIconSize))
+                                                .foregroundColor(.white)
+                                        }
                                     }
                                 }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                // Spacer to maintain same height as original layout
+                                Spacer()
+                                    .frame(height: 16) // Approximate height of timer text + spacing
                             }
-                            .buttonStyle(PlainButtonStyle())
                             
-                            // Time elapsed/total display - perfectly centered under play button
-                            Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                                .font(.caption2)
-                                .foregroundColor(.adaptiveSecondaryText)
-                                .lineLimit(1)
-                                .frame(width: 80, alignment: .center)
-                                .minimumScaleFactor(0.8)
+                            // Timer completely overlaid and isolated from ALL touch events
+                            VStack {
+                                Spacer()
+                                    .frame(height: playButtonSize + 4) // Position below button
+                                
+                                Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
+                                    .font(.caption2)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                    .lineLimit(1)
+                                    .frame(width: 80, alignment: .center)
+                                    .minimumScaleFactor(0.8)
+                                    .allowsHitTesting(false) // Disable touch interaction on text
+                                    .background(Color.clear)
+                            }
+                            .allowsHitTesting(false) // Completely disable ALL touch interaction
                         }
                         
                         // Skip forward 30s - responsive size

@@ -260,7 +260,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // CRITICAL FIX: Check if we're in navigation protection period before allowing CloudKit sync
             let isNavigationProtected = isInNavigationProtectionPeriod()
             
+            print("🔍 DEBUG: CloudKit sync check - chapter protected: \(isChapterProtected), navigation protected: \(isNavigationProtected)")
+            if let lastNavTime = lastNavigationTime {
+                let timeSinceNav = Date().timeIntervalSince(lastNavTime)
+                print("🔍 DEBUG: Time since navigation: \(timeSinceNav) seconds (protection: \(navigationProtectionInterval) seconds)")
+            } else {
+                print("🔍 DEBUG: No navigation time recorded")
+            }
+            
             if isNavigationProtected {
+                print("🛡️ DEBUG: CLOUDKIT SYNC BLOCKED due to navigation protection")
                 os_log("🛡️ CLOUDKIT SYNC BLOCKED: Skipping cross-device sync during navigation protection (%.2f%% -> %.2f%% blocked)", 
                        log: log, type: .info, currentPlayerProgress * 100, newProgress * 100)
                 return // Block CloudKit sync during app navigation
@@ -1330,6 +1339,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Prevent repeated restoration calls for the same episode to improve scrolling performance
         if hasRestoredPositionForCurrentEpisode && currentEpisodeIdForRestoration == currentEpisode.id {
+            print("💾 DEBUG: Skipping position restoration - already restored for episode")
             os_log("⚡ Skipping position restoration - already restored for episode: %@", log: log, type: .debug, currentEpisode.title)
             return
         }
@@ -1734,7 +1744,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     // CRITICAL FIX: Navigation protection mechanism - prevents CloudKit from overriding live progress during app navigation
     private var lastNavigationTime: Date?
-    private let navigationProtectionInterval: TimeInterval = 5.0 // 5 seconds protection after navigation
+    private let navigationProtectionInterval: TimeInterval = 30.0 // 30 seconds protection after navigation
     
     // Track when we last did a rewind to prevent progress protection from blocking
     private var lastRewindTime: Date?
@@ -1758,7 +1768,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     /// Mark that navigation just occurred to protect live progress from CloudKit override
     func markNavigationEvent() {
         lastNavigationTime = Date()
-        os_log("🧭 NAVIGATION PROTECTION: Started 5-second protection period", log: log, type: .info)
+        os_log("🧭 NAVIGATION PROTECTION: Started 30-second protection period", log: log, type: .info)
     }
     
     /// Check if we're currently in the rewind protection period
@@ -2061,7 +2071,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                             // CRITICAL FIX: Check navigation protection before updating playing episode
                             let isNavigationProtected = self.isInNavigationProtectionPeriod()
                             
+                            print("🔍 DEBUG: Background CloudKit sync for currently playing episode - navigation protected: \(isNavigationProtected)")
+                            if let lastNavTime = self.lastNavigationTime {
+                                let timeSinceNav = Date().timeIntervalSince(lastNavTime)
+                                print("🔍 DEBUG: Background sync - Time since navigation: \(timeSinceNav) seconds")
+                            }
+                            
                             if isNavigationProtected {
+                                print("🛡️ DEBUG: BACKGROUND CLOUDKIT SYNC BLOCKED due to navigation protection")
                                 os_log("🛡️ CLOUDKIT BACKGROUND SYNC BLOCKED: Skipping progress update during navigation protection (%.2f%% blocked)", 
                                        log: self.log, type: .info, cloudProgress * 100)
                                 return // Block CloudKit background sync during app navigation
