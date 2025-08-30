@@ -10,6 +10,79 @@ import Combine
 import os
 import AVKit
 
+// MARK: - Feed Deletion Progress View
+struct FeedDeletionProgressView: View {
+    @ObservedObject var viewModel: PodcastViewModel
+    let feedTitle: String
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                Text("Deleting Podcast")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Text("Removing '\(feedTitle)' and all episodes")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                
+                VStack(spacing: 16) {
+                    // Progress bar
+                    ProgressView(value: viewModel.feedDeletionProgress)
+                        .progressViewStyle(LinearProgressViewStyle())
+                        .scaleEffect(y: 2)
+                    
+                    // Percentage
+                    Text("\(Int(viewModel.feedDeletionProgress * 100))%")
+                        .font(.title3)
+                        .fontWeight(.medium)
+                    
+                    // Current step
+                    Text(viewModel.feedDeletionMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(minHeight: 20)
+                }
+                
+                if viewModel.feedDeletionProgress >= 1.0 {
+                    Button("Done") {
+                        isPresented = false
+                        // Reset the progress state
+                        viewModel.isDeletingFeed = false
+                        viewModel.deletingFeedId = nil
+                        viewModel.feedDeletionProgress = 0.0
+                        viewModel.feedDeletionMessage = ""
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Cancel") {
+                        isPresented = false
+                        // Reset the progress state
+                        viewModel.isDeletingFeed = false
+                        viewModel.deletingFeedId = nil
+                        viewModel.feedDeletionProgress = 0.0
+                        viewModel.feedDeletionMessage = ""
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.regularMaterial)
+            )
+            .shadow(radius: 10)
+            .padding(.horizontal, 40)
+        }
+    }
+}
+
 struct PodcastListView: View {
     @EnvironmentObject private var viewModel: PodcastViewModel
     @EnvironmentObject private var alertManager: AlertManager
@@ -50,6 +123,7 @@ struct PodcastListView: View {
     
     // Animation state for deletion progress overlay
     @State private var animationScale: CGFloat = 1.0
+    @State private var currentDeletingFeedTitle: String = ""
     @State private var lastSearchText: String = ""
     @State private var lastPodcastFeedsCount: Int = 0
     
@@ -728,6 +802,7 @@ struct PodcastListView: View {
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
+                    currentDeletingFeedTitle = podcast.title
                     viewModel.deletePodcastFeed(podcast)
                 }
             } message: { podcast in
@@ -737,68 +812,11 @@ struct PodcastListView: View {
                 // Feed Deletion Progress Overlay
                 Group {
                     if viewModel.isDeletingFeed {
-                        ZStack {
-                            // Semi-transparent background
-                            Color.black.opacity(0.4)
-                                .ignoresSafeArea()
-                            
-                            // Progress card
-                            VStack(spacing: 16) {
-                                // Title
-                                Text("Deleting Podcast")
-                                    .font(.headline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.primary)
-                                
-                                // Progress bar
-                                VStack(spacing: 8) {
-                                    ProgressView(value: viewModel.feedDeletionProgress, total: 1.0)
-                                        .progressViewStyle(LinearProgressViewStyle(tint: .red))
-                                        .scaleEffect(y: 2.0) // Make the progress bar thicker
-                                    
-                                    // Progress percentage
-                                    Text("\(Int(viewModel.feedDeletionProgress * 100))%")
-                                        .font(.caption)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.secondary)
-                                }
-                                
-                                // Current operation message
-                                Text(viewModel.feedDeletionMessage)
-                                    .font(.body)
-                                    .multilineTextAlignment(.center)
-                                    .foregroundColor(.primary)
-                                    .padding(.horizontal)
-                                
-                                // Animated activity indicator
-                                if viewModel.feedDeletionProgress < 1.0 {
-                                    HStack(spacing: 4) {
-                                        ForEach(0..<3) { index in
-                                            Circle()
-                                                .fill(Color.red)
-                                                .frame(width: 8, height: 8)
-                                                .scaleEffect(animationScale)
-                                                .animation(
-                                                    Animation.easeInOut(duration: 0.6)
-                                                        .repeatForever()
-                                                        .delay(Double(index) * 0.2),
-                                                    value: animationScale
-                                                )
-                                        }
-                                    }
-                                    .onAppear {
-                                        animationScale = 1.5
-                                    }
-                                }
-                            }
-                            .padding(24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.systemBackground))
-                                    .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
-                            )
-                            .padding(.horizontal, 32)
-                        }
+                        FeedDeletionProgressView(
+                            viewModel: viewModel,
+                            feedTitle: currentDeletingFeedTitle,
+                            isPresented: .constant(true)
+                        )
                     }
                 }
             )

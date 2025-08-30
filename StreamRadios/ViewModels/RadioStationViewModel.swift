@@ -2972,6 +2972,197 @@ extension RadioStationViewModel {
             saveStationsToCoreData()
         }
     }
+    
+    /// Delete all stations for a specific country from both CloudKit and Core Data with enhanced batch processing
+    @MainActor
+    func deleteStationsForCountry(_ countryName: String, progressViewModel: CountryDeletionProgressViewModel? = nil) async {
+        print("🌍🗑️ Starting deletion of all stations for country: \(countryName)")
+        
+        // Get all stations for this country
+        let countryStations = stations.filter { $0.country == countryName }
+        
+        guard !countryStations.isEmpty else {
+            print("🌍🗑️ No stations found for country: \(countryName)")
+            NotificationManager.shared.notifyUserImmediate(title: "No Stations", message: "No stations found for \(countryName)")
+            return
+        }
+        
+        let stationCount = countryStations.count
+        let stationIds = countryStations.map { $0.id }
+        
+        print("🌍🗑️ Found \(stationCount) stations to delete for \(countryName)")
+        
+        progressViewModel?.updateProgress(0.1, step: "Preparing deletion of \(stationCount) stations...")
+        
+        var success = false
+        var error: Error?
+        
+        do {
+            // Remove stations from in-memory array immediately for UI responsiveness
+            stations.removeAll { $0.country == countryName }
+            
+            progressViewModel?.updateProgress(0.2, step: "Removing stations from local memory...")
+            
+            // Delete from Core Data using optimized batches (100)
+            progressViewModel?.updateProgress(0.3, step: "Starting Core Data deletion...")
+            try await deleteCountryStationsFromCoreDataWithProgress(countryName: countryName, progressViewModel: progressViewModel)
+            
+            // Delete from CloudKit using optimized batches (200)
+            progressViewModel?.updateProgress(0.6, step: "Starting CloudKit deletion...")
+            try await deleteStationsFromCloudKitWithProgress(stationIds: stationIds, progressViewModel: progressViewModel)
+            
+            // Check if there are no more stations left and reset country if needed
+            if stations.isEmpty {
+                deleteLocalFile()
+                print("🌍 RESET: No stations remaining after country deletion, resetting to 'Select Country'")
+                selectedCountry = "Select Country"
+            }
+            
+            success = true
+            progressViewModel?.updateProgress(1.0, step: "Deletion completed successfully!")
+            progressViewModel?.markCompleted()
+            print("🌍✅ Successfully deleted all \(stationCount) stations for \(countryName)")
+        } catch let deletionError {
+            error = deletionError
+            progressViewModel?.updateProgress(0.0, step: "Deletion failed: \(deletionError.localizedDescription)")
+            print("🌍❌ Failed to delete stations for \(countryName): \(deletionError)")
+        }
+        
+        // Notify user of completion (only if no progress view is shown)
+        if progressViewModel == nil {
+            if success {
+                NotificationManager.shared.notifyUserImmediate(
+                    title: "Deletion Complete", 
+                    message: "Successfully deleted all \(stationCount) stations from \(countryName)"
+                )
+            } else {
+                NotificationManager.shared.notifyUserImmediate(
+                    title: "Deletion Failed", 
+                    message: "Failed to delete stations from \(countryName): \(error?.localizedDescription ?? "Unknown error")"
+                )
+            }
+        }
+    }
+    
+    /// Delete all stations for a specific country from Core Data using small batches with progress tracking
+    private func deleteCountryStationsFromCoreDataWithProgress(countryName: String, progressViewModel: CountryDeletionProgressViewModel?) async throws {
+        let batchSize = 100 // Small batch size for progress tracking
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            let privateMOC = CoreDataStack.shared.persistentContainer.newBackgroundContext()
+            privateMOC.perform {
+                do {
+                    // First, count total stations to delete
+                    let countFetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                    countFetchRequest.predicate = NSPredicate(format: "country == %@", countryName)
+                    let totalStations = try privateMOC.count(for: countFetchRequest)
+                    
+                    var deletedCount = 0
+                    
+                    while deletedCount < totalStations {
+                        // Check for cancellation
+                        if Task.isCancelled {
+                            print("🌍🗑️ Core Data deletion cancelled")
+                            continuation.resume()
+                            return
+                        }
+                        
+                        // Fetch a batch of stations to delete
+                        let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                        fetchRequest.predicate = NSPredicate(format: "country == %@", countryName)
+                        fetchRequest.fetchLimit = batchSize
+                        
+                        let stationsToDelete = try privateMOC.fetch(fetchRequest)
+                        
+                        if stationsToDelete.isEmpty {
+                            break // No more stations to delete
+                        }
+                        
+                        // Delete the batch
+                        for station in stationsToDelete {
+                            privateMOC.delete(station)
+                        }
+                        
+                        // Save the batch
+                        try privateMOC.save()
+                        
+                        deletedCount += stationsToDelete.count
+                        let progress = Double(deletedCount) / Double(totalStations)
+                        
+                        // Update progress (Core Data is 30% to 60% of total progress)
+                        let coreDataProgress = 0.3 + (progress * 0.3)
+                        progressViewModel?.updateProgress(coreDataProgress, step: "Core Data: Deleted \(deletedCount)/\(totalStations) stations")
+                        
+                        print("🌍🗑️ Core Data: Deleted batch of \(stationsToDelete.count) stations (\(deletedCount)/\(totalStations))")
+                        
+                        // Small delay to prevent overwhelming the system
+                        Thread.sleep(forTimeInterval: 0.01) // 10ms
+                    }
+                    
+                    // Final merge into view context
+                    try privateMOC.save()
+                    DispatchQueue.main.async {
+                        CoreDataStack.shared.persistentContainer.viewContext.refreshAllObjects()
+                    }
+                    
+                    print("🌍✅ Core Data: Completed deletion of \(deletedCount) stations from \(countryName)")
+                    continuation.resume()
+                } catch {
+                    print("🌍❌ Failed to delete stations for \(countryName) from Core Data: \(error)")
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Delete stations from CloudKit using small batches with progress tracking
+    private func deleteStationsFromCloudKitWithProgress(stationIds: [String], progressViewModel: CountryDeletionProgressViewModel?) async throws {
+        let batchSize = 200 // CloudKit batch size
+        let totalStations = stationIds.count
+        var processedCount = 0
+        
+        // Process in batches
+        for i in stride(from: 0, to: totalStations, by: batchSize) {
+            // Check for cancellation
+            if Task.isCancelled {
+                print("🌍🗑️ CloudKit deletion cancelled")
+                return
+            }
+            
+            let endIndex = min(i + batchSize, totalStations)
+            let batch = Array(stationIds[i..<endIndex])
+            
+            // Update progress
+            let batchNumber = (i / batchSize) + 1
+            let totalBatches = (totalStations + batchSize - 1) / batchSize
+            
+            // Update progress (CloudKit is 60% to 100% of total progress)
+            let preDeleteProgress = 0.6 + (Double(processedCount) / Double(totalStations) * 0.4)
+            progressViewModel?.updateProgress(preDeleteProgress, step: "iCloud: Processing batch \(batchNumber)/\(totalBatches)")
+            
+            // Delete the batch from CloudKit
+            try await RadioStationCloudKitManager.shared.deleteRadioStationsBatchFromCloudKit(batch)
+            
+            processedCount += batch.count
+            let overallProgress = Double(processedCount) / Double(totalStations)
+            
+            // Update progress after deletion
+            let postDeleteProgress = 0.6 + (overallProgress * 0.4)
+            progressViewModel?.updateProgress(postDeleteProgress, step: "CloudKit: Deleted \(processedCount)/\(totalStations) stations")
+            
+            print("🌍🗑️ CloudKit: Deleted batch \(batchNumber)/\(totalBatches) (\(processedCount)/\(totalStations) stations)")
+            
+            // Small delay between batches to be respectful to CloudKit
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
+        
+        print("🌍✅ CloudKit: Completed deletion of \(processedCount) stations")
+    }
+    
+    /// Legacy method for backward compatibility
+    private func deleteCountryStationsFromCoreData(countryName: String) async throws {
+        try await deleteCountryStationsFromCoreDataWithProgress(countryName: countryName, progressViewModel: nil)
+    }
 }
 
 extension Notification.Name {

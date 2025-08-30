@@ -8,6 +8,103 @@
 import SwiftUI
 import FlagKit
 
+// MARK: - Progress View Models
+class CountryDeletionProgressViewModel: ObservableObject {
+    @Published var progress: Double = 0.0
+    @Published var currentStep: String = ""
+    @Published var isCompleted: Bool = false
+    @Published var isCancelled: Bool = false
+    
+    func updateProgress(_ newProgress: Double, step: String) {
+        DispatchQueue.main.async {
+            self.progress = newProgress
+            self.currentStep = step
+        }
+    }
+    
+    func markCompleted() {
+        DispatchQueue.main.async {
+            self.isCompleted = true
+            self.progress = 1.0
+        }
+    }
+    
+    func cancel() {
+        isCancelled = true
+    }
+    
+    func reset() {
+        progress = 0.0
+        currentStep = ""
+        isCompleted = false
+        isCancelled = false
+    }
+}
+
+// MARK: - Progress View
+struct CountryDeletionProgressView: View {
+    @ObservedObject var viewModel: CountryDeletionProgressViewModel
+    let countryName: String
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 20) {
+                Text("Deleting Stations")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Text("Removing all stations from \(countryName)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                
+                VStack(spacing: 16) {
+                    // Progress bar
+                    ProgressView(value: viewModel.progress)
+                        .progressViewStyle(LinearProgressViewStyle())
+                        .scaleEffect(y: 2)
+                    
+                    // Percentage
+                    Text("\(Int(viewModel.progress * 100))%")
+                        .font(.title3)
+                        .fontWeight(.medium)
+                    
+                    // Current step
+                    Text(viewModel.currentStep)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(minHeight: 20)
+                }
+                
+                if viewModel.isCompleted {
+                    Button("Done") {
+                        isPresented = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Cancel") {
+                        viewModel.cancel()
+                        isPresented = false
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.regularMaterial)
+            )
+            .shadow(radius: 10)
+            .padding(.horizontal, 40)
+        }
+    }
+}
+
 struct CountryPicker: View {
     @Binding var selectedCountry: String
     var countries: [Country]
@@ -17,6 +114,10 @@ struct CountryPicker: View {
     
     @State private var searchText = ""
     @State private var recentCountries: [String] = []
+    @State private var showingDeleteAlert = false
+    @State private var countryToDelete: Country? = nil
+    @State private var showingProgressView = false
+    @StateObject private var progressViewModel = CountryDeletionProgressViewModel()
     
     // Group countries by regions
     private var groupedCountries: [CountryRegion: [Country]] {
@@ -86,6 +187,16 @@ struct CountryPicker: View {
                                     selectCountry(country.name)
                                 }
                                 .listRowBackground(Color.adaptiveCardBackground)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if let count = stationCount?(country.name), count > 0 {
+                                        Button(role: .destructive) {
+                                            countryToDelete = country
+                                            showingDeleteAlert = true
+                                        } label: {
+                                            Label("Delete Stations", systemImage: "trash")
+                                        }
+                                    }
+                                }
                             }
                         } header: {
                             HStack {
@@ -112,6 +223,16 @@ struct CountryPicker: View {
                                     selectCountry(country.name)
                                 }
                                 .listRowBackground(Color.adaptiveCardBackground)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if let count = stationCount?(country.name), count > 0 {
+                                        Button(role: .destructive) {
+                                            countryToDelete = country
+                                            showingDeleteAlert = true
+                                        } label: {
+                                            Label("Delete Stations", systemImage: "trash")
+                                        }
+                                    }
+                                }
                             }
                         } header: {
                             HStack {
@@ -139,6 +260,16 @@ struct CountryPicker: View {
                                         selectCountry(country.name)
                                     }
                                     .listRowBackground(Color.adaptiveCardBackground)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        if let count = stationCount?(country.name), count > 0 {
+                                            Button(role: .destructive) {
+                                                countryToDelete = country
+                                                showingDeleteAlert = true
+                                            } label: {
+                                                Label("Delete Stations", systemImage: "trash")
+                                            }
+                                        }
+                                    }
                                 }
                             } header: {
                                 if searchText.isEmpty {
@@ -211,6 +342,23 @@ struct CountryPicker: View {
         .onAppear {
             loadRecentCountries()
         }
+        .alert("Delete All Stations", isPresented: $showingDeleteAlert, presenting: countryToDelete) { country in
+            Button("Cancel", role: .cancel) {}
+            Button("Delete All", role: .destructive) {
+                deleteStationsForCountry(country)
+            }
+        } message: { country in
+            let stationCount = stationCount?(country.name) ?? 0
+            return Text("Are you sure you want to delete all \(stationCount) stations from \(country.name)?\n\nThis will permanently remove them from both CloudKit and your local device.\n\nIf you have any custom stations you want to keep, please go to Settings → Manage App Data → Export Stations to backup your data first.")
+        }
+        .overlay(
+            showingProgressView ? 
+            CountryDeletionProgressView(
+                viewModel: progressViewModel,
+                countryName: countryToDelete?.name ?? "",
+                isPresented: $showingProgressView
+            ) : nil
+        )
     }
     
     private var popularCountries: [Country] {
@@ -245,6 +393,18 @@ struct CountryPicker: View {
         
         UserDefaults.standard.set(recent, forKey: "recentCountries")
         recentCountries = recent
+    }
+    
+    private func deleteStationsForCountry(_ country: Country) {
+        // Reset and show progress view
+        progressViewModel.reset()
+        showingProgressView = true
+        
+        Task { @MainActor in
+            await RadioStationViewModel.shared.deleteStationsForCountry(country.name, progressViewModel: progressViewModel)
+            // Update the UI by notifying that stations have been updated
+            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+        }
     }
 }
 
