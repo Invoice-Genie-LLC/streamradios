@@ -755,6 +755,10 @@ struct PodcastListView: View {
     private func onAppear() {
         os_log("PodcastListView appeared", log: log, type: .info)
         
+        // CRITICAL FIX: Sync live progress from currently playing episode to cache
+        // This ensures the episode list shows current live progress, not stale saved progress
+        syncCurrentPlayingProgress()
+        
         // PERFORMANCE: Initialize caches immediately for fast rendering
         initializeCaches()
         
@@ -774,6 +778,21 @@ struct PodcastListView: View {
         if viewModel.podcastFeeds.isEmpty {
             // Start lightweight monitoring without heavy reload operations
             self.startFreshInstallDataMonitoring()
+        }
+    }
+    
+    private func syncCurrentPlayingProgress() {
+        // CRITICAL FIX: Mark navigation event to protect live progress from CloudKit override
+        podcastPlayer.markNavigationEvent()
+        
+        // Sync live progress from currently playing episode to ViewModel cache
+        // This prevents progress reset when returning to episode list
+        if let currentEpisode = podcastPlayer.currentEpisode,
+           podcastPlayer.isPlaying || podcastPlayer.currentTime > 0 {
+            let liveProgress = podcastPlayer.currentProgress
+            DispatchQueue.main.async {
+                self.viewModel.episodeProgress[currentEpisode.id] = liveProgress
+            }
         }
     }
     
@@ -2949,7 +2968,26 @@ struct PodcastPlayerView: View {
         }
     }
 
+    private func syncCurrentPlayingProgress() {
+        // CRITICAL FIX: Mark navigation event to protect live progress from CloudKit override
+        podcastPlayer.markNavigationEvent()
+        
+        // Sync live progress from currently playing episode to ViewModel cache
+        // This prevents progress reset when returning to episode list
+        if let currentEpisode = podcastPlayer.currentEpisode,
+           podcastPlayer.isPlaying || podcastPlayer.currentTime > 0 {
+            let liveProgress = podcastPlayer.currentProgress
+            DispatchQueue.main.async {
+                self.viewModel.episodeProgress[currentEpisode.id] = liveProgress
+            }
+        }
+    }
+    
     private func handleOnAppear() {
+        // CRITICAL FIX: Sync live progress from currently playing episode to cache
+        // This ensures the episode list shows current live progress, not stale saved progress
+        syncCurrentPlayingProgress()
+        
         let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
         
         // Initialize state for this view appearance  

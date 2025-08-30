@@ -257,6 +257,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return // Block CloudKit sync during chapter seeks
             }
             
+            // CRITICAL FIX: Check if we're in navigation protection period before allowing CloudKit sync
+            let isNavigationProtected = isInNavigationProtectionPeriod()
+            
+            if isNavigationProtected {
+                os_log("🛡️ CLOUDKIT SYNC BLOCKED: Skipping cross-device sync during navigation protection (%.2f%% -> %.2f%% blocked)", 
+                       log: log, type: .info, currentPlayerProgress * 100, newProgress * 100)
+                return // Block CloudKit sync during app navigation
+            }
+            
             os_log("🔄 Cross-device sync: Updating playback position from %.2f%% to %.2f%% (%.1f seconds)", 
                    log: log, type: .info, currentPlayerProgress * 100, newProgress * 100, newTime)
             
@@ -1723,6 +1732,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var lastChapterSeekTime: Date?
     private let chapterSeekProtectionInterval: TimeInterval = 5.0 // 5 seconds protection
     
+    // CRITICAL FIX: Navigation protection mechanism - prevents CloudKit from overriding live progress during app navigation
+    private var lastNavigationTime: Date?
+    private let navigationProtectionInterval: TimeInterval = 5.0 // 5 seconds protection after navigation
+    
     // Track when we last did a rewind to prevent progress protection from blocking
     private var lastRewindTime: Date?
     private var lastRewindEpisodeId: String?
@@ -1733,6 +1746,19 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         guard let lastSeekTime = lastChapterSeekTime else { return false }
         let now = Date()
         return now.timeIntervalSince(lastSeekTime) < chapterSeekProtectionInterval
+    }
+    
+    /// Check if we're currently in the navigation protection period
+    func isInNavigationProtectionPeriod() -> Bool {
+        guard let lastNavTime = lastNavigationTime else { return false }
+        let now = Date()
+        return now.timeIntervalSince(lastNavTime) < navigationProtectionInterval
+    }
+    
+    /// Mark that navigation just occurred to protect live progress from CloudKit override
+    func markNavigationEvent() {
+        lastNavigationTime = Date()
+        os_log("🧭 NAVIGATION PROTECTION: Started 5-second protection period", log: log, type: .info)
     }
     
     /// Check if we're currently in the rewind protection period
@@ -1947,28 +1973,23 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     /// Save progress directly to Core Data for immediate persistence
     private func saveProgressToCoreDataSync(episodeId: String, progress: Double) {
-        os_log("💾 Saving episode progress to Core Data - Episode: %@, Progress: %.2f",
-               log: log, type: .info, episodeId, progress)
-        
-        let context = CoreDataStack.shared.context
-        context.performAndWait {
+        // PERFORMANCE FIX: Use background context to prevent main thread I/O hangs
+        let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+        backgroundContext.perform {
             do {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
                 fetchRequest.fetchLimit = 1
                 
-                if let episode = try context.fetch(fetchRequest).first {
+                if let episode = try backgroundContext.fetch(fetchRequest).first {
                     episode.progress = progress
                     episode.isPlayed = progress >= 0.99
-                    try context.save()
-                    
-                    os_log("✅ Saved progress to Core Data: %@ - %.2f%%", 
-                           log: log, type: .info, episodeId, progress * 100)
+                    try backgroundContext.save()
                 } else {
-                    os_log("⚠️ Episode not found in Core Data: %@", log: log, type: .default, episodeId)
+                    os_log("Episode not found in Core Data: %@", log: self.log, type: .default, episodeId)
                 }
             } catch {
-                os_log("❌ Failed to save progress to Core Data: %@", log: log, type: .default, error.localizedDescription)
+                os_log("Failed to save progress to Core Data: %@", log: self.log, type: .error, error.localizedDescription)
             }
         }
     }
@@ -2035,6 +2056,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                                 os_log("🛡️ CLOUDKIT BACKGROUND SYNC BLOCKED: Skipping progress update during chapter protection (%.2f%% blocked)", 
                                        log: self.log, type: .info, cloudProgress * 100)
                                 return // Block CloudKit background sync during chapter seeks
+                            }
+                            
+                            // CRITICAL FIX: Check navigation protection before updating playing episode
+                            let isNavigationProtected = self.isInNavigationProtectionPeriod()
+                            
+                            if isNavigationProtected {
+                                os_log("🛡️ CLOUDKIT BACKGROUND SYNC BLOCKED: Skipping progress update during navigation protection (%.2f%% blocked)", 
+                                       log: self.log, type: .info, cloudProgress * 100)
+                                return // Block CloudKit background sync during app navigation
                             }
                             
                             self.currentProgress = cloudProgress
