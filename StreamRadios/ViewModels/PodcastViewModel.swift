@@ -183,6 +183,12 @@ class PodcastViewModel: ObservableObject {
     @Published var episodeProgress: [String: Double] = [:]
     @Published var downloadProgress: [String: Double] = [:]
     
+    // MARK: - Feed Deletion Progress Tracking
+    @Published var feedDeletionProgress: Double = 0.0
+    @Published var feedDeletionMessage: String = ""
+    @Published var isDeletingFeed: Bool = false
+    @Published var deletingFeedId: String? = nil
+    
     // Store progress observations to prevent deallocation
     private var progressObservations: [String: NSKeyValueObservation] = [:]
     
@@ -3080,104 +3086,187 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Delete a podcast feed
+    /// Delete a podcast feed with real-time progress tracking
     @MainActor
     func deletePodcastFeed(_ feed: PodcastFeed) {
-        NotificationManager.shared.notifyUserImmediate(title: "Deletion Started", message: "Deleting podcast '\(feed.title)' and all episodes...")
+        // Initialize progress tracking
+        isDeletingFeed = true
+        deletingFeedId = feed.id
+        feedDeletionProgress = 0.0
+        feedDeletionMessage = "Preparing deletion..."
         
-        // Step 1: Get all episode IDs BEFORE any deletion starts to ensure we capture all episodes
-        Task {
-            let episodeIds = await getEpisodeIdsForFeed(feed.id)
-            
-            // Step 2: Immediate UI update - remove from arrays for instant feedback
-            await MainActor.run {
-                if let index = self.podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
-                    self.podcastFeeds.remove(at: index)
-                }
-                self.podcastFeedOrder.removeAll { $0 == feed.id }
-                self.currentEpisodes.removeAll { $0.feedId == feed.id }
-                
-                // Clear selected feed if it's the one being deleted
-                if self.selectedFeedId == feed.id {
-                    self.selectedFeedId = nil
-                }
-                
-                // Trigger immediate UI update for user feedback
-                self.throttledUIUpdate()
-            }
-            
-            // Step 3: **CRITICAL** - Delete from CloudKit FIRST before syncing to other devices
-            // This prevents CloudKit from restoring the deleted feed on other devices
-            var cloudKitDeletionSucceeded = false
+        Task { [self] in
             do {
+                // Step 1: Get episode count for progress calculation
+                feedDeletionMessage = "Analyzing episodes..."
+                feedDeletionProgress = 0.05
                 
-                // Debug: List all feeds in CloudKit before deletion
-                await cloudKitManager.debugListAllFeeds()
+                let episodeIds = await getEpisodeIdsForFeed(feed.id)
+                let totalEpisodes = episodeIds.count
                 
-                // Debug: Check if feed exists by exact ID
-                await cloudKitManager.debugCheckFeedExists(feed.id)
-                
-                try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
-                cloudKitDeletionSucceeded = true
-                
-                await cloudKitManager.debugCheckFeedExists(feed.id)
-                
-            } catch {
-                cloudKitDeletionSucceeded = false
-                if let ckError = error as? CKError {
-                    print("☁️ ❌ CloudKit error code: \(ckError.code)")
-                }
-            }
-            
-            // Step 4: Only sync to other devices AFTER CloudKit deletion succeeds
-            // This ensures other devices won't have CloudKit restore the deleted feed
-            if cloudKitDeletionSucceeded {
                 await MainActor.run {
-                    PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
-                        feedId: feed.id,
-                        feedTitle: feed.title,
-                        episodeIds: episodeIds
-                    )
-                    
-                }
-            } else {
-                await MainActor.run {
-                    
-                    // Show user warning about potential issues
-                    NotificationManager.shared.notifyUserImmediate(
-                        title: "Deletion Warning", 
-                        message: "Feed deleted locally but may reappear due to sync issues"
-                    )
-                }
-            }
-            
-            // Step 5: Final local cleanup - EpisodeStateManager, files, and Core Data  
-            // (CloudKit deletion was already completed in Step 3 above)
-            do {
-                // Delete episode progress, favorites, and downloads from EpisodeStateManager
-                for episodeId in episodeIds {
-                    EpisodeStateManager.shared.clearEpisodeData(episodeId)
+                    feedDeletionMessage = "Found \(totalEpisodes) episodes to delete"
+                    feedDeletionProgress = 0.1
                 }
                 
-                // Delete downloaded episode files
+                // Step 2: Clear episode states from EpisodeStateManager (BATCH OPTIMIZED)
+                await MainActor.run {
+                    feedDeletionMessage = "Clearing episode progress and states..."
+                    feedDeletionProgress = 0.2
+                }
+                
+                // Use batch deletion for much better performance
+                EpisodeStateManager.shared.clearEpisodeDataBatch(episodeIds)
+                
+                await MainActor.run {
+                    feedDeletionMessage = "✅ Cleared \(totalEpisodes) episode states (batch)"
+                    feedDeletionProgress = 0.4
+                }
+                
+                // Step 3: Delete downloaded files
+                await MainActor.run {
+                    feedDeletionMessage = "Deleting downloaded files..."
+                    feedDeletionProgress = 0.5
+                }
+                
                 await deleteDownloadedEpisodeFiles(episodeIds)
                 
-                // Delete from Core Data (episodes and feed) - CloudKit was already handled above
+                await MainActor.run {
+                    feedDeletionMessage = "Downloaded files cleaned up"
+                    feedDeletionProgress = 0.6
+                }
+                
+                // Step 4: Delete from CloudKit
+                await MainActor.run {
+                    feedDeletionMessage = "Deleting from CloudKit..."
+                    feedDeletionProgress = 0.7
+                }
+                
+                var cloudKitDeletionSucceeded = false
+                do {
+                    // Delete feed from CloudKit
+                    try await cloudKitManager.deletePodcastFeedFromCloudKit(feed.id)
+                    
+                    await MainActor.run {
+                        feedDeletionMessage = "CloudKit feed deletion complete"
+                        feedDeletionProgress = 0.75
+                    }
+                    
+                    // Delete episode states from CloudKit database records for this specific feed
+                    await cloudKitManager.deleteEpisodeStatesFromCloudKit(episodeIds: episodeIds)
+                    
+                    // CRITICAL: Also remove episodes from CloudKit shared collections (NSUbiquitousKeyValueStore)
+                    await MainActor.run {
+                        feedDeletionMessage = "Clearing CloudKit shared collections..."
+                        feedDeletionProgress = 0.78
+                    }
+                    
+                    cloudKitManager.removeEpisodesFromSharedCollections(episodeIds: episodeIds)
+                    cloudKitDeletionSucceeded = true
+                    
+                    await MainActor.run {
+                        feedDeletionMessage = "CloudKit cleanup complete"
+                        feedDeletionProgress = 0.8
+                    }
+                    
+                } catch {
+                    cloudKitDeletionSucceeded = false
+                    print("☁️ ❌ CloudKit deletion failed: \(error)")
+                    await MainActor.run {
+                        feedDeletionMessage = "CloudKit deletion failed - continuing locally"
+                        feedDeletionProgress = 0.75
+                    }
+                }
+                
+                // Step 5: Delete from Core Data
+                await MainActor.run {
+                    feedDeletionMessage = "Deleting from local database..."
+                    feedDeletionProgress = 0.85
+                }
+                
+                // First, explicitly clear all episode state data for this feed
+                await clearEpisodeStatesFromCoreData(episodeIds)
+                
+                // Then delete the feed and episode entities
                 try await deleteFeedFromCoreData(feed)
                 
-                // Notify user of successful deletion
                 await MainActor.run {
-                    NotificationManager.shared.notifyUserImmediate(title: "Deletion Complete", message: "Successfully deleted podcast '\(feed.title)' and all \(episodeIds.count) episodes.")
+                    feedDeletionMessage = "Database cleanup complete"
+                    feedDeletionProgress = 0.9
+                }
+                
+                // Step 6: Update UI
+                await MainActor.run {
+                    feedDeletionMessage = "Updating interface..."
+                    feedDeletionProgress = 0.95
+                    
+                    // Remove from UI arrays
+                    if let index = podcastFeeds.firstIndex(where: { $0.id == feed.id }) {
+                        podcastFeeds.remove(at: index)
+                    }
+                    podcastFeedOrder.removeAll { $0 == feed.id }
+                    currentEpisodes.removeAll { $0.feedId == feed.id }
+                    
+                    // Clear selected feed if it's the one being deleted
+                    if selectedFeedId == feed.id {
+                        selectedFeedId = nil
+                    }
+                    
+                    // Clear local episode progress tracking
+                    for episodeId in episodeIds {
+                        episodeProgress.removeValue(forKey: episodeId)
+                    }
+                    
+                    // Trigger UI update
+                    throttledUIUpdate()
+                }
+                
+                // Step 7: Sync deletion to other devices (if CloudKit succeeded)
+                if cloudKitDeletionSucceeded {
+                    await MainActor.run {
+                        PodcastCloudKitManager.shared.syncPodcastFeedRemovedInstantly(
+                            feedId: feed.id,
+                            feedTitle: feed.title,
+                            episodeIds: episodeIds
+                        )
+                    }
+                }
+                
+                // Step 8: Completion
+                await MainActor.run {
+                    feedDeletionMessage = "✅ Successfully deleted '\(feed.title)' and \(totalEpisodes) episodes"
+                    feedDeletionProgress = 1.0
+                }
+                
+                // Auto-hide progress after success
+                try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                await MainActor.run {
+                    isDeletingFeed = false
+                    deletingFeedId = nil
+                    feedDeletionProgress = 0.0
+                    feedDeletionMessage = ""
                 }
                 
             } catch {
-                print("❌ Error during background cleanup: \(error)")
-                
-                // If background cleanup fails, reload UI to show correct state
+                print("❌ Error during feed deletion: \(error)")
                 await MainActor.run {
-                    self.loadFeedsFromCoreData()
-                    self.error = "Failed to completely delete podcast: \(error.localizedDescription)"
-                    NotificationManager.shared.notifyUserImmediate(title: "Deletion Failed", message: "Failed to delete podcast '\(feed.title)': \(error.localizedDescription)")
+                    feedDeletionMessage = "❌ Deletion failed: \(error.localizedDescription)"
+                    feedDeletionProgress = 1.0
+                    
+                    // Keep error visible longer
+                    Task {
+                        try await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                        await MainActor.run {
+                            isDeletingFeed = false
+                            deletingFeedId = nil
+                            feedDeletionProgress = 0.0
+                            feedDeletionMessage = ""
+                        }
+                    }
+                    
+                    // Reload UI to show correct state
+                    loadFeedsFromCoreData()
+                    self.error = "Failed to delete podcast: \(error.localizedDescription)"
                 }
             }
         }
@@ -6574,6 +6663,90 @@ extension PodcastViewModel {
         // Core Data saves happen automatically, no need to force save
         // clearAllStates() already triggers save through state changes
         print("🧹 EPISODE STATE CLEARING: Forced save completed - all local episode data cleared")
+    }
+    
+    /// Clear all episode state data from Core Data for specific episodes
+    private func clearEpisodeStatesFromCoreData(_ episodeIds: [String]) async {
+        guard !episodeIds.isEmpty else { 
+            print("💾 ⚠️ No episode IDs provided for Core Data state cleanup")
+            return 
+        }
+        
+        print("💾 🧹 Starting Core Data cleanup for \(episodeIds.count) episodes")
+        
+        // Use a background context to avoid blocking the main thread
+        let context = CoreDataStack.shared.persistentContainer.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            context.perform {
+                do {
+                    var totalClearedCount = 0
+                    var totalFoundCount = 0
+                    let batchSize = 50  // Smaller batch size for better performance
+                    
+                    // Process episode IDs in batches
+                    for i in stride(from: 0, to: episodeIds.count, by: batchSize) {
+                        let endIndex = min(i + batchSize, episodeIds.count)
+                        let batch = Array(episodeIds[i..<endIndex])
+                        
+                        // Find episodes in this batch (reduced logging)
+                        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                        fetchRequest.predicate = NSPredicate(format: "id IN %@", batch)
+                        fetchRequest.includesPropertyValues = true  // Ensure we get all property values
+                        
+                        let episodes = try context.fetch(fetchRequest)
+                        totalFoundCount += episodes.count
+                        
+                        // Clear episode state data (reduced logging to prevent app quarantine)
+                        for episode in episodes {
+                            // Clear all episode state fields
+                            episode.progress = 0.0
+                            episode.isFavorite = false
+                            episode.isDownloaded = false
+                            episode.isPlayed = false
+                            totalClearedCount += 1
+                        }
+                        
+                        // Save batch immediately to ensure data is persisted
+                        if episodes.count > 0 {
+                            try context.save()
+                            // Log only every 10th batch to reduce logging volume
+                            if (i/batchSize + 1) % 10 == 0 {
+                                print("💾 💾 Saved batch \(i/batchSize + 1) - cleared \(episodes.count) episodes")
+                            }
+                        }
+                    }
+                    
+                    // Final verification - check if any episode states remain
+                    let verificationRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    verificationRequest.predicate = NSPredicate(format: "id IN %@ AND (progress > 0 OR isFavorite == YES OR isDownloaded == YES OR isPlayed == YES)", episodeIds)
+                    let remainingStates = try context.count(for: verificationRequest)
+                    
+                    if remainingStates > 0 {
+                        print("💾 ⚠️ WARNING: \(remainingStates) episodes still have state data after cleanup!")
+                    } else {
+                        print("💾 ✅ VERIFICATION: All episode states successfully cleared")
+                    }
+                    
+                    print("💾 ✅ Core Data episode state cleanup completed:")
+                    print("💾    📊 Requested: \(episodeIds.count) episodes")
+                    print("💾    🔍 Found: \(totalFoundCount) episodes in Core Data")
+                    print("💾    🧹 Processed: \(totalClearedCount) episodes")
+                    print("💾    ⚠️ Remaining states: \(remainingStates) episodes")
+                    
+                    continuation.resume()
+                    
+                } catch {
+                    print("💾 ❌ Error during Core Data episode state cleanup: \(error)")
+                    print("💾 ❌ Error details: \(error.localizedDescription)")
+                    
+                    // Try to rollback and continue - don't fail the deletion process
+                    context.rollback()
+                    continuation.resume()
+                }
+            }
+        }
     }
     
     /// Process episodes in background to prevent main thread blocking during large list operations

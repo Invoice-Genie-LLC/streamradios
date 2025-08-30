@@ -31,7 +31,7 @@ class PodcastCloudKitManager: ObservableObject {
     @Published var lastInstantSyncDate: Date?
     
     // MARK: - Shared Data Structure Keys (to prevent quota exceeded)
-    private enum SharedDataKeys {
+    enum SharedDataKeys {
         static let episodeProgress = "podcast_episodes_progress"
         static let episodeFavorites = "podcast_episodes_favorites"
         static let episodeDownloads = "podcast_episodes_downloads"
@@ -342,6 +342,76 @@ class PodcastCloudKitManager: ObservableObject {
         var collection = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] ?? [:]
         collection.removeValue(forKey: episodeId)
         ubiquitousStore.set(collection, forKey: key)
+    }
+    
+    /// Remove multiple episodes from all shared collections (for feed deletion)
+    func removeEpisodesFromSharedCollections(episodeIds: [String]) {
+        print("📡 🧹 Removing \(episodeIds.count) episodes from CloudKit shared collections")
+        
+        for episodeId in episodeIds {
+            // Remove from all shared collections
+            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodeProgress, episodeId: episodeId)
+            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodeFavorites, episodeId: episodeId)
+            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodeDownloads, episodeId: episodeId)
+            removeEpisodeFromSharedCollection(key: SharedDataKeys.episodePlayed, episodeId: episodeId)
+        }
+        
+        print("📡 ✅ Removed \(episodeIds.count) episodes from CloudKit shared collections")
+    }
+    
+    /// Delete episode states from CloudKit database for specific episodes (batch operation)
+    func deleteEpisodeStatesFromCloudKit(episodeIds: [String]) async {
+        print("📡 🗑️ Starting CloudKit database deletion for \(episodeIds.count) episode states")
+        
+        guard !episodeIds.isEmpty else {
+            print("📡 ⚠️ No episode IDs provided for CloudKit deletion")
+            return
+        }
+        
+        var recordIDsToDelete: [CKRecord.ID] = []
+        
+        // Process episodes in batches to avoid query size limits
+        let batchSize = 100
+        let batches = episodeIds.chunked(into: batchSize)
+        
+        for (batchIndex, batch) in batches.enumerated() {
+            print("📡 🔍 Processing batch \(batchIndex + 1)/\(batches.count): \(batch.count) episodes")
+            
+            // Query for records matching these episode IDs
+            let predicate = NSPredicate(format: "episodeId IN %@", batch)
+            let query = CKQuery(recordType: RecordType.episodeState, predicate: predicate)
+            
+            do {
+                let (matchResults, _) = try await privateDatabase.records(matching: query)
+                
+                for (recordID, recordResult) in matchResults {
+                    switch recordResult {
+                    case .success(let record):
+                        recordIDsToDelete.append(record.recordID)
+                        if let episodeId = record["episodeId"] as? String {
+                            print("📡 🗑️ Found episode state to delete: \(episodeId)")
+                        }
+                    case .failure(let error):
+                        print("📡 ⚠️ Failed to process episode state record \(recordID.recordName): \(error.localizedDescription)")
+                    }
+                }
+            } catch {
+                print("📡 ❌ Failed to query episode states for batch \(batchIndex + 1): \(error.localizedDescription)")
+            }
+        }
+        
+        // Delete the found records in batches
+        if !recordIDsToDelete.isEmpty {
+            print("📡 🗑️ Deleting \(recordIDsToDelete.count) episode state records from CloudKit")
+            do {
+                try await deleteRecordsInBatches(recordIDsToDelete)
+                print("📡 ✅ Successfully deleted \(recordIDsToDelete.count) episode states from CloudKit database")
+            } catch {
+                print("📡 ❌ Failed to delete episode states from CloudKit database: \(error.localizedDescription)")
+            }
+        } else {
+            print("📡 📊 No episode state records found in CloudKit database for the provided episodes")
+        }
     }
     
     /// Diagnostic method to help troubleshoot account validation issues

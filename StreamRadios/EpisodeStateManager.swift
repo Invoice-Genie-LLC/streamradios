@@ -1936,6 +1936,53 @@ class EpisodeStateManager: ObservableObject {
         print("🗑️ EpisodeStateManager: Cleared all data for episode \(episodeId)")
     }
     
+    /// Clear all data for multiple episodes in batch (optimized for feed deletion)
+    func clearEpisodeDataBatch(_ episodeIds: [String]) {
+        guard !episodeIds.isEmpty else { return }
+        
+        print("🗑️ EpisodeStateManager: Starting batch clear for \(episodeIds.count) episodes")
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        var clearedCount = 0
+        var backupsCleared = 0
+        
+        // Clear all data in batches without saving after each operation
+        for episodeId in episodeIds {
+            // Remove from all dictionaries
+            episodeStates.removeValue(forKey: episodeId)
+            episodeProgress.removeValue(forKey: episodeId)
+            episodeFavorites.removeValue(forKey: episodeId)
+            episodeDownloads.removeValue(forKey: episodeId)
+            episodeCurrentTime.removeValue(forKey: episodeId)
+            
+            // Clear currently playing if this is the episode
+            if currentlyPlayingEpisodeId == episodeId {
+                currentlyPlayingEpisodeId = nil
+            }
+            
+            clearedCount += 1
+        }
+        
+        // Clear backup files in batch
+        for episodeId in episodeIds {
+            clearEpisodeBackup(episodeId)
+            backupsCleared += 1
+        }
+        
+        // Save only once at the end
+        saveCurrentStates()
+        sendThrottledUpdate()
+        
+        let endTime = CFAbsoluteTimeGetCurrent()
+        let duration = endTime - startTime
+        
+        print("🗑️ EpisodeStateManager: Batch clear completed:")
+        print("🗑️   ✅ Cleared \(clearedCount) episode states")
+        print("🗑️   ✅ Cleared \(backupsCleared) backup files")
+        print("🗑️   ⏱️ Duration: \(String(format: "%.3f", duration)) seconds")
+        print("🗑️   🚀 Performance: \(String(format: "%.1f", Double(clearedCount) / duration)) episodes/second")
+    }
+    
     func clearAllStates() {
         episodeStates.removeAll()
         episodeProgress.removeAll()

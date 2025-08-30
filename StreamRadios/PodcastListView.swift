@@ -47,6 +47,9 @@ struct PodcastListView: View {
     
     // PERFORMANCE: Memoized filtered podcasts to avoid expensive recomputation
     @State private var cachedFilteredPodcasts: [PodcastFeed] = []
+    
+    // Animation state for deletion progress overlay
+    @State private var animationScale: CGFloat = 1.0
     @State private var lastSearchText: String = ""
     @State private var lastPodcastFeedsCount: Int = 0
     
@@ -730,6 +733,75 @@ struct PodcastListView: View {
             } message: { podcast in
                 Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
             }
+            .overlay(
+                // Feed Deletion Progress Overlay
+                Group {
+                    if viewModel.isDeletingFeed {
+                        ZStack {
+                            // Semi-transparent background
+                            Color.black.opacity(0.4)
+                                .ignoresSafeArea()
+                            
+                            // Progress card
+                            VStack(spacing: 16) {
+                                // Title
+                                Text("Deleting Podcast")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.primary)
+                                
+                                // Progress bar
+                                VStack(spacing: 8) {
+                                    ProgressView(value: viewModel.feedDeletionProgress, total: 1.0)
+                                        .progressViewStyle(LinearProgressViewStyle(tint: .red))
+                                        .scaleEffect(y: 2.0) // Make the progress bar thicker
+                                    
+                                    // Progress percentage
+                                    Text("\(Int(viewModel.feedDeletionProgress * 100))%")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                // Current operation message
+                                Text(viewModel.feedDeletionMessage)
+                                    .font(.body)
+                                    .multilineTextAlignment(.center)
+                                    .foregroundColor(.primary)
+                                    .padding(.horizontal)
+                                
+                                // Animated activity indicator
+                                if viewModel.feedDeletionProgress < 1.0 {
+                                    HStack(spacing: 4) {
+                                        ForEach(0..<3) { index in
+                                            Circle()
+                                                .fill(Color.red)
+                                                .frame(width: 8, height: 8)
+                                                .scaleEffect(animationScale)
+                                                .animation(
+                                                    Animation.easeInOut(duration: 0.6)
+                                                        .repeatForever()
+                                                        .delay(Double(index) * 0.2),
+                                                    value: animationScale
+                                                )
+                                        }
+                                    }
+                                    .onAppear {
+                                        animationScale = 1.5
+                                    }
+                                }
+                            }
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemBackground))
+                                    .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
+                            )
+                            .padding(.horizontal, 32)
+                        }
+                    }
+                }
+            )
         }
         .background(
             Color.clear

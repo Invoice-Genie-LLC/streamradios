@@ -70,7 +70,10 @@ class RadioStationCloudKitManager: ObservableObject {
         
         // Filter out podcast-related keys early to prevent processing
         let radioKeys = keys.filter { key in
-            !key.hasPrefix("instant_podcast_") && !key.hasPrefix("StreamRadios_Episode")
+            !key.hasPrefix("instant_podcast_") && 
+            !key.hasPrefix("StreamRadios_Episode") && 
+            !key.hasPrefix("podcast_episodes_") &&
+            !key.contains("podcast")
         }
         
         // Only process if we have radio-related keys
