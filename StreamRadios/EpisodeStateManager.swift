@@ -1386,10 +1386,17 @@ class EpisodeStateManager: ObservableObject {
             }
         }
         
-        // Reset the episode to beginning and start playing
+        // CRITICAL FIX: Reset the episode to beginning and clear any previous played state
+        // This ensures the episode can play from beginning without immediately completing
         episodeStates[episodeId] = .playing
         episodeProgress[episodeId] = 0.0
         currentlyPlayingEpisodeId = episodeId
+        
+        // REWIND FIX: Clear any existing completion flags that might cause immediate completion
+        // Remove any stale progress data that could interfere with playback
+        episodeCurrentTime[episodeId] = 0.0
+        
+        print("🔄 REWIND AND PLAY: Reset episode \(episodeId) to playing state with 0.0 progress")
         
         saveCurrentStates()
         sendThrottledUpdate()
@@ -1406,11 +1413,14 @@ class EpisodeStateManager: ObservableObject {
         if progress > 0 {
             // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
             let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
+            let isRewindProtected = PodcastPlayer.shared.isInRewindProtectionPeriod()
             
-            // PROGRESS PROTECTION: Only update if progress moves forward, unless in chapter protection
-            if progress >= existingProgress || isChapterProtected {
+            // PROGRESS PROTECTION: Only update if progress moves forward, unless in chapter or rewind protection
+            if progress >= existingProgress || isChapterProtected || isRewindProtected {
                 if isChapterProtected && progress < existingProgress {
                     print("🎯 UPDATE CHAPTER PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - chapter seek override")
+                } else if isRewindProtected && progress < existingProgress {
+                    print("🔄 UPDATE REWIND PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - rewind override")
                 }
                 shouldUpdateProgress = true
                 episodeProgress[episodeId] = progress
@@ -1450,11 +1460,47 @@ class EpisodeStateManager: ObservableObject {
         if isPlaying {
             newState = .playing
             currentlyPlayingEpisodeId = episodeId
-        } else if existingState == .played {
-            // CRITICAL: Preserve explicitly set played state regardless of progress
-            newState = .played
+        } else if existingState == .played && effectiveProgress < 1.0 {
+            // REWIND FIX: If episode was played but progress is now < 1.0, allow state change
+            // This happens when an episode is rewound from a completed state
+            if effectiveProgress > 0 {
+                newState = .inProgress
+                print("🔄 REWIND PROGRESS: Episode \(episodeId) was played but progress < 1.0, changing to inProgress")
+            } else {
+                newState = .new
+                print("🔄 REWIND PROGRESS: Episode \(episodeId) was played but progress = 0.0, changing to new")
+            }
             currentlyPlayingEpisodeId = nil
-            print("💾 PLAYED STATE: Preserving existing played state for episode \(episodeId)")
+        } else if existingState == .played {
+            // REWIND PROTECTION: Don't preserve played state during rewind operations
+            let isRewindProtected = PodcastPlayer.shared.isEpisodeInRewindProtectionPeriod(episodeId)
+            
+            if isRewindProtected {
+                // During rewind protection, allow state changes even for played episodes
+                print("🔄 REWIND PROTECTION: Active protection detected for episode \(episodeId) - progress: \(String(format: "%.4f", effectiveProgress))")
+                if isPlaying {
+                    newState = .playing
+                    currentlyPlayingEpisodeId = episodeId
+                    print("🔄 REWIND PROTECTION: Episode now playing during rewind period")
+                } else if effectiveProgress >= 1.0 {
+                    newState = .played
+                    currentlyPlayingEpisodeId = nil
+                    print("🔄 REWIND PROTECTION: Episode completed during rewind period")
+                } else if effectiveProgress > 0 {
+                    newState = .inProgress
+                    currentlyPlayingEpisodeId = nil
+                    print("🔄 REWIND PROTECTION: Episode in progress during rewind period (progress: \(String(format: "%.2f", effectiveProgress * 100))%)")
+                } else {
+                    newState = .new
+                    currentlyPlayingEpisodeId = nil
+                    print("🔄 REWIND PROTECTION: Episode reset to new during rewind period")
+                }
+            } else {
+                // CRITICAL: Preserve explicitly set played state regardless of progress
+                newState = .played
+                currentlyPlayingEpisodeId = nil
+                print("💾 PLAYED STATE: Preserving existing played state for episode \(episodeId) (not in rewind protection)")
+            }
         } else if effectiveProgress >= 1.0 {
             newState = .played
             currentlyPlayingEpisodeId = nil
@@ -1484,18 +1530,23 @@ class EpisodeStateManager: ObservableObject {
         // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
         let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
         
-        // PROGRESS PROTECTION: Never allow progress to go backwards, unless in chapter protection
+        // REWIND PROTECTION: Check if we're in rewind protection period
+        let isRewindProtected = PodcastPlayer.shared.isInRewindProtectionPeriod()
+        
+        // PROGRESS PROTECTION: Never allow progress to go backwards, unless in chapter or rewind protection
         let existingProgress = episodeProgress[episodeId] ?? 0.0
         let finalProgress: Double
         
-        if progress < existingProgress && !isChapterProtected {
+        if progress < existingProgress && !isChapterProtected && !isRewindProtected {
             print("🛡️ PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
             finalProgress = existingProgress // Keep the higher progress
         } else {
             if isChapterProtected && progress < existingProgress {
                 print("🎯 CHAPTER PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - chapter seek override")
+            } else if isRewindProtected && progress < existingProgress {
+                print("🔄 REWIND PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - rewind override")
             }
-            finalProgress = progress // Allow forward progress, same value, or chapter backward progress
+            finalProgress = progress // Allow forward progress, same value, chapter backward progress, or rewind backward progress
         }
         
         episodeProgress[episodeId] = finalProgress
@@ -2093,18 +2144,23 @@ extension EpisodeStateManager {
         // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
         let isChapterProtected = PodcastPlayer.shared.isInChapterProtectionPeriod()
         
-        // PROGRESS PROTECTION: Never allow progress to go backwards, even from CloudKit, unless in chapter protection
+        // REWIND PROTECTION: Check if we're in rewind protection period
+        let isRewindProtected = PodcastPlayer.shared.isInRewindProtectionPeriod()
+        
+        // PROGRESS PROTECTION: Never allow progress to go backwards, even from CloudKit, unless in chapter or rewind protection
         let existingProgress = episodeProgress[episodeId] ?? 0.0
         let finalProgress: Double
         
-        if progress < existingProgress && !isChapterProtected {
+        if progress < existingProgress && !isChapterProtected && !isRewindProtected {
             print("🛡️ CLOUDKIT PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
             finalProgress = existingProgress // Keep the higher progress
         } else {
             if isChapterProtected && progress < existingProgress {
                 print("🎯 CLOUDKIT CHAPTER PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - chapter seek override")
+            } else if isRewindProtected && progress < existingProgress {
+                print("🔄 CLOUDKIT REWIND PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - rewind override")
             }
-            finalProgress = progress // Allow forward progress, same value, or chapter backward progress
+            finalProgress = progress // Allow forward progress, same value, chapter backward progress, or rewind backward progress
         }
         
         episodeProgress[episodeId] = finalProgress

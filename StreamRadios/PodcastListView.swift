@@ -1384,11 +1384,18 @@ struct EpisodeRowView: View {
                 let currentProgress = podcastPlayer.getCurrentProgress(for: episode)
                 
                 Button(action: {
+                    print("🔄 BUTTON DEBUG 1: Play/Rewind button pressed for episode: \(episode.title)")
+                    print("🔄 BUTTON DEBUG 1: episode.id = \(episode.id)")
+                    print("🔄 BUTTON DEBUG 1: episode.state.isPlayed = \(episode.state.isPlayed), currentProgress = \(currentProgress)")
+                    print("🔄 BUTTON DEBUG 1: episode.state = \(episode.state)")
                     if episode.state.isPlayed || currentProgress >= 0.99 {
+                        print("🔄 BUTTON DEBUG 1: Calling rewindAndPlay for episode: \(episode.title)")
                         podcastPlayer.rewindAndPlay(episode: episode)
                     } else if isPlaying {
+                        print("🔄 BUTTON DEBUG 1: Calling onStop for episode: \(episode.title)")
                         onStop()
                     } else {
+                        print("🔄 BUTTON DEBUG 1: Calling onPlay for episode: \(episode.title)")
                         onPlay()
                     }
                 }) {
@@ -1396,7 +1403,7 @@ struct EpisodeRowView: View {
                         if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
                             // Show spinning loading state
                             Image(systemName: "arrow.2.circlepath")
-                                .font(.title2)
+                                .font(.title)
                                 .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
                                 .foregroundColor(.blue)
                                 .rotationEffect(.degrees(360))
@@ -1405,12 +1412,15 @@ struct EpisodeRowView: View {
                             // Regular play/pause/replay button
                             Image(systemName: episode.state.isPlayed || currentProgress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
                                 .resizable()
-                                .frame(width: buttonSize, height: buttonSize)
+                                .frame(width: buttonSize + 6, height: buttonSize + 6) // Larger visual button
                                 .foregroundColor(episode.state.isPlayed || currentProgress >= 0.99 ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
                         }
                     }
+                    .padding(8) // Add padding for larger tap area
+                    .background(Color.clear) // Invisible background to catch taps
+                    .contentShape(Rectangle()) // Ensure entire area is tappable
                 }
-                .frame(width: 44, height: 44) // Fixed play button area
+                .frame(width: 60, height: 60) // Larger tap area (was 44x44)
                 .padding(.top, 2) // Align with first line of text
                 
                 // COLUMN 2: Episode info (Flexible width with intelligent truncation)
@@ -3065,13 +3075,29 @@ struct PodcastPlayerView: View {
         if podcastPlayer.currentEpisode?.id == episode.id {
             // Check the specific episode's progress, not the current player's progress
             let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
+            print("🔄 BUTTON DEBUG 2: Current episode tap - episode.state.isPlayed = \(episode.state.isPlayed), episodeProgress = \(episodeProgress)")
+            print("🔄 BUTTON DEBUG 2: episode.id = \(episode.id)")
+            print("🔄 BUTTON DEBUG 2: episode.state = \(episode.state)")
             if episode.state.isPlayed || episodeProgress >= 0.99 {
+                print("🔄 BUTTON DEBUG 2: Calling rewindAndPlay for current episode: \(episode.title)")
                 podcastPlayer.rewindAndPlay(episode: episode)
             } else {
+                print("🔄 BUTTON DEBUG 2: Calling togglePlayPause for episode: \(episode.title)")
                 podcastPlayer.togglePlayPause()
             }
         } else {
-            podcastPlayer.playEpisode(episode, feed: feed)
+            // Check if this different episode is finished and should be rewound
+            let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
+            print("🔄 BUTTON DEBUG 2: Different episode tap - episode.state.isPlayed = \(episode.state.isPlayed), episodeProgress = \(episodeProgress)")
+            print("🔄 BUTTON DEBUG 2: episode.id = \(episode.id)")
+            print("🔄 BUTTON DEBUG 2: episode.state = \(episode.state)")
+            if episode.state.isPlayed || episodeProgress >= 0.99 {
+                print("🔄 BUTTON DEBUG 2: Calling rewindAndPlay for finished episode: \(episode.title)")
+                podcastPlayer.rewindAndPlay(episode: episode)
+            } else {
+                print("🔄 BUTTON DEBUG 2: Playing different episode normally: \(episode.title)")
+                podcastPlayer.playEpisode(episode, feed: feed)
+            }
         }
     }
 }

@@ -820,6 +820,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     // PERFORMANCE: Removed old method, now using isUserScrolling property directly
     
     func rewindAndPlay(episode: PodcastEpisode) {
+        print("🔄 REWIND DEBUG: rewindAndPlay called for episode: \(episode.title)")
         // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps rewind and play
         loadingEpisodeId = episode.id
         
@@ -835,6 +836,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     private func performRewindAndPlay(episode: PodcastEpisode, feed: PodcastFeed) {
+        print("🔄 REWIND DEBUG: performRewindAndPlay called for episode: \(episode.title)")
+        // REWIND PROTECTION: Set rewind protection time and episode ID to allow progress reset
+        lastRewindTime = Date()
+        lastRewindEpisodeId = episode.id
+        print("🔄 REWIND PROTECTION: Started rewind protection period for episode \(episode.id) for \(rewindProtectionInterval) seconds")
+        os_log("🔄 REWIND PROTECTION: Started rewind protection period for episode %@ for %.1f seconds", log: log, type: .info, episode.id, rewindProtectionInterval)
         
         if currentEpisode?.id == episode.id {
             // Same episode - rewind to beginning and play
@@ -842,32 +849,49 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             currentTime = 0
             currentProgress = 0
             
+            // CRITICAL FIX: Use rewindAndPlay to properly reset episode state
+            // This method handles all the necessary state resets including played status
+            stateManager.rewindAndPlay(episodeId: episode.id)
+            
             // Reset progress in view model by updating cache directly
             Task { @MainActor in
                 viewModel?.episodeProgress[episode.id] = 0.0
                 
-                // CONDITIONAL SYNC FIX: Use direct state manager update for rewind to avoid triggering real-time sync
-                // Rewind operations should not trigger CloudKit sync - only local state update
-                stateManager.setProgress(for: episode.id, progress: 0.0) // Local only, no sync
+                // REWIND CORE DATA FIX: Always reset isPlayed state in both EpisodeStateManager and Core Data
+                // This ensures the episode shows as unplayed in all parts of the system
+                viewModel?.updateEpisodeState(episode.id, progress: 0.0, isPlayed: false)
+                
+                // CORE DATA IMMEDIATE SYNC: Force immediate Core Data sync for the rewound episode
+                // This ensures the Core Data state is updated right away, not just in memory
+                Task.detached(priority: .userInitiated) {
+                    let episodeStates = [episode.id: EpisodeState(
+                        isPlayed: false,
+                        isFavorite: EpisodeStateManager.shared.isFavorite(episode.id),
+                        progress: 0.0,
+                        isDownloaded: EpisodeStateManager.shared.isDownloaded(episode.id)
+                    )]
+                    
+                    do {
+                        try await PodcastCoreDataManager.shared.syncEpisodeStates(episodeStates)
+                        os_log("✅ REWIND: Core Data synced for episode %@", log: self.log, type: .info, episode.id)
+                    } catch {
+                        os_log("❌ REWIND: Core Data sync failed for episode %@: %@", log: self.log, type: .error, episode.id, error.localizedDescription)
+                    }
+                }
             }
             
-            // Update state manager
-            stateManager.rewindAndPlay(episodeId: episode.id)
+            // IMMEDIATE PLAYBACK FIX: Ensure playback starts immediately for finished episodes
+            if !isPlaying {
+                play()
+            }
             
-            // Start playing
-            play()
-            
-            os_log("Rewound and playing episode: %@", log: log, type: .info, episode.title)
+            os_log("Rewound and playing episode: %@ - reset from finished state", log: log, type: .info, episode.title)
         } else {
             // Different episode - but this was called from rewindAndPlay, so the user wants to restart this episode too
             // Force start from beginning since rewindAndPlay was explicitly called
             shouldStartFromBeginning = true
-            if let currentFeed = currentFeed {
-                playEpisode(episode, feed: currentFeed)
-                os_log("Loaded different episode with rewind - starting from beginning: %@", log: log, type: .info, episode.title)
-            } else {
-                os_log("❌ No current feed available for rewindAndPlay", log: log, type: .error)
-            }
+            playEpisode(episode, feed: feed)
+            os_log("Loaded different episode with rewind - starting from beginning: %@", log: log, type: .info, episode.title)
         }
         
         isPlaying = true
@@ -1313,11 +1337,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if shouldStartFromBeginning {
             os_log("Replay requested - starting from the beginning", log: log, type: .info)
             await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-            currentTime = 0
-            currentProgress = 0
-            shouldStartFromBeginning = false  // Reset the flag
-            hasRestoredPositionForCurrentEpisode = true
-            currentEpisodeIdForRestoration = currentEpisode.id
+            
+            // MAIN THREAD FIX: Update @Published properties on main thread
+            await MainActor.run {
+                currentTime = 0
+                currentProgress = 0
+                shouldStartFromBeginning = false  // Reset the flag
+                hasRestoredPositionForCurrentEpisode = true
+                currentEpisodeIdForRestoration = currentEpisode.id
+            }
+            
             // Update Now Playing info immediately with correct elapsed time
             updateNowPlayingInfo()
             return
@@ -1678,11 +1707,45 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private var lastChapterSeekTime: Date?
     private let chapterSeekProtectionInterval: TimeInterval = 5.0 // 5 seconds protection
     
+    // Track when we last did a rewind to prevent progress protection from blocking
+    private var lastRewindTime: Date?
+    private var lastRewindEpisodeId: String?
+    private let rewindProtectionInterval: TimeInterval = 10.0 // 10 seconds protection (extended for CloudKit sync)
+    
     /// Check if we're currently in the chapter protection period
     func isInChapterProtectionPeriod() -> Bool {
         guard let lastSeekTime = lastChapterSeekTime else { return false }
         let now = Date()
         return now.timeIntervalSince(lastSeekTime) < chapterSeekProtectionInterval
+    }
+    
+    /// Check if we're currently in the rewind protection period
+    func isInRewindProtectionPeriod() -> Bool {
+        guard let lastRewindTime = lastRewindTime else { 
+            os_log("🔄 REWIND PROTECTION CHECK: No rewind time set", log: log, type: .debug)
+            return false 
+        }
+        let now = Date()
+        let timeSinceRewind = now.timeIntervalSince(lastRewindTime)
+        let isProtected = timeSinceRewind < rewindProtectionInterval
+        os_log("🔄 REWIND PROTECTION CHECK: Time since rewind: %.2f seconds, protected: %@", log: log, type: .debug, timeSinceRewind, isProtected ? "YES" : "NO")
+        return isProtected
+    }
+    
+    /// Check if a specific episode is currently in the rewind protection period
+    func isEpisodeInRewindProtectionPeriod(_ episodeId: String) -> Bool {
+        guard let lastRewindTime = lastRewindTime,
+              let lastRewindEpisodeId = lastRewindEpisodeId,
+              lastRewindEpisodeId == episodeId else { 
+            print("🔄 REWIND PROTECTION CHECK (Episode \(episodeId)): No protection set or different episode")
+            return false 
+        }
+        let now = Date()
+        let timeSinceRewind = now.timeIntervalSince(lastRewindTime)
+        let isProtected = timeSinceRewind < rewindProtectionInterval
+        print("🔄 REWIND PROTECTION CHECK (Episode \(episodeId)): Time since rewind: \(String(format: "%.2f", timeSinceRewind)) seconds, protected: \(isProtected ? "YES" : "NO")")
+        os_log("🔄 REWIND PROTECTION CHECK (Episode %@): Time since rewind: %.2f seconds, protected: %@", log: log, type: .debug, episodeId, timeSinceRewind, isProtected ? "YES" : "NO")
+        return isProtected
     }
     
     func seek(to time: Double) {
