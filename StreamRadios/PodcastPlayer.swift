@@ -685,8 +685,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         os_log("✅ Remote Command Center configured for Podcast - Skip Forward/Backward enabled, Station navigation disabled", log: log, type: .info)
     }
     
-    private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
-            guard let viewModel = viewModel else {
+        private func loadAllEpisodesForFeed(_ feed: PodcastFeed) {
+        guard let viewModel = viewModel else {
                 os_log("ViewModel is not set", log: log, type: .error)
                 return
             }
@@ -695,6 +695,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 allEpisodesInFeed = viewModel.allEpisodes.filter { $0.feedId == feed.id }
                 allEpisodesInFeed.sort { $0.publicationDate > $1.publicationDate } // Sort by newest first
                 os_log("Loaded %d episodes for feed: %{public}@", log: log, type: .info, allEpisodesInFeed.count, feed.title)
+                
+                // Update currentEpisodeIndex after episodes are loaded
+                if let currentEpisode = currentEpisode {
+                    updateCurrentEpisodeIndex(for: currentEpisode)
+                }
                 
                 // Verify that all episodes are loaded
                 if allEpisodesInFeed.isEmpty {
@@ -714,6 +719,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     case .success(let episodes):
                         self.allEpisodesInFeed = episodes.sorted { $0.publicationDate > $1.publicationDate }
                         os_log("Fetched and sorted %d episodes for feed: %{public}@", log: self.log, type: .info, self.allEpisodesInFeed.count, feed.title)
+                        
+                        // Update currentEpisodeIndex after fetching episodes
+                        if let currentEpisode = self.currentEpisode {
+                            self.updateCurrentEpisodeIndex(for: currentEpisode)
+                        }
+                        
                         DispatchQueue.main.async {
                             self.objectWillChange.send()
                         }
@@ -723,6 +734,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 }
             }
         }
+    
+    private func updateCurrentEpisodeIndex(for episode: PodcastEpisode) {
+        if let index = allEpisodesInFeed.firstIndex(where: { $0.id == episode.id }) {
+            currentEpisodeIndex = index
+            os_log("Set current episode index to %d", log: log, type: .info, index)
+        } else {
+            os_log("Failed to find index for current episode", log: log, type: .error)
+            currentEpisodeIndex = nil
+        }
+    }
     
     func skipToNextEpisode() {
             os_log("Attempting to skip to next episode", log: log, type: .info)
@@ -1084,13 +1105,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Reset CarPlay progress tracking for new episode
         lastCarPlayProgress = nil
         
-        // Update currentEpisodeIndex
-        if let index = allEpisodesInFeed.firstIndex(where: { $0.id == episode.id }) {
-            currentEpisodeIndex = index
-            os_log("Set current episode index to %d", log: log, type: .info, index)
-        } else {
-            os_log("Failed to find index for current episode", log: log, type: .error)
-        }
+        // Update currentEpisodeIndex (this will be updated again when episodes load asynchronously)
+        updateCurrentEpisodeIndex(for: episode)
         
         // Initialize progress from Core Data first (primary source), then sync with CloudKit in background
         if !shouldStartFromBeginning {
