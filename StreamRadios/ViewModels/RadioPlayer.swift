@@ -2169,6 +2169,97 @@ class RadioPlayer: NSObject, ObservableObject {
         return (fallbackArtist, trimmed)
     }
     
+    /// Cleans HTML/XML metadata to extract readable song information
+    private func cleanHTMLMetadata(_ rawMetadata: String) -> String {
+        var cleaned = rawMetadata
+        
+        print("🧹 Cleaning HTML metadata: '\(rawMetadata)'")
+        
+        // Extract readable information from HTML/XML attributes
+        var extractedParts: [String] = []
+        
+        // Extract text attribute (usually song title)
+        if let textMatch = cleaned.range(of: #"text="([^"]+)""#, options: .regularExpression) {
+            let textValue = String(cleaned[textMatch]).replacingOccurrences(of: #"text=""#, with: "").replacingOccurrences(of: #"""#, with: "")
+            if !textValue.isEmpty && textValue != "M" && textValue != "-1" {
+                extractedParts.append(textValue)
+                print("🧹 Extracted text: '\(textValue)'")
+            }
+        }
+        
+        // Extract artist information (often appears after the last dash or as standalone text)
+        let lines = cleaned.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Skip lines with HTML/XML attributes or URLs
+            if trimmedLine.contains("=") || 
+               trimmedLine.contains("http") || 
+               trimmedLine.contains("<") || 
+               trimmedLine.contains(">") ||
+               trimmedLine.contains("TAID") ||
+               trimmedLine.contains("MediaBaseId") ||
+               trimmedLine.contains("cartcutId") ||
+               trimmedLine.contains("spotInstanceId") ||
+               trimmedLine.isEmpty {
+                continue
+            }
+            
+            // This might be artist or album information
+            if trimmedLine.count > 2 && !trimmedLine.contains("/") {
+                extractedParts.append(trimmedLine)
+                print("🧹 Extracted artist/album: '\(trimmedLine)'")
+            }
+        }
+        
+        // Remove common HTML entities and cleanup
+        cleaned = cleaned
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+        
+        // Remove HTML/XML tags
+        cleaned = cleaned.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        
+        // Remove attribute-value pairs (key="value")
+        cleaned = cleaned.replacingOccurrences(of: #"\w+="[^"]*""#, with: "", options: .regularExpression)
+        
+        // Remove URLs
+        cleaned = cleaned.replacingOccurrences(of: #"https?://[^\s]+"#, with: "", options: .regularExpression)
+        
+        // Remove technical IDs and codes
+        cleaned = cleaned.replacingOccurrences(of: #"\b\d{5,}\b"#, with: "", options: .regularExpression)
+        
+        // If we extracted meaningful parts, use them instead
+        if extractedParts.count >= 2 {
+            // Try to identify artist and title
+            let result = extractedParts.joined(separator: " - ")
+            print("🧹 ✅ Using extracted parts: '\(result)'")
+            return result
+        } else if extractedParts.count == 1 {
+            let result = extractedParts[0]
+            print("🧹 ✅ Using single extracted part: '\(result)'")
+            return result
+        }
+        
+        // Clean up remaining text
+        cleaned = cleaned
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !$0.contains("=") && !$0.contains("http") }
+            .first ?? ""
+        
+        // Final cleanup
+        cleaned = cleaned
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        
+        print("🧹 ✅ Final cleaned result: '\(cleaned)'")
+        return cleaned
+    }
+    
     private func parseComplexMetadata(_ metadata: String) -> (artist: String?, track: String?, album: String?) {
         var artist: String?
         var track: String?
@@ -3610,22 +3701,27 @@ class RadioPlayer: NSObject, ObservableObject {
                 print("🔍 📻 Using GENERIC from timed metadata: '\(firstGeneric)'")
             }
             
-            if let metadata = finalMetadata {
-                print("🔍 Found current metadata: \(metadata)")
+            if let rawMetadata = finalMetadata {
+                print("🔍 Found current metadata: \(rawMetadata)")
                 
-                // Update metadata (artwork will only come from Shazam)
-                DispatchQueue.main.async { [weak self] in
-                    self?.metadata = metadata
-                    // No iTunes artwork fetch - artwork only comes from Shazam
-                    print("📻 Metadata found: \(metadata) - triggering immediate Shazam recognition")
-                    // Trigger immediate Shazam recognition for detected metadata
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                        self?.attemptShazamRecognition()
+                // Clean up HTML/XML metadata
+                let cleanedMetadata = self.cleanHTMLMetadata(rawMetadata)
+                
+                if !cleanedMetadata.isEmpty {
+                    // Update metadata (artwork will only come from Shazam)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.metadata = cleanedMetadata
+                        // No iTunes artwork fetch - artwork only comes from Shazam
+                        print("📻 Metadata found: \(cleanedMetadata) - triggering immediate Shazam recognition")
+                        // Trigger immediate Shazam recognition for detected metadata
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                            self?.attemptShazamRecognition()
+                        }
+                        self?.updateNowPlayingInfo()
+                        self?.updateWidget()
                     }
-                    self?.updateNowPlayingInfo()
-                    self?.updateWidget()
+                    return
                 }
-                return
             }
         }
         
@@ -4134,8 +4230,16 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
             print("🎵 📻 Using GENERIC metadata: '\(firstGeneric)'")
         }
         
-        guard let value = finalMetadata else {
+        guard let rawValue = finalMetadata else {
             print("🎵 ❌ No usable metadata found in \(groups.count) groups")
+            return
+        }
+        
+        // Clean up HTML/XML metadata to extract readable song information
+        let value = cleanHTMLMetadata(rawValue)
+        
+        if value.isEmpty {
+            print("🎵 ❌ No readable metadata after HTML cleanup from: '\(rawValue)'")
             return
         }
         
