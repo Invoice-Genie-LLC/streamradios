@@ -864,8 +864,16 @@ struct RadioStationListView: View {
         if !searchText.isEmpty {
             let allStations = viewModel.stations
             let filtered = allStations.filter { station in
-                station.name.localizedCaseInsensitiveContains(searchText) ||
-                station.country.localizedCaseInsensitiveContains(searchText)
+                // Only show stations with valid country information
+                let hasValidCountry = !station.country.isEmpty && 
+                                    station.country != "Unknown Region" && 
+                                    station.country != "Select Country" &&
+                                    !station.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                
+                let matchesSearch = station.name.localizedCaseInsensitiveContains(searchText) ||
+                                  station.country.localizedCaseInsensitiveContains(searchText)
+                
+                return hasValidCountry && matchesSearch
             }
             // Recent tab maintains chronological order even when searching
             if selectedSubTab == .recent {
@@ -890,7 +898,14 @@ struct RadioStationListView: View {
             if viewModel.selectedCountry == "Select Country" {
                 stations = []
             } else {
-                stations = viewModel.stations.filter { $0.country == viewModel.selectedCountry }
+                stations = viewModel.stations.filter { station in
+                    // Filter by selected country and ensure valid country information
+                    let hasValidCountry = !station.country.isEmpty && 
+                                        station.country != "Unknown Region" && 
+                                        station.country != "Select Country" &&
+                                        !station.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    return station.country == viewModel.selectedCountry && hasValidCountry
+                }
                 // Sort alphabetically by name based on toggle setting
                 if viewModel.isAscendingSort {
                     stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }

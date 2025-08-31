@@ -2199,12 +2199,24 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // Final trim to ensure no trailing whitespace
                 cleanedName = cleanedName.trimmingCharacters(in: .whitespacesAndNewlines)
                 
+                // Use actual country from API if available, otherwise use selected country as fallback
+                // Never assign "Select Country" or other invalid country names to stations
+                let stationCountry: String
+                if let apiCountry = apiStation.country, !apiCountry.isEmpty && apiCountry.trimmingCharacters(in: .whitespacesAndNewlines) != "" {
+                    stationCountry = apiCountry.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else if country.name != "Select Country" && !country.name.isEmpty {
+                    stationCountry = country.name
+                } else {
+                    // Skip stations that don't have valid country information
+                    return nil
+                }
+                
                 return RadioStation(
                     id: apiStation.stationuuid,
                     name: cleanedName,
                     url: apiStation.url,
                     iconData: existingIconData, // Use cached favicon if available
-                    country: country.name,
+                    country: stationCountry,
                     isFavorite: false,
                     favoritedAt: nil,
                     favoriteOrder: nil,
