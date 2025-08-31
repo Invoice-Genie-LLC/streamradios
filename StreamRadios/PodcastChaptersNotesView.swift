@@ -164,8 +164,14 @@ struct PodcastChaptersNotesView: View {
                         ChapterRowView(
                             chapter: chapter,
                             isCurrentChapter: isCurrentChapter(chapter),
+                            progress: chapterProgress(for: chapter),
+                            durationText: formatChapterDuration(for: chapter),
+                            hasLink: chapterLinkURL(for: chapter) != nil,
                             onTap: {
                                 seekToChapter(chapter)
+                            },
+                            onLinkTap: {
+                                openChapterLink(chapter)
                             }
                         )
                     }
@@ -280,6 +286,71 @@ struct PodcastChaptersNotesView: View {
         
         // Optionally dismiss the sheet after seeking
         // isPresented = false
+    }
+    
+    private func chapterBounds(for chapter: PodcastChapter) -> (start: TimeInterval, end: TimeInterval) {
+        let chapters = (episode.chapters?.isEmpty == false ? episode.chapters! : fallbackChapters)
+        if let idx = chapters.firstIndex(where: { $0.id == chapter.id }) {
+            let nextStart = idx + 1 < chapters.count ? chapters[idx + 1].startTime : episode.duration
+            let start = max(0, chapter.startTime)
+            let end = max(start, nextStart)
+            return (start, end)
+        }
+        return (chapter.startTime, episode.duration)
+    }
+    
+    private func chapterProgress(for chapter: PodcastChapter) -> Double {
+        guard podcastPlayer.currentEpisode?.id == episode.id else { return 0 }
+        let (start, end) = chapterBounds(for: chapter)
+        let total = max(0.001, end - start)
+        let t = podcastPlayer.currentTime
+        if t <= start { return 0 }
+        if t >= end { return 1 }
+        return min(1, max(0, (t - start) / total))
+    }
+    
+    private func formatChapterDuration(for chapter: PodcastChapter) -> String {
+        let (start, end) = chapterBounds(for: chapter)
+        let seconds = Int(max(1, round(end - start)))
+        let minutes = Int(round(Double(seconds) / 60.0))
+        return "\(max(1, minutes))m"
+    }
+    
+    private func openChapterLink(_ chapter: PodcastChapter) {
+        // Prefer direct chapter URL; fallback to title/notes-derived URL inside this chapter's time window
+        if let direct = chapter.url, let url = URL(string: direct) { UIApplication.shared.open(url); return }
+        if let derived = chapterLinkURL(for: chapter), let url = URL(string: derived) { UIApplication.shared.open(url); return }
+    }
+    
+    private func hasValidURL(_ urlString: String?) -> Bool {
+        guard let s = urlString?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return false }
+        // Accept http/https only
+        if let u = URL(string: s), let scheme = u.scheme?.lowercased(), (scheme == "http" || scheme == "https") { return true }
+        return false
+    }
+
+    private func chapterLinkURL(for chapter: PodcastChapter) -> String? {
+        // 1) Direct chapter URL
+        if let url = chapter.url, hasValidURL(url) { return url }
+        // 2) Link found in notes within this chapter's time range
+        let (start, end) = chapterBounds(for: chapter)
+        if let links = episode.notes?.links, !links.isEmpty {
+            if let m = links.first(where: { l in
+                guard hasValidURL(l.url) else { return false }
+                if let ts = l.timeStamp { return ts >= start && ts < end }
+                return false
+            }) {
+                return m.url
+            }
+        }
+        // 3) URL embedded in the title text
+        let title = chapter.title
+        if let range = title.range(of: #"https?://\S+"#, options: .regularExpression) {
+            var raw = String(title[range])
+            raw = raw.trimmingCharacters(in: CharacterSet(charactersIn: ",.;)\"]"))
+            if hasValidURL(raw) { return raw }
+        }
+        return nil
     }
     
     private func formatTime(_ time: TimeInterval) -> String {
@@ -446,50 +517,65 @@ struct PodcastChaptersNotesView: View {
 struct ChapterRowView: View {
     let chapter: PodcastChapter
     let isCurrentChapter: Bool
+    let progress: Double
+    let durationText: String
+    let hasLink: Bool
     let onTap: () -> Void
+    let onLinkTap: () -> Void
     
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Chapter time
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(formatChapterTime(chapter.startTime))
-                        .font(.caption)
-                        .foregroundColor(isCurrentChapter ? .blue : .adaptiveSecondaryText)
-                        .monospacedDigit()
-                    
-                    if isCurrentChapter {
-                        Text("Current")
-                            .font(.caption2)
-                            .foregroundColor(.blue)
+            VStack(spacing: 6) {
+                HStack(spacing: 12) {
+                    // Chapter time
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(formatChapterTime(chapter.startTime))
+                            .font(.caption)
+                            .foregroundColor(isCurrentChapter ? .blue : .adaptiveSecondaryText)
+                            .monospacedDigit()
+                        if isCurrentChapter {
+                            Text("Current")
+                                .font(.caption2)
+                                .foregroundColor(.blue)
+                        }
                     }
-                }
-                .frame(width: 60, alignment: .leading)
-                
-                // Chapter content
-                VStack(alignment: .leading, spacing: 4) {
+                    .frame(width: 60, alignment: .leading)
+                    
+                    // Chapter title
                     Text(chapter.title)
                         .font(.body)
                         .foregroundColor(isCurrentChapter ? .blue : .adaptivePrimaryText)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     
-                    if let url = chapter.url {
-                        Text(url)
+                    // Trailing controls
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(durationText)
                             .font(.caption)
                             .foregroundColor(.adaptiveSecondaryText)
-                            .lineLimit(1)
+                            .monospacedDigit()
+                        HStack(spacing: 8) {
+                            if hasLink {
+                                Button(action: onLinkTap) {
+                                    Image(systemName: "link")
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .accessibilityLabel("Open chapter link")
+                            }
+                            if isCurrentChapter {
+                                Image(systemName: "play.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.blue)
+                            }
+                        }
                     }
                 }
-                
-                Spacer()
-                
-                // Play indicator
-                if isCurrentChapter {
-                    Image(systemName: "play.fill")
-                        .font(.caption)
-                        .foregroundColor(.blue)
-                }
+                // Progress bar
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(isCurrentChapter ? .blue : .adaptiveSecondaryText.opacity(0.5))
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)

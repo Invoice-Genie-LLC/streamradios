@@ -1161,10 +1161,15 @@ private class EpisodeBuilder {
         guard !content.isEmpty else { return (nil, []) }
         
         // Extract links from the content
-        let links = extractLinksFromHTML(content)
+        var links = extractLinksFromHTML(content)
         
         // Try to extract chapters from the content
-        let extractedChapters = parseChapters(from: content)
+        var extractedChapters = parseChapters(from: content)
+        
+        // Heuristically assign links to chapters and set timestamps on links
+        let (enrichedChapters, timestampedLinks) = enrichChaptersWithLinks(chapters: extractedChapters, links: links)
+        extractedChapters = enrichedChapters
+        links = timestampedLinks
         
         let notes = PodcastNotes(content: content, links: links)
         return (notes, extractedChapters)
@@ -1204,6 +1209,58 @@ private class EpisodeBuilder {
         }
         
         return links
+    }
+    
+    // MARK: - Chapter-Link Enrichment
+    
+    private func enrichChaptersWithLinks(chapters: [PodcastChapter], links: [PodcastLink]) -> ([PodcastChapter], [PodcastLink]) {
+        guard !chapters.isEmpty, !links.isEmpty else { return (chapters, links) }
+        // Build simple lookup of normalized chapter titles
+        func norm(_ s: String) -> String {
+            return s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var chapterByIndex: [Int: PodcastChapter] = [:]
+        for (idx, ch) in chapters.enumerated() { chapterByIndex[idx] = ch }
+        
+        // For each link, try to find the best matching chapter by title similarity, then assign link URL to that chapter if it lacks one
+        func score(_ linkTitle: String, _ chapterTitle: String) -> Int {
+            let a = norm(linkTitle)
+            let b = norm(chapterTitle)
+            if a == b { return 100 }
+            if a.isEmpty || b.isEmpty { return 0 }
+            if b.contains(a) { return 90 }
+            if a.contains(b) { return 80 }
+            // Token overlap
+            let at = Set(a.split{ !$0.isLetter && !$0.isNumber })
+            let bt = Set(b.split{ !$0.isLetter && !$0.isNumber })
+            let inter = at.intersection(bt)
+            return inter.count * 10
+        }
+        
+        var updatedChapters = chapters
+        var updatedLinks: [PodcastLink] = []
+        
+        for link in links {
+            var bestIndex: Int? = nil
+            var bestScore = 0
+            for (idx, ch) in chapters.enumerated() {
+                let s = score(link.title, ch.title)
+                if s > bestScore { bestScore = s; bestIndex = idx }
+            }
+            if let idx = bestIndex, bestScore >= 20 { // reasonable heuristic
+                // Assign link to chapter if chapter has no url yet
+                if updatedChapters[idx].url == nil || updatedChapters[idx].url?.isEmpty == true {
+                    updatedChapters[idx].url = link.url
+                }
+                // Also timestamp the link with the chapter start time if it doesn't already have one
+                var tsLink = link
+                if tsLink.timeStamp == nil { tsLink.timeStamp = updatedChapters[idx].startTime }
+                updatedLinks.append(tsLink)
+            } else {
+                updatedLinks.append(link)
+            }
+        }
+        return (updatedChapters, updatedLinks)
     }
     
     // MARK: - Chapter Parsing

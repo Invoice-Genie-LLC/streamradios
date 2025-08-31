@@ -522,8 +522,16 @@ struct RadioStationListView: View {
                         
                         // Show metadata if playing
                         if isCurrentlyPlaying {
-                            if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                                Text(metadata)
+                            if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
+                                Text("\(shazamTitle) — \(shazamArtist)")
+                                    .font(.caption)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                    .lineLimit(nil)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+                                let split = radioPlayer.splitArtistTitle(from: metadata, fallbackArtist: station.name, fallbackTitle: metadata)
+                                Text("\(split.title) — \(split.artist)")
                                     .font(.caption)
                                     .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(nil)

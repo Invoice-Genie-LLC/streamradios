@@ -602,8 +602,16 @@ struct StationDetails: View {
                         .lineLimit(2)
                         .padding(.horizontal, 16)
                     
-                    if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                        Text(metadata)
+                    if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
+                        Text("\(shazamTitle) — \(shazamArtist)")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                    } else if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+                        let split = radioPlayer.splitArtistTitle(from: metadata, fallbackArtist: currentStation.name, fallbackTitle: metadata)
+                        Text("\(split.title) — \(split.artist)")
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .foregroundColor(.secondary)

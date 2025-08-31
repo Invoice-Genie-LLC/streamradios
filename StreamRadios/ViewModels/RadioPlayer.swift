@@ -44,6 +44,8 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var albumArt: UIImage?
     @Published var metadata: String?
     @Published var iTunesAlbumArt: UIImage?
+    @Published var displayTitle: String?
+    @Published var displayArtist: String?
     @Published var isHandlingAlarm = false
     @Published var currentlyPlayingStation: RadioStation?
     @Published var alarmStation: RadioStation?
@@ -116,9 +118,184 @@ class RadioPlayer: NSObject, ObservableObject {
             self.podcastPlayer = PodcastPlayer.shared
             self.podcastPlayer?.setRadioPlayer(self)
         }
+        NotificationCenter.default.addObserver(self, selector: #selector(self.handleShazamVerifiedArtwork(_:)), name: Notification.Name("ShazamVerifiedArtwork"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.handleShazamNoMatch), name: Notification.Name("ShazamNoMatch"), object: nil)
+        
+        // Initialize Shazam integration
+        setupShazamIntegration()
         
         // Do not auto-restore on init; wait until user explicitly presses play
         // Start-up UI/auto-restore will be handled explicitly by the app only when desired
+    }
+
+    @objc private func handleShazamVerifiedArtwork(_ note: Notification) {
+        guard let info = note.userInfo as? [String: Any],
+              let title = info["title"] as? String,
+              let artist = info["artist"] as? String,
+              let urlString = info["artworkURL"] as? String,
+              !urlString.isEmpty,
+              let url = URL(string: urlString) else { 
+            print("❌ Invalid Shazam artwork notification - missing required data")
+            if let userInfo = note.userInfo as? [String: Any] {
+                print("   - userInfo keys: \(userInfo.keys.joined(separator: ", "))")
+            } else {
+                print("   - userInfo: nil")
+            }
+            return 
+        }
+        
+        print("🎵 Shazam MATCH FOUND: '\(title)' by '\(artist)'")
+        print("   - Artwork URL: \(urlString)")
+        
+        // Update metadata with Shazam's verified information
+        DispatchQueue.main.async {
+            self.displayTitle = title
+            self.displayArtist = artist
+            
+            // Override metadata with Shazam's verified data
+            self.metadata = "\(artist) - \(title)"
+            
+            print("🔄 Updated Shazam metadata: '\(self.metadata ?? "nil")'")
+            
+            // Fetch and set Shazam artwork as highest priority
+            URLSession.shared.dataTask(with: url) { data, _, _ in
+                guard let data = data, let image = UIImage(data: data) else { 
+                    print("❌ Failed to download Shazam artwork from: \(urlString)")
+                    return 
+                }
+                DispatchQueue.main.async {
+                    print("✅ Setting Shazam artwork - image size: \(image.size)")
+                    self.iTunesAlbumArt = image
+                    self.updateNowPlayingInfo()
+                    self.updateWidget()
+                    print("🎨 Shazam artwork successfully applied and UI updated")
+                }
+            }.resume()
+        }
+    }
+    
+    @objc private func handleShazamNoMatch() {
+        print("🔍 Shazam no match - triggering iTunes Search fallback")
+        // When Shazam fails (especially for live streams), fall back to iTunes Search using current metadata
+        if let metadata = metadata, !metadata.isEmpty {
+            // Use our enhanced metadata splitting to get proper artist and title
+            let stationName = viewModel?.stations[safe: currentStationIndex ?? -1]?.name ?? "Unknown Station"
+            let (artist, title) = splitArtistTitle(from: metadata, fallbackArtist: stationName, fallbackTitle: metadata)
+            
+            print("🎯 iTunes fallback using: Artist='\(artist)', Title='\(title)'")
+            
+            // Avoid "Artist - Artist" searches for artist-only stations
+            let searchMetadata: String
+            if artist == title && artist != metadata {
+                // Artist-only station: just search by artist name
+                searchMetadata = artist
+                print("🎯 🎭 Artist-only search: '\(artist)' (avoiding '\(artist) - \(artist)')")
+            } else {
+                // Normal search with artist and title
+                searchMetadata = "\(artist) - \(title)"
+            }
+            searchITunesForArtwork(metadata: searchMetadata) { [weak self] artwork in
+                if let artwork = artwork {
+                    DispatchQueue.main.async {
+                        // Only set iTunes artwork if we don't have Shazam-verified metadata
+                        if self?.displayTitle == nil && self?.displayArtist == nil {
+                            self?.iTunesAlbumArt = artwork
+                            self?.updateNowPlayingInfo()
+                            self?.updateWidget()
+                            print("🎨 iTunes fallback artwork applied for '\(artist)' - '\(title)'")
+                        } else {
+                            print("🚫 iTunes fallback skipped - Shazam-verified metadata exists")
+                        }
+                    }
+                } else {
+                    print("❌ iTunes fallback failed to find artwork for '\(artist)' - '\(title)'")
+                }
+            }
+        } else {
+            print("❌ iTunes fallback skipped - no metadata available")
+        }
+    }
+    
+    // MARK: - Shazam Integration
+    private var shazamTimer: Timer?
+    private var lastShazamAttempt: Date?
+    private let shazamCooldown: TimeInterval = 15.0 // 15 seconds between attempts (reduced for faster recognition)
+    
+    private func setupShazamIntegration() {
+        // Initialize Shazam integration - timer will start when playback begins
+        print("🎵 Shazam integration initialized - ready for automatic recognition")
+    }
+    
+    private func startShazamTimer() {
+        shazamTimer?.invalidate()
+        // Check every 30 seconds for new songs to get artwork more quickly
+        shazamTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            self?.attemptShazamRecognition()
+        }
+        print("🎵 Started automatic Shazam recognition timer (every 30 seconds)")
+    }
+    
+    private func stopShazamTimer() {
+        shazamTimer?.invalidate()
+        shazamTimer = nil
+    }
+    
+    private func attemptShazamRecognition() {
+        guard isPlaying,
+              let player = player,
+              player.timeControlStatus == .playing else {
+            print("🔄 Shazam recognition skipped - not playing or player unavailable")
+            print("   - isPlaying: \(isPlaying)")
+            print("   - player: \(player != nil ? "available" : "nil")")
+            print("   - player status: \(player?.timeControlStatus.rawValue ?? -1)")
+            return
+        }
+        
+        // Rate limiting - but allow immediate recognition for new songs
+        let now = Date()
+        let hasNewMetadata = metadata != lastMetadataSearched
+        
+        if let lastAttempt = lastShazamAttempt,
+           now.timeIntervalSince(lastAttempt) < shazamCooldown,
+           !hasNewMetadata {
+            print("🔄 Shazam rate limited - waiting \(Int(shazamCooldown - now.timeIntervalSince(lastAttempt))) more seconds")
+            return
+        }
+        
+        lastShazamAttempt = now
+        
+        // Clear previous Shazam metadata for new song detection
+        if let currentMetadata = metadata, currentMetadata != lastMetadataSearched {
+            displayTitle = nil
+            displayArtist = nil
+            // Clear existing artwork to show we're searching for new artwork
+            iTunesAlbumArt = nil
+            updateNowPlayingInfo()
+            updateWidget()
+            print("🔄 New song detected: '\(currentMetadata)' - clearing previous Shazam data for fresh recognition")
+        }
+        
+        // Get current station URL for Shazam recognition
+        if let currentItem = player.currentItem,
+           let url = (currentItem.asset as? AVURLAsset)?.url {
+            
+            print("🎵 STARTING Shazam recognition for: '\(metadata ?? "Unknown")' at URL: \(url.absoluteString)")
+            let stationName = (currentStationIndex != nil && viewModel != nil && currentStationIndex! < viewModel!.stations.count) ? viewModel!.stations[currentStationIndex!].name : "Unknown"
+            print("   - Station: \(stationName)")
+            print("   - Current iTunesAlbumArt: \(iTunesAlbumArt != nil ? "present" : "nil")")
+            
+            Task {
+                await ShazamViewModel.shared.matchCurrentStationStreamURL(url.absoluteString, seconds: 10)
+            }
+            
+            // Update the search tracker to prevent immediate re-search of same metadata
+            if let currentMetadata = metadata {
+                lastMetadataSearched = currentMetadata
+            }
+        } else {
+            print("❌ Shazam recognition failed - no current item or URL available")
+            print("   - currentItem: \(player.currentItem != nil ? "available" : "nil")")
+        }
     }
     
     // MARK: - Network Reconnection Setup
@@ -553,10 +730,10 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.updateNowPlayingInfo()
                         print("▶️ Player is now playing with seamless quality management")
                         
-                        // Enhanced metadata fetching when starting to play
+                        // Enhanced metadata fetching when starting to play (artwork only from Shazam)
                         if let metadata = self?.metadata, !metadata.isEmpty {
-                            // If we have metadata, fetch iTunes artwork
-                            self?.fetchITunesAlbumArt(for: metadata)
+                            // Metadata available - artwork will come from Shazam only
+                            print("📻 Metadata available: \(metadata) - awaiting Shazam artwork")
                         } else {
                             // If no metadata, proactively check for current metadata
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -643,10 +820,10 @@ class RadioPlayer: NSObject, ObservableObject {
                         
                         self?.updateNowPlayingInfo()
                         
-                        // Enhanced metadata fetching when starting to play
+                        // Enhanced metadata fetching when starting to play (artwork only from Shazam)
                         if let metadata = self?.metadata, !metadata.isEmpty {
-                            // If we have metadata, fetch iTunes artwork
-                            self?.fetchITunesAlbumArt(for: metadata)
+                            // Metadata available - artwork will come from Shazam only
+                            print("📻 Metadata available: \(metadata) - awaiting Shazam artwork")
                         } else {
                             // If no metadata, proactively check for current metadata
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -857,6 +1034,14 @@ class RadioPlayer: NSObject, ObservableObject {
         
         updateWidget()
         scheduleAppRefresh()
+        
+        // Start Shazam recognition when playback begins
+        startShazamTimer()
+        
+        // Also attempt immediate Shazam recognition after a short delay to get artwork quickly
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            self?.attemptShazamRecognition()
+        }
     }
     
     private func stopPodcastPlayback() {
@@ -947,12 +1132,14 @@ class RadioPlayer: NSObject, ObservableObject {
            userWantsToPlay = false
            connectionState = .disconnected
            
-           // Clear all song metadata and iTunes artwork completely
+           // Clear all song metadata and Shazam artwork completely
            metadata = nil
-           iTunesAlbumArt = nil
+           iTunesAlbumArt = nil // This holds Shazam artwork
            albumArt = nil
            songTitle = ""
            artistName = ""
+           displayTitle = nil
+           displayArtist = nil
            lastMetadataSearched = ""
            
            // Reset elapsed time tracking
@@ -970,6 +1157,9 @@ class RadioPlayer: NSObject, ObservableObject {
            // Update all UI elements - this will now show default app info with no station artwork
            updateNowPlayingInfo()
            updateWidget()
+           
+           // Stop Shazam recognition when playback stops
+           stopShazamTimer()
            
            print("🛑 Radio player stopped - all metadata and iTunes artwork cleared")
        }
@@ -1010,6 +1200,13 @@ class RadioPlayer: NSObject, ObservableObject {
         // Clear all metadata and iTunes artwork when switching stations
         // This ensures old song artwork doesn't carry over to the new station
         metadata = nil
+        // Clear metadata cache to prevent old artist/title info from carrying over
+        lastKnownArtist = nil
+        lastKnownTitle = nil
+        lastMetadataUpdate = nil
+        // Clear Shazam-verified metadata to prevent previous station's song info from persisting
+        displayTitle = nil
+        displayArtist = nil
         iTunesAlbumArt = nil
         albumArt = nil
         songTitle = ""
@@ -1039,9 +1236,9 @@ class RadioPlayer: NSObject, ObservableObject {
         // IMMEDIATE PLAYBACK: Use direct play method for station transitions
         playStationImmediately()
         
-        // If we already have metadata for this station, fetch iTunes artwork immediately
+        // If we already have metadata for this station, artwork will come from Shazam only
         if let currentMetadata = metadata, !currentMetadata.isEmpty {
-            fetchITunesAlbumArt(for: currentMetadata)
+            print("📻 Station has metadata: \(currentMetadata) - awaiting Shazam artwork")
         }
     }
     
@@ -1241,19 +1438,35 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
         
-        // Set basic metadata
+        // Set basic metadata (display EXACTLY what station sends)
         if let station = currentStation {
             let stationName = station.name
-            let trackTitle = songTitle.isEmpty ? stationName : songTitle
-            let artistInfo = artistName.isEmpty ? (metadata ?? stationName) : artistName
+            let rawMetadata = (metadata ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallbackTitle = rawMetadata.isEmpty ? stationName : rawMetadata
             
-            nowPlayingInfo[MPMediaItemPropertyTitle] = trackTitle
-            nowPlayingInfo[MPMediaItemPropertyArtist] = artistInfo
+            // Priority 1: Use Shazam verified metadata if available
+            let finalTitle: String
+            let finalArtist: String
+            
+            if let shazamTitle = displayTitle, let shazamArtist = displayArtist {
+                finalTitle = shazamTitle
+                finalArtist = shazamArtist
+                print("🎵 Using Shazam verified metadata: '\(finalTitle)' by '\(finalArtist)'")
+            } else {
+                // Priority 2: Use station-provided metadata split
+                let (splitArtist, splitTitle) = splitArtistTitle(from: rawMetadata, fallbackArtist: stationName, fallbackTitle: fallbackTitle)
+                finalTitle = splitTitle
+                finalArtist = splitArtist
+                print("🔄 Split metadata: '\(rawMetadata)' → Artist: '\(splitArtist)', Title: '\(splitTitle)'")
+            }
+            
+            nowPlayingInfo[MPMediaItemPropertyTitle] = finalTitle
+            nowPlayingInfo[MPMediaItemPropertyArtist] = finalArtist
             nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = stationName
             
             // Only log if station changed
             if lastLoggedStationIndex != currentStationIndex {
-                print("🎵 Now Playing Info - Title: '\(trackTitle)', Artist: '\(artistInfo)', Station: '\(stationName)'")
+                print("🎵 Now Playing Info - Title: '\(finalTitle)', Artist: '\(finalArtist)', Station: '\(stationName)'")
             }
         } else {
             nowPlayingInfo[MPMediaItemPropertyTitle] = "StreamRadios"
@@ -1303,51 +1516,23 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
             }
         } else {
-            // When playing, use full priority system
-            // PRIORITY 1: Current track iTunes artwork (highest priority)
+            // When playing, prioritize Shazam artwork but ensure station icons always show
+            print("🔍 Artwork Debug - isPlaying: \(isPlaying)")
+            print("   - iTunesAlbumArt: \(iTunesAlbumArt != nil ? "present (\(iTunesAlbumArt!.size))" : "nil")")
+            print("   - currentStation: \(currentStation?.name ?? "nil")")
+            print("   - station has iconData: \(currentStation?.iconData != nil)")
+            
+            // PRIORITY 1: Shazam-verified artwork (from iTunesAlbumArt which gets Shazam data)
             if let iTunesArt = iTunesAlbumArt {
                 let artwork = MPMediaItemArtwork(boundsSize: iTunesArt.size) { size in
                     return iTunesArt
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                 artworkSet = true
-                // Only log when artwork state changes
-                if !lastLoggedArtworkState {
-                    print("🎨 Now Playing: Using live iTunes artwork")
-                    lastLoggedArtworkState = true
-                }
+                print("✅ Now Playing: Using Shazam artwork (size: \(iTunesArt.size))")
+                lastLoggedArtworkState = true
             }
-            // PRIORITY 2: Current track artwork from metadata
-            else if let currentTrackArtwork = currentTrackArtwork {
-                let artwork = MPMediaItemArtwork(boundsSize: currentTrackArtwork.size) { size in
-                    return currentTrackArtwork
-                }
-                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-                artworkSet = true
-                // Only log when artwork state changes
-                if !lastLoggedArtworkState {
-                    print("🎨 Now Playing: Using current track artwork")
-                    lastLoggedArtworkState = true
-                }
-            }
-            // PRIORITY 3: Station's saved iTunes artwork (from previous tracks)
-            else if let station = currentStation,
-                      let iTunesData = station.iTunesArtworkData,
-                      !iTunesData.isEmpty,
-                      let imageData = Data(base64Encoded: iTunesData),
-                      let image = UIImage(data: imageData) {
-                let artwork = MPMediaItemArtwork(boundsSize: image.size) { size in
-                    return image
-                }
-                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
-                artworkSet = true
-                // Only log when artwork state changes
-                if !lastLoggedArtworkState {
-                    print("🎨 Now Playing: Using station's saved iTunes artwork")
-                    lastLoggedArtworkState = true
-                }
-            }
-            // PRIORITY 4: Station icon (fallback)
+            // PRIORITY 2: Station icon (always show when no Shazam artwork)
             else if let station = currentStation,
                       let iconData = station.iconData,
                       let imageData = Data(base64Encoded: iconData),
@@ -1357,11 +1542,30 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                 artworkSet = true
-                // Only log when artwork state changes
-                if !lastLoggedArtworkState {
-                    print("🎨 Now Playing: Using station icon artwork")
-                    lastLoggedArtworkState = true
+                print("✅ Now Playing: Using station icon '\(station.name)' (size: \(image.size))")
+            }
+            // PRIORITY 3: Default radio icon if station has no icon
+            else {
+                // Create a default radio icon as fallback
+                let defaultSize: CGFloat = 200
+                let renderer = UIGraphicsImageRenderer(size: CGSize(width: defaultSize, height: defaultSize))
+                let defaultImage = renderer.image { context in
+                    UIColor.systemGray.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: defaultSize, height: defaultSize))
+                    
+                    if let radioImage = UIImage(systemName: "radio", withConfiguration: UIImage.SymbolConfiguration(pointSize: 100, weight: .medium)) {
+                        UIColor.white.setFill()
+                        let imageRect = CGRect(x: (defaultSize - 100) / 2, y: (defaultSize - 100) / 2, width: 100, height: 100)
+                        radioImage.draw(in: imageRect)
+                    }
                 }
+                
+                let artwork = MPMediaItemArtwork(boundsSize: defaultImage.size) { size in
+                    return defaultImage
+                }
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+                artworkSet = true
+                print("✅ Now Playing: Using default radio icon (no station icon available)")
             }
         }
         
@@ -1728,8 +1932,30 @@ class RadioPlayer: NSObject, ObservableObject {
     func searchITunesForArtwork(metadata: String, completion: @escaping (UIImage?) -> Void) {
         let parsedData = parseComplexMetadata(metadata)
         
+        // Prefer a direct split based strictly on station-provided metadata
+        var preferredQueries: [String] = []
+        if let stationName = viewModel?.stations[safe: currentStationIndex ?? -1]?.name {
+            let split = splitArtistTitle(from: metadata, fallbackArtist: stationName, fallbackTitle: metadata)
+            let artist = split.artist.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = split.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !artist.isEmpty && !title.isEmpty {
+                preferredQueries.append(contentsOf: [
+                    "\"\(title)\" \"\(artist)\"",
+                    "\(title) \(artist)",
+                    "\(artist) \(title)"
+                ])
+            }
+        }
+        
         // Try multiple search strategies
-        let searchQueries = buildSearchQueries(parsedData: parsedData, originalMetadata: metadata)
+        var searchQueries = buildSearchQueries(parsedData: parsedData, originalMetadata: metadata)
+        // Ensure our preferred queries go first and are unique
+        for q in preferredQueries.reversed() {
+            if let existingIndex = searchQueries.firstIndex(of: q) {
+                searchQueries.remove(at: existingIndex)
+            }
+            searchQueries.insert(q, at: 0)
+        }
         
         print("🎯 Generated \(searchQueries.count) search queries for '\(metadata)':")
         for (index, query) in searchQueries.enumerated() {
@@ -1742,6 +1968,205 @@ class RadioPlayer: NSObject, ObservableObject {
         } else {
             searchWithQueries(searchQueries, completion: completion)
         }
+    }
+
+    // Enhanced metadata handling for better artist/title display
+    private var lastKnownArtist: String?
+    private var lastKnownTitle: String?
+    private var lastMetadataUpdate: Date?
+    
+    // Display-only split that preserves station-provided wording and improves iTunes search
+    func splitArtistTitle(from raw: String, fallbackArtist: String, fallbackTitle: String) -> (artist: String, title: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("🎯 splitArtistTitle called with: '\(raw)' → trimmed: '\(trimmed)'")
+        print("🎯 Current cache: Artist='\(lastKnownArtist ?? "nil")', Title='\(lastKnownTitle ?? "nil")', LastUpdate=\(lastMetadataUpdate?.timeIntervalSinceNow ?? 0)s ago")
+        
+        if trimmed.isEmpty { return (fallbackArtist, fallbackTitle) }
+        
+        let separators = [" - ", " – ", " — ", " | ", " / ", ": "]
+        
+        // Try to split with separators first
+        for sep in separators {
+            if trimmed.contains(sep) {
+                let parts = trimmed.components(separatedBy: sep)
+                if parts.count >= 2 {
+                    let left = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                    let right = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !left.isEmpty && !right.isEmpty {
+                        // Update our knowledge for future incomplete metadata
+                        lastKnownArtist = left
+                        lastKnownTitle = right
+                        lastMetadataUpdate = Date()
+                        return (left, right)
+                    }
+                }
+                break
+            }
+        }
+        
+        // Handle incomplete metadata by checking if it looks like an artist or title
+        let now = Date()
+        let recentWindow: TimeInterval = 30 // 30 seconds to consider metadata "recent"
+        let hasRecentCache = lastMetadataUpdate != nil && now.timeIntervalSince(lastMetadataUpdate!) < recentWindow
+        
+                // Check if we're getting repeated artist-only metadata (indicating a new song with incomplete info)
+        let isRepeatedArtistOnly = hasRecentCache && 
+                                  lastKnownArtist == trimmed &&
+                                  lastKnownTitle != nil &&
+                                  now.timeIntervalSince(lastMetadataUpdate!) > 5.0
+        
+        // Always do pattern detection (whether we have cache or not)
+        // Enhanced pattern detection that considers sequence and context
+        
+        // Strong indicators this is an artist name
+        let strongArtistIndicators = [
+            trimmed.count <= 15 && !trimmed.lowercased().contains("you") && !trimmed.lowercased().contains("love"),  // Short without song words
+            trimmed.contains(" & "),     // Artist collaborations
+            trimmed.contains(" and "),   // Artist collaborations
+            trimmed.lowercased().contains(" feat"),  // Feature collaborations
+            trimmed.lowercased().contains(" vs "),   // VS collaborations
+        ]
+        
+        // Strong indicators this is a song title
+        let strongTitleIndicators = [
+            trimmed.contains("'"),  // Apostrophes very common in songs
+            trimmed.contains("("),  // Parentheses for versions/features
+            trimmed.lowercased().hasPrefix("i "),  // "I Want...", "I Love...", etc.
+            trimmed.lowercased().contains("you"),  // Very common in song titles
+            trimmed.lowercased().contains("love"), // Very common in song titles
+            trimmed.lowercased().contains("my "),  // "My Girl", "My Way", etc.
+            trimmed.lowercased().contains(" me"),  // "Love Me", "Kiss Me", etc.
+            trimmed.lowercased().contains("baby"), // Very common in song titles
+        ]
+        
+        let strongArtistCount = strongArtistIndicators.filter { $0 }.count
+        let strongTitleCount = strongTitleIndicators.filter { $0 }.count
+        
+        // Use strong indicators first, then fall back to weaker heuristics
+        let isLikelyArtist: Bool
+        let isLikelyTitle: Bool
+        
+        if strongTitleCount > 0 {
+            isLikelyTitle = true
+            isLikelyArtist = false
+        } else if strongArtistCount > 0 {
+            isLikelyArtist = true
+            isLikelyTitle = false
+        } else {
+            // Fall back to weaker heuristics for ambiguous cases
+            // Check if this looks like a typical artist name based on common patterns
+            let hasCommonArtistPattern = [
+                trimmed.split(separator: " ").count <= 3,  // Most artists have 1-3 words
+                !trimmed.lowercased().contains("you"),     // Songs often contain "you"
+                !trimmed.lowercased().contains("my "),     // Songs often contain "my"
+                !trimmed.lowercased().contains(" me"),     // Songs often contain "me"
+                !trimmed.lowercased().hasPrefix("i "),     // Songs often start with "I"
+                trimmed.count <= 20,                       // Artists rarely exceed 20 chars
+            ].filter { $0 }.count >= 4  // Most indicators should match for artist
+            
+            let hasCommonTitlePattern = [
+                trimmed.lowercased().contains("you"),      // Very common in titles
+                trimmed.lowercased().contains("love"),     // Very common in titles  
+                trimmed.lowercased().contains("my "),      // Common in titles
+                trimmed.lowercased().contains(" me"),      // Common in titles
+                trimmed.lowercased().hasPrefix("i "),      // Common in titles
+                trimmed.count > 15,                        // Titles often longer
+            ].filter { $0 }.count >= 2  // Some indicators should match for title
+            
+            if hasCommonArtistPattern && !hasCommonTitlePattern {
+                isLikelyArtist = true
+                isLikelyTitle = false
+            } else if hasCommonTitlePattern && !hasCommonArtistPattern {
+                isLikelyTitle = true
+                isLikelyArtist = false
+            } else {
+                // If we have recent context, use completion logic
+                if hasRecentCache {
+                    if lastKnownArtist != nil && lastKnownTitle == nil {
+                        // We have an artist but no title - current could be title if it looks like one
+                        isLikelyTitle = trimmed.count > 15 || trimmed.lowercased().contains("you") || trimmed.lowercased().contains("love")
+                        isLikelyArtist = !isLikelyTitle
+                    } else if lastKnownTitle != nil && lastKnownArtist == nil {
+                        // We have a title but no artist - current is likely artist
+                        isLikelyArtist = true
+                        isLikelyTitle = false
+                    } else {
+                        // Default: shorter names lean artist, longer lean title
+                        isLikelyArtist = trimmed.count <= 12
+                        isLikelyTitle = trimmed.count > 8
+                    }
+                } else {
+                    // No recent context - use basic length heuristics
+                    isLikelyArtist = trimmed.count <= 12
+                    isLikelyTitle = trimmed.count > 8
+                }
+            }
+        }
+        
+        print("🎯 Pattern detection: isLikelyArtist=\(isLikelyArtist), isLikelyTitle=\(isLikelyTitle)")
+        
+        // Detect artist-only stations: if we consistently get different artist names without separators,
+        // this station only sends artist names, not song titles
+        let isArtistOnlyStation = hasRecentCache &&
+                                 lastKnownArtist != nil &&
+                                 lastKnownArtist != trimmed &&
+                                 isLikelyArtist &&
+                                 !trimmed.contains(" - ") &&
+                                 !trimmed.contains(" – ") &&
+                                 !trimmed.contains(" — ")
+        
+        // Clear cache if we're getting repeated artist-only metadata (new song starting)
+        if isRepeatedArtistOnly {
+            print("🎯 🔄 Clearing stale cache - repeated artist '\(trimmed)' likely indicates new song")
+            lastKnownArtist = nil
+            lastKnownTitle = nil
+            lastMetadataUpdate = nil
+        }
+        
+        // Clear cache for artist-only stations to prevent fake combinations
+        if isArtistOnlyStation {
+            print("🎯 🎭 Detected artist-only station - clearing cache to prevent fake combinations")
+            let previousArtist = lastKnownArtist ?? "nil"
+            print("🎯    Previous: '\(previousArtist)' → Current: '\(trimmed)'")
+            lastKnownArtist = nil
+            lastKnownTitle = nil
+            lastMetadataUpdate = nil
+        }
+        
+        // Use pattern detection with or without cache
+        if hasRecentCache && !isRepeatedArtistOnly && !isArtistOnlyStation && isLikelyArtist && lastKnownTitle != nil {
+            // Current is artist, use previous title
+            lastKnownArtist = trimmed
+            lastMetadataUpdate = now
+            print("🎯 ✅ Combined as Artist+CachedTitle: '\(trimmed)' + '\(lastKnownTitle!)'")
+            return (trimmed, lastKnownTitle!)
+        } else if hasRecentCache && !isRepeatedArtistOnly && !isArtistOnlyStation && isLikelyTitle && lastKnownArtist != nil {
+            // Current is title, use previous artist
+            lastKnownTitle = trimmed
+            lastMetadataUpdate = now
+            print("🎯 ✅ Combined as CachedArtist+Title: '\(lastKnownArtist!)' + '\(trimmed)'")
+            return (lastKnownArtist!, trimmed)
+        } else if isLikelyArtist {
+            // Store artist for future combination
+            lastKnownArtist = trimmed
+            lastMetadataUpdate = now
+            print("🎯 📝 Stored artist for future: '\(trimmed)'")
+            return (trimmed, fallbackTitle) // Use station name as title for now
+        } else if isLikelyTitle {
+            // Store title for future combination
+            lastKnownTitle = trimmed
+            lastMetadataUpdate = now
+            print("🎯 📝 Stored title for future: '\(trimmed)'")
+            return (fallbackArtist, trimmed) // Use station name as artist for now
+        } else if hasRecentCache && lastKnownArtist != nil && lastKnownTitle != nil {
+            // Use the most recent complete info we have
+            print("🎯 ⏮️ Using cached complete info: '\(lastKnownArtist!)' + '\(lastKnownTitle!)'")
+            return (lastKnownArtist!, lastKnownTitle!)
+        }
+        
+        // No separator and no context, return as-is
+        print("🎯 🚫 No pattern match or cache - using fallback: Artist='\(fallbackArtist)', Title='\(trimmed)'")
+        return (fallbackArtist, trimmed)
     }
     
     private func parseComplexMetadata(_ metadata: String) -> (artist: String?, track: String?, album: String?) {
@@ -3143,23 +3568,64 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Check if we have timed metadata available
         if let timedMetadata = playerItem.timedMetadata, !timedMetadata.isEmpty {
+            var titleMetadata: String?
+            var artistMetadata: String?
+            var collectedMetadata: [String] = []
+            
             for metadataItem in timedMetadata {
-                if let commonKey = metadataItem.commonKey,
-                   commonKey.rawValue == "title" || commonKey.rawValue == "streamTitle",
-                   let stringValue = metadataItem.stringValue,
-                   !stringValue.isEmpty {
-                    
-                    print("🔍 Found current metadata: \(stringValue)")
-                    
-                    // Update metadata and fetch iTunes artwork
-                    DispatchQueue.main.async { [weak self] in
-                        self?.metadata = stringValue
-                        self?.fetchITunesAlbumArt(for: stringValue)
-                        self?.updateNowPlayingInfo()
-                        self?.updateWidget()
+                if let stringValue = metadataItem.stringValue, !stringValue.isEmpty {
+                    if let commonKey = metadataItem.commonKey {
+                        switch commonKey.rawValue {
+                        case "title", "streamTitle":
+                            titleMetadata = stringValue
+                            print("🔍 Found TITLE in timed metadata: '\(stringValue)'")
+                        case "artist", "albumArtist":
+                            artistMetadata = stringValue
+                            print("🔍 Found ARTIST in timed metadata: '\(stringValue)'")
+                        default:
+                            collectedMetadata.append(stringValue)
+                            print("🔍 Found OTHER in timed metadata (\(commonKey.rawValue)): '\(stringValue)'")
+                        }
+                    } else {
+                        collectedMetadata.append(stringValue)
+                        print("🔍 Found GENERIC in timed metadata: '\(stringValue)'")
                     }
-                    return
                 }
+            }
+            
+            // Determine the best metadata to use
+            var finalMetadata: String?
+            
+            if let title = titleMetadata, let artist = artistMetadata {
+                finalMetadata = "\(artist) - \(title)"
+                print("🔍 ✅ COMBINED timed metadata: '\(artist)' + '\(title)' = '\(finalMetadata!)'")
+            } else if let title = titleMetadata {
+                finalMetadata = title
+                print("🔍 📖 Using TITLE from timed metadata: '\(title)'")
+            } else if let artist = artistMetadata {
+                finalMetadata = artist
+                print("🔍 🎤 Using ARTIST from timed metadata: '\(artist)'")
+            } else if let firstGeneric = collectedMetadata.first {
+                finalMetadata = firstGeneric
+                print("🔍 📻 Using GENERIC from timed metadata: '\(firstGeneric)'")
+            }
+            
+            if let metadata = finalMetadata {
+                print("🔍 Found current metadata: \(metadata)")
+                
+                // Update metadata (artwork will only come from Shazam)
+                DispatchQueue.main.async { [weak self] in
+                    self?.metadata = metadata
+                    // No iTunes artwork fetch - artwork only comes from Shazam
+                    print("📻 Metadata found: \(metadata) - triggering immediate Shazam recognition")
+                    // Trigger immediate Shazam recognition for detected metadata
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                        self?.attemptShazamRecognition()
+                    }
+                    self?.updateNowPlayingInfo()
+                    self?.updateWidget()
+                }
+                return
             }
         }
         
@@ -3616,20 +4082,91 @@ class RadioPlayer: NSObject, ObservableObject {
 
 extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
     func metadataOutput(_ output: AVPlayerItemMetadataOutput, didOutputTimedMetadataGroups groups: [AVTimedMetadataGroup], from track: AVPlayerItemTrack?) {
-        guard let group = groups.first,
-              let metadataItem = group.items.first,
-              let value = metadataItem.value as? String else {
+        guard !groups.isEmpty else { return }
+        
+        // Process all metadata groups and items to extract complete information
+        var collectedMetadata: [String] = []
+        var titleMetadata: String?
+        var artistMetadata: String?
+        
+        for group in groups {
+            for metadataItem in group.items {
+                if let value = metadataItem.value as? String, !value.isEmpty {
+                    // Check for specific metadata types
+                    if let commonKey = metadataItem.commonKey {
+                        switch commonKey.rawValue {
+                        case "title", "streamTitle":
+                            titleMetadata = value
+                            print("🎵 Found TITLE metadata: '\(value)'")
+                        case "artist", "albumArtist":
+                            artistMetadata = value
+                            print("🎵 Found ARTIST metadata: '\(value)'")
+                        default:
+                            collectedMetadata.append(value)
+                            print("🎵 Found OTHER metadata (\(commonKey.rawValue)): '\(value)'")
+                        }
+                    } else {
+                        collectedMetadata.append(value)
+                        print("🎵 Found GENERIC metadata: '\(value)'")
+                    }
+                }
+            }
+        }
+        
+        // Determine the best metadata to use
+        var finalMetadata: String?
+        
+        if let title = titleMetadata, let artist = artistMetadata {
+            // We have both artist and title - combine them
+            finalMetadata = "\(artist) - \(title)"
+            print("🎵 ✅ COMBINED metadata: '\(artist)' + '\(title)' = '\(finalMetadata!)'")
+        } else if let title = titleMetadata {
+            // Only title available
+            finalMetadata = title
+            print("🎵 📖 Using TITLE metadata: '\(title)'")
+        } else if let artist = artistMetadata {
+            // Only artist available
+            finalMetadata = artist
+            print("🎵 🎤 Using ARTIST metadata: '\(artist)'")
+        } else if let firstGeneric = collectedMetadata.first {
+            // Use first generic metadata
+            finalMetadata = firstGeneric
+            print("🎵 📻 Using GENERIC metadata: '\(firstGeneric)'")
+        }
+        
+        guard let value = finalMetadata else {
+            print("🎵 ❌ No usable metadata found in \(groups.count) groups")
             return
         }
         
-        // Update metadata and trigger artwork fetch
+        // Update metadata with station-provided value only and trigger artwork fetch
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.metadata = value
             
-            // Always attempt to fetch artwork for new metadata
+            // Only clear artwork if we have verified new song content
+            // Don't clear Shazam-verified artwork for repeated metadata from same song
+            let isNewSongContent = (lastMetadataSearched != value)
+            
+            if isNewSongContent {
+                // Clear old artwork when genuinely new metadata is detected
+                iTunesAlbumArt = nil
+                print("🧹 Cleared old artwork for fresh song recognition")
+            } else if displayTitle != nil && displayArtist != nil {
+                print("🎯 Keeping Shazam-verified artwork - same song detected")
+            }
+            
+            // Artwork will only come from Shazam
             if !value.isEmpty {
-                self.fetchITunesAlbumArt(for: value)
+                if isNewSongContent {
+                    print("📻 New metadata detected: \(value) - triggering immediate Shazam recognition")
+                    // Trigger immediate Shazam recognition for new songs
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                        self?.attemptShazamRecognition()
+                    }
+                } else {
+                    print("📻 Same metadata repeated: \(value) - no new search needed")
+                }
             }
             
             self.updateNowPlayingInfo()

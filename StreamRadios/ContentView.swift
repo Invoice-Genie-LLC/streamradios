@@ -833,8 +833,15 @@ struct CompactPlayerView: View {
                         
                         // Metadata with connection status
                         HStack(spacing: 4) {
-                            if let metadata = metadata, !metadata.isEmpty {
-                                Text(metadata)
+                            if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
+                                Text("\(shazamTitle) — \(shazamArtist)")
+                                    .font(.caption)
+                                    .foregroundColor(.adaptiveSecondaryText)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            } else if let meta = metadata, !meta.isEmpty {
+                                let split = radioPlayer.splitArtistTitle(from: meta, fallbackArtist: currentStation.name, fallbackTitle: meta)
+                                Text("\(split.title) — \(split.artist)")
                                     .font(.caption)
                                     .foregroundColor(.adaptiveSecondaryText)
                                     .lineLimit(1)
