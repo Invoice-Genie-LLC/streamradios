@@ -15,6 +15,24 @@ extension UIDevice {
     }
 }
 
+// Custom ViewModifier to handle station card animations
+struct StationCardAnimationModifier: ViewModifier {
+    let isTapped: Bool
+    let isLoading: Bool
+    
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isTapped ? 0.95 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isTapped)
+    }
+    
+    @ViewBuilder
+    private var loadingIndicator: some View {
+        // Loading indicator removed - visual feedback now only on artwork
+        EmptyView()
+    }
+}
+
 
 
 struct RadioStationListView: View {
@@ -42,6 +60,10 @@ struct RadioStationListView: View {
     
     // Track tapped station for immediate focus
     @State private var tappedStationId: String?
+    
+    // Visual feedback for station tap
+    @State private var tappedStationForAnimation: String?
+    @State private var loadingStationId: String?
     
     // State tracking for logging optimization
     @State private var lastScrollSkipLog: Date?
@@ -340,6 +362,13 @@ struct RadioStationListView: View {
         }
         .onReceive(radioPlayer.$isPlaying) { isPlaying in
             if !isEditing && !isPlaying { scrollToCurrentStation(proxy: proxy) }
+            
+            // Clear loading state when playback starts or stops
+            if isPlaying && loadingStationId != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    loadingStationId = nil
+                }
+            }
         }
         .onChange(of: selectedTab) { _, newTab in
             if newTab == .radio && !isEditing {
@@ -475,6 +504,8 @@ struct RadioStationListView: View {
     @ViewBuilder
     private func stationCard(for station: RadioStation) -> some View {
         let isCurrentlyPlaying = isCurrentStation(station: station) && radioPlayer.isPlaying
+        let isLoading = loadingStationId == station.id
+        let isTapped = tappedStationForAnimation == station.id
         
         HStack(spacing: 12) {
             // Expanded tappable area for station info (includes more space after signal bars)
@@ -485,7 +516,7 @@ struct RadioStationListView: View {
             }) {
                 HStack(spacing: 12) {
                     // Station logo - 64x64 as per screenshot
-                    stationLogo(for: station)
+                    stationLogo(for: station, isLoading: isLoading)
                     
                     // Station info - give maximum available space
                     VStack(alignment: .leading, spacing: 4) {
@@ -593,10 +624,12 @@ struct RadioStationListView: View {
             },
             alignment: .bottom
         )
+        // Visual feedback animations
+        .modifier(StationCardAnimationModifier(isTapped: isTapped, isLoading: isLoading))
     }
     
     @ViewBuilder
-    private func stationLogo(for station: RadioStation) -> some View {
+    private func stationLogo(for station: RadioStation, isLoading: Bool = false) -> some View {
         ZStack {
             // Background for logo
             RoundedRectangle(cornerRadius: 8)
@@ -607,6 +640,25 @@ struct RadioStationListView: View {
             imageForStation(station)
                 .frame(width: 64, height: 64)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .opacity(isLoading ? 0.6 : 1.0)
+                .animation(.easeInOut(duration: 0.2), value: isLoading)
+            
+            // Loading indicator overlay on artwork
+            if isLoading {
+                ZStack {
+                    // Semi-transparent overlay
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.black.opacity(0.3))
+                        .frame(width: 64, height: 64)
+                    
+                    // Loading spinner
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: isLoading)
+            }
         }
     }
     
@@ -799,6 +851,21 @@ struct RadioStationListView: View {
             return 
         }
         
+        // Immediate haptic feedback
+        UIDevice.playHapticFeedback()
+        
+        // Immediate visual feedback - show tap animation
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+            tappedStationForAnimation = station.id
+        }
+        
+        // Reset tap animation after short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                tappedStationForAnimation = nil
+            }
+        }
+        
         // Dismiss keyboard when a station is tapped
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
@@ -815,6 +882,10 @@ struct RadioStationListView: View {
         } else {
             // Different station or no station playing - start playing this station
             print("▶️ Playing station: \(station.name)")
+            
+            // Show loading state
+            loadingStationId = station.id
+            
             if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
                 print("🔍 Found station at index: \(index)")
                 viewModel.updateLastPlayed(for: viewModel.stations[index])
@@ -822,22 +893,46 @@ struct RadioStationListView: View {
                 
                 // Trigger immediate focus on the tapped station
                 tappedStationId = station.id
+                
+                // Clear loading state after a delay (station should be connected by then)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    loadingStationId = nil
+                }
+                
             } else {
                 print("❌ Station not found in viewModel.stations")
+                // Clear loading state immediately if station not found
+                loadingStationId = nil
             }
         }
     }
     
     private func handlePlayButtonTap(for station: RadioStation) {
+        // Immediate haptic feedback
+        UIDevice.playHapticFeedback()
+        
         // Dismiss keyboard when play button is tapped
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
         if isStationPlaying(station) {
             radioPlayer.togglePlayPause()
         } else {
+            // Show loading state for new station
+            loadingStationId = station.id
+            
             if let index = viewModel.stations.firstIndex(where: { $0.id == station.id }) {
                 viewModel.updateLastPlayed(for: viewModel.stations[index])
                 radioPlayer.playStation(at: index, from: viewModel.stations)
+                
+                // Clear loading state after a delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    if loadingStationId == station.id {
+                        loadingStationId = nil
+                    }
+                }
+            } else {
+                // Clear loading state immediately if station not found
+                loadingStationId = nil
             }
         }
     }
