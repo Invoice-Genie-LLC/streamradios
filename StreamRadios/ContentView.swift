@@ -991,6 +991,10 @@ struct UnifiedPodcastPlayerView: View {
         sizeClass == .compact ? 18 : 20
     }
     
+    private var skipButtonIconSize: CGFloat {
+        sizeClass == .compact ? 18 : 20  // Larger than regular iconSize for better usability
+    }
+    
     private var horizontalPadding: CGFloat {
         sizeClass == .compact ? 12 : 16
     }
@@ -1051,10 +1055,10 @@ struct UnifiedPodcastPlayerView: View {
                 VStack(spacing: 4) {
                     // Essential controls only - using responsive sizing
                     HStack(spacing: buttonSpacing) {
-                        // Skip backward 15s - responsive size
+                        // Skip backward 15s - larger size for better usability
                         Button(action: podcastPlayer.skipBackward) {
                             Image(systemName: "gobackward.15")
-                                .font(.system(size: iconSize))
+                                .font(.system(size: skipButtonIconSize))
                                 .foregroundColor(.white)
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -1113,10 +1117,10 @@ struct UnifiedPodcastPlayerView: View {
 
                         }
                         
-                        // Skip forward 30s - responsive size
+                        // Skip forward 30s - larger size for better usability
                         Button(action: podcastPlayer.skipForward) {
                             Image(systemName: "goforward.30")
-                                .font(.system(size: iconSize))
+                                .font(.system(size: skipButtonIconSize))
                                 .foregroundColor(.white)
                         }
                         .buttonStyle(PlainButtonStyle())
