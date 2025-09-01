@@ -1357,15 +1357,35 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func completeEpisode(episodeId: String) {
+        print("🏁 COMPLETE EPISODE: Setting episode \(episodeId.prefix(8)) as played with 100% progress")
         episodeStates[episodeId] = .played
         episodeProgress[episodeId] = 1.0
         
         if currentlyPlayingEpisodeId == episodeId {
             currentlyPlayingEpisodeId = nil
+            print("🏁 COMPLETE EPISODE: Cleared currently playing episode")
         }
         
         saveCurrentStates()
-        sendThrottledUpdate()
+        sendImmediateUpdate() // Use immediate update for completion
+        
+        // LOG: Debug episode completion
+        print("🏁 COMPLETE EPISODE: Episode \(episodeId.prefix(8)) marked as played - state=\(getState(for: episodeId).rawValue), progress=\(getProgress(for: episodeId))")
+        
+        // Send immediate notification for UI updates
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .init("EpisodeStateChangedInstantly"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "state": EpisodePlaybackState.played.rawValue]
+            )
+            
+            NotificationCenter.default.post(
+                name: .init("EpisodePlayedChangedInstantly"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "isPlayed": true]
+            )
+        }
     }
     
     func rewindAndPlay(episodeId: String) {
@@ -1409,6 +1429,9 @@ class EpisodeStateManager: ObservableObject {
         let existingProgress = episodeProgress[episodeId] ?? 0.0
         let existingState = episodeStates[episodeId] ?? .new
         let shouldUpdateProgress: Bool
+        
+        // LOG: Debug progress updates for troubleshooting
+        print("📈 UPDATE PROGRESS [\(episodeId.prefix(8))]: incoming=\(String(format: "%.3f", progress)), existing=\(String(format: "%.3f", existingProgress)), state=\(existingState.rawValue), playing=\(isPlaying)")
         
         if progress > 0 {
             // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
@@ -1504,6 +1527,7 @@ class EpisodeStateManager: ObservableObject {
         } else if effectiveProgress >= 1.0 {
             newState = .played
             currentlyPlayingEpisodeId = nil
+            print("🏁 PROGRESS COMPLETE: Episode \(episodeId.prefix(8)) marked as played due to 100% progress")
         } else if effectiveProgress > 0 {
             newState = .inProgress
             currentlyPlayingEpisodeId = nil
@@ -1518,6 +1542,28 @@ class EpisodeStateManager: ObservableObject {
             episodeStates[episodeId] = newState
             saveCurrentStates()
             sendThrottledUpdate()
+            
+            // LOG: Final state after update
+            print("📈 UPDATE COMPLETE [\(episodeId.prefix(8))]: finalState=\(newState.rawValue), finalProgress=\(String(format: "%.3f", getProgress(for: episodeId)))")
+            
+            // Send immediate notification for state changes
+            if episodeStates[episodeId] != existingState {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .init("EpisodeStateChangedInstantly"),
+                        object: nil,
+                        userInfo: ["episodeId": episodeId, "state": newState.rawValue]
+                    )
+                    
+                    if newState == .played {
+                        NotificationCenter.default.post(
+                            name: .init("EpisodePlayedChangedInstantly"),
+                            object: nil,
+                            userInfo: ["episodeId": episodeId, "isPlayed": true]
+                        )
+                    }
+                }
+            }
             
             // REAL-TIME SYNC ONLY: No automatic CloudKit sync - only sync under specific conditions
             // Real-time sync is handled by setProgressWithRealTimeSync() for allowed conditions:

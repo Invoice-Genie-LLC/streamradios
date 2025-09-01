@@ -77,12 +77,20 @@ extension PodcastModel {
     func toPodcastEpisode() -> PodcastEpisode {
             let episodeId = self.id ?? UUID().uuidString
             
-            // CRITICAL FIX: Use Core Data as source of truth, not UserDefaults/EpisodeStateManager
-            // Core Data properties should be the authoritative source
-            let progress = Double(self.progress)
-            let isFavorite = self.isFavorite
-            var isDownloaded = self.isDownloaded
-            let isPlayed = self.isPlayed
+                    // FIX: Use EpisodeStateManager as source of truth for progress and playback state
+        // while preserving Core Data for favorites and downloads, per memories
+        let episodeStateProgress = EpisodeStateManager.shared.getProgress(for: episodeId)
+        let episodeState = EpisodeStateManager.shared.getState(for: episodeId)
+        let episodeStateIsPlayed = episodeState == .played
+        
+        // Use the higher progress value and trust EpisodeStateManager for played status
+        let progress = max(Double(self.progress), episodeStateProgress)
+        let isFavorite = self.isFavorite
+        var isDownloaded = self.isDownloaded
+        let isPlayed = episodeStateIsPlayed || self.isPlayed || progress >= 1.0
+        
+        // LOG: Debug episode state synchronization
+        print("🔄 EPISODE SYNC [\(episodeId.prefix(8))]: CoreData(progress=\(String(format: "%.3f", Double(self.progress))), played=\(self.isPlayed)) EpisodeStateManager(progress=\(String(format: "%.3f", episodeStateProgress)), state=\(episodeState.rawValue)) Final(progress=\(String(format: "%.3f", progress)), played=\(isPlayed))")
             
             // PERFORMANCE: Only log critical download/path issues, not every episode
             #if DEBUG

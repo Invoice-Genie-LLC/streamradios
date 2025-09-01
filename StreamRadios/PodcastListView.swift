@@ -1493,11 +1493,17 @@ struct EpisodeRowView: View {
                 let currentProgress = podcastPlayer.getCurrentProgress(for: episode)
                 
                 Button(action: {
+                    // FIX: Use EpisodeStateManager as source of truth for button behavior
+                    let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                    let isPlayedByState = episodeState == .played
+                    let isCompletedByProgress = currentProgress >= 0.99
+                    
                     print("🔄 BUTTON DEBUG 1: Play/Rewind button pressed for episode: \(episode.title)")
                     print("🔄 BUTTON DEBUG 1: episode.id = \(episode.id)")
-                    print("🔄 BUTTON DEBUG 1: episode.state.isPlayed = \(episode.state.isPlayed), currentProgress = \(currentProgress)")
-                    print("🔄 BUTTON DEBUG 1: episode.state = \(episode.state)")
-                    if episode.state.isPlayed || currentProgress >= 0.99 {
+                    print("🔄 BUTTON DEBUG 1: episodeState = \(episodeState.rawValue), progress = \(String(format: "%.3f", currentProgress)), episode.state.isPlayed = \(episode.state.isPlayed)")
+                    print("🔄 BUTTON DEBUG 1: isPlayedByState = \(isPlayedByState), isCompletedByProgress = \(isCompletedByProgress)")
+                    
+                    if isPlayedByState || isCompletedByProgress {
                         print("🔄 BUTTON DEBUG 1: Calling rewindAndPlay for episode: \(episode.title)")
                         podcastPlayer.rewindAndPlay(episode: episode)
                     } else if isPlaying {
@@ -1518,11 +1524,17 @@ struct EpisodeRowView: View {
                                 .rotationEffect(.degrees(360))
                                 .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
                         } else {
-                            // Regular play/pause/replay button
-                            Image(systemName: episode.state.isPlayed || currentProgress >= 0.99 ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
+                            // FIX: Use EpisodeStateManager for consistent button display
+                            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                            let isPlayedByState = episodeState == .played
+                            let isCompletedByProgress = currentProgress >= 0.99
+                            let shouldShowRewind = isPlayedByState || isCompletedByProgress
+                            
+                            // Regular play/pause/replay button with consistent state logic
+                            Image(systemName: shouldShowRewind ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
                                 .resizable()
                                 .frame(width: buttonSize + 6, height: buttonSize + 6) // Larger visual button
-                                .foregroundColor(episode.state.isPlayed || currentProgress >= 0.99 ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
+                                .foregroundColor(shouldShowRewind ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
                         }
                     }
                     .padding(8) // Add padding for larger tap area
@@ -1715,13 +1727,20 @@ struct EpisodeRowView: View {
     
     private var episodeStatusChip: some View {
         Group {
-            // REAL-TIME STATUS FIX: Use currentProgress instead of episode.state.progress for accurate status during playback
-            if episode.state.isPlayed || (currentProgress >= 0.99 && !isPlaying) {
+            // FIX: Always use EpisodeStateManager as the source of truth for status display
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let isPlayedByState = episodeState == .played
+            let isCompletedByProgress = currentProgress >= 0.99 && !isPlaying
+            
+            // LOG: Debug status determination for troubleshooting
+            let _ = print("📊 STATUS DEBUG [\(episode.id.prefix(8))]: state=\(episodeState.rawValue), progress=\(String(format: "%.3f", currentProgress)), isPlaying=\(isPlaying), episode.state.isPlayed=\(episode.state.isPlayed)")
+            
+            if isPlayedByState || isCompletedByProgress {
                 Text("Played")
                     .foregroundColor(.adaptivePrimaryText)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.adaptiveBorder)) // Adaptive gray for played
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.adaptiveBorder))
             } else if isPlaying {
                 Text("Playing")
                     .foregroundColor(.white)
@@ -1740,7 +1759,7 @@ struct EpisodeRowView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue)) // Changed from green to blue for consistency
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue))
             }
         }
         .font(.caption2)
@@ -2197,11 +2216,19 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .foregroundColor(.blue)
                                 .opacity(0.6)
                         } else {
-                            // Regular play/pause button
-                            Image(systemName: cachedPlayButtonIcon)
+                            // FIX: Use real-time EpisodeStateManager for button display
+                            let currentEpisodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                            let currentButtonIcon = isPlaying ? "pause.fill" : currentEpisodeState.buttonImage
+                            let currentButtonColor = isPlaying ? .blue : currentEpisodeState.buttonColor
+                            
+                            // LOG: Debug button state for troubleshooting
+                            let _ = print("📊 BUTTON DEBUG [\(episode.id.prefix(8))]: currentState=\(currentEpisodeState.rawValue), icon=\(currentButtonIcon), color=\(currentButtonColor)")
+                            
+                            // Regular play/pause button with real-time state
+                            Image(systemName: currentButtonIcon)
                                 .font(.title2)
                                 .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
-                                .foregroundColor(isPlaying ? .blue : EpisodeStateManager.shared.getState(for: episode.id).buttonColor)
+                                .foregroundColor(currentButtonColor)
                         }
                     }
                 }
@@ -3251,10 +3278,15 @@ struct PodcastPlayerView: View {
         if podcastPlayer.currentEpisode?.id == episode.id {
             // Check the specific episode's progress, not the current player's progress
             let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
-            print("🔄 BUTTON DEBUG 2: Current episode tap - episode.state.isPlayed = \(episode.state.isPlayed), episodeProgress = \(episodeProgress)")
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let isPlayedByState = episodeState == .played
+            let isCompletedByProgress = episodeProgress >= 0.99
+            
+            print("🔄 BUTTON DEBUG 2: Current episode tap - episodeState = \(episodeState.rawValue), progress = \(String(format: "%.3f", episodeProgress))")
             print("🔄 BUTTON DEBUG 2: episode.id = \(episode.id)")
-            print("🔄 BUTTON DEBUG 2: episode.state = \(episode.state)")
-            if episode.state.isPlayed || episodeProgress >= 0.99 {
+            print("🔄 BUTTON DEBUG 2: isPlayedByState = \(isPlayedByState), isCompletedByProgress = \(isCompletedByProgress), episode.state.isPlayed = \(episode.state.isPlayed)")
+            
+            if isPlayedByState || isCompletedByProgress {
                 print("🔄 BUTTON DEBUG 2: Calling rewindAndPlay for current episode: \(episode.title)")
                 podcastPlayer.rewindAndPlay(episode: episode)
             } else {
@@ -3264,10 +3296,15 @@ struct PodcastPlayerView: View {
         } else {
             // Check if this different episode is finished and should be rewound
             let episodeProgress = podcastPlayer.getCurrentProgress(for: episode)
-            print("🔄 BUTTON DEBUG 2: Different episode tap - episode.state.isPlayed = \(episode.state.isPlayed), episodeProgress = \(episodeProgress)")
+            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+            let isPlayedByState = episodeState == .played
+            let isCompletedByProgress = episodeProgress >= 0.99
+            
+            print("🔄 BUTTON DEBUG 2: Different episode tap - episodeState = \(episodeState.rawValue), progress = \(String(format: "%.3f", episodeProgress))")
             print("🔄 BUTTON DEBUG 2: episode.id = \(episode.id)")
-            print("🔄 BUTTON DEBUG 2: episode.state = \(episode.state)")
-            if episode.state.isPlayed || episodeProgress >= 0.99 {
+            print("🔄 BUTTON DEBUG 2: isPlayedByState = \(isPlayedByState), isCompletedByProgress = \(isCompletedByProgress), episode.state.isPlayed = \(episode.state.isPlayed)")
+            
+            if isPlayedByState || isCompletedByProgress {
                 print("🔄 BUTTON DEBUG 2: Calling rewindAndPlay for finished episode: \(episode.title)")
                 podcastPlayer.rewindAndPlay(episode: episode)
             } else {

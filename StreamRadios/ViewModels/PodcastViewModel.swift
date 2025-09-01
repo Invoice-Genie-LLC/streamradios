@@ -342,6 +342,22 @@ class PodcastViewModel: ObservableObject {
             name: .init("EpisodeProgressChangedInstantly"),
             object: nil
         )
+        
+        // Listen for instant episode state changes for real-time UI updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantEpisodeStateChange),
+            name: .init("EpisodeStateChangedInstantly"),
+            object: nil
+        )
+        
+        // Listen for instant episode played changes for real-time UI updates
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInstantEpisodePlayedChange),
+            name: .init("EpisodePlayedChangedInstantly"),
+            object: nil
+        )
     }
     
     @objc private func handleInstantPodcastProgressSync(_ notification: Notification) {
@@ -383,6 +399,39 @@ class PodcastViewModel: ObservableObject {
         episodeProgress[episodeId] = progress
         
         // Single deferred UI update to prevent spam
+        Task { @MainActor in
+            self.objectWillChange.send()
+        }
+    }
+    
+    @objc private func handleInstantEpisodeStateChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let stateRawValue = userInfo["state"] as? String else {
+            return
+        }
+        
+        print("📊 INSTANT STATE CHANGE: Episode \(episodeId.prefix(8)) state changed to \(stateRawValue)")
+        
+        // Force immediate UI update for state changes
+        Task { @MainActor in
+            self.objectWillChange.send()
+        }
+    }
+    
+    @objc private func handleInstantEpisodePlayedChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let episodeId = userInfo["episodeId"] as? String,
+              let isPlayed = userInfo["isPlayed"] as? Bool else {
+            return
+        }
+        
+        print("📊 INSTANT PLAYED CHANGE: Episode \(episodeId.prefix(8)) played status changed to \(isPlayed)")
+        
+        // Update episode state in UI data structures
+        updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: nil)
+        
+        // Force immediate UI update for played status changes
         Task { @MainActor in
             self.objectWillChange.send()
         }
