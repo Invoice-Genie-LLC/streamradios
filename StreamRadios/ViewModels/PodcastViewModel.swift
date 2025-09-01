@@ -383,7 +383,6 @@ class PodcastViewModel: ObservableObject {
                 // 🔄 CRITICAL FIX: Update UI immediately for automatic view refresh
                 self.updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: progress)
                 
-                print("📡 ✅ Applied instant podcast progress sync with UI refresh: \(episodeId) (\(String(format: "%.2f", progress * 100))%%)")
             }
         }
     }
@@ -411,8 +410,6 @@ class PodcastViewModel: ObservableObject {
             return
         }
         
-        print("📊 INSTANT STATE CHANGE: Episode \(episodeId.prefix(8)) state changed to \(stateRawValue)")
-        
         // Force immediate UI update for state changes
         Task { @MainActor in
             self.objectWillChange.send()
@@ -425,8 +422,6 @@ class PodcastViewModel: ObservableObject {
               let isPlayed = userInfo["isPlayed"] as? Bool else {
             return
         }
-        
-        print("📊 INSTANT PLAYED CHANGE: Episode \(episodeId.prefix(8)) played status changed to \(isPlayed)")
         
         // Update episode state in UI data structures
         updateEpisodeUIState(episodeId: episodeId, isFavorite: nil, isDownloaded: nil, progress: nil)
@@ -640,7 +635,6 @@ class PodcastViewModel: ObservableObject {
                 print("📡 Deleted feed and episodes from Core Data: \(feedTitle)")
                 
                 await MainActor.run {
-                    print("📡 ✅ Applied instant podcast feed removal sync: \(feedTitle)")
                     print("📡 📊 Remote device cleanup summary:")
                     print("📡    ✅ CloudKit was already cleaned by originating device")
                     print("📡    ✅ EpisodeStateManager: \(episodeIds.count) episode states cleared")
@@ -656,7 +650,6 @@ class PodcastViewModel: ObservableObject {
     }
     
     @objc private func handleInstantPodcastFavoriteSync(_ notification: Notification) {
-        print("📡 🔔 FAVORITE SYNC RECEIVED: Processing favorite sync notification...")
         
         guard let userInfo = notification.userInfo,
               let episodeId = userInfo["episodeId"] as? String,
@@ -664,12 +657,9 @@ class PodcastViewModel: ObservableObject {
             print("📡 ❌ FAVORITE SYNC FAILED: Invalid notification data")
             return
         }
-        
-        print("📡 🔔 FAVORITE SYNC: Episode \(episodeId) favorite change to \(isFavorite)")
-        
+                
         // Update episode favorite status from remote sync
         let currentFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
-        print("📡 🔔 FAVORITE SYNC: Current state: \(currentFavorite), New state: \(isFavorite)")
         
         // Always ensure UI is in sync, even if data states match
         DispatchQueue.main.async {
@@ -684,8 +674,6 @@ class PodcastViewModel: ObservableObject {
                 self.updateEpisodeUIState(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: nil)
             }
             
-            // 🚗 CARPLAY FIX: Notify CarPlay immediately about cross-device favorite sync
-            print("🚗 CARPLAY NOTIFY: Sending EpisodeStateChanged notification for cross-device favorite sync")
             NotificationCenter.default.post(
                 name: NSNotification.Name("EpisodeStateChanged"),
                 object: nil,
@@ -694,7 +682,6 @@ class PodcastViewModel: ObservableObject {
                     "isFavorite": isFavorite
                 ]
             )
-            print("🚗 CARPLAY NOTIFY: EpisodeStateChanged notification sent for cross-device sync")
             
             // CRITICAL FIX: Save to Core Data for persistence across app restarts
             Task {
@@ -712,16 +699,9 @@ class PodcastViewModel: ObservableObject {
                 
                 do {
                     try await self.episodeManager.updateEpisodeStates([coreDataUpdate])
-                    print("💾 BANNER SYNC: Saved favorite state to Core Data for persistence: \(episodeId) (favorite: \(isFavorite))")
                 } catch {
                     print("❌ BANNER SYNC: Failed to save favorite state to Core Data: \(error)")
                 }
-            }
-            
-            if currentFavorite != isFavorite {
-                print("📡 ✅ Applied instant podcast favorite sync with data change: \(episodeId) (favorite: \(isFavorite))")
-            } else {
-                print("📡 🔄 FAVORITE SYNC: States matched but forced UI refresh: \(episodeId) (favorite: \(isFavorite))")
             }
         }
     }
@@ -777,16 +757,9 @@ class PodcastViewModel: ObservableObject {
                 
                 do {
                     try await self.episodeManager.updateEpisodeStates([coreDataUpdate])
-                    print("💾 BANNER SYNC: Saved download state to Core Data for persistence: \(episodeId) (downloaded: \(isDownloaded))")
                 } catch {
                     print("❌ BANNER SYNC: Failed to save download state to Core Data: \(error)")
                 }
-            }
-            
-            if currentDownloaded != isDownloaded {
-                print("📡 ✅ Applied instant podcast download sync with data change: \(episodeId) (downloaded: \(isDownloaded))")
-            } else {
-                print("📡 🔄 DOWNLOAD SYNC: States matched but forced UI refresh: \(episodeId) (downloaded: \(isDownloaded))")
             }
         }
     }
@@ -847,16 +820,9 @@ class PodcastViewModel: ObservableObject {
                 
                 do {
                     try await self.episodeManager.updateEpisodeStates([coreDataUpdate])
-                    print("💾 BANNER SYNC: Saved played state to Core Data for persistence: \(episodeId) (played: \(isPlayed), progress: \(effectiveProgress))")
                 } catch {
                     print("❌ BANNER SYNC: Failed to save played state to Core Data: \(error)")
                 }
-            }
-            
-            if currentPlayed != isPlayed {
-                print("📡 ✅ Applied instant podcast played sync with data change: \(episodeId) (played: \(isPlayed))")
-            } else {
-                print("📡 🔄 PLAYED SYNC: States matched but forced UI refresh: \(episodeId) (played: \(isPlayed))")
             }
         }
     }
@@ -890,7 +856,6 @@ class PodcastViewModel: ObservableObject {
             }
             
             currentEpisodes[index] = updatedEpisode
-            print("🔄 UI UPDATE: Updated currentEpisodes[\\(index)] for episode \\(episodeId)")
         }
         
         // Update the episode in the podcastFeeds array (triggers feed-level UI refresh)
@@ -911,7 +876,6 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 podcastFeeds[feedIndex] = updatedFeed
-                print("🔄 UI UPDATE: Updated podcastFeeds[\\(feedIndex)].episodes[\\(episodeIndex)] for episode \\(episodeId)")
                 break
             }
         }
@@ -1125,8 +1089,6 @@ class PodcastViewModel: ObservableObject {
     
     /// Immediate UI update for real-time sync (bypasses batch processing)
     private func updateEpisodeUIStateImmediate(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?, progress: Double? = nil) {
-        print("⚡ IMMEDIATE UPDATE: Processing real-time sync for episode \\(episodeId) (large feed optimization)")
-        
         // Update episodeProgress cache immediately
         if let progress = progress {
             episodeProgress[episodeId] = progress
@@ -1148,7 +1110,6 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 currentEpisodes[index] = updatedEpisode
-                print("⚡ IMMEDIATE UPDATE: Updated currentEpisodes[\\(index)] for episode \\(episodeId)")
                 break
             }
         }
@@ -1170,7 +1131,6 @@ class PodcastViewModel: ObservableObject {
                     }
                     
                     podcastFeeds[feedIndex] = updatedFeed
-                    print("⚡ IMMEDIATE UPDATE: Updated podcastFeeds[\\(feedIndex)].episodes[\\(episodeIndex)] for episode \\(episodeId)")
                     return // Found and updated, exit early
                 }
             }
@@ -1409,9 +1369,7 @@ class PodcastViewModel: ObservableObject {
             print("⚠️ IMMEDIATE CHECK: Missing feed URL for \(feedId)")
             return
         }
-        
-        print("🚀 IMMEDIATE CHECK: Starting immediate new episode check for feed \(feedId)")
-        
+                
         do {
             // Check for cancellation before starting work
             try Task.checkCancellation()
@@ -1423,7 +1381,6 @@ class PodcastViewModel: ObservableObject {
             try Task.checkCancellation()
             
             guard !newEpisodes.isEmpty else {
-                print("✅ IMMEDIATE CHECK: No new episodes found for feed \(feedId)")
                 return
             }
             
@@ -1450,7 +1407,6 @@ class PodcastViewModel: ObservableObject {
             await MainActor.run {
                 // If this is the currently selected feed, reload episodes from Core Data immediately
                 if self.selectedFeedId == feedId {
-                    print("🔄 IMMEDIATE CHECK: Refreshing episodes for currently selected feed")
                     Task {
                         do {
                             let result = try await self.episodeManager.loadEpisodes(
@@ -1465,7 +1421,6 @@ class PodcastViewModel: ObservableObject {
                             let processedEpisodes = await self.processEpisodesInBackground(result.episodes)
                             await MainActor.run {
                                 self.currentEpisodes = processedEpisodes
-                                print("🔄 IMMEDIATE CHECK: Updated currentEpisodes with \(processedEpisodes.count) episodes")
                             }
                         } catch {
                             print("❌ IMMEDIATE CHECK: Failed to reload episodes: \(error)")
@@ -1480,9 +1435,7 @@ class PodcastViewModel: ObservableObject {
             Task.detached(priority: .background) {
                 await self.quietSyncEpisodeStates(for: feedId)
             }
-            
-            print("✅ IMMEDIATE CHECK: Successfully processed \(newEpisodes.count) new episodes for feed \(feedId)")
-            
+                        
         } catch is CancellationError {
             print("🚫 IMMEDIATE CHECK: Cancelled for feed \(feedId)")
         } catch {
@@ -1492,7 +1445,6 @@ class PodcastViewModel: ObservableObject {
     
     /// Uses timestamp comparison to stop parsing once we reach episodes we already have
     private func parseNewEpisodesOnly(from url: URL, feedId: String) async throws -> [PodcastEpisode] {
-        print("🔍 Parsing RSS for new episodes only from: \(url.absoluteString)")
         
         // CRITICAL: Check for user scrolling and abort parsing if detected
         if isUserScrolling {
@@ -1502,16 +1454,13 @@ class PodcastViewModel: ObservableObject {
         
         // Get the most recent episode date from Core Data to use as cutoff
         let mostRecentEpisodeDate = await getMostRecentEpisodeDate(for: feedId)
-        print("📅 Most recent episode date: \(mostRecentEpisodeDate?.description ?? "none")")
         
         // Get existing episode IDs from Core Data to compare
         let existingEpisodeIds = await getExistingEpisodeIds(for: feedId)
-        print("📋 Found \(existingEpisodeIds.count) existing episodes for comparison")
         
         // Parse episodes from RSS with intelligent stopping
         let newEpisodes = try await parseRSSEpisodesWithCutoff(from: url, cutoffDate: mostRecentEpisodeDate, existingIds: existingEpisodeIds)
         
-        print("🆕 Found \(newEpisodes.count) new episodes using intelligent parsing")
         return newEpisodes
     }
     
@@ -1561,7 +1510,6 @@ class PodcastViewModel: ObservableObject {
     
     /// Parse RSS episodes with intelligent cutoff based on existing episode dates
     private func parseRSSEpisodesWithCutoff(from url: URL, cutoffDate: Date?, existingIds: Set<String>) async throws -> [PodcastEpisode] {
-        print("🧠 Smart parsing RSS episodes from: \(url.absoluteString)")
         
         // CRITICAL: Check for user scrolling and abort parsing if detected
         if isUserScrolling {
@@ -1655,7 +1603,6 @@ class PodcastViewModel: ObservableObject {
         
         for attempt in 1...maxRetries {
             do {
-                print("🔄 Fetching RSS data (attempt \(attempt)/\(maxRetries)) for: \(feedTitle)")
                 
                 // CRITICAL: Yield control to allow UI updates
                 await Task.yield()
@@ -1723,7 +1670,6 @@ class PodcastViewModel: ObservableObject {
                     return Data(data.dropFirst(3)) // Remove UTF-8 BOM
                 }
                 
-                print("✅ Successfully fetched \(data.count) bytes for: \(feedTitle)")
                 return data
                 
             } catch {
@@ -1738,7 +1684,6 @@ class PodcastViewModel: ObservableObject {
                 // For decode errors, wait longer between retries
                 if isDecodeError && attempt < maxRetries {
                     let delay = Double(attempt) * 2.0 // Progressive delay: 2s, 4s, 6s
-                    print("⏳ Waiting \(delay) seconds before retry due to decode error...")
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 } else if attempt < maxRetries {
                     // Standard retry delay for other errors
@@ -1751,7 +1696,6 @@ class PodcastViewModel: ObservableObject {
         }
         
         // All retries failed
-        print("💥 All \(maxRetries) fetch attempts failed for: \(feedTitle) - Final error: \(lastError?.localizedDescription ?? "Unknown error")")
         
         if let lastError = lastError, (lastError as NSError).code == -1015 {
             throw NSError(domain: "FeedError", code: -1015, userInfo: [NSLocalizedDescriptionKey: "Feed data is corrupted or truncated"])
@@ -1767,7 +1711,6 @@ class PodcastViewModel: ObservableObject {
             podcastFeeds.append(feed)
             podcastFeedOrder.append(feed.id)
             throttledUIUpdate()
-            print("📡 ☁️ CLOUDKIT FEED ADD: ✅ Added feed (without episodes) from CloudKit: \(feed.title)")
         }
     }
     
@@ -1785,22 +1728,18 @@ class PodcastViewModel: ObservableObject {
             let feedTitle = podcastFeeds[feedIndex].title
             let feed = podcastFeeds[feedIndex]
             
-            print("📡 ☁️ CLOUDKIT FEED DELETE: Starting comprehensive cleanup for: \(feedTitle)")
             
             Task {
                 // Step 1: Get episode IDs for comprehensive cleanup
                 let episodeIds = await getEpisodeIdsForFeed(feedId)
-                print("📡 ☁️ Found \(episodeIds.count) episodes to clean up for CloudKit deletion: \(feedTitle)")
                 
                 // Step 2: Clean up episode data from EpisodeStateManager (prevents duplication)
                 for episodeId in episodeIds {
                     EpisodeStateManager.shared.clearEpisodeData(episodeId)
                 }
-                print("📡 ☁️ Cleared \(episodeIds.count) episode states from EpisodeStateManager")
                 
                 // Step 3: Delete downloaded episode files (prevents storage bloat)
                 await deleteDownloadedEpisodeFiles(episodeIds)
-                print("📡 ☁️ Cleaned up downloaded files for \(episodeIds.count) episodes")
                 
                 // Step 4: Remove from UI arrays and clear local state
                 await MainActor.run {
@@ -1828,7 +1767,6 @@ class PodcastViewModel: ObservableObject {
                 // Step 5: Delete from Core Data (prevents duplication)
                 do {
                     try await deleteFeedFromCoreData(feed)
-                    print("📡 ☁️ Deleted feed and episodes from Core Data: \(feedTitle)")
                     
                     await MainActor.run {
                         print("📡 ☁️ CLOUDKIT FEED DELETE: ✅ Comprehensive cleanup completed for: \(feedTitle)")
@@ -6335,7 +6273,6 @@ extension PodcastViewModel {
                     self.podcastFeedOrder.removeAll()
                     self.currentEpisodes.removeAll()
                     self.throttledUIUpdate()
-                    print("📡 ✅ MAIN THREAD: Cleared all in-memory podcast data due to empty Core Data")
                     
                     // PERFORMANCE: Reset flags on main thread
                     self.isLoadingFromCoreData = false
@@ -6382,30 +6319,24 @@ extension PodcastViewModel {
                 // Batch property updates to prevent multiple UI refreshes
                 self.podcastFeeds = loadedFeeds
                 self.podcastFeedOrder = loadedFeeds.map { $0.id }
-                print("📡 ✅ MAIN THREAD: Updated podcastFeeds with \(loadedFeeds.count) feeds")
-                print("📡 ✅ MAIN THREAD: Updated podcastFeedOrder with \(self.podcastFeedOrder.count) items")
                 
                 // Clear loading flags
                 self.isLoading = false
                 self.isLoadingFeeds = false
                 self.isLoadingFromCoreData = false
-                print("📡 ✅ MAIN THREAD: Cleared loading flags - isLoading: false, isLoadingFeeds: false")
                 
                 // Single UI refresh after all properties are updated
                 self.throttledUIUpdate()
-                print("📡 ✅ MAIN THREAD: Triggered objectWillChange for UI refresh")
                 
                 // Report status to DataSyncManager
                 self.reportStatusToDataSyncManager()
             }
             
-            print("📡 Loaded \(loadedFeeds.count) podcast feeds from CoreData.")
             
             // Debug: Check if episodes exist in Core Data
             let debugEpisodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             do {
                 let allEpisodes = try backgroundContext.fetch(debugEpisodeRequest)
-                print("🔍 DEBUG: Found \(allEpisodes.count) total episodes in Core Data")
                 
                 // Group by feedId to see distribution
                 let episodesByFeed = Dictionary(grouping: allEpisodes) { $0.feedId ?? "unknown" }

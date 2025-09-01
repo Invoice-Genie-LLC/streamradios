@@ -3178,6 +3178,17 @@ class RadioPlayer: NSObject, ObservableObject {
     private func searchAppleMusicForArtwork(title: String, artist: String) async throws -> MusicKit.Song? {
         print("🎵 Apple Music Search: Looking for '\(title)' by '\(artist)'")
         
+        // Check authorization first
+        let authStatus = MusicAuthorization.currentStatus
+        if authStatus != .authorized {
+            print("🎵 ❌ Apple Music not authorized (status: \(authStatus)) - requesting authorization")
+            let newStatus = await MusicAuthorization.request()
+            if newStatus != .authorized {
+                print("🎵 ❌ Apple Music authorization denied - cannot search for artwork")
+                throw NSError(domain: "MusicKitError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Apple Music access required for artwork search"])
+            }
+        }
+        
         // Strategy 1: Generate artist name variations to handle different ordering
         var artistVariations = [artist]
         

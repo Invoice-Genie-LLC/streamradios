@@ -1822,13 +1822,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     /// Check if we're currently in the rewind protection period
     func isInRewindProtectionPeriod() -> Bool {
         guard let lastRewindTime = lastRewindTime else { 
-            os_log("🔄 REWIND PROTECTION CHECK: No rewind time set", log: log, type: .debug)
-            return false 
+            return false
         }
         let now = Date()
         let timeSinceRewind = now.timeIntervalSince(lastRewindTime)
         let isProtected = timeSinceRewind < rewindProtectionInterval
-        os_log("🔄 REWIND PROTECTION CHECK: Time since rewind: %.2f seconds, protected: %@", log: log, type: .debug, timeSinceRewind, isProtected ? "YES" : "NO")
         return isProtected
     }
     

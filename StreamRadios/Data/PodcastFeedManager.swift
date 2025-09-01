@@ -730,7 +730,6 @@ extension PodcastFeedManager {
         
         for attempt in 1...maxRetries {
             do {
-                os_log("🔄 Fetching RSS data (attempt %d/%d) for feed: %@", log: log, type: .info, attempt, maxRetries, feedTitle)
                 
                 // CRITICAL: Yield control to allow UI updates
                 await Task.yield()
@@ -800,7 +799,6 @@ extension PodcastFeedManager {
                     return Data(data.dropFirst(3)) // Remove UTF-8 BOM
                 }
                 
-                os_log("✅ Successfully fetched %d bytes for feed: %@", log: log, type: .info, data.count, feedTitle)
                 return data
                 
             } catch {

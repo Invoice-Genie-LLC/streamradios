@@ -88,9 +88,6 @@ extension PodcastModel {
         let isFavorite = self.isFavorite
         var isDownloaded = self.isDownloaded
         let isPlayed = episodeStateIsPlayed || self.isPlayed || progress >= 1.0
-        
-        // LOG: Debug episode state synchronization
-        print("🔄 EPISODE SYNC [\(episodeId.prefix(8))]: CoreData(progress=\(String(format: "%.3f", Double(self.progress))), played=\(self.isPlayed)) EpisodeStateManager(progress=\(String(format: "%.3f", episodeStateProgress)), state=\(episodeState.rawValue)) Final(progress=\(String(format: "%.3f", progress)), played=\(isPlayed))")
             
             // PERFORMANCE: Only log critical download/path issues, not every episode
             #if DEBUG

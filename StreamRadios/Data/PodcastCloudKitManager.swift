@@ -81,12 +81,6 @@ class PodcastCloudKitManager: ObservableObject {
         print("📡 🔧 SETUP: Initial synchronize() result: \(syncResult)")
         
         os_log("📡 Instant sync setup completed", log: log, type: .info)
-        
-        // Clear any existing test data from previous debug sessions
-        clearTestData()
-        
-        // Run a test sync to verify everything works
-        testInstantSync()
     }
     
     /// Test if iCloud is available and properly configured
@@ -121,31 +115,7 @@ class PodcastCloudKitManager: ObservableObject {
         ubiquitousStore.synchronize()
     }
     
-    /// Test the instant sync mechanism with a dummy sync
-    private func testInstantSync() {
-        print("📡 🧪 SYNC TEST: Testing instant sync mechanism...")
-        
-        let testEpisodeId = "test-episode-\(Date().timeIntervalSince1970)"
-        
-        // This should trigger the sync and we should see logs
-        print("📡 🧪 SYNC TEST: Calling syncPodcastFavoriteInstantly with test data...")
-        syncPodcastFavoriteInstantly(episodeId: testEpisodeId, isFavorite: true)
-        
-        // Wait a moment and check if we can read it back
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            if let storedData = self.ubiquitousStore.object(forKey: "instant_podcast_episode_favorite") as? [String: Any],
-               let storedEpisodeId = storedData["episodeId"] as? String,
-               storedEpisodeId == testEpisodeId {
-                print("📡 ✅ SYNC TEST: Test sync data found in store!")
-            } else {
-                print("📡 ❌ SYNC TEST: Test sync data NOT found in store!")
-            }
-            
-            // Clean up test data
-            self.ubiquitousStore.removeObject(forKey: "instant_podcast_episode_favorite")
-            self.ubiquitousStore.synchronize()
-        }
-    }
+
     
     // MARK: - Account Validation
     
@@ -200,29 +170,10 @@ class PodcastCloudKitManager: ObservableObject {
             return isValid
         }
         
-        // For backward compatibility, allow sync data without account ID but log warning
-        print("📡 ⚠️ ACCOUNT VALIDATION: Sync data missing account ID - allowing for backward compatibility")
         return true
     }
     
-    /// Clears any test/debug data from ubiquitous key-value store
-    private func clearTestData() {
-        print("📡 🧹 Clearing all test sync data...")
-        
-        // Remove any test feed data
-        ubiquitousStore.removeObject(forKey: "instant_podcast_feed_removed")
-        ubiquitousStore.removeObject(forKey: "instant_podcast_feed_added")
-        ubiquitousStore.removeObject(forKey: "sync_test")
-        
-        // Clear any other potential test keys
-        let testKeys = ["test_feed", "test_podcast", "debug_sync", "test_deletion", "test_addition"]
-        for key in testKeys {
-            ubiquitousStore.removeObject(forKey: key)
-        }
-        
-        ubiquitousStore.synchronize()
-        print("📡 ✅ All test sync data cleared")
-    }
+
     
     // MARK: - Ubiquitous Store Cleanup
     
@@ -231,10 +182,17 @@ class PodcastCloudKitManager: ObservableObject {
         let now = Date().timeIntervalSince1970
         let lastCleanup = ubiquitousStore.double(forKey: SharedDataKeys.lastCleanupDate)
         
-        // Only cleanup if it's been more than cleanup interval since last cleanup
-        guard lastCleanup == 0 || (now - lastCleanup) > cleanupInterval else {
+        // CRITICAL: Force cleanup if test data exists (performance fix)
+        let hasTestData = checkForTestDataPollution()
+        
+        // Only cleanup if it's been more than cleanup interval since last cleanup, UNLESS we have test data
+        guard hasTestData || lastCleanup == 0 || (now - lastCleanup) > cleanupInterval else {
             print("📡 🧹 CLEANUP: Skipping cleanup - last cleanup was recent")
             return
+        }
+        
+        if hasTestData {
+            print("📡 🧹 CLEANUP: ⚠️ FORCING CLEANUP - Test data pollution detected causing performance issues!")
         }
         
         print("📡 🧹 CLEANUP: Starting ubiquitous store cleanup to prevent quota exceeded")
@@ -261,6 +219,9 @@ class PodcastCloudKitManager: ObservableObject {
         
         // Clean up oversized collections
         cleanupSharedDataCollections()
+        
+        // CRITICAL: Clean up test data pollution that's causing performance issues
+        cleanupTestDataPollution()
         
         // Record cleanup date
         ubiquitousStore.set(now, forKey: SharedDataKeys.lastCleanupDate)
@@ -301,6 +262,137 @@ class PodcastCloudKitManager: ObservableObject {
         ubiquitousStore.set(trimmedCollection, forKey: key)
         
         print("📡 🧹 CLEANUP: Trimmed \(key) from \(collection.count) to \(trimmedCollection.count) entries")
+    }
+    
+    /// Check if test data pollution exists that would cause performance issues
+    private func checkForTestDataPollution() -> Bool {
+        // Check favorites for test episodes
+        if let favoritesData = ubiquitousStore.object(forKey: SharedDataKeys.episodeFavorites) as? [String: [String: Any]] {
+            for episodeId in favoritesData.keys {
+                if episodeId.hasPrefix("test-episode-") {
+                    return true
+                }
+            }
+        }
+        
+        // Check other collections too
+        let collectionsToCheck = [
+            SharedDataKeys.episodeDownloads,
+            SharedDataKeys.episodePlayed,
+            SharedDataKeys.episodeProgress
+        ]
+        
+        for key in collectionsToCheck {
+            if let data = ubiquitousStore.object(forKey: key) as? [String: [String: Any]] {
+                for episodeId in data.keys {
+                    if episodeId.hasPrefix("test-episode-") {
+                        return true
+                    }
+                }
+            }
+        }
+        
+        return false
+    }
+    
+    /// Clean up test data pollution that causes massive sync operations and performance issues
+    private func cleanupTestDataPollution() {
+        print("📡 🧹 TEST CLEANUP: Starting comprehensive test data cleanup...")
+        var totalRemoved = 0
+        
+        // Remove test episodes from favorites
+        if let favoritesData = ubiquitousStore.object(forKey: SharedDataKeys.episodeFavorites) as? [String: [String: Any]] {
+            var cleanedFavorites = favoritesData
+            var removedCount = 0
+            
+            for (episodeId, _) in favoritesData {
+                if episodeId.hasPrefix("test-episode-") {
+                    cleanedFavorites.removeValue(forKey: episodeId)
+                    removedCount += 1
+                }
+            }
+            
+            if removedCount > 0 {
+                ubiquitousStore.set(cleanedFavorites, forKey: SharedDataKeys.episodeFavorites)
+                totalRemoved += removedCount
+                print("📡 🧹 TEST CLEANUP: Removed \(removedCount) test episodes from favorites")
+            }
+        }
+        
+        // Remove test episodes from downloads
+        if let downloadsData = ubiquitousStore.object(forKey: SharedDataKeys.episodeDownloads) as? [String: [String: Any]] {
+            var cleanedDownloads = downloadsData
+            var removedCount = 0
+            
+            for (episodeId, _) in downloadsData {
+                if episodeId.hasPrefix("test-episode-") {
+                    cleanedDownloads.removeValue(forKey: episodeId)
+                    removedCount += 1
+                }
+            }
+            
+            if removedCount > 0 {
+                ubiquitousStore.set(cleanedDownloads, forKey: SharedDataKeys.episodeDownloads)
+                totalRemoved += removedCount
+                print("📡 🧹 TEST CLEANUP: Removed \(removedCount) test episodes from downloads")
+            }
+        }
+        
+        // Remove test episodes from played states
+        if let playedData = ubiquitousStore.object(forKey: SharedDataKeys.episodePlayed) as? [String: [String: Any]] {
+            var cleanedPlayed = playedData
+            var removedCount = 0
+            
+            for (episodeId, _) in playedData {
+                if episodeId.hasPrefix("test-episode-") {
+                    cleanedPlayed.removeValue(forKey: episodeId)
+                    removedCount += 1
+                }
+            }
+            
+            if removedCount > 0 {
+                ubiquitousStore.set(cleanedPlayed, forKey: SharedDataKeys.episodePlayed)
+                totalRemoved += removedCount
+                print("📡 🧹 TEST CLEANUP: Removed \(removedCount) test episodes from played states")
+            }
+        }
+        
+        // Remove test episodes from progress data
+        if let progressData = ubiquitousStore.object(forKey: SharedDataKeys.episodeProgress) as? [String: [String: Any]] {
+            var cleanedProgress = progressData
+            var removedCount = 0
+            
+            for (episodeId, _) in progressData {
+                if episodeId.hasPrefix("test-episode-") {
+                    cleanedProgress.removeValue(forKey: episodeId)
+                    removedCount += 1
+                }
+            }
+            
+            if removedCount > 0 {
+                ubiquitousStore.set(cleanedProgress, forKey: SharedDataKeys.episodeProgress)
+                totalRemoved += removedCount
+                print("📡 🧹 TEST CLEANUP: Removed \(removedCount) test episodes from progress data")
+            }
+        }
+        
+        // Clean up other test keys
+        let testKeys = [
+            "test_connectivity",
+            "sync_test", 
+            "debug_sync"
+        ]
+        
+        for key in testKeys {
+            ubiquitousStore.removeObject(forKey: key)
+        }
+        
+        if totalRemoved > 0 {
+            ubiquitousStore.synchronize()
+            print("📡 🧹 TEST CLEANUP: ✅ CRITICAL PERFORMANCE FIX - Removed \(totalRemoved) test episodes that were causing massive sync operations and app hangs!")
+        } else {
+            print("📡 🧹 TEST CLEANUP: No test data found to clean up")
+        }
     }
     
     // MARK: - Shared Collection Management
@@ -1227,7 +1319,6 @@ class PodcastCloudKitManager: ObservableObject {
     
     // New unique-key handler for favorite sync
     private func handleInstantPodcastFavoriteSync(for episodeId: String, uniqueKey: String) {
-        print("📡 🔔 FAVORITE SYNC HANDLER: Starting podcast favorite sync processing for episode \(episodeId)...")
         
         // Try to read data with retry mechanism to handle iCloud KV Store timing issues
         attemptToReadFavoriteData(for: episodeId, uniqueKey: uniqueKey, attempt: 1, maxAttempts: 3)
@@ -1257,9 +1348,7 @@ class PodcastCloudKitManager: ObservableObject {
                 return
             }
         }
-        
-        print("📡 🔔 FAVORITE SYNC DATA: Raw data received: \(favoriteData)")
-        
+                
         // Process the favorite data
         processFavoriteData(favoriteData, expectedEpisodeId: episodeId)
     }
@@ -1280,9 +1369,7 @@ class PodcastCloudKitManager: ObservableObject {
                 return
             }
         }
-        
-        print("📡 🔔 FAVORITE SYNC DATA: Raw data received: \(favoriteData)")
-        
+                
         // Process the favorite data
         processFavoriteData(favoriteData)
     }
@@ -1307,23 +1394,16 @@ class PodcastCloudKitManager: ObservableObject {
             return
         }
         
-        print("📡 🔔 FAVORITE SYNC VALID: Episode \(episodeId) favorite \(isFavorite)")
-        
-        os_log("📡 Received instant podcast favorite sync: %@ (favorite: %@)", log: log, type: .info, episodeId, isFavorite ? "YES" : "NO")
-        
         // Notify PodcastViewModel to update the episode favorite status
-        print("📡 🔔 FAVORITE SYNC NOTIFICATION: Sending InstantSyncDidUpdatePodcastFavorite notification...")
         NotificationCenter.default.post(
             name: .init("InstantSyncDidUpdatePodcastFavorite"),
             object: nil,
             userInfo: ["episodeId": episodeId, "isFavorite": isFavorite]
         )
-        print("📡 ✅ FAVORITE SYNC NOTIFICATION SENT: Notification posted successfully")
     }
     
     // New unique-key handler for download sync
     private func handleInstantPodcastDownloadSync(for episodeId: String, uniqueKey: String) {
-        print("📡 🔔 DOWNLOAD SYNC HANDLER: Starting podcast download sync processing for episode \(episodeId)...")
         
         // Try to read data with retry mechanism to handle iCloud KV Store timing issues
         attemptToReadDownloadData(for: episodeId, uniqueKey: uniqueKey, attempt: 1, maxAttempts: 3)
@@ -1331,7 +1411,6 @@ class PodcastCloudKitManager: ObservableObject {
     
     // New unique-key handler for played sync
     private func handleInstantPodcastPlayedSync(for episodeId: String, uniqueKey: String) {
-        print("📡 🔔 PLAYED SYNC HANDLER: Starting podcast played sync processing for episode \(episodeId)...")
         
         // Try to read data with retry mechanism to handle iCloud KV Store timing issues
         attemptToReadPlayedData(for: episodeId, uniqueKey: uniqueKey, attempt: 1, maxAttempts: 3)
@@ -1339,7 +1418,6 @@ class PodcastCloudKitManager: ObservableObject {
     
     // Legacy handler for backward compatibility
     private func handleInstantPodcastDownloadSync() {
-        print("📡 🔔 LEGACY DOWNLOAD SYNC HANDLER: Starting legacy podcast download sync processing...")
         
         // Try to read data with retry mechanism to handle iCloud KV Store timing issues
         attemptToReadDownloadData(attempt: 1, maxAttempts: 3)
@@ -1347,22 +1425,18 @@ class PodcastCloudKitManager: ObservableObject {
     
     // New unique-key retry method for downloads
     private func attemptToReadDownloadData(for episodeId: String, uniqueKey: String, attempt: Int, maxAttempts: Int) {
-        print("📡 🔄 DOWNLOAD SYNC ATTEMPT \(attempt)/\(maxAttempts): Trying to read data from '\(uniqueKey)'...")
         
         guard let downloadData = ubiquitousStore.object(forKey: uniqueKey) as? [String: Any] else {
             if attempt < maxAttempts {
-                print("📡 ⏳ DOWNLOAD SYNC RETRY: Data not ready, retrying in 0.5 seconds...")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     self.attemptToReadDownloadData(for: episodeId, uniqueKey: uniqueKey, attempt: attempt + 1, maxAttempts: maxAttempts)
                 }
                 return
             } else {
-                print("📡 ❌ DOWNLOAD SYNC FAILED: No data found for \(uniqueKey) after \(maxAttempts) attempts")
                 return
             }
         }
         
-        print("📡 🔔 DOWNLOAD SYNC DATA: Raw data received: \(downloadData)")
         
         // Process the download data
         processDownloadData(downloadData, expectedEpisodeId: episodeId)
@@ -1370,7 +1444,6 @@ class PodcastCloudKitManager: ObservableObject {
     
     // Legacy retry method for backward compatibility
     private func attemptToReadDownloadData(attempt: Int, maxAttempts: Int) {
-        print("📡 🔄 LEGACY DOWNLOAD SYNC ATTEMPT \(attempt)/\(maxAttempts): Trying to read legacy data...")
         
         guard let downloadData = ubiquitousStore.object(forKey: "instant_podcast_episode_download") as? [String: Any] else {
             if attempt < maxAttempts {
@@ -1380,7 +1453,6 @@ class PodcastCloudKitManager: ObservableObject {
                 }
                 return
             } else {
-                print("📡 ❌ DOWNLOAD SYNC FAILED: No data found for instant_podcast_episode_download after \(maxAttempts) attempts")
                 return
             }
         }
@@ -1393,7 +1465,6 @@ class PodcastCloudKitManager: ObservableObject {
     
     // New unique-key retry method for played sync
     private func attemptToReadPlayedData(for episodeId: String, uniqueKey: String, attempt: Int, maxAttempts: Int) {
-        print("📡 🔄 PLAYED SYNC ATTEMPT \(attempt)/\(maxAttempts): Trying to read data from '\(uniqueKey)'...")
         
         guard let playedData = ubiquitousStore.object(forKey: uniqueKey) as? [String: Any] else {
             if attempt < maxAttempts {
@@ -1433,10 +1504,6 @@ class PodcastCloudKitManager: ObservableObject {
             print("📡 ❌ DOWNLOAD SYNC FAILED: Episode ID mismatch - expected: \(expected), got: \(episodeId)")
             return
         }
-        
-        print("📡 🔔 DOWNLOAD SYNC VALID: Episode \(episodeId) download \(isDownloaded)")
-        
-        os_log("📡 Received instant podcast download sync: %@ (downloaded: %@)", log: log, type: .info, episodeId, isDownloaded ? "YES" : "NO")
         
         // Notify PodcastViewModel to update the episode download status
         print("📡 🔔 DOWNLOAD SYNC NOTIFICATION: Sending InstantSyncDidUpdatePodcastDownload notification...")

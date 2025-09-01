@@ -1066,7 +1066,7 @@ struct UnifiedPodcastPlayerView: View {
                         Button(action: podcastPlayer.skipBackward) {
                             Image(systemName: "gobackward.15")
                                 .font(.system(size: skipButtonIconSize))
-                                .foregroundColor(.white)
+                                .foregroundColor(.adaptivePrimaryText)
                         }
                         .buttonStyle(PlainButtonStyle())
                         
@@ -1128,7 +1128,7 @@ struct UnifiedPodcastPlayerView: View {
                         Button(action: podcastPlayer.skipForward) {
                             Image(systemName: "goforward.30")
                                 .font(.system(size: skipButtonIconSize))
-                                .foregroundColor(.white)
+                                .foregroundColor(.adaptivePrimaryText)
                         }
                         .buttonStyle(PlainButtonStyle())
                         
@@ -1142,7 +1142,7 @@ struct UnifiedPodcastPlayerView: View {
                         }) {
                             Text(String(format: "%.1fx", podcastPlayer.playbackSpeed))
                                 .font(.system(size: iconSize - 2, weight: .medium))
-                                .foregroundColor(.white)
+                                .foregroundColor(.adaptivePrimaryText)
                                 .frame(width: buttonSize + 8, height: buttonSize + 8)
                         }
                         .buttonStyle(PlainButtonStyle())

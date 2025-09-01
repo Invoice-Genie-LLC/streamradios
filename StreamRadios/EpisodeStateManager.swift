@@ -552,7 +552,6 @@ class EpisodeStateManager: ObservableObject {
     func disableCloudKitPriorityMode() {
         cloudKitPriorityQueue.async(flags: .barrier) {
             self.cloudKitPriorityMode = false
-            print("☁️ ✅ CLOUDKIT PRIORITY: Disabled - EpisodeStateManager will take precedence during episode loading")
         }
     }
     
@@ -727,9 +726,9 @@ class EpisodeStateManager: ObservableObject {
         // Use instance property instead of static to avoid Swift compilation error
         periodicBackupCounter += 1
         
-        // EMERGENCY PERFORMANCE: Create backup much less frequently to prevent main thread hangs
-        // Only backup every 100 saves or when we have LOTS of data
-        if periodicBackupCounter % 100 == 0 || (episodeStates.count >= 500 && periodicBackupCounter % 50 == 0) {
+        // EMERGENCY PERFORMANCE: Create backup MUCH less frequently to prevent notification storms
+        // Only backup every 500 saves to drastically reduce CloudKit notifications
+        if periodicBackupCounter % 500 == 0 {
             createEmergencyBackup()
         }
     }
@@ -1357,20 +1356,16 @@ class EpisodeStateManager: ObservableObject {
     }
     
     func completeEpisode(episodeId: String) {
-        print("🏁 COMPLETE EPISODE: Setting episode \(episodeId.prefix(8)) as played with 100% progress")
+        print("✅ Episode \(episodeId.prefix(8)) completed")
         episodeStates[episodeId] = .played
         episodeProgress[episodeId] = 1.0
         
         if currentlyPlayingEpisodeId == episodeId {
             currentlyPlayingEpisodeId = nil
-            print("🏁 COMPLETE EPISODE: Cleared currently playing episode")
         }
         
         saveCurrentStates()
         sendImmediateUpdate() // Use immediate update for completion
-        
-        // LOG: Debug episode completion
-        print("🏁 COMPLETE EPISODE: Episode \(episodeId.prefix(8)) marked as played - state=\(getState(for: episodeId).rawValue), progress=\(getProgress(for: episodeId))")
         
         // Send immediate notification for UI updates
         DispatchQueue.main.async {
@@ -1430,8 +1425,6 @@ class EpisodeStateManager: ObservableObject {
         let existingState = episodeStates[episodeId] ?? .new
         let shouldUpdateProgress: Bool
         
-        // LOG: Debug progress updates for troubleshooting
-        print("📈 UPDATE PROGRESS [\(episodeId.prefix(8))]: incoming=\(String(format: "%.3f", progress)), existing=\(String(format: "%.3f", existingProgress)), state=\(existingState.rawValue), playing=\(isPlaying)")
         
         if progress > 0 {
             // CHAPTER SEEK PROTECTION: Check if we're in chapter protection period
@@ -1527,7 +1520,6 @@ class EpisodeStateManager: ObservableObject {
         } else if effectiveProgress >= 1.0 {
             newState = .played
             currentlyPlayingEpisodeId = nil
-            print("🏁 PROGRESS COMPLETE: Episode \(episodeId.prefix(8)) marked as played due to 100% progress")
         } else if effectiveProgress > 0 {
             newState = .inProgress
             currentlyPlayingEpisodeId = nil
@@ -1542,9 +1534,6 @@ class EpisodeStateManager: ObservableObject {
             episodeStates[episodeId] = newState
             saveCurrentStates()
             sendThrottledUpdate()
-            
-            // LOG: Final state after update
-            print("📈 UPDATE COMPLETE [\(episodeId.prefix(8))]: finalState=\(newState.rawValue), finalProgress=\(String(format: "%.3f", getProgress(for: episodeId)))")
             
             // Send immediate notification for state changes
             if episodeStates[episodeId] != existingState {
@@ -2426,7 +2415,6 @@ extension EpisodeStateManager {
         saveSyncProgress()
         
         let progressPercent = Int(syncProgress.progress * 100)
-        print("📡 ⚡ SYNC PROGRESS: Episode \(episodeId) processed (\(progressPercent)% complete)")
     }
     
     /// Get the current sync progress if any

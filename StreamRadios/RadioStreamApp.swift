@@ -8,6 +8,7 @@
 import SwiftUI
 import WidgetKit
 import UIKit
+import MusicKit
 
 @main
 struct RadioStreamApp: App {
@@ -71,6 +72,12 @@ struct RadioStreamApp: App {
         if !UserDefaults.standard.bool(forKey: "NotificationAuthorizationRequested") {
             notificationManager.requestAuthorization()
             UserDefaults.standard.set(true, forKey: "NotificationAuthorizationRequested")
+        }
+        
+        // Request Apple Music authorization for station artwork search
+        Task {
+            await MusicAuthorizationManager.shared.requestAuthorization()
+            print("🎵 Apple Music authorization requested for artwork search")
         }
         
         // PERFORMANCE FIX: Check for radio station sync status instead of empty stations

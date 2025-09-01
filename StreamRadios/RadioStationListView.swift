@@ -284,10 +284,36 @@ struct RadioStationListView: View {
                     Text("Select a Country")
                         .font(.headline)
                         .foregroundColor(.adaptivePrimaryText)
-                    Text("Choose a country from the settings to view available radio stations")
+                    Text("Select any country to explore its radio stations")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
+                    
+                    Button(action: {
+                        showingCountryPicker = true
+                    }) {
+                        HStack {
+                            Image(systemName: "globe")
+                                .font(.system(size: 16, weight: .medium))
+                            Text("Browse Countries")
+                                .font(.system(size: 16, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 25)
+                                .fill(
+                                    LinearGradient(
+                                        gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                        )
+                        .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                    }
+                    .padding(.top, 20)
                 }
                 .padding(.horizontal, 40)
             } else {

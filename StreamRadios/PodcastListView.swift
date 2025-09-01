@@ -2221,9 +2221,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
                             let currentButtonIcon = isPlaying ? "pause.fill" : currentEpisodeState.buttonImage
                             let currentButtonColor = isPlaying ? .blue : currentEpisodeState.buttonColor
                             
-                            // LOG: Debug button state for troubleshooting
-                            let _ = print("📊 BUTTON DEBUG [\(episode.id.prefix(8))]: currentState=\(currentEpisodeState.rawValue), icon=\(currentButtonIcon), color=\(currentButtonColor)")
-                            
                             // Regular play/pause button with real-time state
                             Image(systemName: currentButtonIcon)
                                 .font(.title2)
@@ -2716,7 +2713,7 @@ struct PodcastPlayerView: View {
                                     HStack {
                                         Text("ABOUT")
                                             .font(.caption)
-                                            .foregroundColor(.blue)
+                                            .foregroundColor(.adaptivePrimaryText)
                                             .tracking(1.2)
                                         
                                         Spacer()
@@ -2783,11 +2780,11 @@ struct PodcastPlayerView: View {
                 HStack(spacing: 4) {
                     Text("\(viewModel.currentEpisodes.count)")
                         .font(.caption)
-                        .foregroundColor(.blue)
+                        .foregroundColor(.adaptiveSecondaryText)
                     
                     Text("episode\(viewModel.currentEpisodes.count == 1 ? "" : "s")")
                         .font(.caption)
-                        .foregroundColor(.blue)
+                        .foregroundColor(.adaptiveSecondaryText)
                     
                     if viewModel.hasMoreEpisodes {
                         Text("• More available")
