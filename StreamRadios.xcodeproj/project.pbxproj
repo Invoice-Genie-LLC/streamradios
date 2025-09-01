@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		35784634DC5C44839E7A7E8C /* CarPlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */; };
+		7706149B2E65F71D0022C94A /* StationSubmissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149A2E65F71D0022C94A /* StationSubmissionView.swift */; };
 		7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA3A2C152EF2006D5EBB /* ContentView.swift */; };
 		7707DA3D2C152EF5006D5EBB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3C2C152EF5006D5EBB /* Assets.xcassets */; };
 		7707DA402C152EF5006D5EBB /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3F2C152EF5006D5EBB /* Preview Assets.xcassets */; };
@@ -96,9 +97,9 @@
 		B2F29DD3820F421291555FF0EC14AC64 /* AudioSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13EEBEE095834FD2A182D6544F831109 /* AudioSettingsSheet.swift */; };
 		CARPLAY001234567890ABCDEF /* CarPlay.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CARPLAY123456789ABCDEF01 /* CarPlay.framework */; };
 		CARPLAYSCENE12345678901234 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */; };
-		ELEGANTPICKER123456789ABC /* CountryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEGANTPICKER987654321DEF /* CountryPicker.swift */; };
-		DEBUGLOGGER123456789ABCD /* DebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBUGLOGGERFILE987654321 /* DebugLogger.swift */; };
 		CRASHDETECT123456789ABCD /* CrashDetectionUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = CRASHDETECTFILE987654321 /* CrashDetectionUtility.swift */; };
+		DEBUGLOGGER123456789ABCD /* DebugLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBUGLOGGERFILE987654321 /* DebugLogger.swift */; };
+		ELEGANTPICKER123456789ABC /* CountryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = ELEGANTPICKER987654321DEF /* CountryPicker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -128,6 +129,7 @@
 /* Begin PBXFileReference section */
 		13EEBEE095834FD2A182D6544F831109 /* AudioSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsSheet.swift; sourceTree = "<group>"; };
 		6D761BF748C94D9CBF35BC37 /* CarPlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayManager.swift; sourceTree = "<group>"; };
+		7706149A2E65F71D0022C94A /* StationSubmissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSubmissionView.swift; sourceTree = "<group>"; };
 		7707DA352C152EF2006D5EBB /* StreamRadios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreamRadios.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7707DA3A2C152EF2006D5EBB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7707DA3C2C152EF5006D5EBB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -219,9 +221,9 @@
 		77FC45402E0F816100C823B8 /* GlobalPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalPlayerView.swift; sourceTree = "<group>"; };
 		CARPLAY123456789ABCDEF01 /* CarPlay.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CarPlay.framework; path = System/Library/Frameworks/CarPlay.framework; sourceTree = SDKROOT; };
 		CARPLAYSCENE56789012345678 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
-		ELEGANTPICKER987654321DEF /* CountryPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryPicker.swift; sourceTree = "<group>"; };
-		DEBUGLOGGERFILE987654321 /* DebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogger.swift; sourceTree = "<group>"; };
 		CRASHDETECTFILE987654321 /* CrashDetectionUtility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashDetectionUtility.swift; sourceTree = "<group>"; };
+		DEBUGLOGGERFILE987654321 /* DebugLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogger.swift; sourceTree = "<group>"; };
+		ELEGANTPICKER987654321DEF /* CountryPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountryPicker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -298,6 +300,7 @@
 				774180512C6708020030B459 /* AudioPlayerProtocol.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
 				778610652E50A8A700108721 /* PodcastPreviewView.swift */,
+				7706149A2E65F71D0022C94A /* StationSubmissionView.swift */,
 				7715BD9F2C4EAA6C00FA7CB1 /* AlertManager.swift */,
 				77E23F4D2C90A0B300CDECD9 /* PlaybackManager.swift */,
 				7741804F2C6703FC0030B459 /* PodcastPlayer.swift */,
@@ -623,6 +626,7 @@
 				778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */,
 				77F6689F2C7A56CF00E2618C /* BannerAlert.swift in Sources */,
 				7707DA682C156FA7006D5EBB /* RadioStationViewModel.swift in Sources */,
+				7706149B2E65F71D0022C94A /* StationSubmissionView.swift in Sources */,
 				77A2F8082C587E570015C398 /* AlarmTriggeredView.swift in Sources */,
 				77E23F422C8F3B1D00CDECD9 /* ReconnectingIndicatorView.swift in Sources */,
 				775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */,

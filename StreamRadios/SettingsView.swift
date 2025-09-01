@@ -71,6 +71,7 @@ struct SettingsView: View {
     @State private var debugLogsContent = ""
     @State private var showingDebugLogsView = false
     @State private var notificationPermissionStatus = "Unknown"
+
     
     // Debug counters that can be reset
     @State private var sessionStartTime = Date()
@@ -123,6 +124,7 @@ struct SettingsView: View {
                         displaySettings
                         alarmSettings
                         dataManagementLink
+                        stationSubmissionSettings
                         aboutSettings
                         debugSettings
                     }
@@ -191,6 +193,7 @@ struct SettingsView: View {
                 )
             }
         }
+
         .overlay(
             Group {
                 if alertManager.showCustomAlert {
@@ -502,6 +505,40 @@ extension SettingsView {
             }
             .buttonStyle(PlainButtonStyle())
         }
+    }
+    
+    @ViewBuilder
+    private var stationSubmissionSettings: some View {
+        NavigationLink(destination: ContentSubmissionView()) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.headline)
+                        .foregroundColor(.blue)
+                        .frame(width: 20)
+                    
+                    Text("Submit radio station or podcast")
+                        .font(.body)
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+                
+                Text("Submit your radio station or podcast for inclusion in StreamRadios")
+                    .font(.caption)
+                    .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .background(cardBackgroundColor)
+            .cornerRadius(16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
     }
     
     @ViewBuilder

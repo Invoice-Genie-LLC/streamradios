@@ -1924,6 +1924,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var refreshTrigger = UUID() // Force UI refresh when progress/played state changes
     @State private var downloadButtonPressed = false // For download button press animation
     
+    // Local loading state for visual feedback
+    @State private var localLoadingState = false
+    
     // Cache expensive computations to avoid recalculation during scrolling
     private let cachedProgress: Double
     private let cachedStatusText: String
@@ -2178,27 +2181,50 @@ struct OptimizedEpisodeRowView: View, Equatable {
         // Responsive Layout: Play Button | Episode Info | Action Buttons
         HStack(alignment: .top, spacing: 12) {
             
-            // COLUMN 1: Play button (Fixed width)
-            Button(action: isPlaying ? onStop : onPlay) {
-                Group {
-                    if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
-                        // Show spinning loading state
-                        Image(systemName: "arrow.2.circlepath")
-                            .font(.title2)
-                            .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
-                            .foregroundColor(.blue)
-                            .rotationEffect(.degrees(360))
-                            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
-                    } else {
-                        // Regular play/pause button
-                        Image(systemName: cachedPlayButtonIcon)
-                            .font(.title2)
-                            .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
-                            .foregroundColor(isPlaying ? .blue : EpisodeStateManager.shared.getState(for: episode.id).buttonColor)
+            // COLUMN 1: Play button (Fixed width) with enhanced loading indicator
+            ZStack {
+                Button(action: isPlaying ? onStop : {
+                    // Start local loading state when play button tapped
+                    localLoadingState = true
+                    onPlay()
+                }) {
+                    Group {
+                        if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
+                            // Show loading indicator similar to radio station style
+                            Image(systemName: cachedPlayButtonIcon)
+                                .font(.title2)
+                                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                                .foregroundColor(.blue)
+                                .opacity(0.6)
+                        } else {
+                            // Regular play/pause button
+                            Image(systemName: cachedPlayButtonIcon)
+                                .font(.title2)
+                                .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
+                                .foregroundColor(isPlaying ? .blue : EpisodeStateManager.shared.getState(for: episode.id).buttonColor)
+                        }
                     }
                 }
+                .frame(width: 44, height: 44) // Fixed play button area
+                
+                // Loading overlay similar to radio station implementation
+                if localLoadingState {
+                    ZStack {
+                        // Semi-transparent circular overlay with more visibility
+                        Circle()
+                            .fill(Color.black.opacity(0.6))
+                            .frame(width: 44, height: 44)
+                        
+                        // Loading spinner
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: localLoadingState)
+
+                }
             }
-            .frame(width: 44, height: 44) // Fixed play button area
             .padding(.top, 2) // Align with first line of text
             
             // COLUMN 2: Episode content (Flexible width with intelligent truncation)
@@ -2315,6 +2341,8 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onTapGesture {
+            // Start local loading state when tapped
+            localLoadingState = true
             onPlay()
         }
         .onReceive(podcastPlayer.$currentProgress) { _ in
@@ -2324,6 +2352,26 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .onReceive(podcastPlayer.$currentTime) { _ in
             // Force view refresh when current time changes for playing episodes
             // This ensures real-time time left updates
+        }
+        .onReceive(podcastPlayer.$isPlaying) { isPlaying in
+            // Clear loading state when playback starts for this episode
+            if isPlaying && podcastPlayer.currentEpisode?.id == episode.id {
+                localLoadingState = false
+            }
+        }
+        .onChange(of: isPlaying) { _, newIsPlaying in
+            // Clear loading state when this episode starts playing
+            if newIsPlaying {
+                localLoadingState = false
+            }
+        }
+        .onChange(of: localLoadingState) { _, isLoading in
+            // Auto-clear loading state after 3 seconds as fallback
+            if isLoading {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    localLoadingState = false
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("EpisodeProgressChangedInstantly"))) { notification in
             if let userInfo = notification.userInfo,

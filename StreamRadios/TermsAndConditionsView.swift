@@ -22,6 +22,22 @@ struct TermsAndConditionsView: View {
     
     var body: some View {
         VStack(spacing: 0) {
+            // Drag indicator
+            VStack(spacing: 8) {
+                // Drag handle
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 8)
+                
+                // Title
+                Text("Terms and Conditions")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(primaryTextColor)
+                    .padding(.bottom, 4)
+            }
+            
             // Header Divider
             Divider()
                 .background(Color.gray.opacity(0.3))
