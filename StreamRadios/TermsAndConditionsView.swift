@@ -4,6 +4,12 @@ struct TermsAndConditionsView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.dismiss) private var dismiss
     
+    let showDragIndicator: Bool
+    
+    init(showDragIndicator: Bool = false) {
+        self.showDragIndicator = showDragIndicator
+    }
+    
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
     }
@@ -22,25 +28,27 @@ struct TermsAndConditionsView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Drag indicator
-            VStack(spacing: 8) {
-                // Drag handle
-                RoundedRectangle(cornerRadius: 2.5)
-                    .fill(Color.gray.opacity(0.5))
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 8)
+            // Drag indicator - only show when accessed from StationSubmissionView
+            if showDragIndicator {
+                VStack(spacing: 8) {
+                    // Drag handle
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(Color.gray.opacity(0.5))
+                        .frame(width: 40, height: 5)
+                        .padding(.top, 8)
+                    
+                    // Title
+                    Text("Terms and Conditions")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(primaryTextColor)
+                        .padding(.bottom, 4)
+                }
                 
-                // Title
-                Text("Terms and Conditions")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(primaryTextColor)
-                    .padding(.bottom, 4)
+                // Header Divider
+                Divider()
+                    .background(Color.gray.opacity(0.3))
             }
-            
-            // Header Divider
-            Divider()
-                .background(Color.gray.opacity(0.3))
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -173,16 +181,24 @@ struct TermsAndConditionsView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
             NavigationView {
-                TermsAndConditionsView()
+                TermsAndConditionsView(showDragIndicator: false)
             }
             .preferredColorScheme(.dark)
-            .previewDisplayName("Dark Mode")
+            .previewDisplayName("Dark Mode - Navigation")
             
             NavigationView {
-                TermsAndConditionsView()
+                TermsAndConditionsView(showDragIndicator: false)
             }
             .preferredColorScheme(.light)
-            .previewDisplayName("Light Mode")
+            .previewDisplayName("Light Mode - Navigation")
+            
+            TermsAndConditionsView(showDragIndicator: true)
+                .preferredColorScheme(.dark)
+                .previewDisplayName("Dark Mode - Sheet with Drag")
+            
+            TermsAndConditionsView(showDragIndicator: true)
+                .preferredColorScheme(.light)
+                .previewDisplayName("Light Mode - Sheet with Drag")
         }
     }
 } 

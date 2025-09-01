@@ -229,7 +229,7 @@ struct ContentSubmissionView: View {
                 }
             }
         .sheet(isPresented: $showingTerms) {
-            TermsAndConditionsView()
+            TermsAndConditionsView(showDragIndicator: true)
         }
         .alert("Terms of Use Required", isPresented: $showTermsAlert) {
             Button("Read Terms of Use") {
