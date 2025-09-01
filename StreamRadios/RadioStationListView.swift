@@ -796,8 +796,10 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func imageForStation(_ station: RadioStation) -> some View {
-        // Only show iTunes artwork for currently playing station
-        if isCurrentStation(station: station) && radioPlayer.isPlaying {
+        // Show iTunes artwork for currently playing station if available
+        // Use more stable condition to prevent flickering during brief isPlaying state changes
+        if isCurrentStation(station: station) {
+            // Prioritize iTunes artwork if available (regardless of brief isPlaying flickers)
             if let iTunesArt = radioPlayer.iTunesAlbumArt {
                 Image(uiImage: iTunesArt)
                     .resizable()
@@ -814,7 +816,7 @@ struct RadioStationListView: View {
                 defaultStationImage(station)
             }
         }
-        // For non-playing stations, always show station icon or default
+        // For non-current stations, always show station icon or default
         else {
             if let iconData = station.iconData,
                let imageData = Data(base64Encoded: iconData),

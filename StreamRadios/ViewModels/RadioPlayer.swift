@@ -15,6 +15,7 @@ import SwiftUI
 import Reachability
 import SystemConfiguration
 import Foundation
+import MusicKit
 
 enum ConnectionState {
     case connected
@@ -184,7 +185,18 @@ class RadioPlayer: NSObject, ObservableObject {
             
             print("🎯 iTunes fallback using: Artist='\(artist)', Title='\(title)'")
             
-            // Avoid "Artist - Artist" searches for artist-only stations
+            // Check if both artist and title are just the station name (invalid for music search)
+            let normalizedStationName = stationName.lowercased().replacingOccurrences(of: " ", with: "")
+            let normalizedArtist = artist.lowercased().replacingOccurrences(of: " ", with: "")
+            let normalizedTitle = title.lowercased().replacingOccurrences(of: " ", with: "")
+            
+            if normalizedArtist == normalizedStationName && normalizedTitle == normalizedStationName {
+                print("🎯 🚫 Skipping iTunes search - both artist and title are station name: '\(stationName)'")
+                print("🎯    This would create meaningless searches like 'TOP ALBANIA RADIO - TOP ALBANIA RADIO'")
+                return
+            }
+            
+            // Avoid "Artist - Artist" searches for artist-only stations  
             let searchMetadata: String
             if artist == title && artist != metadata {
                 // Artist-only station: just search by artist name
@@ -268,11 +280,25 @@ class RadioPlayer: NSObject, ObservableObject {
         if let currentMetadata = metadata, currentMetadata != lastMetadataSearched {
             displayTitle = nil
             displayArtist = nil
-            // Clear existing artwork to show we're searching for new artwork
-            iTunesAlbumArt = nil
+            // Only clear artwork if we're confident this is truly a different song
+            // Avoid clearing artwork for minor metadata variations that cause UI flicker
+            let metadataWords = Set(currentMetadata.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+            let lastSearchedWords = Set((lastMetadataSearched ?? "").lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+            
+            // Only clear artwork if the songs are significantly different (less than 50% word overlap)
+            let commonWords = metadataWords.intersection(lastSearchedWords)
+            let similarity = metadataWords.isEmpty ? 0.0 : Double(commonWords.count) / Double(metadataWords.count)
+            
+            if similarity < 0.5 {
+                // Clear existing artwork only for genuinely different songs
+                iTunesAlbumArt = nil
+                print("🔄 New song detected: '\(currentMetadata)' - clearing previous artwork (similarity: \(String(format: "%.2f", similarity)))")
+            } else {
+                print("🔄 Similar song metadata: '\(currentMetadata)' - keeping existing artwork (similarity: \(String(format: "%.2f", similarity)))")
+            }
+            
             updateNowPlayingInfo()
             updateWidget()
-            print("🔄 New song detected: '\(currentMetadata)' - clearing previous Shazam data for fresh recognition")
         }
         
         // Get current station URL for Shazam recognition
@@ -1938,6 +1964,19 @@ class RadioPlayer: NSObject, ObservableObject {
             let split = splitArtistTitle(from: metadata, fallbackArtist: stationName, fallbackTitle: metadata)
             let artist = split.artist.trimmingCharacters(in: .whitespacesAndNewlines)
             let title = split.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Check if both artist and title are just the station name (invalid for music search)
+            let normalizedStationName = stationName.lowercased().replacingOccurrences(of: " ", with: "")
+            let normalizedArtist = artist.lowercased().replacingOccurrences(of: " ", with: "")
+            let normalizedTitle = title.lowercased().replacingOccurrences(of: " ", with: "")
+            
+            if normalizedArtist == normalizedStationName && normalizedTitle == normalizedStationName {
+                print("🎯 🚫 Skipping artwork search - both artist and title are station name: '\(stationName)'")
+                print("🎯    Metadata: '\(metadata)' → Artist: '\(artist)', Title: '\(title)'")
+                completion(nil)
+                return
+            }
+            
             if !artist.isEmpty && !title.isEmpty {
                 preferredQueries.append(contentsOf: [
                     "\"\(title)\" \"\(artist)\"",
@@ -1975,6 +2014,135 @@ class RadioPlayer: NSObject, ObservableObject {
     private var lastKnownTitle: String?
     private var lastMetadataUpdate: Date?
     
+    /// Smart detection of artist-title order in radio metadata
+    private func smartDetectArtistTitleOrder(left: String, right: String) -> (artist: String, title: String) {
+        print("🔍 Smart detection: left='\(left)', right='\(right)'")
+        
+        // Common artist indicators
+        let artistIndicators = [
+            "feat.", "featuring", "ft.", "with", "&", "and",
+            "vs", "versus", "x", "collaboration"
+        ]
+        
+        // Common title indicators
+        let titleIndicators = [
+            "(", ")", "[", "]", "remix", "radio edit", "extended", "version",
+            "live", "acoustic", "instrumental", "remastered"
+        ]
+        
+        var leftArtistScore = 0
+        var rightArtistScore = 0
+        var leftTitleScore = 0
+        var rightTitleScore = 0
+        
+        // Check for artist indicators
+        for indicator in artistIndicators {
+            if left.lowercased().contains(indicator.lowercased()) { leftArtistScore += 1 }
+            if right.lowercased().contains(indicator.lowercased()) { rightArtistScore += 1 }
+        }
+        
+        // Check for title indicators
+        for indicator in titleIndicators {
+            if left.lowercased().contains(indicator.lowercased()) { leftTitleScore += 1 }
+            if right.lowercased().contains(indicator.lowercased()) { rightTitleScore += 1 }
+        }
+        
+        // Strong indicator: Multiple artists separated by commas (like "DJ KHALED, VYBZ KARTEL, BUJU BANTON")
+        let leftCommaCount = left.components(separatedBy: ",").count - 1
+        let rightCommaCount = right.components(separatedBy: ",").count - 1
+        
+        if leftCommaCount >= 2 { leftArtistScore += 3 }  // Strong artist indicator
+        if rightCommaCount >= 2 { rightArtistScore += 3 } // Strong artist indicator
+        
+        // Artist name patterns (DJ, MC, common suffixes)
+        let leftLower = left.lowercased()
+        let rightLower = right.lowercased()
+        
+        if leftLower.hasPrefix("dj ") || leftLower.hasPrefix("mc ") || leftLower.contains(" dj ") { leftArtistScore += 2 }
+        if rightLower.hasPrefix("dj ") || rightLower.hasPrefix("mc ") || rightLower.contains(" dj ") { rightArtistScore += 2 }
+        
+        // Heuristic: Longer text is more likely to be the title
+        if left.count > Int(Double(right.count) * 1.5) { leftTitleScore += 1 }
+        if right.count > Int(Double(left.count) * 1.5) { rightTitleScore += 1 }
+        
+        // Heuristic: All caps text is more likely to be metadata formatting (could be either)
+        // But if one is mixed case and other is all caps, mixed case is more likely the artist name
+        let leftIsAllCaps = left.uppercased() == left && left != left.lowercased()
+        let rightIsAllCaps = right.uppercased() == right && right != right.lowercased()
+        
+        if !leftIsAllCaps && rightIsAllCaps { leftArtistScore += 1 }
+        if !rightIsAllCaps && leftIsAllCaps { rightArtistScore += 1 }
+        
+        // Common knowledge: if one part is a well-known artist name pattern
+        let leftIsLikelyArtist = isLikelyArtistName(left)
+        let rightIsLikelyArtist = isLikelyArtistName(right)
+        
+        if leftIsLikelyArtist { leftArtistScore += 2 }
+        if rightIsLikelyArtist { rightArtistScore += 2 }
+        
+        print("🔍 Scores - Left: artist=\(leftArtistScore), title=\(leftTitleScore) | Right: artist=\(rightArtistScore), title=\(rightTitleScore)")
+        
+        // Decide based on scores
+        if leftArtistScore > rightArtistScore {
+            print("🔍 ✅ Detected format: ARTIST - TITLE")
+            return (left, right)  // left=artist, right=title
+        } else if rightArtistScore > leftArtistScore {
+            print("🔍 ✅ Detected format: TITLE - ARTIST")
+            return (right, left)  // right=artist, left=title  
+        } else if leftTitleScore > rightTitleScore {
+            print("🔍 ✅ Detected format: TITLE - ARTIST (by title indicators)")
+            return (right, left)  // right=artist, left=title
+        } else if rightTitleScore > leftTitleScore {
+            print("🔍 ✅ Detected format: ARTIST - TITLE (by title indicators)")
+            return (left, right)  // left=artist, right=title
+        } else {
+            // Final tie-breaker: Check for collaboration patterns
+            let leftHasArtistPattern = leftLower.contains(" feat") || leftLower.contains(" ft") || 
+                                     leftLower.contains(" & ") || leftLower.contains(" and ")
+            let rightHasArtistPattern = rightLower.contains(" feat") || rightLower.contains(" ft") || 
+                                      rightLower.contains(" & ") || rightLower.contains(" and ")
+            
+            if rightHasArtistPattern && !leftHasArtistPattern {
+                print("🔍 ✅ Detected format: TITLE - ARTIST (by collaboration indicators)")
+                return (right, left)  // right=artist, left=title
+            } else if leftHasArtistPattern && !rightHasArtistPattern {
+                print("🔍 ✅ Detected format: ARTIST - TITLE (by collaboration indicators)")
+                return (left, right)  // left=artist, right=title
+            }
+            
+            // Final fallback: Most radio metadata follows "ARTIST - TITLE" format
+            print("🔍 ⚖️ True tie - defaulting to ARTIST - TITLE (standard radio format)")
+            return (left, right)  // left=artist, right=title
+        }
+    }
+    
+    /// Check if a string is likely an artist name
+    private func isLikelyArtistName(_ text: String) -> Bool {
+        let normalized = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Known artist patterns
+        let artistPatterns = [
+            "phil collins", "richard ashcroft", "rema", "selena gomez",
+            "mutya buena", "the killers", "portugal the man"
+        ]
+        
+        for pattern in artistPatterns {
+            if normalized.contains(pattern) { return true }
+        }
+        
+        // Name patterns (First Last, First Middle Last, etc.)
+        let nameComponents = normalized.components(separatedBy: " ")
+        if nameComponents.count >= 2 && nameComponents.count <= 4 {
+            // Check if it looks like a name (starts with capital letters)
+            let hasNamePattern = nameComponents.allSatisfy { component in
+                component.first?.isUppercase == true || component.first?.isLetter == true
+            }
+            if hasNamePattern { return true }
+        }
+        
+        return false
+    }
+
     // Display-only split that preserves station-provided wording and improves iTunes search
     func splitArtistTitle(from raw: String, fallbackArtist: String, fallbackTitle: String) -> (artist: String, title: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1993,11 +2161,14 @@ class RadioPlayer: NSObject, ObservableObject {
                     let left = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
                     let right = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
                     if !left.isEmpty && !right.isEmpty {
+                        // Smart detection of ARTIST-TITLE vs TITLE-ARTIST format
+                        let (detectedArtist, detectedTitle) = smartDetectArtistTitleOrder(left: left, right: right)
+                        
                         // Update our knowledge for future incomplete metadata
-                        lastKnownArtist = left
-                        lastKnownTitle = right
+                        lastKnownArtist = detectedArtist
+                        lastKnownTitle = detectedTitle
                         lastMetadataUpdate = Date()
-                        return (left, right)
+                        return (detectedArtist, detectedTitle)
                     }
                 }
                 break
@@ -2147,6 +2318,31 @@ class RadioPlayer: NSObject, ObservableObject {
             print("🎯 ✅ Combined as CachedArtist+Title: '\(lastKnownArtist!)' + '\(trimmed)'")
             return (lastKnownArtist!, trimmed)
         } else if isLikelyArtist {
+            // Check if this "artist" is actually just the station name or technical identifier
+            let currentStationName = fallbackArtist.lowercased().replacingOccurrences(of: " ", with: "")
+            let trimmedForComparison = trimmed.lowercased().replacingOccurrences(of: " ", with: "")
+            
+            // Check for exact station name match
+            if currentStationName == trimmedForComparison {
+                print("🎯 🚫 Detected station name as metadata - rejecting to avoid fake song info")
+                print("🎯    Station: '\(fallbackArtist)' vs Metadata: '\(trimmed)'")
+                return (fallbackArtist, fallbackTitle) // Return station info, don't store fake artist
+            }
+            
+            // Check for technical station identifiers that should never be used as artist names
+            let stationIdentifiers = [
+                "lautfm", "laut.fm", "progressive.com", "verbraucherinformationen",
+                "radio", "fm", "am", "streaming", "live", "online"
+            ]
+            
+            for identifier in stationIdentifiers {
+                if trimmedForComparison.contains(identifier) {
+                    print("🎯 🚫 Detected station identifier '\(identifier)' in metadata - rejecting to avoid fake song info")
+                    print("🎯    Metadata: '\(trimmed)'")
+                    return (fallbackArtist, fallbackTitle) // Return station info, don't store fake identifier
+                }
+            }
+            
             // Store artist for future combination
             lastKnownArtist = trimmed
             lastMetadataUpdate = now
@@ -2174,6 +2370,65 @@ class RadioPlayer: NSObject, ObservableObject {
         var cleaned = rawMetadata
         
         print("🧹 Cleaning HTML metadata: '\(rawMetadata)'")
+        
+        // Check for JSON content - if it looks like JSON, reject it entirely
+        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (trimmed.hasPrefix("{") && trimmed.hasSuffix("}")) || 
+           (trimmed.hasPrefix("[") && trimmed.hasSuffix("]")) ||
+           trimmed.contains("\"frag_type\"") ||
+           trimmed.contains("\"content\"") ||
+           trimmed.contains("frag_type") {
+            print("🧹 ❌ Rejecting JSON/fragment metadata: '\(rawMetadata)'")
+            return ""
+        }
+        
+        // Check for specific commercial break patterns (more precise matching)
+        let commercialPatterns = [
+            // Technical/JSON patterns
+            "frag_type", "\"content\"", "null", "undefined", "empty",
+            // Station technical data and URLs
+            "verbraucherinformationen", "lautfm", "laut.fm", "progressive.com",
+            "www.", "http://", "https://",
+            // Audio encoding/streaming technical terms (full patterns)
+            "transcoder", "encoder", "lavf", "lame", "ffmpeg",
+            "br-128", "sr-44100", "128k", "256k", "320k",
+            // German/international commercial filler (full phrases)
+            "ein bisschen", "weitere informationen", "werbung", 
+            "anzeige", "reklame", "publicité", "publicidad", "reclame",
+            // Time patterns (more specific)
+            "00:00:00", "01:00:00", "02:00:00", "03:00:00"
+        ]
+        
+        // Check for exact commercial break phrases (more restrictive)
+        let commercialPhrases = [
+            "commercial break", "ad break", "advertisement", 
+            "commercial spot", "sponsored by", "we'll be right back"
+        ]
+        
+        let lowercased = trimmed.lowercased()
+        
+        // Check technical patterns
+        for pattern in commercialPatterns {
+            if lowercased.contains(pattern) {
+                print("🧹 ❌ Rejecting commercial break metadata: '\(rawMetadata)'")
+                return ""
+            }
+        }
+        
+        // Check commercial phrases  
+        for phrase in commercialPhrases {
+            if lowercased.contains(phrase) {
+                print("🧹 ❌ Rejecting commercial break metadata: '\(rawMetadata)'")
+                return ""
+            }
+        }
+        
+        // Check for domain extensions (but only complete domains)
+        let domainPattern = #"\w+\.(com|de|fm|net|org)\b"#
+        if trimmed.range(of: domainPattern, options: .regularExpression) != nil {
+            print("🧹 ❌ Rejecting commercial break metadata: '\(rawMetadata)'")
+            return ""
+        }
         
         // Extract readable information from HTML/XML attributes
         var extractedParts: [String] = []
@@ -2258,6 +2513,45 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("🧹 ✅ Final cleaned result: '\(cleaned)'")
         return cleaned
+    }
+    
+    /// Parse search query strings to extract artist and title
+    /// Handles formats like: "Artist" "Title", Artist Title, Title Artist, etc.
+    private func parseSearchQuery(_ query: String) -> (artist: String, title: String) {
+        let cleanQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Handle quoted format: "Artist" "Title" or "Title" "Artist"
+        if cleanQuery.contains("\"") {
+            let quotedParts = cleanQuery.extractQuotedStrings()
+            if quotedParts.count >= 2 {
+                // For quoted queries, assume first quote is title, second is artist
+                // This matches our search query generation pattern: "Title" "Artist"
+                return (artist: quotedParts[1], title: quotedParts[0])
+            } else if quotedParts.count == 1 {
+                // Single quoted part, use the rest as the other component
+                let withoutQuotes = cleanQuery.removeQuotedStrings().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !withoutQuotes.isEmpty {
+                    return (artist: withoutQuotes, title: quotedParts[0])
+                } else {
+                    return (artist: "", title: quotedParts[0])
+                }
+            }
+        }
+        
+        // Handle space-separated format: try to intelligently split
+        let words = cleanQuery.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        
+        if words.count >= 2 {
+            let midPoint = words.count / 2
+            let firstHalf = words[0..<midPoint].joined(separator: " ")
+            let secondHalf = words[midPoint...].joined(separator: " ")
+            
+            // Return as title, artist (most of our queries are in "title artist" format)
+            return (artist: secondHalf, title: firstHalf)
+        }
+        
+        // Fallback: use entire query as title
+        return (artist: "", title: cleanQuery)
     }
     
     private func parseComplexMetadata(_ metadata: String) -> (artist: String?, track: String?, album: String?) {
@@ -2666,7 +2960,7 @@ class RadioPlayer: NSObject, ObservableObject {
         return strategies.sorted { $0.priority > $1.priority }
     }
     
-    /// Generates normalized smart queries with advanced text processing
+    /// Generates normalized smart queries with advanced text processing - Enhanced for hyphenated words
     private func generateNormalizedSmartQueries(parsedData: (artist: String?, track: String?, album: String?), originalMetadata: String) -> [String] {
         var queries: [String] = []
         
@@ -2682,14 +2976,23 @@ class RadioPlayer: NSObject, ObservableObject {
                 normalizedArtist  // Solo artist search
             ])
             
+            // Simple hyphen handling - if original contains hyphens, add variants
+            if artist.contains("-") || track.contains("-") {
+                // Add original case variants (less aggressive approach)
+                queries.append(contentsOf: [
+                    "\(track.lowercased()) \(artist.lowercased())",
+                    "\(artist.lowercased()) \(track.lowercased())"
+                ])
+            }
+            
             // Feature-aware normalization (remove feat., remix, etc.)
             let cleanTrack = removeFeatures(from: track)
             let cleanArtist = removeFeatures(from: artist)
             
             if cleanTrack != track || cleanArtist != artist {
                 queries.append(contentsOf: [
-                    "\(cleanTrack) \(cleanArtist)",
-                    "\(cleanArtist) \(cleanTrack)"
+                    "\(smartNormalization(cleanTrack)) \(smartNormalization(cleanArtist))",
+                    "\(smartNormalization(cleanArtist)) \(smartNormalization(cleanTrack))"
                 ])
             }
         }
@@ -2767,7 +3070,7 @@ class RadioPlayer: NSObject, ObservableObject {
         
         // Single word fallbacks for high-quality words
         for word in meaningfulWords.prefix(3) {
-            if word.count > 4 && !word.allSatisfy { $0.isNumber } {
+            if word.count > 4 && !word.allSatisfy({ $0.isNumber }) {
                 queries.append(word)
             }
         }
@@ -2811,44 +3114,377 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
-    /// Search iTunes with specific session
+    /// Search Apple Music API with specific session (replacement for failed iTunes Search API)
     private func searchITunes(query: String, using session: URLSession, completion: @escaping (UIImage?) -> Void) {
-        // Implement iTunes search logic here - this is a simplified version
-        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "https://itunes.apple.com/search?term=\(encodedQuery)&media=music&entity=song&limit=1"
+        print("🔍 Apple Music API: Searching for artwork with query: '\(query)'")
         
-        guard let url = URL(string: urlString) else {
-            completion(nil)
-            return
-        }
+        // Parse the search query to extract artist and title
+        let (artist, title) = parseSearchQuery(query)
+        print("🎵 Apple Music Search: Looking for '\(title)' by '\(artist)'")
         
-        session.dataTask(with: url) { data, response, error in
-            guard let data = data, error == nil else {
-                completion(nil)
-                return
-            }
-            
+        // Try Apple Music search using the existing ShazamViewModel functionality
+        Task {
             do {
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let results = json["results"] as? [[String: Any]],
-                   let firstResult = results.first,
-                   let artworkUrlString = firstResult["artworkUrl100"] as? String,
-                   let artworkUrl = URL(string: artworkUrlString.replacingOccurrences(of: "100x100", with: "600x600")) {
+                // Use the existing Apple Music search infrastructure
+                if let song = try await self.searchAppleMusicForArtwork(title: title, artist: artist) {
+                    print("✅ Apple Music API: Found song: \(song.title) by \(song.artistName)")
                     
-                    session.dataTask(with: artworkUrl) { imageData, _, _ in
-                        if let imageData = imageData, let image = UIImage(data: imageData) {
-                            completion(image)
-                        } else {
+                    // Get artwork URL
+                    if let artwork = song.artwork, let artworkURL = artwork.url(width: 600, height: 600) {
+                        print("🎨 Apple Music API: Found artwork URL: \(artworkURL)")
+                        
+                        // Download the artwork
+                        do {
+                            let (data, _) = try await URLSession.shared.data(from: artworkURL)
+                            if let image = UIImage(data: data) {
+                                print("✅ Apple Music API: Successfully downloaded artwork (\(data.count) bytes)")
+                                DispatchQueue.main.async {
+                                    completion(image)
+                                }
+                            } else {
+                                print("❌ Apple Music API: Failed to create image from artwork data")
+                                DispatchQueue.main.async {
+                                    completion(nil)
+                                }
+                            }
+                        } catch {
+                            print("❌ Apple Music API: Artwork download error: \(error.localizedDescription)")
+                            DispatchQueue.main.async {
+                                completion(nil)
+                            }
+                        }
+                    } else {
+                        print("❌ Apple Music API: No artwork URL found")
+                        DispatchQueue.main.async {
                             completion(nil)
                         }
-                    }.resume()
+                    }
                 } else {
-                    completion(nil)
+                    print("❌ Apple Music API: No results found for query '\(query)'")
+                    DispatchQueue.main.async {
+                        completion(nil)
+                    }
                 }
             } catch {
-                completion(nil)
+                print("❌ Apple Music API: Search failed for query '\(query)': \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    completion(nil)
+                }
             }
-        }.resume()
+        }
+    }
+    
+    /// Search Apple Music for artwork using MusicKit with enhanced artist name handling
+    private func searchAppleMusicForArtwork(title: String, artist: String) async throws -> MusicKit.Song? {
+        print("🎵 Apple Music Search: Looking for '\(title)' by '\(artist)'")
+        
+        // Strategy 1: Generate artist name variations to handle different ordering
+        var artistVariations = [artist]
+        
+        // Handle cases like "Arta Kabashi & Anso" vs "Anso & Arta Kabashi"
+        if artist.contains("&") || artist.contains(" and ") || artist.contains(", ") {
+            let separators = ["&", " and ", ", "]
+            for separator in separators {
+                if artist.contains(separator) {
+                    let parts = artist.components(separatedBy: separator).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    if parts.count == 2 {
+                        // Add reversed order version
+                        let reversedArtist = "\(parts[1]) \(separator) \(parts[0])"
+                        artistVariations.append(reversedArtist)
+                        
+                        // Add individual artists as fallback
+                        artistVariations.append(parts[0])
+                        artistVariations.append(parts[1])
+                    }
+                }
+            }
+        }
+        
+        // Remove duplicates and empty entries
+        artistVariations = Array(Set(artistVariations)).filter { !$0.isEmpty }
+        
+        // Strategy 2: Create multiple search strategies including word joining
+        var searchStrategies: [String] = []
+        
+        // Generate title variations (handle cases like "pa pritur" -> "Papritur")
+        var titleVariations = [title]
+        
+        // If title has spaces, try joining words together
+        if title.contains(" ") {
+            let joinedTitle = title.replacingOccurrences(of: " ", with: "")
+            titleVariations.append(joinedTitle)
+            
+            // Also try capitalizing each word and joining
+            let capitalizedJoined = title.components(separatedBy: " ")
+                .map { $0.capitalized }
+                .joined()
+            if capitalizedJoined != joinedTitle {
+                titleVariations.append(capitalizedJoined)
+            }
+        }
+        
+        // If title is one word, try splitting it for common patterns
+        if !title.contains(" ") && title.count > 4 {
+            // Try splitting at common points (this is speculative)
+            let midPoint = title.index(title.startIndex, offsetBy: title.count / 2)
+            let firstHalf = String(title[..<midPoint])
+            let secondHalf = String(title[midPoint...])
+            if firstHalf.count >= 2 && secondHalf.count >= 2 {
+                titleVariations.append("\(firstHalf) \(secondHalf)")
+            }
+        }
+        
+        // Remove duplicates
+        titleVariations = Array(Set(titleVariations)).filter { !$0.isEmpty }
+        
+        for artistVar in artistVariations {
+            for titleVar in titleVariations {
+                // Exact title + artist combinations
+                searchStrategies.append("\(titleVar) \(artistVar)")
+                searchStrategies.append("\"\(titleVar)\" \"\(artistVar)\"")
+                searchStrategies.append("\"\(titleVar)\" \(artistVar)")
+            }
+        }
+        
+        // Add title-only searches as fallback
+        for titleVar in titleVariations {
+            searchStrategies.append(titleVar)
+        }
+        
+        print("🎵 Apple Music Search: Trying \(searchStrategies.count) search strategies")
+        
+        // Strategy 3: Try each search strategy and score results
+        for (index, searchTerm) in searchStrategies.enumerated() {
+            print("🎵 Apple Music Search: Strategy \(index + 1): '\(searchTerm)'")
+            
+            do {
+                let request = MusicCatalogSearchRequest(term: searchTerm, types: [Song.self])
+                let response = try await request.response()
+                let songs = response.songs
+                
+                print("🎵 Apple Music Search: Found \(songs.count) results")
+                
+                if !songs.isEmpty {
+                    // Score and find best match
+                    var bestMatch: (song: Song, score: Double)?
+                    
+                    for song in songs {
+                        let score = calculateAppleMusicMatchScore(
+                            queriedTitle: title,
+                            queriedArtist: artist,
+                            resultTitle: song.title,
+                            resultArtist: song.artistName
+                        )
+                        
+                        print("🎵 Candidate: '\(song.title)' by '\(song.artistName)' - Score: \(String(format: "%.2f", score))")
+                        
+                        if score > (bestMatch?.score ?? 0.0) && score > 0.3 {
+                            bestMatch = (song, score)
+                        }
+                    }
+                    
+                    if let match = bestMatch {
+                        print("🎵 Apple Music Search: ✅ Best match: '\(match.song.title)' by '\(match.song.artistName)' (Score: \(String(format: "%.2f", match.score)))")
+                        return match.song
+                    }
+                }
+            } catch {
+                print("🎵 Apple Music Search: Strategy \(index + 1) error: \(error)")
+                continue
+            }
+        }
+        
+        print("🎵 Apple Music Search: ❌ No suitable matches found after all strategies")
+        return nil
+    }
+    
+    /// Calculate match score for Apple Music results to ensure accuracy
+    private func calculateAppleMusicMatchScore(queriedTitle: String, queriedArtist: String, 
+                                            resultTitle: String, resultArtist: String) -> Double {
+        let normalizedQueryTitle = smartNormalization(queriedTitle)
+        let normalizedQueryArtist = smartNormalization(queriedArtist)
+        let normalizedResultTitle = smartNormalization(resultTitle)
+        let normalizedResultArtist = smartNormalization(resultArtist)
+        
+        var score = 0.0
+        
+        // First check: Heavily penalize cover versions, karaoke tracks, and tribute artists
+        let coverIndicators = [
+            "in the style of", "performance track", "demonstration vocals", "instrumental version",
+            "karaoke", "tribute", "cover version", "backing track", "minus one", "done again",
+            "the hit crew", "the karaoke crew", "sound-a-like", "originally performed by",
+            "as made famous by", "in the manner of", "tribute to", "sing-along", "playback"
+        ]
+        
+        let resultTitleLower = resultTitle.lowercased()
+        let resultArtistLower = resultArtist.lowercased()
+        
+        for indicator in coverIndicators {
+            if resultTitleLower.contains(indicator) || resultArtistLower.contains(indicator) {
+                print("🎵 ❌ Penalizing cover version containing '\(indicator)': '\(resultTitle)' by '\(resultArtist)'")
+                return 0.0  // Immediately disqualify cover versions
+            }
+        }
+        
+        // Title matching (60% of score) with enhanced word joining/separation handling
+        if normalizedQueryTitle == normalizedResultTitle {
+            score += 0.6  // Perfect title match
+        } else {
+            // Check for word joining/separation matches (e.g., "pa pritur" vs "Papritur")
+            let queryJoined = normalizedQueryTitle.replacingOccurrences(of: " ", with: "")
+            let resultJoined = normalizedResultTitle.replacingOccurrences(of: " ", with: "")
+            
+            if queryJoined == resultJoined {
+                score += 0.55  // High score for joined word match
+            } else if normalizedResultTitle.contains(normalizedQueryTitle) && normalizedQueryTitle.count > 2 {
+                score += 0.4  // Title substring match
+            } else if normalizedQueryTitle.contains(normalizedResultTitle) && normalizedResultTitle.count > 2 {
+                score += 0.3  // Query contains result title
+            } else if queryJoined.contains(resultJoined) && resultJoined.count > 3 {
+                score += 0.35  // Joined query contains result
+            } else if resultJoined.contains(queryJoined) && queryJoined.count > 3 {
+                score += 0.35  // Joined result contains query
+            } else {
+                // Use similarity for partial matches
+                let titleSimilarity = calculateStringSimilarity(normalizedQueryTitle, normalizedResultTitle)
+                let joinedSimilarity = calculateStringSimilarity(queryJoined, resultJoined)
+                let bestSimilarity = max(titleSimilarity, joinedSimilarity)
+                
+                if bestSimilarity > 0.7 {
+                    score += bestSimilarity * 0.6
+                }
+            }
+        }
+        
+        // Artist matching (40% of score) - Enhanced for multi-artist handling with original artist bonus
+        if normalizedQueryArtist == normalizedResultArtist {
+            score += 0.4  // Perfect artist match
+            // Bonus for exact artist match (prioritize originals over covers)
+            score += 0.2
+            print("🎵 ✅ Exact artist match bonus: '\(queriedArtist)' = '\(resultArtist)'")
+        } else {
+            // Check if artists contain each other's components (handle order variations)
+            let queryArtistWords = Set(normalizedQueryArtist.components(separatedBy: " ").filter { $0.count > 2 })
+            let resultArtistWords = Set(normalizedResultArtist.components(separatedBy: " ").filter { $0.count > 2 })
+            
+            let commonWords = queryArtistWords.intersection(resultArtistWords)
+            if !commonWords.isEmpty {
+                let similarity = Double(commonWords.count) / Double(max(queryArtistWords.count, resultArtistWords.count))
+                score += similarity * 0.4
+                print("🎵 Artist word match: \(commonWords) - Similarity: \(String(format: "%.2f", similarity))")
+            } else {
+                // Fallback to string similarity
+                let artistSimilarity = calculateStringSimilarity(normalizedQueryArtist, normalizedResultArtist)
+                if artistSimilarity > 0.7 {
+                    score += artistSimilarity * 0.4
+                }
+            }
+        }
+        
+        return score
+    }
+    
+    /// Calculate string similarity using a simple algorithm
+    private func calculateStringSimilarity(_ str1: String, _ str2: String) -> Double {
+        let longer = str1.count > str2.count ? str1 : str2
+        let shorter = str1.count > str2.count ? str2 : str1
+        
+        if longer.isEmpty {
+            return 1.0
+        }
+        
+        let distance = levenshteinDistance(shorter, longer)
+        return 1.0 - (Double(distance) / Double(longer.count))
+    }
+    
+    /// Calculate Levenshtein distance between two strings
+    private func levenshteinDistance(_ str1: String, _ str2: String) -> Int {
+        let str1Array = Array(str1)
+        let str2Array = Array(str2)
+        let str1Count = str1Array.count
+        let str2Count = str2Array.count
+        
+        // Handle empty strings
+        if str1Count == 0 { return str2Count }
+        if str2Count == 0 { return str1Count }
+        
+        var matrix = Array(repeating: Array(repeating: 0, count: str2Count + 1), count: str1Count + 1)
+        
+        for i in 0...str1Count {
+            matrix[i][0] = i
+        }
+        
+        for j in 0...str2Count {
+            matrix[0][j] = j
+        }
+        
+        for i in 1...str1Count {
+            for j in 1...str2Count {
+                let cost = str1Array[i-1] == str2Array[j-1] ? 0 : 1
+                matrix[i][j] = min(
+                    matrix[i-1][j] + 1,      // deletion
+                    matrix[i][j-1] + 1,      // insertion
+                    matrix[i-1][j-1] + cost  // substitution
+                )
+            }
+        }
+        
+        return matrix[str1Count][str2Count]
+    }
+    
+    /// Enhanced normalization for consistent matching
+    private func normalizeForMatching(_ text: String) -> String {
+        guard !text.isEmpty else { return "" }
+        
+        return text.lowercased()
+            .replacingOccurrences(of: "the ", with: "")
+            .replacingOccurrences(of: " the", with: "")
+            .replacingOccurrences(of: "&", with: "and")
+            .replacingOccurrences(of: "+", with: "and")
+            .replacingOccurrences(of: #"[^\w\s]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Optimized Levenshtein similarity for performance
+    private func calculateOptimizedLevenshteinSimilarity(_ str1: String, _ str2: String) -> Double {
+        let s1 = str1.lowercased()
+        let s2 = str2.lowercased()
+        
+        // Quick exact match check
+        if s1 == s2 { return 1.0 }
+        
+        // Handle empty strings
+        if s1.isEmpty || s2.isEmpty { return 0.0 }
+        
+        // Length optimization - skip if too different
+        let maxLength = max(s1.count, s2.count)
+        let minLength = min(s1.count, s2.count)
+        
+        if maxLength == 0 { return 0.0 }
+        if Double(minLength) / Double(maxLength) < 0.3 { return 0.0 }
+        
+        let distance = levenshteinDistance(s1, s2)
+        return max(0.0, 1.0 - Double(distance) / Double(maxLength))
+    }
+    
+    /// Advanced similarity calculation with character-level analysis
+    private func calculateAdvancedSimilarity(_ str1: String, _ str2: String) -> Double {
+        let normalized1 = normalizeForMatching(str1)
+        let normalized2 = normalizeForMatching(str2)
+        
+        // Exact match bonus
+        if normalized1 == normalized2 { return 1.0 }
+        
+        // Substring matching
+        if normalized1.contains(normalized2) || normalized2.contains(normalized1) {
+            let longerString = normalized1.count > normalized2.count ? normalized1 : normalized2
+            let shorterString = normalized1.count <= normalized2.count ? normalized1 : normalized2
+            return Double(shorterString.count) / Double(longerString.count) * 0.9
+        }
+        
+        // Levenshtein similarity
+        return calculateOptimizedLevenshteinSimilarity(normalized1, normalized2)
     }
     
     /// Extract phrase groups from text for better matching
@@ -2890,17 +3526,36 @@ class RadioPlayer: NSObject, ObservableObject {
             .filter { $0.count > 2 }
     }
     
-    /// Smart normalization with ML-inspired text processing
+    /// Smart normalization with ML-inspired text processing - Enhanced for uppercase and hyphenated words
     private func smartNormalization(_ text: String) -> String {
-        return text
-            .lowercased()
-            .replacingOccurrences(of: #"[^\w\s\-']"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: " the ", with: " ")
-            .replacingOccurrences(of: "the ", with: "")
-            .replacingOccurrences(of: " & ", with: " and ")
-            .replacingOccurrences(of: " + ", with: " and ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = text
+        
+        // Convert to lowercase first
+        result = result.lowercased()
+        
+        // Handle hyphenated words by converting them to spaced words for better search matching
+        // This handles cases like "strada-facendo" -> "strada facendo" 
+        result = result.replacingOccurrences(of: "(\\w)-(\\w)", with: "$1 $2", options: .regularExpression)
+        
+        // Clean up punctuation but preserve meaningful separators temporarily
+        result = result.replacingOccurrences(of: "[^\\w\\s\\-']", with: " ", options: .regularExpression)
+        
+        // Normalize multiple whitespace
+        result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        
+        // Remove common articles and noise words
+        result = result.replacingOccurrences(of: " the ", with: " ")
+        result = result.replacingOccurrences(of: "the ", with: "")
+        result = result.replacingOccurrences(of: " & ", with: " and ")
+        result = result.replacingOccurrences(of: " + ", with: " and ")
+        
+        // Handle single letter words that might be misheard - e.g., "A BOY" vs "B BOY"
+        // This is common with radio metadata that gets garbled
+        result = result.replacingOccurrences(of: "^a ", with: "b ", options: .regularExpression)
+        result = result.replacingOccurrences(of: " a ", with: " b ")
+        
+        // Clean final result
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     /// Removes features, remixes, and collaborative indicators
@@ -3721,6 +4376,17 @@ class RadioPlayer: NSObject, ObservableObject {
                         self?.updateWidget()
                     }
                     return
+                } else {
+                    // Commercial break or invalid metadata detected
+                    print("🔍 ❌ Commercial break or invalid metadata detected from: '\(rawMetadata)' - clearing display")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.metadata = nil
+                        self?.clearITunesArtwork()
+                        print("📻 Commercial break detected - clearing metadata and showing station name")
+                        self?.updateNowPlayingInfo()
+                        self?.updateWidget()
+                    }
+                    return
                 }
             }
         }
@@ -4098,82 +4764,7 @@ class RadioPlayer: NSObject, ObservableObject {
         return max(trackScore, max(artistScore, albumScore * 0.7))
     }
     
-    /// Optimized Levenshtein similarity for performance
-    private func calculateOptimizedLevenshteinSimilarity(_ str1: String, _ str2: String) -> Double {
-        let s1 = str1.lowercased()
-        let s2 = str2.lowercased()
-        
-        // Quick exact match check
-        if s1 == s2 { return 1.0 }
-        
-        // Length optimization - skip if too different
-        let maxLength = max(s1.count, s2.count)
-        let minLength = min(s1.count, s2.count)
-        
-        if maxLength == 0 { return 0.0 }
-        if Double(minLength) / Double(maxLength) < 0.3 { return 0.0 }
-        
-        let distance = levenshteinDistance(s1, s2)
-        return max(0.0, 1.0 - Double(distance) / Double(maxLength))
-    }
-    
-    /// Fast Levenshtein distance calculation
-    private func levenshteinDistance(_ str1: String, _ str2: String) -> Int {
-        let array1 = Array(str1)
-        let array2 = Array(str2)
-        
-        let m = array1.count
-        let n = array2.count
-        
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-        
-        for i in 0...m { dp[i][0] = i }
-        for j in 0...n { dp[0][j] = j }
-        
-        for i in 1...m {
-            for j in 1...n {
-                let cost = array1[i-1] == array2[j-1] ? 0 : 1
-                dp[i][j] = min(
-                    dp[i-1][j] + 1,      // deletion
-                    dp[i][j-1] + 1,      // insertion
-                    dp[i-1][j-1] + cost  // substitution
-                )
-            }
-        }
-        
-        return dp[m][n]
-    }
-    
-    /// Enhanced normalization for consistent matching
-    private func normalizeForMatching(_ text: String) -> String {
-        return text.lowercased()
-            .replacingOccurrences(of: "the ", with: "")
-            .replacingOccurrences(of: " the", with: "")
-            .replacingOccurrences(of: "&", with: "and")
-            .replacingOccurrences(of: "+", with: "and")
-            .replacingOccurrences(of: #"[^\w\s]"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    /// Advanced similarity calculation with character-level analysis
-    private func calculateAdvancedSimilarity(_ str1: String, _ str2: String) -> Double {
-        let normalized1 = normalizeForMatching(str1)
-        let normalized2 = normalizeForMatching(str2)
-        
-        // Exact match bonus
-        if normalized1 == normalized2 { return 1.0 }
-        
-        // Substring matching
-        if normalized1.contains(normalized2) || normalized2.contains(normalized1) {
-            let longerString = normalized1.count > normalized2.count ? normalized1 : normalized2
-            let shorterString = normalized1.count <= normalized2.count ? normalized1 : normalized2
-            return Double(shorterString.count) / Double(longerString.count) * 0.9
-        }
-        
-        // Levenshtein similarity
-        return calculateOptimizedLevenshteinSimilarity(normalized1, normalized2)
-    }
+
 }
 
 extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
@@ -4239,7 +4830,15 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
         let value = cleanHTMLMetadata(rawValue)
         
         if value.isEmpty {
-            print("🎵 ❌ No readable metadata after HTML cleanup from: '\(rawValue)'")
+            print("🎵 ❌ No readable metadata after HTML cleanup from: '\(rawValue)' - probably commercial break")
+            // For commercial breaks or invalid metadata, clear current metadata and show station name
+            DispatchQueue.main.async { [weak self] in
+                self?.metadata = nil
+                self?.clearITunesArtwork()
+                print("📻 Commercial break detected - clearing metadata and showing station name")
+                self?.updateNowPlayingInfo()
+                self?.updateWidget()
+            }
             return
         }
         
