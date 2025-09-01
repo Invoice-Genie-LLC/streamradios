@@ -423,31 +423,31 @@ class RadioPlayer: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Monitor buffer health and adapt UI accordingly with improved logic
-        streamQualityManager.$bufferHealth
-            .removeDuplicates()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] health in
-                guard let self = self else { return }
-                // Avoid publishing from within view updates by deferring state writes
-                DispatchQueue.main.async {
-                    // When paused or not playing, never show buffering; keep paused/disconnected UI
-                    if !self.isPlaying || self.connectionState == .paused {
-                        self.isBuffering = false
-                        return
-                    }
-                    // Only show buffering if actively trying to play and the player is waiting
-                    if health < 0.05, self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate {
-                        self.connectionState = .buffering
-                        self.isBuffering = true
-                    } else if self.player?.timeControlStatus == .playing {
-                        // Actively playing
-                        self.connectionState = .connected
-                        self.isBuffering = false
-                    }
-                }
-            }
-            .store(in: &cancellables)
+        // Monitor buffer health and adapt UI accordingly with improved logic - DISABLED for performance
+        // streamQualityManager.$bufferHealth
+        //     .removeDuplicates()
+        //     .receive(on: DispatchQueue.main)
+        //     .sink { [weak self] health in
+        //         guard let self = self else { return }
+        //         // Avoid publishing from within view updates by deferring state writes
+        //         DispatchQueue.main.async {
+        //             // When paused or not playing, never show buffering; keep paused/disconnected UI
+        //             if !self.isPlaying || self.connectionState == .paused {
+        //                 self.isBuffering = false
+        //                 return
+        //             }
+        //             // Only show buffering if actively trying to play and the player is waiting
+        //             if health < 0.05, self.player?.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+        //                 self.connectionState = .buffering
+        //                 self.isBuffering = true
+        //             } else if self.player?.timeControlStatus == .playing {
+        //                 // Actively playing
+        //                 self.connectionState = .connected
+        //                 self.isBuffering = false
+        //             }
+        //         }
+        //     }
+        //     .store(in: &cancellables)
     }
     
     func autoPlayLastStationSetup() {
@@ -635,12 +635,12 @@ class RadioPlayer: NSObject, ObservableObject {
     func setViewModel(_ viewModel: RadioStationViewModel) {
         self.viewModel = viewModel
         
-        // Observe changes in the stations array
-        viewModel.$stations
-            .sink { [weak self] _ in
-                self?.updateNowPlayingInfo()
-            }
-            .store(in: &cancellables)
+        // Observe changes in the stations array - DISABLED for performance
+        // viewModel.$stations
+        //     .sink { [weak self] _ in
+        //         self?.updateNowPlayingInfo()
+        //     }
+        //     .store(in: &cancellables)
     }
     
     private func configureAudioSession() {
