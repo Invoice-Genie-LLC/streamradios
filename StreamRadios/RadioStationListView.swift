@@ -249,7 +249,7 @@ struct RadioStationListView: View {
     private var emptyStateView: some View {
         VStack {
             // RECENT, FAVORITES & ALL TAB FIX: Don't show anything when stations exist but tabs are empty
-            if selectedSubTab == .recent || 
+            if selectedSubTab == .recent ||
                (selectedSubTab == .favorites && !viewModel.stations.isEmpty) ||
                (selectedSubTab == .all && !viewModel.stations.isEmpty && viewModel.selectedCountry != "Select Country") {
                 // Show nothing for Recent tab when empty, Favorites tab when stations exist but no favorites,
@@ -627,7 +627,7 @@ struct RadioStationListView: View {
             // Background that covers the entire available space
             Rectangle()
                 .fill(
-                    isEditing 
+                    isEditing
                         ? Color.clear // No background color when sorting
                         : (isCurrentlyPlaying ? Color.blue.opacity(0.03) : Color.adaptiveCardBackground.opacity(0.7)) // Darker normal background
                 )
@@ -874,9 +874,9 @@ struct RadioStationListView: View {
         print("🎯 Station tapped: \(station.name), isEditing: \(isEditing)")
         
         // Don't handle tap if in editing mode - let native drag handle it
-        guard !isEditing else { 
+        guard !isEditing else {
             print("⚠️ Ignoring tap because in editing mode")
-            return 
+            return
         }
         
         // Immediate haptic feedback
@@ -985,10 +985,10 @@ struct RadioStationListView: View {
     
 
     
-        private var filteredStations: [RadioStation] {
+    private var filteredStations: [RadioStation] {
         // Only filter for radio tab
         guard selectedTab == .radio else {
-return []
+            return []
         }
         
         // UNIVERSAL SEARCH: When user is searching, search across ALL countries and ALL stations regardless of tab
@@ -996,8 +996,8 @@ return []
             let allStations = viewModel.stations
             let filtered = allStations.filter { station in
                 // Only show stations with valid country information
-                let hasValidCountry = !station.country.isEmpty && 
-                                    station.country != "Unknown Region" && 
+                let hasValidCountry = !station.country.isEmpty &&
+                                    station.country != "Unknown Region" &&
                                     station.country != "Select Country" &&
                                     !station.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 
@@ -1072,12 +1072,15 @@ return []
             } else {
                 stations = viewModel.stations.filter { station in
                     // Filter by selected country and ensure valid country information
-                    let hasValidCountry = !station.country.isEmpty && 
-                                        station.country != "Unknown Region" && 
+                    let hasValidCountry = !station.country.isEmpty &&
+                                        station.country != "Unknown Region" &&
                                         station.country != "Select Country" &&
                                         !station.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    return station.country == viewModel.selectedCountry && hasValidCountry
+                    
+                    let matches = station.country == viewModel.selectedCountry && hasValidCountry
+                    return matches
                 }
+                
                 // Sort alphabetically by name based on toggle setting
                 if viewModel.isAscendingSort {
                     stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }

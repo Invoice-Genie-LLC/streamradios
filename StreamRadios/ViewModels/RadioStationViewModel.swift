@@ -186,6 +186,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
             loadStationsFromCoreData()
             
+            // Migrate existing stations to use normalized country names (one-time migration)
+            Task {
+                await migrateStationCountryNames()
+            }
+            
             let userDefaults = UserDefaults.standard
             let hasLaunchedBeforeKey = "HasLaunchedBefore"
             
@@ -581,7 +586,20 @@ class RadioStationViewModel: NSObject, ObservableObject {
             } else if cloudKitStationCount < localStationCount {
                 // More stations locally than in CloudKit (stations deleted on other devices)
                 let deletedStationsCount = localStationCount - cloudKitStationCount
-                print("🗑️ Detected \(deletedStationsCount) stations deleted on other devices, triggering sync...")
+                print("🗑️ Detected \(deletedStationsCount) stations deleted on other devices")
+                
+                // SAFETY CHECK: Don't trigger mass deletion if the discrepancy is too large
+                // This could indicate CloudKit issues, migration, or other problems
+                let discrepancyPercentage = Double(deletedStationsCount) / Double(localStationCount)
+                if discrepancyPercentage > 0.5 { // More than 50% discrepancy
+                    print("⚠️ SAFETY: Large station count discrepancy detected (\(Int(discrepancyPercentage * 100))%)")
+                    print("⚠️ SAFETY: CloudKit: \(cloudKitStationCount), Local: \(localStationCount)")
+                    print("⚠️ SAFETY: Skipping automatic deletion sync to prevent data loss")
+                    print("⚠️ SAFETY: This may be due to migration, CloudKit issues, or data corruption")
+                    return
+                }
+                
+                print("🗑️ Proceeding with deletion sync for \(deletedStationsCount) stations...")
                 
                 await MainActor.run {
                     // Update DataSyncManager to show sync banner  
@@ -2203,7 +2221,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // Never assign "Select Country" or other invalid country names to stations
                 let stationCountry: String
                 if let apiCountry = apiStation.country, !apiCountry.isEmpty && apiCountry.trimmingCharacters(in: .whitespacesAndNewlines) != "" {
-                    stationCountry = apiCountry.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Normalize API country names to match our Country model
+                    let normalizedCountry = normalizeAPICountryName(apiCountry.trimmingCharacters(in: .whitespacesAndNewlines))
+                    stationCountry = normalizedCountry ?? country.name
                 } else if country.name != "Select Country" && !country.name.isEmpty {
                     stationCountry = country.name
                 } else {
@@ -2521,6 +2541,74 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
+    // MARK: - Country Name Normalization
+    
+    /// Normalize API country names to match our Country model names
+    private func normalizeAPICountryName(_ apiCountryName: String) -> String? {
+        switch apiCountryName {
+        case "The United Kingdom Of Great Britain And Northern Ireland":
+            return "United Kingdom"
+        case "The United States Of America", "United States Of America", "USA", "United States of America":
+            return "United States"
+        default:
+            return apiCountryName
+        }
+    }
+    
+    /// Migrate existing stations to use normalized country names
+    @MainActor
+    func migrateStationCountryNames() {
+        print("🔄 Starting country name migration for existing stations...")
+        
+        let context = CoreDataStack.shared.context
+        var migrationCount = 0
+        
+        // Update stations with old country names
+        for station in stations {
+            if let normalizedName = normalizeAPICountryName(station.country),
+               normalizedName != station.country {
+                
+                // Update in memory
+                if let index = stations.firstIndex(where: { $0.id == station.id }) {
+                    var updatedStation = stations[index]
+                    updatedStation.country = normalizedName
+                    stations[index] = updatedStation
+                }
+                
+                // Update in Core Data
+                let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", station.id)
+                
+                do {
+                    let managedStations = try context.fetch(fetchRequest)
+                    if let managedStation = managedStations.first {
+                        managedStation.country = normalizedName
+                        migrationCount += 1
+                    }
+                } catch {
+                    print("❌ Failed to fetch station for migration: \(error)")
+                }
+            }
+        }
+        
+        // Save changes
+        if migrationCount > 0 {
+            do {
+                try context.save()
+                print("✅ Country name migration completed - updated \(migrationCount) stations")
+                
+                // Reload stations from Core Data to reflect changes
+                Task {
+                    await loadStationsFromCoreData()
+                }
+            } catch {
+                print("❌ Failed to save country name migration: \(error)")
+            }
+        } else {
+            print("✅ No stations needed country name migration")
+        }
+    }
+    
     // MARK: - Deleted Stations Management
     
     /// Add a station ID to the deleted stations list to prevent re-fetching
@@ -2537,6 +2625,16 @@ class RadioStationViewModel: NSObject, ObservableObject {
         deleted.remove(stationId)
         deletedStationIds = deleted
         print("📝 Removed station from deleted list: \(stationId)")
+    }
+    
+    /// Remove multiple station IDs from the deleted stations list (for country deletion)
+    private func removeMultipleFromDeletedStations(_ stationIds: [String]) {
+        var deleted = deletedStationIds
+        for stationId in stationIds {
+            deleted.remove(stationId)
+        }
+        deletedStationIds = deleted
+        print("📝 Removed \(stationIds.count) stations from deleted list for country deletion")
     }
     
     /// Clear all deleted station IDs (for troubleshooting or data reset)
@@ -3003,6 +3101,10 @@ extension RadioStationViewModel {
         let stationIds = countryStations.map { $0.id }
         
         print("🌍🗑️ Found \(stationCount) stations to delete for \(countryName)")
+        
+        // Clear protection for these stations so they can be re-added later
+        removeMultipleFromDeletedStations(stationIds)
+        print("🌍🗑️ Cleared protection for \(stationCount) stations - they can be re-added from API")
         
         progressViewModel?.updateProgress(0.1, step: "Preparing deletion of \(stationCount) stations...")
         

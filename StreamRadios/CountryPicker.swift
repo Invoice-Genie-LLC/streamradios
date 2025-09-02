@@ -362,7 +362,7 @@ struct CountryPicker: View {
     }
     
     private var popularCountries: [Country] {
-        let popularNames = ["USA", "Canada", "United Kingdom", "UK", "Germany", "France", "Australia", "Japan", "Brazil"]
+        let popularNames = ["United States", "Canada", "United Kingdom", "Germany", "France", "Australia", "Japan", "Brazil"]
         return popularNames.compactMap { name in
             countries.first { $0.name == name }
         }
@@ -529,31 +529,127 @@ enum CountryRegion: String, CaseIterable, Hashable {
     }
     
     static func region(for countryName: String) -> CountryRegion {
-        let northAmericaCountries = ["USA", "Canada", "Mexico", "Greenland"]
-        let southAmericaCountries = ["Brazil", "Argentina", "Chile", "Peru", "Colombia", "Venezuela", "Ecuador", "Bolivia", "Paraguay", "Uruguay", "Guyana", "Suriname", "French Guiana"]
-        let europeCountries = ["United Kingdom", "UK", "England", "Scotland", "Wales", "Northern Ireland", "Germany", "France", "Italy", "Spain", "Netherlands", "Belgium", "Switzerland", "Austria", "Sweden", "Norway", "Denmark", "Finland", "Poland", "Czech Republic", "Slovakia", "Hungary", "Romania", "Bulgaria", "Croatia", "Slovenia", "Serbia", "Bosnia & Herzegovina", "Montenegro", "Albania", "Macedonia", "Greece", "Portugal", "Ireland", "Iceland", "Lithuania", "Latvia", "Estonia", "Belarus", "Ukraine", "Moldova", "Russia", "Luxembourg", "Malta", "Cyprus", "Liechtenstein", "Monaco", "San Marino", "Vatican City", "Andorra"]
-        let africaCountries = ["Nigeria", "South Africa", "Kenya", "Egypt", "Morocco", "Ghana", "Ethiopia", "Algeria", "Tunisia", "Libya", "Sudan", "South Sudan", "Uganda", "Tanzania", "Rwanda", "Burundi", "Democratic Republic of Congo", "Congo - Kinshasa", "Congo - Brazzaville", "Central African Republic", "Chad", "Niger", "Mali", "Burkina Faso", "Senegal", "Guinea", "Guinea-Bissau", "Sierra Leone", "Liberia", "Ivory Coast", "Côte d'Ivoire", "Togo", "Benin", "Cameroon", "Equatorial Guinea", "Gabon", "São Tomé & Príncipe", "Angola", "Namibia", "Botswana", "Zimbabwe", "Zambia", "Malawi", "Mozambique", "Madagascar", "Mauritius", "Seychelles", "Comoros", "Djibouti", "Eritrea", "Somalia", "Lesotho", "Swaziland", "Gambia", "Cape Verde"]
-        let asiaCountries = ["China", "Japan", "South Korea", "North Korea", "India", "Indonesia", "Thailand", "Vietnam", "Philippines", "Malaysia", "Singapore", "Myanmar", "Cambodia", "Laos", "Bangladesh", "Pakistan", "Afghanistan", "Nepal", "Bhutan", "Sri Lanka", "Maldives", "Mongolia", "Kazakhstan", "Uzbekistan", "Turkmenistan", "Kyrgyzstan", "Tajikistan", "Taiwan", "Hong Kong", "Macau", "Brunei", "Timor-Leste"]
-        let oceaniaCountries = ["Australia", "New Zealand", "Fiji", "Papua New Guinea", "Solomon Islands", "Vanuatu", "Samoa", "Tonga", "Kiribati", "Tuvalu", "Nauru", "Palau", "Marshall Islands", "Micronesia", "Cook Islands", "Niue", "American Samoa", "French Polynesia", "Guam", "Northern Mariana Islands", "New Caledonia", "Norfolk Island"]
-        let middleEastCountries = ["Saudi Arabia", "United Arab Emirates", "Iran", "Iraq", "Israel", "Jordan", "Lebanon", "Syria", "Turkey", "Kuwait", "Qatar", "Bahrain", "Oman", "Yemen", "Palestinian Territories"]
-        let caribbeanCountries = ["Jamaica", "Cuba", "Haiti", "Dominican Republic", "Puerto Rico", "Trinidad & Tobago", "Barbados", "Bahamas", "Saint Lucia", "Grenada", "Saint Vincent & Grenadines", "Antigua & Barbuda", "Dominica", "Saint Kitts & Nevis", "Aruba", "Curaçao", "Sint Maarten", "British Virgin Islands", "U.S. Virgin Islands", "Cayman Islands", "Turks & Caicos Islands", "Anguilla", "Montserrat", "Guadeloupe", "Martinique", "Saint Barthélemy", "Saint Martin"]
+        // North America (including Central America)
+        let northAmericaCountries = [
+            "United States", "Canada", "Mexico", "Greenland",
+            "Guatemala", "Belize", "Honduras", "El Salvador", "Nicaragua", "Costa Rica", "Panama"
+        ]
+        
+        // South America
+        let southAmericaCountries = [
+            "Brazil", "Argentina", "Chile", "Peru", "Colombia", "Venezuela", "Ecuador", "Bolivia", 
+            "Paraguay", "Uruguay", "Guyana", "Suriname", "French Guiana"
+        ]
+        
+        // Europe (including European Russia)
+        let europeCountries = [
+            "United Kingdom", "Germany", "France", "Italy", "Spain", "Netherlands", "Belgium", 
+            "Switzerland", "Austria", "Sweden", "Norway", "Denmark", "Finland", "Poland", 
+            "Czech Republic", "Slovakia", "Hungary", "Romania", "Bulgaria", "Croatia", "Slovenia", 
+            "Serbia", "Bosnia & Herzegovina", "Montenegro", "Albania", "Macedonia", "Greece", 
+            "Portugal", "Ireland", "Iceland", "Lithuania", "Latvia", "Estonia", "Belarus", 
+            "Ukraine", "Moldova", "Russia", "Luxembourg", "Malta", "Cyprus", "Liechtenstein", 
+            "Monaco", "San Marino", "Vatican City", "Andorra", "Kosovo", "European Union"
+        ]
+        
+        // Africa
+        let africaCountries = [
+            "Nigeria", "South Africa", "Kenya", "Egypt", "Morocco", "Ghana", "Ethiopia", "Algeria", 
+            "Tunisia", "Libya", "Sudan", "South Sudan", "Uganda", "Tanzania", "Rwanda", "Burundi", 
+            "Congo - Kinshasa", "Congo - Brazzaville", "Central African Republic", "Chad", "Niger", 
+            "Mali", "Burkina Faso", "Senegal", "Guinea", "Guinea-Bissau", "Sierra Leone", "Liberia", 
+            "Côte d'Ivoire", "Togo", "Benin", "Cameroon", "Equatorial Guinea", "Gabon", 
+            "São Tomé & Príncipe", "Angola", "Namibia", "Botswana", "Zimbabwe", "Zambia", "Malawi", 
+            "Mozambique", "Madagascar", "Mauritius", "Seychelles", "Comoros", "Djibouti", "Eritrea", 
+            "Somalia", "Lesotho", "Swaziland", "Gambia", "Cape Verde"
+        ]
+        
+        // Asia (including Central Asia and parts of Middle East)
+        let asiaCountries = [
+            "China", "Japan", "South Korea", "North Korea", "India", "Indonesia", "Thailand", 
+            "Vietnam", "Philippines", "Malaysia", "Singapore", "Myanmar", "Cambodia", "Laos", 
+            "Bangladesh", "Pakistan", "Afghanistan", "Nepal", "Bhutan", "Sri Lanka", "Maldives", 
+            "Mongolia", "Kazakhstan", "Uzbekistan", "Turkmenistan", "Kyrgyzstan", "Tajikistan", 
+            "Taiwan", "Hong Kong", "Macau", "Brunei", "Timor-Leste"
+        ]
+        
+        // Oceania (Australia, New Zealand, and Pacific Islands)
+        let oceaniaCountries = [
+            "Australia", "New Zealand", "Fiji", "Papua New Guinea", "Solomon Islands", "Vanuatu", 
+            "Samoa", "Tonga", "Kiribati", "Tuvalu", "Nauru", "Palau", "Marshall Islands", 
+            "Micronesia", "Cook Islands", "Niue", "American Samoa", "French Polynesia", "Guam", 
+            "Northern Mariana Islands", "New Caledonia", "Norfolk Island", "Pitcairn Islands",
+            "Tokelau", "Wallis & Futuna"
+        ]
+        
+        // Middle East (Western Asia and North Africa)
+        let middleEastCountries = [
+            "Saudi Arabia", "United Arab Emirates", "Iran", "Iraq", "Israel", "Jordan", "Lebanon", 
+            "Syria", "Turkey", "Kuwait", "Qatar", "Bahrain", "Oman", "Yemen", "Palestinian Territories"
+        ]
+        
+        // Caribbean
+        let caribbeanCountries = [
+            "Jamaica", "Cuba", "Haiti", "Dominican Republic", "Puerto Rico", "Trinidad & Tobago", 
+            "Barbados", "Bahamas", "Saint Lucia", "Grenada", "Saint Vincent & Grenadines", 
+            "Antigua & Barbuda", "Dominica", "Saint Kitts & Nevis", "Aruba", "Curaçao", 
+            "Sint Maarten", "British Virgin Islands", "U.S. Virgin Islands", "Cayman Islands", 
+            "Turks & Caicos Islands", "Anguilla", "Montserrat", "Guadeloupe", "Martinique", 
+            "Saint Barthélemy", "Saint Martin"
+        ]
+        
+        // Add missing countries to proper regions
+        let additionalEuropeCountries = [
+            "Armenia", "Azerbaijan", "Georgia", "Faroe Islands", "Gibraltar", "Guernsey", 
+            "Isle of Man", "Jersey", "Åland Islands"
+        ]
+        
+        let additionalAfricaCountries = [
+            "Mayotte", "Réunion", "Saint Helena"
+        ]
+        
+        let additionalOceaniaCountries = [
+            "Christmas Island", "Cocos (Keeling) Islands"
+        ]
+        
+        let additionalCaribbean = [
+            "Bermuda", "Saint Pierre & Miquelon"
+        ]
+        
+        let additionalSouthAmerica = [
+            "Falkland Islands"
+        ]
+        
+        // Special territories and other regions
+        let otherRegions = [
+            "Select Country", "Unknown Region", "European Union"
+        ]
+        
+        // Check all regions including additional countries
+        let allEuropeCountries = europeCountries + additionalEuropeCountries
+        let allAfricaCountries = africaCountries + additionalAfricaCountries
+        let allOceaniaCountries = oceaniaCountries + additionalOceaniaCountries
+        let allCaribbeanCountries = caribbeanCountries + additionalCaribbean
+        let allSouthAmericaCountries = southAmericaCountries + additionalSouthAmerica
         
         if northAmericaCountries.contains(countryName) {
             return .northAmerica
-        } else if southAmericaCountries.contains(countryName) {
+        } else if allSouthAmericaCountries.contains(countryName) {
             return .southAmerica
-        } else if europeCountries.contains(countryName) {
+        } else if allEuropeCountries.contains(countryName) {
             return .europe
-        } else if africaCountries.contains(countryName) {
+        } else if allAfricaCountries.contains(countryName) {
             return .africa
         } else if asiaCountries.contains(countryName) {
             return .asia
-        } else if oceaniaCountries.contains(countryName) {
+        } else if allOceaniaCountries.contains(countryName) {
             return .oceania
         } else if middleEastCountries.contains(countryName) {
             return .middleEast
-        } else if caribbeanCountries.contains(countryName) {
+        } else if allCaribbeanCountries.contains(countryName) {
             return .caribbean
+        } else if otherRegions.contains(countryName) {
+            return .other
         } else {
             return .other
         }

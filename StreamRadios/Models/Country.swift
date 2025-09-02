@@ -21,17 +21,9 @@ struct Country: Identifiable, Hashable {
         // For most countries, the flag code is the same as the ISO code
         // Handle special cases where the display name differs from the API expectation
         switch name {
-        case "USA", "United States":
+        case "United States":
             return "US"
-        case "UK", "United Kingdom":
-            return "GB"
-        case "England":
-            return "GB"
-        case "Scotland":
-            return "GB"
-        case "Wales":
-            return "GB"
-        case "Northern Ireland":
+        case "United Kingdom":
             return "GB"
         case "Russia":
             return "RU"
@@ -123,7 +115,7 @@ extension Country {
             Country(name: "Ecuador", flag: "EC"),
             Country(name: "Egypt", flag: "EG"),
             Country(name: "El Salvador", flag: "SV"),
-            Country(name: "England", flag: "GB-ENG"),
+
             Country(name: "Equatorial Guinea", flag: "GQ"),
             Country(name: "Eritrea", flag: "ER"),
             Country(name: "Estonia", flag: "EE"),
@@ -219,7 +211,7 @@ extension Country {
             Country(name: "Niue", flag: "NU"),
             Country(name: "Norfolk Island", flag: "NF"),
             Country(name: "North Korea", flag: "KP"),
-            Country(name: "Northern Ireland", flag: "GB-NIR"),
+
             Country(name: "Northern Mariana Islands", flag: "MP"),
             Country(name: "Norway", flag: "NO"),
             Country(name: "Oman", flag: "OM"),
@@ -250,7 +242,7 @@ extension Country {
             Country(name: "Samoa", flag: "WS"),
             Country(name: "San Marino", flag: "SM"),
             Country(name: "Saudi Arabia", flag: "SA"),
-            Country(name: "Scotland", flag: "GB-SCT"),
+
             Country(name: "Senegal", flag: "SN"),
             Country(name: "Serbia", flag: "RS"),
             Country(name: "Seychelles", flag: "SC"),
@@ -288,19 +280,18 @@ extension Country {
             Country(name: "Turks & Caicos Islands", flag: "TC"),
             Country(name: "Tuvalu", flag: "TV"),
             Country(name: "Uganda", flag: "UG"),
-            Country(name: "UK", flag: "GB"),
+            Country(name: "United Kingdom", flag: "GB"),
             Country(name: "Ukraine", flag: "UA"),
             Country(name: "United Arab Emirates", flag: "AE"),
             Country(name: "United States", flag: "US"),
             Country(name: "Uruguay", flag: "UY"),
-            Country(name: "USA", flag: "US"),
             Country(name: "U.S. Virgin Islands", flag: "VI"),
             Country(name: "Uzbekistan", flag: "UZ"),
             Country(name: "Vanuatu", flag: "VU"),
             Country(name: "Vatican City", flag: "VA"),
             Country(name: "Venezuela", flag: "VE"),
             Country(name: "Vietnam", flag: "VN"),
-            Country(name: "Wales", flag: "GB-WLS"),
+
             Country(name: "Wallis & Futuna", flag: "WF"),
             Country(name: "Yemen", flag: "YE"),
             Country(name: "Zambia", flag: "ZM"),
