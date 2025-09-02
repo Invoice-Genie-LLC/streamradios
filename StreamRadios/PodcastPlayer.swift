@@ -1688,6 +1688,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: true)
         stateManager.startPlaying(episodeId: currentEpisode.id)
         
+        // CRITICAL FIX: Update Now Playing info immediately for lock screen sync
+        updateNowPlayingInfoElapsedTimeOnly()
         updateNowPlayingInfo()
         setupTimeObserver()
         
@@ -1792,6 +1794,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
 
         ensureProgressTracking(for: currentEpisode)
 
+        // CRITICAL FIX: Update Now Playing info immediately for lock screen sync
+        updateNowPlayingInfoElapsedTimeOnly()
         updateNowPlayingInfo()
         
         // Notify CarPlay of playback state change
@@ -2068,8 +2072,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     currentTime: time
                 )
                 
-                // Update Now Playing info after successful seek
-                self.updateNowPlayingInfo()
+                // CRITICAL FIX: Update Now Playing info immediately after seek for lock screen sync
+                self.updateNowPlayingInfoElapsedTimeOnly()
+                
+                // Update full Now Playing info after successful seek (debounced)
+                self.updateNowPlayingInfoDebounced()
                 
                 os_log("✅ CHAPTER SEEK: Successfully completed seek to %.1fs (%.2f%%) in episode: %@ - position reconfirmed", 
                        log: self.log, type: .info, time, newProgress * 100, currentEpisode.title)
@@ -2569,6 +2576,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     }
                 }
                 
+                // CRITICAL FIX: Update Now Playing Info Center immediately for lock screen sync
+                // This ensures lock screen controls show real-time progress
+                self.updateNowPlayingInfoElapsedTimeOnly()
+                
                 // PERFORMANCE: Only trigger heavy operations if user is not scrolling
                 if !self.isUserScrolling {
                     self.updatePlaybackInfoThrottled()
@@ -2609,6 +2620,27 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 self?.updateNowPlayingInfo()
             }
         }
+    }
+    
+    // CRITICAL FIX: Lightweight method to update only elapsed time for real-time lock screen sync
+    private func updateNowPlayingInfoElapsedTimeOnly() {
+        // Only update if podcast is the active player
+        guard PlaybackManager.shared.activePlayer == .podcast else { return }
+        
+        // Get current Now Playing info and update only the elapsed time
+        let nowPlayingCenter = MPNowPlayingInfoCenter.default()
+        var nowPlayingInfo = nowPlayingCenter.nowPlayingInfo ?? [:]
+        
+        // Update only the elapsed time - this is lightweight and prevents lock screen rewind
+        let elapsedTime = max(0, currentTime)
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsedTime
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+        
+        // Set the updated info immediately - no debouncing for elapsed time
+        nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
+        
+        os_log("🔄 Lock Screen Sync: Updated elapsed time to %.1fs for real-time lock screen controls", 
+               log: log, type: .debug, elapsedTime)
     }
     
     func updateNowPlayingInfo() {
