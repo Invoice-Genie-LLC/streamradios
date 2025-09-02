@@ -985,13 +985,13 @@ struct RadioStationListView: View {
     
 
     
-    private var filteredStations: [RadioStation] {
+        private var filteredStations: [RadioStation] {
         // Only filter for radio tab
         guard selectedTab == .radio else {
-            return []
+return []
         }
         
-        // UNIVERSAL SEARCH: When user is searching, search across ALL countries and ALL stations
+        // UNIVERSAL SEARCH: When user is searching, search across ALL countries and ALL stations regardless of tab
         if !searchText.isEmpty {
             let allStations = viewModel.stations
             let filtered = allStations.filter { station in
@@ -1006,12 +1006,53 @@ struct RadioStationListView: View {
                 
                 return hasValidCountry && matchesSearch
             }
-            // Recent tab maintains chronological order even when searching
+            
+            // GLOBAL SEARCH: All tabs now search globally across all countries and return all matching results
+            // Sort results based on the current tab's sorting preference
             if selectedSubTab == .recent {
-                // Return search results sorted by lastPlayed (most recent first)
-                return filtered.filter { $0.lastPlayed != nil }.sorted { $0.lastPlayed ?? Date.distantPast > $1.lastPlayed ?? Date.distantPast }
+                // For Recent tab, prioritize recently played stations but show all search results
+                // Sort by: recently played first, then alphabetically
+                return filtered.sorted { station1, station2 in
+                    let hasPlayed1 = station1.lastPlayed != nil
+                    let hasPlayed2 = station2.lastPlayed != nil
+                    
+                    if hasPlayed1 && hasPlayed2 {
+                        return station1.lastPlayed! > station2.lastPlayed!
+                    } else if hasPlayed1 {
+                        return true
+                    } else if hasPlayed2 {
+                        return false
+                    } else {
+                        return station1.name.localizedCaseInsensitiveCompare(station2.name) == .orderedAscending
+                    }
+                }
+            } else if selectedSubTab == .favorites {
+                // For Favorites tab, prioritize favorited stations but show all search results
+                // Sort by: favorites first, then alphabetically
+                return filtered.sorted { station1, station2 in
+                    if station1.isFavorite && station2.isFavorite {
+                        // Both are favorites, sort by favorite order or favoritedAt
+                        if let order1 = station1.favoriteOrder, let order2 = station2.favoriteOrder {
+                            return order1 < order2
+                        } else if station1.favoriteOrder != nil {
+                            return true
+                        } else if station2.favoriteOrder != nil {
+                            return false
+                        } else {
+                            let date1 = station1.favoritedAt ?? Date.distantPast
+                            let date2 = station2.favoritedAt ?? Date.distantPast
+                            return date1 > date2
+                        }
+                    } else if station1.isFavorite {
+                        return true
+                    } else if station2.isFavorite {
+                        return false
+                    } else {
+                        return station1.name.localizedCaseInsensitiveCompare(station2.name) == .orderedAscending
+                    }
+                }
             } else {
-                // Preserve existing sort toggle behavior for All and Favorites tabs
+                // All tab: sort alphabetically based on toggle setting
                 if viewModel.isAscendingSort {
                     return filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
                 } else {
