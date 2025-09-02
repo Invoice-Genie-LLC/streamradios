@@ -2410,19 +2410,29 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func skipForward() {
+        os_log("⏭️ SKIP FORWARD: Lock screen skip forward command received", log: log, type: .info)
         seek(by: 15)
         // REMOVED: Redundant progress saving - seek(to:) already handles all progress saving with chapter protection
         os_log("⏭️ SEEK FORWARD: 15s forward seek completed with chapter protection", log: log, type: .info)
     }
     
     func skipBackward() {
+        os_log("⏪ SKIP BACKWARD: Lock screen skip backward command received", log: log, type: .info)
         seek(by: -15)
         // REMOVED: Redundant progress saving - seek(to:) already handles all progress saving with chapter protection
         os_log("⏪ SEEK BACKWARD: 15s backward seek completed with chapter protection", log: log, type: .info)
     }
     
     private func seek(by seconds: Double) {
-        let newTime = min(max(currentTime + seconds, 0), duration)
+        // CRITICAL FIX: Get actual current time from player for accurate skip operations
+        // Don't rely on cached currentTime which might be stale or protected
+        guard let player = player else { return }
+        let actualCurrentTime = max(0, player.currentTime().seconds)
+        let newTime = min(max(actualCurrentTime + seconds, 0), duration)
+        
+        os_log("🎯 SKIP SEEK: From actual time %.1fs %@ %.1fs to %.1fs", 
+               log: log, type: .info, actualCurrentTime, seconds > 0 ? "+" : "", seconds, newTime)
+        
         seek(to: newTime)
     }
     
