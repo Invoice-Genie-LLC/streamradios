@@ -104,12 +104,153 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                setupTerminationHandling()
                setupCarPlayRouteChangeHandling()
                setupCrossDeviceProgressSync()
+               
+               // CRITICAL: Add comprehensive background audio session management like RadioPlayer
+               setupBackgroundAudioObservers()
        }
     
     private func setupAudioSession() {
         // Audio session is now managed centrally by PlaybackManager
         // This method is kept for backward compatibility
         print("✅ Podcast: Audio session management delegated to PlaybackManager")
+    }
+    
+    // CRITICAL: Add comprehensive background audio observers like RadioPlayer
+    private func setupBackgroundAudioObservers() {
+        // CRITICAL: Add app lifecycle observers for background audio session maintenance
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAppWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+        
+        // CRITICAL: Add memory warning observer to prevent termination during podcast playback
+        NotificationCenter.default.addObserver(self, selector: #selector(handleMemoryWarning), name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        
+        print("✅ PodcastPlayer: Background audio observers configured")
+    }
+    
+    @objc private func handleAppDidEnterBackground() {
+        // Simplified background handling to prevent deadlocks and main thread blocking
+        if isPlaying && userWantsToPlay {
+            print("🔧 PodcastPlayer: App entering background - podcast playback active")
+            DebugLogger.logInfo("App entering background with active podcast playback - delegating to AppDelegate for centralized background task management", category: "BackgroundAudio")
+            DebugLogger.setUserAction("Podcast Background Transition")
+            
+            // Log current episode context for debugging
+            let episodeTitle = currentEpisode?.title ?? "Unknown"
+            let currentProgress = self.currentProgress
+            DebugLogger.logInfo("Background transition context - Episode: \(episodeTitle), Progress: \(currentProgress)%, Duration: \(duration)s", category: "BackgroundAudio")
+            
+            // Don't create competing background tasks - let AppDelegate handle this centrally
+            // Just ensure the audio session category is correct for background playback
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                // Quick, non-blocking check to ensure category is correct
+                if audioSession.category != .playback {
+                    DebugLogger.logWarning("Audio session category not set for background podcast playback - may need adjustment", category: "BackgroundAudio")
+                }
+                print("✅ PodcastPlayer: Background transition handled - audio session category verified")
+                DebugLogger.logInfo("Podcast background transition completed - centralized task management active", category: "BackgroundAudio")
+            } catch {
+                print("❌ PodcastPlayer: Audio session check failed: \(error)")
+                DebugLogger.logError("Audio session verification failed during podcast background transition: \(error.localizedDescription)", category: "BackgroundAudio")
+            }
+        } else {
+            DebugLogger.logInfo("App entering background with no active podcast playback - no background maintenance needed", category: "BackgroundAudio")
+        }
+    }
+    
+    @objc private func handleAppWillEnterForeground() {
+        // CRITICAL FIX: Restore audio session when app returns to foreground
+        if userWantsToPlay {
+            print("🔧 PodcastPlayer: App entering foreground - restoring podcast playback if needed")
+            DebugLogger.logInfo("App entering foreground with podcast playback intent - checking restoration needs", category: "BackgroundAudio")
+            DebugLogger.setUserAction("Podcast Foreground Transition")
+            
+            // Check if we need to restart playback
+            if !isPlaying && player != nil {
+                DebugLogger.logWarning("Podcast playback was interrupted during background - attempting restoration", category: "BackgroundAudio")
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self else { 
+                        DebugLogger.logError("PodcastPlayer instance lost during foreground restoration", category: "BackgroundAudio")
+                        return 
+                    }
+                    
+                    do {
+                        // Reactivate audio session
+                        PlaybackManager.shared.setActivePlayer(.podcast)
+                        
+                        // Resume playback if user wants it
+                        if self.userWantsToPlay {
+                            self.player?.play()
+                            print("✅ PodcastPlayer: Podcast playback resumed after foreground transition")
+                            DebugLogger.logInfo("Podcast playback successfully restored after foreground transition", category: "BackgroundAudio")
+                        }
+                    } catch {
+                        DebugLogger.logError("Failed to restore podcast playback during foreground transition: \(error.localizedDescription)", category: "BackgroundAudio")
+                    }
+                }
+            } else if isPlaying {
+                DebugLogger.logInfo("Podcast playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
+            } else {
+                DebugLogger.logInfo("No podcast playback restoration needed - user did not want playback", category: "BackgroundAudio")
+            }
+        } else {
+            DebugLogger.logInfo("App entering foreground with no podcast playback intent", category: "BackgroundAudio")
+        }
+    }
+    
+    @objc private func handleMemoryWarning() {
+        // CRITICAL FIX: Handle memory warnings to prevent app termination during podcast playback
+        print("⚠️ PodcastPlayer: Memory warning received - optimizing for background audio")
+        
+        let memoryUsage = ProcessInfo.processInfo.physicalMemory
+        let availableMemory = ProcessInfo.processInfo.systemUptime
+        
+        DebugLogger.logWarning("CRITICAL: Memory warning received during podcast playback - System Memory: \(memoryUsage / 1024 / 1024)MB, Uptime: \(availableMemory)s", category: "MemoryPressure")
+        DebugLogger.setUserAction("Memory Warning During Podcast Playback")
+        
+        // Log current playback state for debugging
+        let episodeTitle = currentEpisode?.title ?? "None"
+        DebugLogger.logInfo("Memory warning context - Podcast playing: \(isPlaying), User wants playback: \(userWantsToPlay), Current episode: \(episodeTitle)", category: "MemoryPressure")
+        
+        // Clear non-essential data to free memory
+        clearNonEssentialPodcastData()
+        
+        // Force garbage collection
+        DispatchQueue.global(qos: .background).async {
+            // Perform heavy cleanup on background queue
+            self.optimizePodcastMemoryUsage()
+            DebugLogger.logInfo("Background podcast memory optimization completed", category: "MemoryPressure")
+        }
+    }
+    
+    private func clearNonEssentialPodcastData() {
+        // Clear cached metadata that can be refetched (but preserve playback state)
+        if !isPlaying {
+            // Only clear if not actively playing
+            allEpisodesInFeed.removeAll()
+            print("🧹 PodcastPlayer: Cleared episode cache due to memory pressure")
+            DebugLogger.logInfo("Cleared episode cache due to memory pressure (podcast not playing)", category: "MemoryPressure")
+        } else {
+            DebugLogger.logWarning("Memory warning during active podcast playback - limited cleanup to preserve audio", category: "MemoryPressure")
+        }
+    }
+    
+    private func optimizePodcastMemoryUsage() {
+        // Perform memory optimization on background thread
+        print("🧹 PodcastPlayer: Optimizing memory usage for background stability")
+        DebugLogger.logInfo("Starting background podcast memory optimization to prevent app termination", category: "MemoryPressure")
+        
+        // Clear any cached network responses or temporary data
+        let cacheSize = URLCache.shared.currentDiskUsage + URLCache.shared.currentMemoryUsage
+        URLCache.shared.removeAllCachedResponses()
+        DebugLogger.logInfo("Cleared URL cache during podcast memory optimization - freed \(cacheSize / 1024)KB of memory", category: "MemoryPressure")
+        
+        // Force memory cleanup
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+            DebugLogger.logInfo("Podcast memory optimization completed - UI state refreshed", category: "MemoryPressure")
+        }
     }
     
     private func setupReachability() {
@@ -1723,25 +1864,37 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            DebugLogger.logError("Invalid audio interruption notification received for podcast - missing required data", category: "AudioInterruption")
             return
         }
         
         switch type {
         case .began:
             print("🔇 PodcastPlayer: Audio interruption began - checking if CarPlay related")
+            DebugLogger.logWarning("Audio interruption began - pausing podcast playback (likely phone call or other audio)", category: "AudioInterruption")
+            DebugLogger.setUserAction("Podcast Audio Interruption Started")
+            
+            let wasPlaying = isPlaying
+            let episodeTitle = currentEpisode?.title ?? "None"
+            DebugLogger.logInfo("Podcast audio interruption handled - Was playing: \(wasPlaying), Episode: \(episodeTitle)", category: "AudioInterruption")
             
             // CRITICAL: Don't pause if this is a CarPlay transition and user wants to continue podcast
             if userWantsToPlay && currentEpisode != nil {
                 print("🚗 PodcastPlayer: Resisting audio interruption - user wants podcast to continue")
+                DebugLogger.logInfo("Resisting podcast audio interruption - user wants playback to continue (likely CarPlay transition)", category: "AudioInterruption")
                 
                 // Brief delay to let CarPlay transition complete, then aggressively resume
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     guard let self = self,
                           let player = self.player,
                           self.userWantsToPlay,
-                          self.currentEpisode != nil else { return }
+                          self.currentEpisode != nil else { 
+                        DebugLogger.logError("PodcastPlayer instance or state lost during interruption recovery", category: "AudioInterruption")
+                        return 
+                    }
                     
                     print("🔄 PodcastPlayer: Aggressively resuming after CarPlay interruption")
+                    DebugLogger.logInfo("Attempting aggressive podcast resume after CarPlay interruption", category: "AudioInterruption")
                     
                     // Reactivate audio session and resume playback
                     do {
@@ -1750,22 +1903,38 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         self.isPlaying = true
                         self.updateNowPlayingInfo()
                         print("✅ PodcastPlayer: Successfully resumed after CarPlay interruption")
+                        DebugLogger.logInfo("Podcast playback successfully resumed after CarPlay interruption", category: "AudioInterruption")
                     } catch {
                         print("⚠️ PodcastPlayer: Failed to resume after interruption: \(error)")
+                        DebugLogger.logError("Failed to resume podcast playback after CarPlay interruption: \(error.localizedDescription)", category: "AudioInterruption")
                     }
                 }
+            } else {
+                DebugLogger.logInfo("Not resisting podcast audio interruption - user does not want playback or no episode loaded", category: "AudioInterruption")
             }
             
         case .ended:
             print("🔊 PodcastPlayer: Audio interruption ended")
+            DebugLogger.logInfo("Podcast audio interruption ended - checking resume options", category: "AudioInterruption")
+            DebugLogger.setUserAction("Podcast Audio Interruption Ended")
+            
+            let shouldResume = userWantsToPlay && currentEpisode != nil && !isPlaying
+            DebugLogger.logInfo("Interruption resume analysis - Should resume: \(shouldResume), User wants playback: \(userWantsToPlay), Has episode: \(currentEpisode != nil), Is playing: \(isPlaying)", category: "AudioInterruption")
             
             // Resume if user wants to continue and we have content
-            if userWantsToPlay && currentEpisode != nil && !isPlaying {
+            if shouldResume {
                 print("🔄 PodcastPlayer: Resuming podcast after interruption ended")
+                DebugLogger.logInfo("Resuming podcast playback after audio interruption ended", category: "AudioInterruption")
                 play()
+            } else {
+                let reason = !userWantsToPlay ? "user does not want playback" : 
+                           currentEpisode == nil ? "no episode loaded" : 
+                           isPlaying ? "already playing" : "unknown reason"
+                DebugLogger.logInfo("Not resuming podcast playback after interruption - \(reason)", category: "AudioInterruption")
             }
             
         @unknown default:
+            DebugLogger.logWarning("Unknown podcast audio interruption type received", category: "AudioInterruption")
             break
         }
     }

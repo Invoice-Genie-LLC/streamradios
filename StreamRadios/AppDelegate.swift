@@ -102,8 +102,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Save state immediately when app resigns active status (might be force closed)
         updatePodcastStateAndSave()
         PodcastPlayer.shared.handleAppWillTerminate()
-        // Prepare to suppress global player if the app is swiped away shortly after
-        UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
+        
+        // CRITICAL FIX: Don't suppress radio player if it's actively playing in background
+        let radioPlayer = RadioPlayer.shared
+        if !(radioPlayer.isPlaying && radioPlayer.userWantsToPlay) {
+            // Only suppress global player if radio is not actively playing
+            UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
+        } else {
+            print("🔧 AppDelegate: Radio is playing - not suppressing player on next launch")
+        }
         
         // Force synchronize to persist data
         UserDefaults.standard.synchronize()
@@ -225,6 +232,99 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
          // Log background transition for crash context
          DebugLogger.logInfo("App entered background", category: "AppLifecycle")
          DebugLogger.setUserAction("App Background")
+         
+         // CRITICAL FIX: Enhanced background task management to prevent main thread deadlocks
+         let radioPlayer = RadioPlayer.shared
+         if radioPlayer.isPlaying && radioPlayer.userWantsToPlay {
+             print("🔧 AppDelegate: Starting enhanced background task for radio playback")
+             DebugLogger.logInfo("App entering background with active radio playback - starting enhanced background task to prevent termination", category: "BackgroundTask")
+             DebugLogger.setUserAction("App Background with Radio Playing")
+             
+             let backgroundTaskID = application.beginBackgroundTask(withName: "RadioBackgroundPlayback") {
+                 print("⚠️ AppDelegate: Background task for radio expired")
+                 DebugLogger.logWarning("CRITICAL: Radio background task expired - app may be terminated by iOS", category: "BackgroundTask")
+             }
+             
+             DebugLogger.logInfo("Background task started - ID: \(backgroundTaskID.rawValue), Station: \(radioPlayer.currentlyPlayingStation?.name ?? "Unknown")", category: "BackgroundTask")
+             
+             // CRITICAL FIX: Use background queue for audio session maintenance to prevent main thread blocking
+             DispatchQueue.global(qos: .background).async {
+                 do {
+                     // Maintain audio session on background thread to prevent blocking
+                     let audioSession = AVAudioSession.sharedInstance()
+                     try audioSession.setActive(true, options: [])
+                     print("✅ AppDelegate: Audio session maintained for background radio playback")
+                     DebugLogger.logInfo("Background audio session successfully maintained for radio playback", category: "BackgroundTask")
+                     
+                     // CRITICAL FIX: Use Timer instead of DispatchQueue.main.asyncAfter to prevent deadlocks
+                     // Schedule background task completion on a background timer
+                     Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+                         if backgroundTaskID != .invalid {
+                             application.endBackgroundTask(backgroundTaskID)
+                             print("✅ AppDelegate: Background task for radio completed via timer")
+                             DebugLogger.logInfo("Radio background task completed successfully via background timer - app should remain stable", category: "BackgroundTask")
+                         }
+                     }
+                 } catch {
+                     print("❌ AppDelegate: Failed to maintain background audio session: \(error)")
+                     DebugLogger.logError("CRITICAL: Background audio session maintenance failed - app may terminate: \(error.localizedDescription)", category: "BackgroundTask")
+                     
+                     // End background task immediately on error
+                     if backgroundTaskID != .invalid {
+                         application.endBackgroundTask(backgroundTaskID)
+                     }
+                 }
+             }
+         } else {
+             DebugLogger.logInfo("App entering background with no active radio playback - no background task needed", category: "BackgroundTask")
+         }
+         
+         // CRITICAL FIX: Enhanced background task management for podcast playback to prevent deadlocks
+         let podcastPlayer = PodcastPlayer.shared
+         if podcastPlayer.isPlaying && podcastPlayer.userWantsToPlay {
+             print("🔧 AppDelegate: Starting enhanced background task for podcast playback")
+             DebugLogger.logInfo("App entering background with active podcast playback - starting enhanced background task to prevent termination", category: "BackgroundTask")
+             DebugLogger.setUserAction("App Background with Podcast Playing")
+             
+             let backgroundTaskID = application.beginBackgroundTask(withName: "PodcastBackgroundPlayback") {
+                 print("⚠️ AppDelegate: Background task for podcast expired")
+                 DebugLogger.logWarning("CRITICAL: Podcast background task expired - app may be terminated by iOS", category: "BackgroundTask")
+             }
+             
+             let episodeTitle = podcastPlayer.currentEpisode?.title ?? "Unknown"
+             DebugLogger.logInfo("Podcast background task started - ID: \(backgroundTaskID.rawValue), Episode: \(episodeTitle)", category: "BackgroundTask")
+             
+             // Use background queue for audio session maintenance to prevent main thread blocking
+             DispatchQueue.global(qos: .background).async {
+                 do {
+                     // Maintain audio session on background thread to prevent blocking
+                     let audioSession = AVAudioSession.sharedInstance()
+                     try audioSession.setActive(true, options: [])
+                     print("✅ AppDelegate: Audio session maintained for background podcast playback")
+                     DebugLogger.logInfo("Background audio session successfully maintained for podcast playback", category: "BackgroundTask")
+                     
+                     // Use Timer instead of DispatchQueue.main.asyncAfter to prevent deadlocks
+                     // Schedule background task completion on a background timer
+                     Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+                         if backgroundTaskID != .invalid {
+                             application.endBackgroundTask(backgroundTaskID)
+                             print("✅ AppDelegate: Background task for podcast completed via timer")
+                             DebugLogger.logInfo("Podcast background task completed successfully via background timer - app should remain stable", category: "BackgroundTask")
+                         }
+                     }
+                 } catch {
+                     print("❌ AppDelegate: Failed to maintain background audio session for podcast: \(error)")
+                     DebugLogger.logError("CRITICAL: Background audio session maintenance failed for podcast - app may terminate: \(error.localizedDescription)", category: "BackgroundTask")
+                     
+                     // End background task immediately on error
+                     if backgroundTaskID != .invalid {
+                         application.endBackgroundTask(backgroundTaskID)
+                     }
+                 }
+             }
+         } else {
+             DebugLogger.logInfo("App entering background with no active podcast playback - no background task needed", category: "BackgroundTask")
+         }
          
          // App entered background - save all current state immediately
          updatePodcastStateAndSave()

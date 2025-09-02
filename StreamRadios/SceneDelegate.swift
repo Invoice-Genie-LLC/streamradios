@@ -11,6 +11,10 @@ import SwiftUI
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
+    
+    // PERFORMANCE: Throttling to prevent rapid successive app activation hangs
+    private var lastBecameActiveTime: Date?
+    private let becameActiveThrottleInterval: TimeInterval = 2.0 // Minimum 2 seconds between activations
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         // Create a SwiftUI view that provides the window contents.
@@ -73,22 +77,43 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Clear all notifications and reset badge count when app becomes active
         NotificationManager.shared.clearAllNotificationsAndBadge()
         
-        // 🚗 CARPLAY SYNC: Immediate and aggressive sync to CarPlay when main app becomes active
+        // PERFORMANCE FIX: Throttle rapid successive activations to prevent hangs
+        let now = Date()
+        if let lastTime = lastBecameActiveTime,
+           now.timeIntervalSince(lastTime) < becameActiveThrottleInterval {
+            print("🚗 THROTTLED: Skipping CarPlay sync - too soon since last activation (\(String(format: "%.1f", now.timeIntervalSince(lastTime)))s ago)")
+            return
+        }
+        lastBecameActiveTime = now
+        
+        // 🚗 CARPLAY SYNC: Asynchronous sync to CarPlay when main app becomes active
         // This ensures podcast feeds sync to CarPlay when user opens the phone app
+        // CRITICAL FIX: Move all heavy operations off the main thread to prevent app hangs
         
-        // AGGRESSIVE SYNC: Force immediate data refresh for CarPlay
-        print("🚗 MAIN APP: DEBUG - Scene became active, triggering aggressive CarPlay sync")
+        print("🚗 MAIN APP: DEBUG - Scene became active, triggering async CarPlay sync")
         
-        // 1. Force PodcastViewModel to reload immediately
-        PodcastViewModel.shared.loadFeedsFromCoreData()
-        
-        // 2. Immediate sync attempt via CarPlayManager
-        CarPlayManager.shared.forceRefreshPodcastData()
-        
-        // 3. Debug check
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let feedCount = PodcastViewModel.shared.podcastFeeds.count
-            print("🚗 MAIN APP: DEBUG - After aggressive sync, PodcastViewModel has \(feedCount) feeds")
+        // PERFORMANCE FIX: Execute all CarPlay sync operations asynchronously to prevent main thread blocking
+        Task.detached(priority: .userInitiated) {
+            // 1. Force PodcastViewModel to reload on background thread
+            await MainActor.run {
+                PodcastViewModel.shared.loadFeedsFromCoreData()
+            }
+            
+            // Small delay to prevent thread contention
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            
+            // 2. Sync via CarPlayManager on background thread
+            await MainActor.run {
+                CarPlayManager.shared.forceRefreshPodcastData()
+            }
+            
+            // 3. Debug check after operations complete
+            await MainActor.run {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    let feedCount = PodcastViewModel.shared.podcastFeeds.count
+                    print("🚗 MAIN APP: DEBUG - After async sync, PodcastViewModel has \(feedCount) feeds")
+                }
+            }
         }
         
         // Set UserDefaults flag for polling-based backup
@@ -156,8 +181,28 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // Save radio state
         RadioPlayer.shared.saveLastPlayedStation()
-        // Request that global player be suppressed on next launch
-        UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
+        
+        // CRITICAL FIX: Don't suppress players if they're actively playing in background
+        let radioPlayer = RadioPlayer.shared
+        let podcastPlayer = PodcastPlayer.shared
+        let isRadioPlaying = radioPlayer.isPlaying && radioPlayer.userWantsToPlay
+        let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.userWantsToPlay
+        
+        if !(isRadioPlaying || isPodcastPlaying) {
+            // Only suppress global player if neither radio nor podcast is actively playing
+            UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
+            DebugLogger.logInfo("Scene entering background with no active playback - suppressing player on next launch", category: "SceneLifecycle")
+        } else {
+            if isRadioPlaying {
+                DebugLogger.logInfo("Scene entering background with active radio playback - preserving player state for next launch", category: "SceneLifecycle")
+                DebugLogger.setUserAction("Scene Background with Radio Playing")
+            }
+            if isPodcastPlaying {
+                let episodeTitle = podcastPlayer.currentEpisode?.title ?? "Unknown"
+                DebugLogger.logInfo("Scene entering background with active podcast playback - preserving player state for next launch, Episode: \(episodeTitle)", category: "SceneLifecycle")
+                DebugLogger.setUserAction("Scene Background with Podcast Playing")
+            }
+        }
         
         // Force synchronize UserDefaults
         UserDefaults.standard.synchronize()

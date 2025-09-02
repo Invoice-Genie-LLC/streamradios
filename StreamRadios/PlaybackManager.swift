@@ -43,29 +43,51 @@ class PlaybackManager: ObservableObject {
     }
     
     private func setupCentralizedAudioSession() {
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
+        // CRITICAL FIX: Move audio session configuration to background queue to prevent main thread blocking
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
             
-            // Check if audio session is already configured by another component
-            if audioSession.category != .ambient {
-                print("⚠️ PlaybackManager: Audio session already configured with category: \(audioSession.category.rawValue)")
-                audioSessionConfigured = true
-                return
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                
+                // Check if audio session is already configured by another component
+                if audioSession.category != .ambient {
+                    print("⚠️ PlaybackManager: Audio session already configured with category: \(audioSession.category.rawValue)")
+                    DispatchQueue.main.async {
+                        self.audioSessionConfigured = true
+                    }
+                    return
+                }
+                
+                // Use optimized audio session configuration for background stability
+                // This configuration is essential for preventing app termination during lock screen playback
+                try audioSession.setCategory(.playback, 
+                                           mode: .default, 
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP, .mixWithOthers])
+                
+                // Set preferred buffer duration for better background performance
+                try audioSession.setPreferredIOBufferDuration(0.1) // 100ms buffer for stability
+                
+                print("✅ PlaybackManager: Centralized audio session configured for background stability")
+                DispatchQueue.main.async {
+                    self.audioSessionConfigured = true
+                }
+                
+            } catch {
+                print("❌ PlaybackManager: Failed to configure centralized audio session: \(error)")
+                DebugLogger.logError("CRITICAL: Audio session configuration failed - this may cause background termination: \(error.localizedDescription)", category: "AudioSession")
+                DebugLogger.setUserAction("Audio Session Configuration Failure")
+                
+                // Log additional context for debugging
+                let currentCategory = AVAudioSession.sharedInstance().category
+                let currentOptions = AVAudioSession.sharedInstance().categoryOptions
+                DebugLogger.logInfo("Audio session failure context - Current category: \(currentCategory.rawValue), Options: \(currentOptions.rawValue)", category: "AudioSession")
+                
+                // Mark as configured even on error to prevent repeated attempts
+                DispatchQueue.main.async {
+                    self.audioSessionConfigured = true
+                }
             }
-            
-            // Use a unified audio session configuration that works for both radio and podcasts
-            // and ensures proper "Playing Now" functionality
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-            
-            print("✅ PlaybackManager: Centralized audio session configured")
-            audioSessionConfigured = true
-            
-        } catch {
-            print("❌ PlaybackManager: Failed to configure centralized audio session: \(error)")
-            // Mark as configured even on error to prevent repeated attempts
-            audioSessionConfigured = true
         }
     }
     

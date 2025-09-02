@@ -84,6 +84,9 @@ struct SettingsView: View {
     @State private var crashCount = 0
     @State private var memoryWarningCount = 0
     @State private var recentExceptions: [ExceptionInfo] = []
+    
+    // Real crash data from DebugLogger
+    @ObservedObject private var debugLogger = DebugLogger.shared
     @State private var audioSessionErrorCount = 1
     @State private var carPlayDisconnectionCount = 2
     @State private var playbackFailureCount = 0
@@ -155,9 +158,9 @@ struct SettingsView: View {
                 // Enable battery monitoring for accurate battery level reporting
                 UIDevice.current.isBatteryMonitoringEnabled = true
                 
-                // Initialize sample exception data only if debug logging is enabled
+                // Initialize real crash data from DebugLogger if debug logging is enabled
                 if debugLoggingEnabled {
-                    initializeSampleExceptions()
+                    loadRealCrashData()
                     os_log("Debug logging session started", log: OSLog(subsystem: "com.radio.streamradios", category: "Debug"), type: .info)
                 }
             }
@@ -621,6 +624,11 @@ extension SettingsView {
                         Spacer()
                         Toggle("", isOn: $debugLoggingEnabled)
                             .toggleStyle(SwitchToggleStyle(tint: .blue))
+                            .onChange(of: debugLoggingEnabled) { enabled in
+                                if enabled {
+                                    loadRealCrashData()
+                                }
+                            }
                     }
                     .padding(.horizontal, 16)
                     
@@ -873,7 +881,7 @@ extension SettingsView {
                             title: "Stack Traces & Exceptions",
                             icon: "exclamationmark.triangle.fill",
                             color: .red,
-                            content: recentExceptions.isEmpty ? "No recent exceptions" : getFormattedExceptionsInfo()
+                            content: getFormattedRealExceptionsInfo()
                         )
                         .padding(.horizontal, 16)
                         
@@ -953,13 +961,16 @@ extension SettingsView {
     }
     
     private func getLogStatistics() -> [String: Int]? {
-        // let stats = DebugLogger.getLogStatistics() - will be added when import is fixed
-        return ["INFO": infoCount, "WARNING": warningCount, "ERROR": errorCount] // Using state variables
+        let stats = DebugLogger.getLogStatistics()
+        return stats
     }
     
     private func clearAllDebugCounters() {
         // Reset session timer
         sessionStartTime = Date()
+        
+        // Clear all DebugLogger data
+        DebugLogger.clearAllLogs()
         
         // Reset all error counters
         errorCount = 0
@@ -997,8 +1008,7 @@ extension SettingsView {
             return
         }
         
-        // let debugContent = DebugLogger.getAllLogsForSharing() - will be added when import is fixed
-        let debugContent = generateSanitizedDebugReport() // Using sanitized content
+        let debugContent = DebugLogger.getAllLogsForSharing()
         
         // Create email-specific sharing items
         let emailSubject = "Debug Sent From User"
@@ -1122,9 +1132,10 @@ extension SettingsView {
         
         🔄 APP LIFECYCLE & CRASHES
         ─────────────────────────
-        Crash Reports: \(crashCount)
-        Background Task Failures: 0
-        Launch Issues: 0
+        Crash Reports: \(debugLogger.logEntries.filter { $0.level == .critical && $0.crashInfo != nil }.count)
+        Critical Errors: \(debugLogger.logEntries.filter { $0.level == .critical }.count)
+        Total Errors: \(debugLogger.logEntries.filter { $0.level == .error }.count)
+        Warnings: \(debugLogger.logEntries.filter { $0.level == .warning }.count)
         Memory Warnings: \(memoryWarningCount)
         App State: Foreground
         Launch Time: Normal
@@ -1132,7 +1143,7 @@ extension SettingsView {
         
         📊 RUNTIME STATISTICS
         ───────────────────
-        Total Log Entries: \(errorCount + warningCount + infoCount)
+        Total Log Entries: \(debugLogger.logEntries.count)
         Error Level Logs: \(errorCount)
         Warning Level Logs: \(warningCount)
         Info Level Logs: \(infoCount)
@@ -1152,7 +1163,7 @@ extension SettingsView {
         
         🚨 STACK TRACES & EXCEPTIONS
         ──────────────────────────
-        \(recentExceptions.isEmpty ? "No recent exceptions" : getFormattedExceptionsInfo())
+        \(getFormattedRealExceptionsInfo())
         
         🛠️ DEBUGGING CONTEXT
         ──────────────────
@@ -1606,51 +1617,34 @@ extension SettingsView {
     
     // MARK: - Exception Handling Functions
     
-    private func initializeSampleExceptions() {
-        // Create some sample exceptions for demonstration
-        let sampleExceptions = [
-            ExceptionInfo(
-                timestamp: Date().addingTimeInterval(-3600), // 1 hour ago
-                errorMessage: "Failed to decode podcast RSS feed",
-                filename: "PodcastManager.swift",
-                lineNumber: 145,
-                functionName: "parseFeedData(_:)",
-                stackTrace: [
-                    "PodcastManager.parseFeedData(_:) at line 145",
-                    "PodcastViewModel.refreshPodcast() at line 89",
-                    "ContentView.onAppear() at line 23"
-                ],
-                errorType: "DecodingError"
-            ),
-            ExceptionInfo(
-                timestamp: Date().addingTimeInterval(-1800), // 30 minutes ago
-                errorMessage: "Network connection timeout",
-                filename: "RadioBrowserAPI.swift",
-                lineNumber: 67,
-                functionName: "fetchStationsForCountry(_:)",
-                stackTrace: [
-                    "RadioBrowserAPI.fetchStationsForCountry(_:) at line 67",
-                    "RadioViewModel.loadStations() at line 156",
-                    "RadioListView.refreshStations() at line 78"
-                ],
-                errorType: "URLError"
-            ),
-            ExceptionInfo(
-                timestamp: Date().addingTimeInterval(-900), // 15 minutes ago
-                errorMessage: "Core Data save failed: constraint violation",
-                filename: "CoreDataStack.swift",
-                lineNumber: 89,
-                functionName: "saveContext()",
-                stackTrace: [
-                    "CoreDataStack.saveContext() at line 89",
-                    "PodcastEpisodeManager.saveEpisode(_:) at line 234",
-                    "PodcastPlayer.updateProgress() at line 567"
-                ],
-                errorType: "NSError"
-            )
-        ]
+    private func loadRealCrashData() {
+        // Load real crash and error data from DebugLogger
+        let allLogs = debugLogger.logEntries
         
-        recentExceptions = sampleExceptions
+        // Convert DebugLogger entries to ExceptionInfo for display
+        let crashAndErrorLogs = allLogs.filter { 
+            $0.level == .critical || $0.level == .error 
+        }.sorted { 
+            $0.timestamp > $1.timestamp 
+        }
+        
+        recentExceptions = crashAndErrorLogs.prefix(10).map { logEntry in
+            ExceptionInfo(
+                timestamp: logEntry.timestamp,
+                errorMessage: logEntry.message,
+                filename: logEntry.file,
+                lineNumber: logEntry.line,
+                functionName: logEntry.function,
+                stackTrace: logEntry.stackTrace,
+                errorType: logEntry.crashInfo?.crashType ?? (logEntry.level == .critical ? "Critical Error" : "Error")
+            )
+        }
+        
+        // Update crash count from real data
+        crashCount = allLogs.filter { $0.level == .critical && $0.crashInfo != nil }.count
+        
+        print("📊 Loaded \(recentExceptions.count) real crash/error entries from DebugLogger")
+        print("💥 Total crashes detected: \(crashCount)")
     }
     
     private func getFormattedExceptionsInfo() -> String {
@@ -1673,6 +1667,63 @@ extension SettingsView {
             
             if index < recentLimit - 1 {
                 output += "\n" + String(repeating: "─", count: 30) + "\n\n"
+            }
+        }
+        
+        return output
+    }
+    
+    private func getFormattedRealExceptionsInfo() -> String {
+        // Get real crash and error data from DebugLogger
+        let allLogs = debugLogger.logEntries
+        let crashAndErrorLogs = allLogs.filter { 
+            $0.level == .critical || $0.level == .error 
+        }.sorted { 
+            $0.timestamp > $1.timestamp 
+        }
+        
+        if crashAndErrorLogs.isEmpty {
+            return "No crashes or critical errors detected"
+        }
+        
+        let recentLimit = min(crashAndErrorLogs.count, 5)
+        var output = "Recent Crashes & Critical Errors (Last \(recentLimit)):\n\n"
+        
+        for (index, logEntry) in crashAndErrorLogs.prefix(recentLimit).enumerated() {
+            output += "[\(index + 1)] \(logEntry.timestamp.formatted(.dateTime))\n"
+            output += "Level: \(logEntry.level.emoji) \(logEntry.level.rawValue)\n"
+            output += "Message: \(logEntry.message)\n"
+            output += "File: \(logEntry.file):\(logEntry.line)\n"
+            output += "Function: \(logEntry.function)\n"
+            output += "Category: \(logEntry.category)\n"
+            
+            if let crashInfo = logEntry.crashInfo {
+                output += "Crash Type: \(crashInfo.crashType)\n"
+                if let signal = crashInfo.signal {
+                    output += "Signal: \(signal)\n"
+                }
+                if let exceptionName = crashInfo.exceptionName {
+                    output += "Exception: \(exceptionName)\n"
+                }
+                output += "Memory: \(String(format: "%.1f MB", crashInfo.memoryFootprint))\n"
+            }
+            
+            if let userAction = logEntry.userAction {
+                output += "User Action: \(userAction)\n"
+            }
+            
+            if !logEntry.stackTrace.isEmpty {
+                output += "Stack Trace:\n"
+                for stackLine in logEntry.stackTrace.prefix(10) { // Limit to 10 lines
+                    output += "  • \(stackLine)\n"
+                }
+                if logEntry.stackTrace.count > 10 {
+                    output += "  ... (\(logEntry.stackTrace.count - 10) more lines)\n"
+                }
+            }
+            
+            if index < recentLimit - 1 {
+                output += "\n" + String(repeating: "─", count: 40) + "\n\n"
             }
         }
         

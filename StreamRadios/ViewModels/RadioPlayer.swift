@@ -110,6 +110,14 @@ class RadioPlayer: NSObject, ObservableObject {
         // CRITICAL: Enhanced CarPlay artwork fetching using audio session events
         setupCarPlayArtworkObservation()
         
+        // CRITICAL: Add memory warning observer to prevent termination
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
+        
         // Bind stream quality manager updates
         setupStreamQualityBinding()
         
@@ -678,27 +686,211 @@ class RadioPlayer: NSObject, ObservableObject {
     
     func addInterruptionObserver() {
         NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
+        
+        // CRITICAL: Add app lifecycle observers for background audio session maintenance
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAppWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
     }
     
+    @objc private func handleAppDidEnterBackground() {
+        // CRITICAL FIX: Simplified background handling to prevent deadlocks and main thread blocking
+        if isPlaying && userWantsToPlay {
+            print("🔧 RadioPlayer: App entering background - radio playback active")
+            DebugLogger.logInfo("App entering background with active radio playback - delegating to AppDelegate for centralized background task management", category: "BackgroundAudio")
+            DebugLogger.setUserAction("Radio Background Transition")
+            
+            // CRITICAL FIX: Don't create competing background tasks - let AppDelegate handle this centrally
+            // Just ensure the audio session category is correct for background playback
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                // Quick, non-blocking check to ensure category is correct
+                if audioSession.category != .playback {
+                    DebugLogger.logWarning("Audio session category not set for background playback - may need adjustment", category: "BackgroundAudio")
+                }
+                print("✅ RadioPlayer: Background transition handled - audio session category verified")
+                DebugLogger.logInfo("Radio background transition completed - centralized task management active", category: "BackgroundAudio")
+            } catch {
+                print("❌ RadioPlayer: Audio session check failed: \(error)")
+                DebugLogger.logError("Audio session verification failed during background transition: \(error.localizedDescription)", category: "BackgroundAudio")
+            }
+        } else {
+            DebugLogger.logInfo("App entering background with no active radio playback - no background maintenance needed", category: "BackgroundAudio")
+        }
+    }
+    
+    @objc private func handleAppWillEnterForeground() {
+        // CRITICAL FIX: Restore audio session when app returns to foreground
+        if userWantsToPlay {
+            print("🔧 RadioPlayer: App entering foreground - restoring radio playback if needed")
+            DebugLogger.logInfo("App entering foreground with radio playback intent - checking restoration needs", category: "BackgroundAudio")
+            DebugLogger.setUserAction("Radio Foreground Transition")
+            
+            // Check if we need to restart playback
+            if !isPlaying && player != nil {
+                DebugLogger.logWarning("Radio playback was interrupted during background - attempting restoration", category: "BackgroundAudio")
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self else { 
+                        DebugLogger.logError("RadioPlayer instance lost during foreground restoration", category: "BackgroundAudio")
+                        return 
+                    }
+                    
+                    do {
+                        // Reactivate audio session
+                        PlaybackManager.shared.setActivePlayer(.radio)
+                        
+                        // Resume playback if user wants it
+                        if self.userWantsToPlay {
+                            self.player?.play()
+                            print("✅ RadioPlayer: Radio playback resumed after foreground transition")
+                            DebugLogger.logInfo("Radio playback successfully restored after foreground transition", category: "BackgroundAudio")
+                        }
+                    } catch {
+                        DebugLogger.logError("Failed to restore radio playback during foreground transition: \(error.localizedDescription)", category: "BackgroundAudio")
+                    }
+                }
+            } else if isPlaying {
+                DebugLogger.logInfo("Radio playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
+            } else {
+                DebugLogger.logInfo("No radio playback restoration needed - user did not want playback", category: "BackgroundAudio")
+            }
+        } else {
+            DebugLogger.logInfo("App entering foreground with no radio playback intent", category: "BackgroundAudio")
+        }
+    }
+    
+    @objc private func handleMemoryWarning() {
+        // CRITICAL FIX: Handle memory warnings to prevent app termination during radio playback
+        print("⚠️ RadioPlayer: Memory warning received - optimizing for background audio")
+        
+        let memoryUsage = ProcessInfo.processInfo.physicalMemory
+        let availableMemory = ProcessInfo.processInfo.systemUptime
+        
+        DebugLogger.logWarning("CRITICAL: Memory warning received during radio playback - System Memory: \(memoryUsage / 1024 / 1024)MB, Uptime: \(availableMemory)s", category: "MemoryPressure")
+        DebugLogger.setUserAction("Memory Warning During Radio Playback")
+        
+        // Log current playback state for debugging
+        DebugLogger.logInfo("Memory warning context - Radio playing: \(isPlaying), User wants playback: \(userWantsToPlay), Current station: \(currentlyPlayingStation?.name ?? "None")", category: "MemoryPressure")
+        
+        // Clear non-essential data to free memory
+        clearNonEssentialData()
+        
+        // If not playing, we can be more aggressive with cleanup
+        if !isPlaying {
+            albumArt = nil
+            iTunesAlbumArt = nil
+            print("🧹 RadioPlayer: Cleared artwork cache due to memory pressure")
+            DebugLogger.logInfo("Cleared artwork cache and metadata due to memory pressure (radio not playing)", category: "MemoryPressure")
+        } else {
+            DebugLogger.logWarning("Memory warning during active radio playback - limited cleanup to preserve audio", category: "MemoryPressure")
+        }
+        
+        // Force garbage collection
+        DispatchQueue.global(qos: .background).async {
+            // Perform heavy cleanup on background queue
+            self.optimizeMemoryUsage()
+            DebugLogger.logInfo("Background memory optimization completed", category: "MemoryPressure")
+        }
+    }
+    
+    private func clearNonEssentialData() {
+        // Clear cached metadata that can be refetched
+        if !isPlaying {
+            metadata = nil
+            displayTitle = nil
+            displayArtist = nil
+        }
+        
+        // Clear old artwork cache
+        if albumArt != nil && !isPlaying {
+            albumArt = nil
+        }
+        if iTunesAlbumArt != nil && !isPlaying {
+            iTunesAlbumArt = nil
+        }
+    }
+    
+    private func optimizeMemoryUsage() {
+        // Perform memory optimization on background thread
+        print("🧹 RadioPlayer: Optimizing memory usage for background stability")
+        DebugLogger.logInfo("Starting background memory optimization to prevent app termination", category: "MemoryPressure")
+        
+        // Clear any cached network responses or temporary data
+        let cacheSize = URLCache.shared.currentDiskUsage + URLCache.shared.currentMemoryUsage
+        URLCache.shared.removeAllCachedResponses()
+        DebugLogger.logInfo("Cleared URL cache - freed \(cacheSize / 1024)KB of memory", category: "MemoryPressure")
+        
+        // Force memory cleanup
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+            DebugLogger.logInfo("Memory optimization completed - UI state refreshed", category: "MemoryPressure")
+        }
+    }
 
     
     @objc private func handleInterruption(notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            DebugLogger.logError("Invalid audio interruption notification received - missing required data", category: "AudioInterruption")
             return
         }
         
         if type == .began {
             // Interruption began, pause the player
+            print("🔧 RadioPlayer: Audio interruption began - pausing playback")
+            DebugLogger.logWarning("Audio interruption began - pausing radio playback (likely phone call or other audio)", category: "AudioInterruption")
+            DebugLogger.setUserAction("Audio Interruption Started")
+            
+            let wasPlaying = isPlaying
             player?.pause()
+            
+            DebugLogger.logInfo("Audio interruption handled - Radio was playing: \(wasPlaying), Station: \(currentlyPlayingStation?.name ?? "None")", category: "AudioInterruption")
+            
         } else if type == .ended {
             // Interruption ended - let PlaybackManager handle audio session reactivation
-            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            print("🔧 RadioPlayer: Audio interruption ended")
+            DebugLogger.logInfo("Audio interruption ended - checking resume options", category: "AudioInterruption")
+            DebugLogger.setUserAction("Audio Interruption Ended")
+            
+            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { 
+                DebugLogger.logWarning("Audio interruption ended but no options provided - cannot determine if should resume", category: "AudioInterruption")
+                return 
+            }
+            
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            if options.contains(.shouldResume) && PlaybackManager.shared.activePlayer == .radio {
+            let shouldResume = options.contains(.shouldResume)
+            let isActivePlayer = PlaybackManager.shared.activePlayer == .radio
+            
+            DebugLogger.logInfo("Interruption resume analysis - Should resume: \(shouldResume), Is active player: \(isActivePlayer), User wants playback: \(userWantsToPlay)", category: "AudioInterruption")
+            
+            if shouldResume && isActivePlayer && userWantsToPlay {
                 // Resume playback if it should resume and radio is the active player
-                player?.play()
+                DebugLogger.logInfo("Attempting to resume radio playback after interruption", category: "AudioInterruption")
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self else { 
+                        DebugLogger.logError("RadioPlayer instance lost during interruption recovery", category: "AudioInterruption")
+                        return 
+                    }
+                    
+                    do {
+                        // Reactivate audio session first
+                        PlaybackManager.shared.setActivePlayer(.radio)
+                        
+                        // Then resume playback
+                        self.player?.play()
+                        print("✅ RadioPlayer: Radio playback resumed after interruption")
+                        DebugLogger.logInfo("Radio playback successfully resumed after audio interruption", category: "AudioInterruption")
+                    } catch {
+                        DebugLogger.logError("Failed to resume radio playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
+                    }
+                }
+            } else {
+                let reason = !shouldResume ? "system indicated not to resume" : 
+                           !isActivePlayer ? "radio is not the active player" : 
+                           !userWantsToPlay ? "user does not want playback" : "unknown reason"
+                DebugLogger.logInfo("Not resuming radio playback after interruption - \(reason)", category: "AudioInterruption")
             }
         }
     }

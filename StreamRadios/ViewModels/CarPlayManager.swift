@@ -48,40 +48,39 @@ class CarPlayManager: ObservableObject {
     }
     
     /// Force refresh podcast data immediately - called when main app becomes active
+    /// PERFORMANCE FIX: Optimized to prevent redundant calls and main thread blocking
+    @MainActor
     func forceRefreshPodcastData() {
         os_log("🚗 CarPlay: Force refresh podcast data requested", log: log, type: .info)
         
-        // Trigger immediate podcast data refresh in the main app
-        DispatchQueue.main.async {
-            print("🚗 CarPlay: DEBUG - Starting force refresh podcast data")
-            
-            // Force PodcastViewModel to reload from Core Data
-            PodcastViewModel.shared.loadFeedsFromCoreData()
-            
-            // Get the latest podcast feeds from PodcastViewModel
-            let latestFeeds = PodcastViewModel.shared.podcastFeeds
-            print("🚗 CarPlay: DEBUG - Found \(latestFeeds.count) feeds in PodcastViewModel")
-            
-            // Configure CarPlayManager with latest data
-            self.configurePodcastData(latestFeeds)
-            
-            // Update our local data
-            self.updateContent()
-            
-            // Send multiple notifications to trigger CarPlay template refresh with different timings
-            for delay in [0.0, 0.2, 0.5, 1.0] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("CarPlayRefreshRequested"),
-                        object: nil,
-                        userInfo: ["source": "ForceRefreshPodcastData", "delay": "\(delay)"]
-                    )
-                    print("🚗 CarPlay: DEBUG - Sent refresh notification (delay: \(delay)s)")
-                }
+        print("🚗 CarPlay: DEBUG - Starting optimized force refresh podcast data")
+        
+        // PERFORMANCE FIX: Don't call loadFeedsFromCoreData again if it was just called
+        // Instead, just sync with existing data to prevent duplicate operations
+        
+        // Get the latest podcast feeds from PodcastViewModel (already loaded by SceneDelegate)
+        let latestFeeds = PodcastViewModel.shared.podcastFeeds
+        print("🚗 CarPlay: DEBUG - Found \(latestFeeds.count) feeds in PodcastViewModel (no reload needed)")
+        
+        // Configure CarPlayManager with latest data
+        self.configurePodcastData(latestFeeds)
+        
+        // Update our local data
+        self.updateContent()
+        
+        // Send notifications to trigger CarPlay template refresh with optimized timing
+        for delay in [0.0, 0.3, 0.8] { // Reduced from 4 notifications to 3
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("CarPlayRefreshRequested"),
+                    object: nil,
+                    userInfo: ["source": "ForceRefreshPodcastData", "delay": "\(delay)"]
+                )
+                print("🚗 CarPlay: DEBUG - Sent refresh notification (delay: \(delay)s)")
             }
-            
-            print("🚗 CarPlay: Force refresh podcast data completed with \(latestFeeds.count) feeds")
         }
+        
+        print("🚗 CarPlay: Optimized force refresh completed with \(latestFeeds.count) feeds")
     }
     
     func configurePodcastData(_ podcastFeeds: [PodcastFeed]) {
