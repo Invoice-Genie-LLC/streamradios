@@ -120,7 +120,6 @@ extension Country {
             Country(name: "Eritrea", flag: "ER"),
             Country(name: "Estonia", flag: "EE"),
             Country(name: "Ethiopia", flag: "ET"),
-            Country(name: "European Union", flag: "EU"),
             Country(name: "Falkland Islands", flag: "FK"),
             Country(name: "Faroe Islands", flag: "FO"),
             Country(name: "Fiji", flag: "FJ"),

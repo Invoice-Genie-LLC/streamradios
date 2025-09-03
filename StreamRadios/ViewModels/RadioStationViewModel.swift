@@ -73,6 +73,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
     @Published var isImportInProgress = false
     @Published var isAscendingSort = true
     
+    // Flag to prevent API fetches until migration is complete
+    private var isMigrationComplete = false
+    
     // Progress tracking for station loading
     @Published var loadingProgress: Double = 0.0
     @Published var loadingStationsCount: Int = 0
@@ -187,8 +190,10 @@ class RadioStationViewModel: NSObject, ObservableObject {
             loadStationsFromCoreData()
             
             // Migrate existing stations to use normalized country names (one-time migration)
-            Task {
+            // CRITICAL: Run synchronously to prevent race conditions with API fetches
+            Task { @MainActor in
                 await migrateStationCountryNames()
+                self.isMigrationComplete = true
             }
             
             let userDefaults = UserDefaults.standard
@@ -596,6 +601,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     print("⚠️ SAFETY: CloudKit: \(cloudKitStationCount), Local: \(localStationCount)")
                     print("⚠️ SAFETY: Skipping automatic deletion sync to prevent data loss")
                     print("⚠️ SAFETY: This may be due to migration, CloudKit issues, or data corruption")
+                    
+                    // Check if we've recently attempted recovery to avoid infinite loops
+                    let lastRecoveryTime = UserDefaults.standard.object(forKey: "LastDiscrepancyRecoveryTime") as? Date ?? Date.distantPast
+                    let timeSinceLastRecovery = Date().timeIntervalSince(lastRecoveryTime)
+                    
+                    if timeSinceLastRecovery > 3600 { // Only attempt recovery once per hour
+                        // Offer recovery options
+                        await handleLargeDiscrepancy(cloudKitCount: cloudKitStationCount, localCount: localStationCount)
+                    } else {
+                        print("⚠️ SAFETY: Recovery attempted recently, skipping to prevent loops")
+                        print("⚠️ SAFETY: Next recovery attempt available in \(Int(3600 - timeSinceLastRecovery)) seconds")
+                    }
                     return
                 }
                 
@@ -1878,26 +1895,67 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
     }
     
-    /// Sync station order changes to CloudKit
-    func syncOrderChangesToCloudKit() async {
-        print("📡 🚨 RADIO ORDER SYNC: Starting batch order sync to CloudKit...")
+    /// Handle large discrepancy between CloudKit and local station counts
+    private func handleLargeDiscrepancy(cloudKitCount: Int, localCount: Int) async {
+        print("🔧 RECOVERY: Starting discrepancy recovery process...")
         
-        // Update DataSyncManager to show we're starting a save operation
+        // Option 1: Force upload local stations to CloudKit (most likely scenario)
+        if localCount > cloudKitCount {
+            print("🔧 RECOVERY: Local has more stations (\(localCount)) than CloudKit (\(cloudKitCount))")
+            print("🔧 RECOVERY: This suggests CloudKit data may be incomplete or corrupted")
+            print("🔧 RECOVERY: Attempting to upload local stations to CloudKit...")
+            
         await MainActor.run {
             DataSyncManager.shared.radioStationsStatus = .inProgress
-            DataSyncManager.shared.radioStationsOperation = "Saving station order to CloudKit..."
+                DataSyncManager.shared.radioStationsOperation = "🔧 Recovering CloudKit data - uploading \(localCount) stations..."
             DataSyncManager.shared.radioStationsProgress = 0.0
-            DataSyncManager.shared.radioStationsTotalCount = stations.count
+                DataSyncManager.shared.radioStationsTotalCount = localCount
             DataSyncManager.shared.radioStationsCurrentCount = 0
         }
         
         do {
-            // **OPTIMIZED**: Sync all stations to CloudKit in batches instead of individually with progress tracking
-            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(stations) { [weak self] progress, count, message in
+                // Force upload all local stations to CloudKit
+                try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(stations, country: nil) { [weak self] progress, count, message in
                 Task { @MainActor in
-                    DataSyncManager.shared.radioStationsProgress = progress
-                    DataSyncManager.shared.radioStationsCurrentCount = count
-                    DataSyncManager.shared.radioStationsOperation = message
+                        DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: "🔧 Recovery: \(message)")
+                    }
+                }
+                
+                await MainActor.run {
+                    DataSyncManager.shared.radioStationsStatus = .completed
+                    DataSyncManager.shared.radioStationsOperation = "✅ Recovery complete - uploaded \(localCount) stations to CloudKit"
+                    DataSyncManager.shared.radioStationsProgress = 1.0
+                }
+                
+                print("✅ RECOVERY: Successfully uploaded \(localCount) stations to CloudKit")
+                
+                // Set a flag to prevent this recovery from running again immediately
+                UserDefaults.standard.set(Date(), forKey: "LastDiscrepancyRecoveryTime")
+                
+            } catch {
+                await MainActor.run {
+                    DataSyncManager.shared.radioStationsStatus = .failed
+                    DataSyncManager.shared.radioStationsOperation = "❌ Recovery failed: \(error.localizedDescription)"
+                }
+                print("❌ RECOVERY: Failed to upload stations to CloudKit: \(error)")
+            }
+        }
+    }
+    
+    /// Sync station order changes to CloudKit with resumable support
+    func syncOrderChangesToCloudKit() async {
+        print("📡 🚨 RADIO ORDER SYNC: Starting batch order sync to CloudKit...")
+        
+        // Use DataSyncManager's new resumable sync system
+        await MainActor.run {
+            DataSyncManager.shared.startRadioStationSync(totalStations: stations.count, country: nil, operationType: "order_sync")
+        }
+        
+        do {
+            // **OPTIMIZED**: Sync all stations to CloudKit in batches with resumable support
+            try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(stations, country: nil) { [weak self] progress, count, message in
+                Task { @MainActor in
+                    DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: message)
                 }
             }
             print("📡 ✅ RADIO ORDER SYNC: Successfully saved \(stations.count) stations in batches")
@@ -1907,9 +1965,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Mark operation as completed
             await MainActor.run {
-                DataSyncManager.shared.radioStationsStatus = .completed
-                DataSyncManager.shared.radioStationsOperation = "Saved \(stations.count) stations to CloudKit"
-                DataSyncManager.shared.radioStationsProgress = 1.0
+                DataSyncManager.shared.completeRadioStationSync()
             }
             
             print("📡 ✅ RADIO ORDER SYNC: Successfully synced station order to CloudKit")
@@ -2004,6 +2060,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @MainActor
     func fetchStationsFromAPI(for country: Country) async {
+        // Wait for migration to complete to prevent race conditions
+        while !isMigrationComplete {
+            try? await Task.sleep(nanoseconds: 100_000_000) // Wait 0.1 seconds
+        }
+        
         isLoadingFromAPI = true
         isLoading = true
         loadingProgress = 0.0
@@ -2051,6 +2112,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             progressTask.cancel()
             
             print("📡 RadioBrowserAPI: Received \(apiStations.count) stations for \(country.name)")
+            
+            // Debug logging for specific countries that have issues
+            if country.name == "Saint Vincent & Grenadines" || country.name == "Saint Pierre & Miquelon" {
+                print("🔍 Debug: API returned \(apiStations.count) stations for \(country.name) (code: \(country.apiCountryCode))")
+                if !apiStations.isEmpty {
+                    print("🔍 Debug: First few stations: \(apiStations.prefix(3).map { $0.name })")
+                    print("🔍 Debug: Station countries from API: \(apiStations.prefix(3).map { $0.country ?? "nil" })")
+                } else {
+                    print("🔍 Debug: API returned empty result - checking if country code '\(country.apiCountryCode)' is valid")
+                }
+            }
             
             await MainActor.run {
                 loadingProgress = 0.3
@@ -2221,11 +2293,49 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // Never assign "Select Country" or other invalid country names to stations
                 let stationCountry: String
                 if let apiCountry = apiStation.country, !apiCountry.isEmpty && apiCountry.trimmingCharacters(in: .whitespacesAndNewlines) != "" {
+                    let trimmedApiCountry = apiCountry.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Debug logging for Vatican City and other small countries
+                    if country.name == "Vatican City" || trimmedApiCountry.lowercased().contains("vatican") || trimmedApiCountry.lowercased().contains("holy") {
+                        print("🏛️ Vatican Debug: API returned '\(trimmedApiCountry)' for selected country '\(country.name)'")
+                    }
+                    
+                    // Debug logging for Saint Vincent & Grenadines
+                    if country.name == "Saint Vincent & Grenadines" || trimmedApiCountry.lowercased().contains("saint vincent") || trimmedApiCountry.lowercased().contains("st. vincent") || trimmedApiCountry.lowercased().contains("grenadines") {
+                        print("🏝️ Saint Vincent Debug: API returned '\(trimmedApiCountry)' for selected country '\(country.name)'")
+                    }
+                    
+                    // Debug logging for Saint Pierre & Miquelon
+                    if country.name == "Saint Pierre & Miquelon" || trimmedApiCountry.lowercased().contains("saint pierre") || trimmedApiCountry.lowercased().contains("st. pierre") || trimmedApiCountry.lowercased().contains("miquelon") {
+                        print("🇫🇷 Saint Pierre Debug: API returned '\(trimmedApiCountry)' for selected country '\(country.name)'")
+                    }
+                    
                     // Normalize API country names to match our Country model
-                    let normalizedCountry = normalizeAPICountryName(apiCountry.trimmingCharacters(in: .whitespacesAndNewlines))
+                    let normalizedCountry = normalizeAPICountryName(trimmedApiCountry)
                     stationCountry = normalizedCountry ?? country.name
+                    
+                    // Debug logging for normalization results
+                    if country.name == "Vatican City" || trimmedApiCountry.lowercased().contains("vatican") || trimmedApiCountry.lowercased().contains("holy") {
+                        print("🏛️ Vatican Debug: Normalized to '\(stationCountry)'")
+                    }
+                    
+                    if country.name == "Saint Vincent & Grenadines" || trimmedApiCountry.lowercased().contains("saint vincent") || trimmedApiCountry.lowercased().contains("st. vincent") || trimmedApiCountry.lowercased().contains("grenadines") {
+                        print("🏝️ Saint Vincent Debug: Normalized to '\(stationCountry)'")
+                    }
+                    
+                    if country.name == "Saint Pierre & Miquelon" || trimmedApiCountry.lowercased().contains("saint pierre") || trimmedApiCountry.lowercased().contains("st. pierre") || trimmedApiCountry.lowercased().contains("miquelon") {
+                        print("🇫🇷 Saint Pierre Debug: Normalized to '\(stationCountry)'")
+                    }
                 } else if country.name != "Select Country" && !country.name.isEmpty {
                     stationCountry = country.name
+                    if country.name == "Vatican City" {
+                        print("🏛️ Vatican Debug: Using fallback country name '\(stationCountry)'")
+                    }
+                    if country.name == "Saint Vincent & Grenadines" {
+                        print("🏝️ Saint Vincent Debug: Using fallback country name '\(stationCountry)'")
+                    }
+                    if country.name == "Saint Pierre & Miquelon" {
+                        print("🇫🇷 Saint Pierre Debug: Using fallback country name '\(stationCountry)'")
+                    }
                 } else {
                     // Skip stations that don't have valid country information
                     return nil
@@ -2267,13 +2377,45 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             // Filter out stations that already exist (check by URL to avoid duplicates)
+            // Use Core Data as the source of truth to avoid race conditions with in-memory array
             await MainActor.run {
                 loadingPhase = "Filtering existing stations"
                 loadingProgress = 0.75
             }
             
-            let existingURLs = Set(stations.map { $0.url })
+            // Get existing URLs from Core Data to avoid race conditions with in-memory array
+            let existingURLs: Set<String> = await withCheckedContinuation { continuation in
+                let backgroundContext = CoreDataStack.shared.newBackgroundContext()
+                backgroundContext.perform {
+                    let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                    fetchRequest.propertiesToFetch = ["url"] // Only fetch URLs for performance
+                    
+                    do {
+                        let existingStations = try backgroundContext.fetch(fetchRequest)
+                        let urls = Set(existingStations.compactMap { $0.url })
+                        continuation.resume(returning: urls)
+                    } catch {
+                        print("⚠️ Error fetching existing URLs from Core Data: \(error)")
+                        // Fallback to in-memory array
+                        continuation.resume(returning: Set(self.stations.map { $0.url }))
+                    }
+                }
+            }
+            
             let uniqueNewStations = newStations.filter { !existingURLs.contains($0.url) }
+            
+            // Debug logging for Canada to track duplicate issue
+            if country.name == "Canada" {
+                print("🍁 Canada Debug: API returned \(apiStations.count) stations")
+                print("🍁 Canada Debug: After URL deduplication: \(processedAPIStations.count) stations")
+                print("🍁 Canada Debug: After conversion: \(newStations.count) stations")
+                print("🍁 Canada Debug: Existing URLs in Core Data: \(existingURLs.count)")
+                print("🍁 Canada Debug: Unique new stations to add: \(uniqueNewStations.count)")
+                if !uniqueNewStations.isEmpty {
+                    print("🍁 Canada Debug: New station URLs: \(uniqueNewStations.map { $0.url })")
+                    print("🍁 Canada Debug: New station names: \(uniqueNewStations.map { $0.name })")
+                }
+            }
             
             await MainActor.run {
                 loadingPhase = "Analyzing results"
@@ -2318,12 +2460,25 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
             
             print("✅ Added \(uniqueNewStations.count) new stations for \(country.name)")
+            if country.name == "Vatican City" {
+                print("🏛️ Vatican Debug: Added stations with countries: \(uniqueNewStations.map { $0.country })")
+                print("🏛️ Vatican Debug: Station names: \(uniqueNewStations.map { $0.name })")
+            }
+            if country.name == "Saint Vincent & Grenadines" {
+                print("🏝️ Saint Vincent Debug: Added stations with countries: \(uniqueNewStations.map { $0.country })")
+                print("🏝️ Saint Vincent Debug: Station names: \(uniqueNewStations.map { $0.name })")
+            }
+            if country.name == "Saint Pierre & Miquelon" {
+                print("🇫🇷 Saint Pierre Debug: Added stations with countries: \(uniqueNewStations.map { $0.country })")
+                print("🇫🇷 Saint Pierre Debug: Station names: \(uniqueNewStations.map { $0.name })")
+            }
             if cachedFaviconCount > 0 {
                 print("🖼️ Using \(cachedFaviconCount) cached favicons, downloading \(uniqueNewStations.count - cachedFaviconCount) new ones")
             }
             
-            // Save to CoreData first and ensure UI sees the new items immediately
+            // Trigger immediate UI refresh after adding stations to in-memory array
             await MainActor.run {
+                self.objectWillChange.send()
                 loadingPhase = "Preparing local storage"
                 loadingProgress = 0.85
             }
@@ -2545,28 +2700,189 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     /// Normalize API country names to match our Country model names
     private func normalizeAPICountryName(_ apiCountryName: String) -> String? {
-        switch apiCountryName {
+        let trimmed = apiCountryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        switch trimmed {
         case "The United Kingdom Of Great Britain And Northern Ireland":
             return "United Kingdom"
-        case "The United States Of America", "United States Of America", "USA", "United States of America":
+        case "The United States Of America", "United States Of America", "USA", "United States of America", "US", "America":
             return "United States"
+        case "The Faroe Islands":
+            return "Faroe Islands"
+        case "The Netherlands":
+            return "Netherlands"
+        case "The Bahamas":
+            return "Bahamas"
+        case "The Gambia":
+            return "Gambia"
+        case "Czech Republic", "Czechia":
+            return "Czech Republic"
+        case "Russian Federation":
+            return "Russia"
+        case "Republic of Korea":
+            return "South Korea"
+        case "Democratic People's Republic of Korea":
+            return "North Korea"
+        case "Bosnia and Herzegovina", "Bosnia And Herzegovina":
+            return "Bosnia & Herzegovina"
+        case "Trinidad and Tobago", "Trinidad And Tobago":
+            return "Trinidad & Tobago"
+        case "São Tomé and Príncipe", "Sao Tome and Principe":
+            return "São Tomé & Príncipe"
+        case "Antigua and Barbuda", "Antigua And Barbuda":
+            return "Antigua & Barbuda"
+        case "Vatican", "Holy See", "Vatican City State", "The Vatican":
+            return "Vatican City"
+        case "Saint Vincent and the Grenadines", "St. Vincent and the Grenadines", "St Vincent and the Grenadines", "Saint Vincent and Grenadines", "St. Vincent & Grenadines", "St Vincent & Grenadines":
+            return "Saint Vincent & Grenadines"
+        case "Saint Pierre and Miquelon", "St. Pierre and Miquelon", "St Pierre and Miquelon", "Saint Pierre et Miquelon", "St. Pierre et Miquelon", "St Pierre et Miquelon":
+            return "Saint Pierre & Miquelon"
         default:
-            return apiCountryName
+            // Handle general cases where API adds "The" prefix
+            if trimmed.hasPrefix("The ") {
+                let withoutThe = String(trimmed.dropFirst(4))
+                return withoutThe
+            }
+            return trimmed
         }
     }
     
-    /// Migrate existing stations to use normalized country names
+    /// Migrate existing stations to use normalized country names and fix massive database corruption
     @MainActor
     func migrateStationCountryNames() {
         print("🔄 Starting country name migration for existing stations...")
         
         let context = CoreDataStack.shared.context
         var migrationCount = 0
+        var corruptedStationsRemoved = 0
+        var countryReassignments = 0
         
-        // Update stations with old country names
+        // Debug: Check all unique country names currently in stations
+        let uniqueCountries = Set(stations.map { $0.country })
+        print("🔍 Current unique country names: \(uniqueCountries.sorted())")
+        
+        // CRITICAL FIX: Detect massive database corruption where all stations are assigned to "Italy"
+        let italyStationCount = stations.filter { $0.country == "Italy" }.count
+        let totalStationCount = stations.count
+        let corruptionPercentage = totalStationCount > 0 ? Double(italyStationCount) / Double(totalStationCount) * 100 : 0
+        
+        print("🚨 CORRUPTION ANALYSIS: \(italyStationCount) of \(totalStationCount) stations (\(String(format: "%.1f", corruptionPercentage))%) assigned to Italy")
+        
+        // Check if we've done cleanup recently to prevent endless loops
+        let lastCleanupTime = UserDefaults.standard.double(forKey: "LastStationCleanupTime")
+        let currentTime = Date().timeIntervalSince1970
+        let timeSinceLastCleanup = currentTime - lastCleanupTime
+        
+        // Only run cleanup if it's been more than 1 hour since last cleanup
+        if timeSinceLastCleanup < 3600 && lastCleanupTime > 0 { // 3600 = 1 hour
+            print("⏭️ Skipping station cleanup (last cleanup: \(Int(timeSinceLastCleanup/60)) minutes ago)")
+            return
+        }
+        
+        // If more than 80% of stations are assigned to Italy, this indicates database corruption
+        if corruptionPercentage > 80.0 {
+            print("🚨 MASSIVE DATABASE CORRUPTION DETECTED!")
+            print("🔧 Attempting to fix country assignments using API country codes...")
+            
+            // Fix corrupted country assignments by inferring correct countries from station names
+            for station in stations {
+                if station.country == "Italy" {
+                    // Try to determine correct country from station name patterns
+                    if let correctCountry = inferCountryFromStationName(station.name), correctCountry != "Italy" {
+                        print("🔧 Reassigning '\(station.name)' from Italy to '\(correctCountry)'")
+                        
+                        // Update in memory
+                        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+                            var updatedStation = stations[index]
+                            updatedStation.country = correctCountry
+                            stations[index] = updatedStation
+                        }
+                        
+                        // Update in Core Data
+                        let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                        fetchRequest.predicate = NSPredicate(format: "id == %@", station.id)
+                        
+                        do {
+                            let managedStations = try context.fetch(fetchRequest)
+                            if let managedStation = managedStations.first {
+                                managedStation.country = correctCountry
+                                countryReassignments += 1
+                            }
+                        } catch {
+                            print("❌ Failed to fetch station for country reassignment: \(error)")
+                        }
+                    }
+                }
+            }
+        }
+        
+        // First pass: Remove obviously corrupted stations (Italian/UK stations mixed with others)
+        var stationsToRemove: [RadioStation] = []
+        for station in stations {
+            // Identify corrupted data: stations that are clearly from wrong countries
+            let stationName = station.name.lowercased()
+            let stationCountry = station.country
+            
+            // Remove Italian stations that are not assigned to Italy
+            if stationCountry != "Italy" && (
+                stationName.contains("radio rai") || 
+                stationName.contains("rai radio") ||
+                stationName.contains("radio italia") ||
+                stationName.contains("virgin radio italia") ||
+                stationName.contains("radio kiss kiss") ||
+                stationName.contains("radio norba") ||
+                stationName.contains("radio monte carlo") ||
+                stationName.hasPrefix("rai ") ||
+                stationName.contains("radio maria") ||
+                stationName.contains("radio popolare")
+            ) {
+                stationsToRemove.append(station)
+                print("🗑️ Removing corrupted Italian station: '\(station.name)' (was assigned to '\(stationCountry)')")
+            }
+            
+            // Remove UK stations that are not assigned to United Kingdom
+            else if stationCountry != "United Kingdom" && (
+                stationName.contains("bbc") ||
+                stationName.contains("talksport") ||
+                stationName.contains("talkradio") ||
+                stationName.contains("virgin radio uk") ||
+                stationName.contains("smooth radio") ||
+                stationName.contains("resonance fm") ||
+                stationName.contains("sky news uk") ||
+                stationName.contains("gb news")
+            ) {
+                stationsToRemove.append(station)
+                print("🗑️ Removing corrupted UK station: '\(station.name)' (was assigned to '\(stationCountry)')")
+            }
+        }
+        
+        // Remove corrupted stations from memory and Core Data
+        for station in stationsToRemove {
+            // Remove from memory
+            if let index = stations.firstIndex(where: { $0.id == station.id }) {
+                stations.remove(at: index)
+            }
+            
+            // Remove from Core Data
+            let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", station.id)
+            
+            do {
+                let managedStations = try context.fetch(fetchRequest)
+                if let managedStation = managedStations.first {
+                    context.delete(managedStation)
+                    corruptedStationsRemoved += 1
+                }
+            } catch {
+                print("❌ Failed to delete corrupted station: \(error)")
+            }
+        }
+        
+        // Second pass: Update stations with old country names
         for station in stations {
             if let normalizedName = normalizeAPICountryName(station.country),
                normalizedName != station.country {
+                print("🔄 Migrating station '\(station.name)' from '\(station.country)' to '\(normalizedName)'")
                 
                 // Update in memory
                 if let index = stations.firstIndex(where: { $0.id == station.id }) {
@@ -2592,21 +2908,510 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         // Save changes
-        if migrationCount > 0 {
+        if migrationCount > 0 || corruptedStationsRemoved > 0 || countryReassignments > 0 {
             do {
                 try context.save()
-                print("✅ Country name migration completed - updated \(migrationCount) stations")
+                print("✅ Database cleanup completed:")
+                print("   - Reassigned \(countryReassignments) stations from corrupted Italy assignments")
+                print("   - Migrated \(migrationCount) stations to correct country names")
+                print("   - Removed \(corruptedStationsRemoved) corrupted stations")
+                
+                // Update cleanup timestamp to prevent repeated cleanup
+                UserDefaults.standard.set(currentTime, forKey: "LastStationCleanupTime")
                 
                 // Reload stations from Core Data to reflect changes
-                Task {
-                    await loadStationsFromCoreData()
-                }
+                loadStationsFromCoreData()
             } catch {
-                print("❌ Failed to save country name migration: \(error)")
+                print("❌ Failed to save database cleanup: \(error)")
             }
         } else {
-            print("✅ No stations needed country name migration")
+            print("✅ No stations needed migration or cleanup")
         }
+    }
+    
+    /// Helper function to get country name from ISO country code
+    private func getCountryNameFromCode(_ code: String) -> String? {
+        let countryMappings: [String: String] = [
+            // Skip US and UK as requested
+            // "US": "United States",
+            // "GB": "United Kingdom", 
+            // "UK": "United Kingdom",
+            
+            // A
+            "AD": "Andorra",
+            "AE": "United Arab Emirates",
+            "AF": "Afghanistan",
+            "AG": "Antigua & Barbuda",
+            "AI": "Anguilla",
+            "AL": "Albania",
+            "AM": "Armenia",
+            "AO": "Angola",
+            "AR": "Argentina",
+            "AS": "American Samoa",
+            "AT": "Austria",
+            "AU": "Australia",
+            "AW": "Aruba",
+            "AX": "Åland Islands",
+            "AZ": "Azerbaijan",
+            
+            // B
+            "BA": "Bosnia & Herzegovina",
+            "BB": "Barbados",
+            "BD": "Bangladesh",
+            "BE": "Belgium",
+            "BF": "Burkina Faso",
+            "BG": "Bulgaria",
+            "BH": "Bahrain",
+            "BI": "Burundi",
+            "BJ": "Benin",
+            "BL": "Saint Barthélemy",
+            "BM": "Bermuda",
+            "BN": "Brunei",
+            "BO": "Bolivia",
+            "BR": "Brazil",
+            "BS": "Bahamas",
+            "BT": "Bhutan",
+            "BW": "Botswana",
+            "BY": "Belarus",
+            "BZ": "Belize",
+            
+            // C
+            "CA": "Canada",
+            "CC": "Cocos (Keeling) Islands",
+            "CD": "Congo - Kinshasa",
+            "CF": "Central African Republic",
+            "CG": "Congo - Brazzaville",
+            "CH": "Switzerland",
+            "CI": "Côte d'Ivoire",
+            "CK": "Cook Islands",
+            "CL": "Chile",
+            "CM": "Cameroon",
+            "CN": "China",
+            "CO": "Colombia",
+            "CR": "Costa Rica",
+            "CU": "Cuba",
+            "CV": "Cape Verde",
+            "CW": "Curaçao",
+            "CX": "Christmas Island",
+            "CY": "Cyprus",
+            "CZ": "Czech Republic",
+            
+            // D
+            "DE": "Germany",
+            "DJ": "Djibouti",
+            "DK": "Denmark",
+            "DM": "Dominica",
+            "DO": "Dominican Republic",
+            "DZ": "Algeria",
+            
+            // E
+            "EC": "Ecuador",
+            "EE": "Estonia",
+            "EG": "Egypt",
+            "ER": "Eritrea",
+            "ES": "Spain",
+            "ET": "Ethiopia",
+            
+            // F
+            "FI": "Finland",
+            "FJ": "Fiji",
+            "FK": "Falkland Islands",
+            "FM": "Micronesia",
+            "FO": "Faroe Islands",
+            "FR": "France",
+            
+            // G
+            "GA": "Gabon",
+            "GD": "Grenada",
+            "GE": "Georgia",
+            "GF": "French Guiana",
+            "GG": "Guernsey",
+            "GH": "Ghana",
+            "GI": "Gibraltar",
+            "GL": "Greenland",
+            "GM": "Gambia",
+            "GN": "Guinea",
+            "GP": "Guadeloupe",
+            "GQ": "Equatorial Guinea",
+            "GR": "Greece",
+            "GT": "Guatemala",
+            "GU": "Guam",
+            "GW": "Guinea-Bissau",
+            "GY": "Guyana",
+            
+            // H
+            "HK": "Hong Kong",
+            "HN": "Honduras",
+            "HR": "Croatia",
+            "HT": "Haiti",
+            "HU": "Hungary",
+            
+            // I
+            "ID": "Indonesia",
+            "IE": "Ireland",
+            "IL": "Israel",
+            "IM": "Isle of Man",
+            "IN": "India",
+            "IQ": "Iraq",
+            "IR": "Iran",
+            "IS": "Iceland",
+            "IT": "Italy",
+            
+            // J
+            "JE": "Jersey",
+            "JM": "Jamaica",
+            "JO": "Jordan",
+            "JP": "Japan",
+            
+            // K
+            "KE": "Kenya",
+            "KG": "Kyrgyzstan",
+            "KH": "Cambodia",
+            "KI": "Kiribati",
+            "KM": "Comoros",
+            "KN": "Saint Kitts & Nevis",
+            "KP": "North Korea",
+            "KR": "South Korea",
+            "KW": "Kuwait",
+            "KY": "Cayman Islands",
+            "KZ": "Kazakhstan",
+            
+            // L
+            "LA": "Laos",
+            "LB": "Lebanon",
+            "LC": "Saint Lucia",
+            "LI": "Liechtenstein",
+            "LK": "Sri Lanka",
+            "LR": "Liberia",
+            "LS": "Lesotho",
+            "LT": "Lithuania",
+            "LU": "Luxembourg",
+            "LV": "Latvia",
+            "LY": "Libya",
+            
+            // M
+            "MA": "Morocco",
+            "MC": "Monaco",
+            "MD": "Moldova",
+            "ME": "Montenegro",
+            "MF": "Saint Martin",
+            "MG": "Madagascar",
+            "MH": "Marshall Islands",
+            "MK": "Macedonia",
+            "ML": "Mali",
+            "MM": "Myanmar",
+            "MN": "Mongolia",
+            "MO": "Macau",
+            "MP": "Northern Mariana Islands",
+            "MQ": "Martinique",
+            "MR": "Mauritania",
+            "MS": "Montserrat",
+            "MT": "Malta",
+            "MU": "Mauritius",
+            "MV": "Maldives",
+            "MW": "Malawi",
+            "MX": "Mexico",
+            "MY": "Malaysia",
+            "MZ": "Mozambique",
+            
+            // N
+            "NA": "Namibia",
+            "NC": "New Caledonia",
+            "NE": "Niger",
+            "NF": "Norfolk Island",
+            "NG": "Nigeria",
+            "NI": "Nicaragua",
+            "NL": "Netherlands",
+            "NO": "Norway",
+            "NP": "Nepal",
+            "NR": "Nauru",
+            "NU": "Niue",
+            "NZ": "New Zealand",
+            
+            // O
+            "OM": "Oman",
+            
+            // P
+            "PA": "Panama",
+            "PE": "Peru",
+            "PF": "French Polynesia",
+            "PG": "Papua New Guinea",
+            "PH": "Philippines",
+            "PK": "Pakistan",
+            "PL": "Poland",
+            "PM": "Saint Pierre & Miquelon",
+            "PN": "Pitcairn Islands",
+            "PR": "Puerto Rico",
+            "PS": "Palestinian Territories",
+            "PT": "Portugal",
+            "PW": "Palau",
+            "PY": "Paraguay",
+            
+            // Q
+            "QA": "Qatar",
+            
+            // R
+            "RE": "Réunion",
+            "RO": "Romania",
+            "RS": "Serbia",
+            "RU": "Russia",
+            "RW": "Rwanda",
+            
+            // S
+            "SA": "Saudi Arabia",
+            "SB": "Solomon Islands",
+            "SC": "Seychelles",
+            "SD": "Sudan",
+            "SE": "Sweden",
+            "SG": "Singapore",
+            "SH": "Saint Helena",
+            "SI": "Slovenia",
+            "SK": "Slovakia",
+            "SL": "Sierra Leone",
+            "SM": "San Marino",
+            "SN": "Senegal",
+            "SO": "Somalia",
+            "SR": "Suriname",
+            "SS": "South Sudan",
+            "ST": "São Tomé & Príncipe",
+            "SV": "El Salvador",
+            "SX": "Sint Maarten",
+            "SY": "Syria",
+            "SZ": "Swaziland",
+            
+            // T
+            "TC": "Turks & Caicos Islands",
+            "TD": "Chad",
+            "TG": "Togo",
+            "TH": "Thailand",
+            "TJ": "Tajikistan",
+            "TK": "Tokelau",
+            "TL": "Timor-Leste",
+            "TM": "Turkmenistan",
+            "TN": "Tunisia",
+            "TO": "Tonga",
+            "TR": "Turkey",
+            "TT": "Trinidad & Tobago",
+            "TV": "Tuvalu",
+            "TW": "Taiwan",
+            "TZ": "Tanzania",
+            
+            // U
+            "UA": "Ukraine",
+            "UG": "Uganda",
+            "UY": "Uruguay",
+            "UZ": "Uzbekistan",
+            
+            // V
+            "VA": "Vatican City",
+            "VC": "Saint Vincent & Grenadines",
+            "VE": "Venezuela",
+            "VG": "British Virgin Islands",
+            "VI": "U.S. Virgin Islands",
+            "VN": "Vietnam",
+            "VU": "Vanuatu",
+            
+            // W
+            "WF": "Wallis & Futuna",
+            "WS": "Samoa",
+            
+            // X
+            "XK": "Kosovo",
+            
+            // Y
+            "YE": "Yemen",
+            "YT": "Mayotte",
+            
+            // Z
+            "ZA": "South Africa",
+            "ZM": "Zambia",
+            "ZW": "Zimbabwe"
+        ]
+        
+        return countryMappings[code.uppercased()]
+    }
+    
+    /// Helper function to infer country from station name patterns
+    private func inferCountryFromStationName(_ name: String) -> String? {
+        let nameLower = name.lowercased()
+        
+        // US patterns - very comprehensive
+        if nameLower.contains("usa") || nameLower.contains("america") || nameLower.contains("american") ||
+           nameLower.contains("chicago") || nameLower.contains("new york") || nameLower.contains("los angeles") ||
+           nameLower.contains("seattle") || nameLower.contains("boston") || nameLower.contains("miami") ||
+           nameLower.contains("texas") || nameLower.contains("california") || nameLower.contains("florida") ||
+           nameLower.contains("atlanta") || nameLower.contains("denver") || nameLower.contains("phoenix") ||
+           nameLower.contains("philadelphia") || nameLower.contains("detroit") || nameLower.contains("houston") ||
+           nameLower.contains("dallas") || nameLower.contains("nashville") || nameLower.contains("memphis") ||
+           nameLower.contains("washington") || nameLower.contains("oregon") || nameLower.contains("nevada") ||
+           nameLower.contains("arizona") || nameLower.contains("utah") || nameLower.contains("colorado") ||
+           nameLower.contains("minnesota") || nameLower.contains("wisconsin") || nameLower.contains("ohio") ||
+           nameLower.contains("michigan") || nameLower.contains("indiana") || nameLower.contains("illinois") ||
+           nameLower.contains("missouri") || nameLower.contains("kansas") || nameLower.contains("oklahoma") ||
+           nameLower.contains("arkansas") || nameLower.contains("louisiana") || nameLower.contains("mississippi") ||
+           nameLower.contains("alabama") || nameLower.contains("georgia") || nameLower.contains("south carolina") ||
+           nameLower.contains("north carolina") || nameLower.contains("virginia") || nameLower.contains("maryland") ||
+           nameLower.contains("delaware") || nameLower.contains("new jersey") || nameLower.contains("pennsylvania") ||
+           nameLower.contains("connecticut") || nameLower.contains("massachusetts") || nameLower.contains("rhode island") ||
+           nameLower.contains("vermont") || nameLower.contains("new hampshire") || nameLower.contains("maine") ||
+           nameLower.contains("alaska") || nameLower.contains("hawaii") || nameLower.contains("montana") ||
+           nameLower.contains("wyoming") || nameLower.contains("north dakota") || nameLower.contains("south dakota") ||
+           nameLower.contains("nebraska") || nameLower.contains("iowa") || nameLower.contains("kentucky") ||
+           nameLower.contains("tennessee") || nameLower.contains("west virginia") || nameLower.contains("idaho") ||
+           nameLower.contains("new mexico") || nameLower.contains("portland") || nameLower.contains("sacramento") ||
+           nameLower.contains("san francisco") || nameLower.contains("san diego") || nameLower.contains("las vegas") ||
+           nameLower.contains("milwaukee") || nameLower.contains("cleveland") || nameLower.contains("cincinnati") ||
+           nameLower.contains("columbus") || nameLower.contains("pittsburgh") || nameLower.contains("baltimore") ||
+           nameLower.contains("buffalo") || nameLower.contains("rochester") || nameLower.contains("syracuse") ||
+           nameLower.contains("albany") || nameLower.contains("richmond") || nameLower.contains("norfolk") ||
+           nameLower.contains("charlotte") || nameLower.contains("raleigh") || nameLower.contains("charleston") ||
+           nameLower.contains("columbia") || nameLower.contains("savannah") || nameLower.contains("jacksonville") ||
+           nameLower.contains("tampa") || nameLower.contains("orlando") || nameLower.contains("fort lauderdale") ||
+           nameLower.contains("west palm beach") || nameLower.contains("pensacola") || nameLower.contains("tallahassee") ||
+           nameLower.contains("gainesville") || nameLower.contains("birmingham") || nameLower.contains("montgomery") ||
+           nameLower.contains("mobile") || nameLower.contains("huntsville") || nameLower.contains("jackson") ||
+           nameLower.contains("new orleans") || nameLower.contains("baton rouge") || nameLower.contains("shreveport") ||
+           nameLower.contains("lafayette") || nameLower.contains("little rock") || nameLower.contains("fayetteville") ||
+           nameLower.contains("fort smith") || nameLower.contains("tulsa") || nameLower.contains("oklahoma city") ||
+           nameLower.contains("wichita") || nameLower.contains("topeka") || nameLower.contains("kansas city") ||
+           nameLower.contains("st. louis") || nameLower.contains("springfield") || nameLower.contains("jefferson city") ||
+           nameLower.contains("des moines") || nameLower.contains("cedar rapids") || nameLower.contains("davenport") ||
+           nameLower.contains("sioux city") || nameLower.contains("omaha") || nameLower.contains("lincoln") ||
+           nameLower.contains("grand island") || nameLower.contains("sioux falls") || nameLower.contains("rapid city") ||
+           nameLower.contains("fargo") || nameLower.contains("bismarck") || nameLower.contains("grand forks") ||
+           nameLower.contains("minneapolis") || nameLower.contains("st. paul") || nameLower.contains("duluth") ||
+           nameLower.contains("rochester") || nameLower.contains("madison") || nameLower.contains("green bay") ||
+           nameLower.contains("appleton") || nameLower.contains("eau claire") || nameLower.contains("la crosse") ||
+           (nameLower.contains("fm") && (nameLower.contains(" us ") || nameLower.contains("united states"))) {
+            return "United States"
+        }
+        
+        // UK patterns - comprehensive
+        if nameLower.contains("bbc") || nameLower.contains("london") || nameLower.contains("uk") ||
+           nameLower.contains("britain") || nameLower.contains("british") || nameLower.contains("england") || 
+           nameLower.contains("scotland") || nameLower.contains("wales") || nameLower.contains("northern ireland") ||
+           nameLower.contains("manchester") || nameLower.contains("birmingham") || nameLower.contains("liverpool") ||
+           nameLower.contains("leeds") || nameLower.contains("sheffield") || nameLower.contains("bristol") ||
+           nameLower.contains("glasgow") || nameLower.contains("edinburgh") || nameLower.contains("cardiff") ||
+           nameLower.contains("belfast") || nameLower.contains("newcastle") || nameLower.contains("nottingham") ||
+           nameLower.contains("leicester") || nameLower.contains("coventry") || nameLower.contains("hull") ||
+           nameLower.contains("bradford") || nameLower.contains("stoke") || nameLower.contains("wolverhampton") ||
+           nameLower.contains("plymouth") || nameLower.contains("derby") || nameLower.contains("swansea") ||
+           nameLower.contains("southampton") || nameLower.contains("salford") || nameLower.contains("aberdeen") ||
+           nameLower.contains("westminster") || nameLower.contains("croydon") || nameLower.contains("harrow") ||
+           nameLower.contains("brent") || nameLower.contains("ealing") || nameLower.contains("wandsworth") ||
+           nameLower.contains("lambeth") || nameLower.contains("southwark") || nameLower.contains("lewisham") ||
+           nameLower.contains("greenwich") || nameLower.contains("hackney") || nameLower.contains("tower hamlets") ||
+           nameLower.contains("newham") || nameLower.contains("waltham forest") || nameLower.contains("redbridge") ||
+           nameLower.contains("havering") || nameLower.contains("barking") || nameLower.contains("enfield") ||
+           nameLower.contains("barnet") || nameLower.contains("haringey") || nameLower.contains("camden") ||
+           nameLower.contains("islington") || nameLower.contains("kensington") || nameLower.contains("chelsea") ||
+           nameLower.contains("hammersmith") || nameLower.contains("fulham") || nameLower.contains("richmond") ||
+           nameLower.contains("kingston") || nameLower.contains("merton") || nameLower.contains("sutton") ||
+           nameLower.contains("croydon") || nameLower.contains("bromley") || nameLower.contains("bexley") ||
+           nameLower.contains("hillingdon") || nameLower.contains("hounslow") {
+            return "United Kingdom"
+        }
+        
+        // German patterns
+        if nameLower.contains("deutschland") || nameLower.contains("german") || nameLower.contains("berlin") ||
+           nameLower.contains("münchen") || nameLower.contains("munich") || nameLower.contains("hamburg") ||
+           nameLower.contains("cologne") || nameLower.contains("köln") || nameLower.contains("frankfurt") ||
+           nameLower.contains("stuttgart") || nameLower.contains("düsseldorf") || nameLower.contains("dortmund") ||
+           nameLower.contains("essen") || nameLower.contains("leipzig") || nameLower.contains("bremen") ||
+           nameLower.contains("dresden") || nameLower.contains("hannover") || nameLower.contains("nürnberg") ||
+           nameLower.contains("nuremberg") || nameLower.contains("duisburg") || nameLower.contains("bochum") ||
+           nameLower.contains("wuppertal") || nameLower.contains("bielefeld") || nameLower.contains("bonn") ||
+           nameLower.contains("münster") || nameLower.contains("karlsruhe") || nameLower.contains("mannheim") ||
+           nameLower.contains("augsburg") || nameLower.contains("wiesbaden") || nameLower.contains("gelsenkirchen") ||
+           nameLower.contains("mönchengladbach") || nameLower.contains("braunschweig") || nameLower.contains("chemnitz") ||
+           nameLower.contains("kiel") || nameLower.contains("aachen") || nameLower.contains("halle") ||
+           nameLower.contains("magdeburg") || nameLower.contains("freiburg") || nameLower.contains("krefeld") ||
+           nameLower.contains("lübeck") || nameLower.contains("oberhausen") || nameLower.contains("erfurt") ||
+           nameLower.contains("mainz") || nameLower.contains("rostock") || nameLower.contains("kassel") ||
+           nameLower.contains("hagen") || nameLower.contains("potsdam") || nameLower.contains("saarbrücken") ||
+           nameLower.contains("hamm") || nameLower.contains("mülheim") || nameLower.contains("ludwigshafen") ||
+           nameLower.contains("leverkusen") || nameLower.contains("oldenburg") || nameLower.contains("osnabrück") ||
+           nameLower.contains("solingen") || nameLower.contains("heidelberg") || nameLower.contains("herne") ||
+           nameLower.contains("neuss") || nameLower.contains("darmstadt") || nameLower.contains("paderborn") ||
+           nameLower.contains("regensburg") || nameLower.contains("ingolstadt") || nameLower.contains("würzburg") ||
+           nameLower.contains("fürth") || nameLower.contains("wolfsburg") || nameLower.contains("offenbach") ||
+           nameLower.contains("ulm") || nameLower.contains("heilbronn") || nameLower.contains("pforzheim") ||
+           nameLower.contains("göttingen") || nameLower.contains("bottrop") || nameLower.contains("trier") ||
+           nameLower.contains("recklinghausen") || nameLower.contains("reutlingen") || nameLower.contains("bremerhaven") ||
+           nameLower.contains("koblenz") || nameLower.contains("bergisch gladbach") || nameLower.contains("jena") ||
+           nameLower.contains("remscheid") || nameLower.contains("erlangen") || nameLower.contains("moers") ||
+           nameLower.contains("siegen") || nameLower.contains("hildesheim") || nameLower.contains("salzgitter") {
+            return "Germany"
+        }
+        
+        // French patterns
+        if nameLower.contains("france") || nameLower.contains("french") || nameLower.contains("français") ||
+           nameLower.contains("paris") || nameLower.contains("radio france") || nameLower.contains("marseille") ||
+           nameLower.contains("lyon") || nameLower.contains("toulouse") || nameLower.contains("nice") ||
+           nameLower.contains("nantes") || nameLower.contains("strasbourg") || nameLower.contains("montpellier") ||
+           nameLower.contains("bordeaux") || nameLower.contains("lille") || nameLower.contains("rennes") ||
+           nameLower.contains("reims") || nameLower.contains("le havre") || nameLower.contains("saint-étienne") ||
+           nameLower.contains("toulon") || nameLower.contains("angers") || nameLower.contains("grenoble") ||
+           nameLower.contains("dijon") || nameLower.contains("nîmes") || nameLower.contains("aix-en-provence") ||
+           nameLower.contains("brest") || nameLower.contains("le mans") || nameLower.contains("amiens") ||
+           nameLower.contains("tours") || nameLower.contains("limoges") || nameLower.contains("clermont-ferrand") ||
+           nameLower.contains("villeurbanne") || nameLower.contains("besançon") || nameLower.contains("orléans") ||
+           nameLower.contains("metz") || nameLower.contains("rouen") || nameLower.contains("mulhouse") ||
+           nameLower.contains("perpignan") || nameLower.contains("caen") || nameLower.contains("boulogne-billancourt") ||
+           nameLower.contains("nancy") || nameLower.contains("argenteuil") || nameLower.contains("roubaix") ||
+           nameLower.contains("tourcoing") || nameLower.contains("nanterre") || nameLower.contains("avignon") ||
+           nameLower.contains("créteil") || nameLower.contains("dunkerque") || nameLower.contains("poitiers") ||
+           nameLower.contains("asnières-sur-seine") || nameLower.contains("courbevoie") || nameLower.contains("versailles") ||
+           nameLower.contains("colombes") || nameLower.contains("fort-de-france") || nameLower.contains("aulnay-sous-bois") ||
+           nameLower.contains("saint-paul") || nameLower.contains("rueil-malmaison") || nameLower.contains("pau") ||
+           nameLower.contains("aubervilliers") || nameLower.contains("champigny-sur-marne") || nameLower.contains("antibes") ||
+           nameLower.contains("saint-maur-des-fossés") || nameLower.contains("cannes") || nameLower.contains("béziers") ||
+           nameLower.contains("bourges") || nameLower.contains("calais") || nameLower.contains("saint-nazaire") ||
+           nameLower.contains("colmar") || nameLower.contains("drancy") || nameLower.contains("ajaccio") ||
+           nameLower.contains("mérignac") || nameLower.contains("saint-louis") || nameLower.contains("nouméa") {
+            return "France"
+        }
+        
+        // Italian patterns (legitimate ones) - comprehensive
+        if nameLower.contains("rai") || nameLower.contains("italia") || nameLower.contains("italian") ||
+           nameLower.contains("rome") || nameLower.contains("roma") || nameLower.contains("milano") || 
+           nameLower.contains("milan") || nameLower.contains("napoli") || nameLower.contains("naples") ||
+           nameLower.contains("torino") || nameLower.contains("turin") || nameLower.contains("palermo") ||
+           nameLower.contains("genova") || nameLower.contains("genoa") || nameLower.contains("bologna") ||
+           nameLower.contains("firenze") || nameLower.contains("florence") || nameLower.contains("bari") ||
+           nameLower.contains("catania") || nameLower.contains("venezia") || nameLower.contains("venice") ||
+           nameLower.contains("verona") || nameLower.contains("messina") || nameLower.contains("padova") ||
+           nameLower.contains("padua") || nameLower.contains("trieste") || nameLower.contains("taranto") ||
+           nameLower.contains("brescia") || nameLower.contains("prato") || nameLower.contains("parma") ||
+           nameLower.contains("modena") || nameLower.contains("reggio calabria") || nameLower.contains("reggio emilia") ||
+           nameLower.contains("perugia") || nameLower.contains("livorno") || nameLower.contains("ravenna") ||
+           nameLower.contains("cagliari") || nameLower.contains("foggia") || nameLower.contains("rimini") ||
+           nameLower.contains("salerno") || nameLower.contains("ferrara") || nameLower.contains("sassari") ||
+           nameLower.contains("latina") || nameLower.contains("giugliano") || nameLower.contains("monza") ||
+           nameLower.contains("siracusa") || nameLower.contains("pescara") || nameLower.contains("bergamo") ||
+           nameLower.contains("forlì") || nameLower.contains("trento") || nameLower.contains("vicenza") ||
+           nameLower.contains("terni") || nameLower.contains("bolzano") || nameLower.contains("novara") ||
+           nameLower.contains("piacenza") || nameLower.contains("ancona") || nameLower.contains("andria") ||
+           nameLower.contains("arezzo") || nameLower.contains("udine") || nameLower.contains("cesena") ||
+           nameLower.contains("lecce") || nameLower.contains("pesaro") || nameLower.contains("barletta") ||
+           nameLower.contains("alessandria") || nameLower.contains("la spezia") || nameLower.contains("pistoia") ||
+           nameLower.contains("como") || nameLower.contains("pavia") || nameLower.contains("treviso") ||
+           nameLower.contains("busto arsizio") || nameLower.contains("varese") || nameLower.contains("fiumicino") ||
+           nameLower.contains("lamezia terme") || nameLower.contains("cosenza") || nameLower.contains("brindisi") ||
+           nameLower.contains("gallarate") || nameLower.contains("cinisello balsamo") || nameLower.contains("sesto san giovanni") ||
+           nameLower.contains("casoria") || nameLower.contains("castellammare") || nameLower.contains("carpi") ||
+           nameLower.contains("guidonia montecelio") || nameLower.contains("cerignola") || nameLower.contains("viterbo") ||
+           nameLower.contains("tivoli") || nameLower.contains("caserta") || nameLower.contains("lecco") ||
+           nameLower.contains("vercelli") || nameLower.contains("quartu sant'elena") || nameLower.contains("altamura") ||
+           nameLower.contains("imola") || nameLower.contains("cremona") || nameLower.contains("vigevano") ||
+           nameLower.contains("caltanissetta") || nameLower.contains("asti") || nameLower.contains("matera") ||
+           nameLower.contains("massa") || nameLower.contains("avellino") || nameLower.contains("benevento") ||
+           nameLower.contains("afragola") || nameLower.contains("carrara") || nameLower.contains("potenza") {
+            return "Italy"
+        }
+        
+        return nil
     }
     
     // MARK: - Deleted Stations Management
@@ -3018,6 +3823,11 @@ extension RadioStationViewModel {
             
             // Set loading to false immediately to show stations
             isLoading = false
+            
+            // Force UI update to ensure immediate refresh
+            DispatchQueue.main.async { [weak self] in
+                self?.objectWillChange.send()
+            }
             
             // Post notification that stations have been loaded
             NotificationCenter.default.post(name: NSNotification.Name("StationsLoaded"), object: nil)

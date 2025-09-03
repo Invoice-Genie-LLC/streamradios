@@ -44,6 +44,11 @@ struct RadioStreamApp: App {
                     // Clear notifications and badge when app launches
                     NotificationManager.shared.clearAllNotificationsAndBadge()
                     
+                    // Check for incomplete syncs on app startup
+                    Task { @MainActor in
+                        DataSyncManager.shared.checkAndResumeRadioStationSync()
+                    }
+                    
                     // Initialize comprehensive debug logging system
                     // DebugLogger.logInfo will be added when import is fixed
                 }

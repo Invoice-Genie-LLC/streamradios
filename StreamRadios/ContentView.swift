@@ -1477,6 +1477,23 @@ struct UnifiedRadioProgressBanner: View {
     @StateObject private var radioViewModel = RadioStationViewModel.shared
     @StateObject private var syncManager = DataSyncManager.shared
     @State private var hideCompletedBanner = false
+    @State private var showDetailedSyncProgress = false
+    
+    /// Format time remaining in a human-readable format
+    private func formatTimeRemaining(_ seconds: Double) -> String {
+        let totalSeconds = Int(seconds)
+        if totalSeconds < 60 {
+            return "\(totalSeconds)s"
+        } else if totalSeconds < 3600 {
+            let minutes = totalSeconds / 60
+            let remainingSeconds = totalSeconds % 60
+            return "\(minutes)m \(remainingSeconds)s"
+        } else {
+            let hours = totalSeconds / 3600
+            let remainingMinutes = (totalSeconds % 3600) / 60
+            return "\(hours)h \(remainingMinutes)m"
+        }
+    }
     
     var body: some View {
         if shouldShowBanner {
@@ -1591,6 +1608,135 @@ struct UnifiedRadioProgressBanner: View {
                 removal: .opacity.combined(with: .move(edge: .top))
             ))
             .animation(.easeInOut(duration: 0.3), value: shouldShowBanner)
+            .onTapGesture {
+                // Show detailed progress for any CloudKit operations
+                if currentOperationType == .cloudKitSave || currentOperationType == .cloudKitFetch || 
+                   (syncManager.radioStationsStatus == .inProgress && shouldShowBanner) {
+                    showDetailedSyncProgress = true
+                }
+            }
+            .sheet(isPresented: $showDetailedSyncProgress) {
+                NavigationView {
+                    VStack(spacing: 20) {
+                        // Header
+                        VStack(spacing: 8) {
+                            Image(systemName: "icloud.and.arrow.up")
+                                .font(.system(size: 40))
+                                .foregroundColor(.blue)
+                            
+                            Text("CloudKit Sync")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                            
+                            Text(syncManager.radioStationsOperation.isEmpty ? "Synchronizing..." : syncManager.radioStationsOperation)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.top)
+                        
+                        // Progress Section
+                        VStack(spacing: 12) {
+                            // Progress Bar
+                            ProgressView(value: syncManager.radioStationsProgress)
+                                .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                                .scaleEffect(x: 1, y: 2, anchor: .center)
+                            
+                            // Progress Percentage
+                            Text("\(Int(syncManager.radioStationsProgress * 100))%")
+                                .font(.title3)
+                                .fontWeight(.medium)
+                            
+                            // Station Counts
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Current")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(syncManager.radioStationsCurrentCount)")
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                }
+                                
+                                Spacer()
+                                
+                                VStack(spacing: 4) {
+                                    Text("Total")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(syncManager.radioStationsTotalCount)")
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                }
+                                
+                                Spacer()
+                                
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text("Remaining")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(syncManager.radioStationsRemainingCount)")
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                            .padding(.horizontal)
+                            
+                            // Time Estimates
+                            if syncManager.radioStationsEstimatedTimeRemaining > 0 {
+                                VStack(spacing: 8) {
+                                    HStack {
+                                        Text("Estimated time remaining:")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Text(formatTimeRemaining(syncManager.radioStationsEstimatedTimeRemaining))
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                    }
+                                    
+                                    if syncManager.radioStationsAverageTimePerStation > 0 {
+                                        HStack {
+                                            Text("Average time per station:")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                            Spacer()
+                                            Text("\(String(format: "%.1f", syncManager.radioStationsAverageTimePerStation))s")
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
+                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .padding(.horizontal)
+                        
+                        Spacer()
+                        
+                        // Close Button
+                        Button("Close") {
+                            showDetailedSyncProgress = false
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(10)
+                        .padding(.horizontal)
+                        .padding(.bottom)
+                    }
+                    .navigationTitle("Sync Progress")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .navigationBarItems(trailing: Button("Done") {
+                        showDetailedSyncProgress = false
+                    })
+                }
+            }
             .onChange(of: syncManager.radioStationsStatus) { status in
                 if status == .completed {
                     // Show completion for 3 seconds, then hide

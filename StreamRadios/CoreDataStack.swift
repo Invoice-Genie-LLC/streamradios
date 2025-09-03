@@ -227,40 +227,55 @@ class CoreDataStack {
 
     // New methods for podcast episode management
     func fetchAllEpisodes() -> [PodcastEpisode] {
-        let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-        do {
-            let results = try context.fetch(request)
-
-            return results.map { $0.toPodcastEpisode() }
-        } catch {
-            print("CoreData: Error fetching episodes: \(error)")
-
-            return []
+        var episodes: [PodcastEpisode] = []
+        let backgroundContext = newBackgroundContext()
+        
+        backgroundContext.performAndWait {
+            let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+            do {
+                let results = try backgroundContext.fetch(request)
+                episodes = results.map { $0.toPodcastEpisode() }
+            } catch {
+                print("CoreData: Error fetching episodes: \(error)")
+            }
         }
+        
+        return episodes
     }
 
     func saveEpisodes(_ episodes: [PodcastEpisode]) {
         // CRITICAL FIX: Remove duplicates before saving
         let uniqueEpisodes = removeDuplicateEpisodes(episodes)
+        let backgroundContext = newBackgroundContext()
         
-        for episode in uniqueEpisodes {
-            let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
-            
-            do {
-                let results = try context.fetch(fetchRequest)
-                if let existingEpisode = results.first {
-                    existingEpisode.update(from: episode)
-                } else {
-                    let newEpisode = PodcastModel(context: context)
-                    newEpisode.update(from: episode)
+        backgroundContext.perform {
+            for episode in uniqueEpisodes {
+                let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@", episode.id)
+                
+                do {
+                    let results = try backgroundContext.fetch(fetchRequest)
+                    if let existingEpisode = results.first {
+                        existingEpisode.update(from: episode)
+                    } else {
+                        let newEpisode = PodcastModel(context: backgroundContext)
+                        newEpisode.update(from: episode)
+                    }
+                } catch {
+                    print("CoreData: Error saving episode: \(error)")
                 }
-            } catch {
-                print("CoreData: Error saving episode: \(error)")
+            }
+            
+            // Save the background context
+            if backgroundContext.hasChanges {
+                do {
+                    try backgroundContext.save()
+                    print("CoreData: Successfully saved \(uniqueEpisodes.count) episodes in background")
+                } catch {
+                    print("CoreData: Error saving background context: \(error)")
+                }
             }
         }
-        
-        saveContext()
     }
     
     /// Remove duplicate episodes using compositeID for robust duplicate detection
@@ -291,14 +306,23 @@ class CoreDataStack {
     }
 
     func deleteAllEpisodes() {
-        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
-        let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        let backgroundContext = newBackgroundContext()
         
-        do {
-            try context.execute(deleteRequest)
-            saveContext()
-        } catch {
-            print("CoreData: Error deleting all episodes: \(error)")
+        backgroundContext.perform {
+            let fetchRequest: NSFetchRequest<NSFetchRequestResult> = PodcastModel.fetchRequest()
+            let deleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+            
+            do {
+                try backgroundContext.execute(deleteRequest)
+                
+                // Save the background context
+                if backgroundContext.hasChanges {
+                    try backgroundContext.save()
+                    print("CoreData: Successfully deleted all episodes in background")
+                }
+            } catch {
+                print("CoreData: Error deleting all episodes: \(error)")
+            }
         }
     }
 }
@@ -326,14 +350,14 @@ extension CoreDataStack {
     }
     
     private func updateCoreData(with stations: [RadioStation], completion: @escaping (Error?) -> Void) {
-        let context = self.context
-        context.perform {
+        let backgroundContext = newBackgroundContext()
+        backgroundContext.perform {
             for station in stations {
                 let request: NSFetchRequest<CDStation> = CDStation.fetchRequest()
                 request.predicate = NSPredicate(format: "id == %@", station.id)
                 
                 do {
-                    let results = try context.fetch(request)
+                    let results = try backgroundContext.fetch(request)
                     if let existingStation = results.first {
                         // Update existing station
                         existingStation.name = station.name
@@ -351,7 +375,7 @@ extension CoreDataStack {
                         existingStation.lastPlayed = station.lastPlayed
                     } else {
                         // Insert new station
-                        let newStation = CDStation(context: context)
+                        let newStation = CDStation(context: backgroundContext)
                         newStation.id = station.id
                         newStation.name = station.name
                         newStation.url = station.url
@@ -376,7 +400,7 @@ extension CoreDataStack {
             
             // Save changes to CoreData
             do {
-                try context.save()
+                try backgroundContext.save()
                 print("CoreData sync complete.")
                 completion(nil)
             } catch {

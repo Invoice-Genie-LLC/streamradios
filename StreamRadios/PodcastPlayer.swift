@@ -1247,9 +1247,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Initialize time and duration for the new episode
         duration = episode.duration
         
-        // Initialize progress to 0 - will be set correctly in the UserDefaults loading section below
-        currentProgress = 0
-        currentTime = 0
+        // ENHANCED PROTECTION: Don't reset progress to 0 during episode switch - preserve existing progress
+        // Only reset if this is a completely new episode or explicitly requested
+        if currentEpisode?.id != episode.id {
+            // Different episode - initialize to 0, will be set correctly from Core Data below
+            currentProgress = 0
+            currentTime = 0
+        }
+        // If same episode, preserve current progress to prevent reset during reconnection/reload
         
         // Reset position restoration flag for the new episode
         hasRestoredPositionForCurrentEpisode = false
@@ -1352,10 +1357,25 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         self.isInitialProgressLoad = false
                     }
                 } else {
-                    isInitialProgressLoad = true
-                    currentProgress = 0
-                    currentTime = 0
-                    os_log("Progress reset - Setting currentProgress to 0 for episode: %@", log: log, type: .info, episode.title)
+                    // ENHANCED PROTECTION: Only reset to 0 if we're sure there's no progress anywhere
+                    // Check EpisodeStateManager as backup before resetting
+                    let stateManagerProgress = stateManager.getProgress(for: episode.id)
+                    let episodeStateProgress = episode.state.progress
+                    let maxProgress = max(stateManagerProgress, episodeStateProgress)
+                    
+                    if maxProgress > 0 {
+                        // Found progress from alternate source - use it instead of resetting
+                        isInitialProgressLoad = true
+                        currentProgress = maxProgress
+                        currentTime = maxProgress * duration
+                        os_log("PROTECTION: Found progress %.4f from alternate source for episode: %@", log: log, type: .info, maxProgress, episode.title)
+                    } else {
+                        // No progress found anywhere - safe to reset
+                        isInitialProgressLoad = true
+                        currentProgress = 0
+                        currentTime = 0
+                        os_log("No progress found - Setting currentProgress to 0 for episode: %@", log: log, type: .info, episode.title)
+                    }
                     
                     // Reset the flag after a brief delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -1363,10 +1383,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     }
                 }
         } else {
-            // Only reset to 0 if explicitly starting from beginning
-            currentProgress = 0
-            currentTime = 0
-            os_log("Forced reset - Starting from beginning for episode: %@", log: log, type: .info, episode.title)
+            // ENHANCED PROTECTION: Even when shouldStartFromBeginning is true, double-check this is intentional
+            // Only reset if this is a rewind action, not a reconnection or reload
+            if shouldStartFromBeginning {
+                currentProgress = 0
+                currentTime = 0
+                os_log("Intentional reset - Starting from beginning for episode: %@", log: log, type: .info, episode.title)
+            } else {
+                // Preserve current progress for reconnections/reloads
+                os_log("PROTECTION: Preserving current progress %.4f for episode reload: %@", log: log, type: .info, currentProgress, episode.title)
+            }
         }
         
         // Set up observers first so we can properly seek when ready
@@ -1627,17 +1653,44 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return
         }
         else {
-            // No progress found - start from beginning
-            os_log("🔍 SEEK DEBUG - No progress (%.4f) or no duration (%.4f) - starting from beginning", log: log, type: .info, savedProgress, duration)
-            await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-            await MainActor.run {
-                currentTime = 0
-                currentProgress = 0
-                hasRestoredPositionForCurrentEpisode = true
-                currentEpisodeIdForRestoration = currentEpisode.id
+            // ENHANCED PROTECTION: Before resetting to beginning, check all possible progress sources
+            let stateManagerProgress = stateManager.getProgress(for: currentEpisode.id)
+            let episodeStateProgress = currentEpisode.state.progress
+            let maxAlternateProgress = max(stateManagerProgress, episodeStateProgress)
+            
+            if maxAlternateProgress > 0 && duration > 0 {
+                // Found progress from alternate source - use it instead of resetting
+                let targetTime = maxAlternateProgress * duration
+                os_log("🔍 PROTECTION: Found alternate progress %.4f, seeking to %.4f seconds", log: log, type: .info, maxAlternateProgress, targetTime)
+                
+                await MainActor.run {
+                    currentTime = targetTime
+                    currentProgress = maxAlternateProgress
+                }
+                
+                player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
+                    if completed {
+                        DispatchQueue.main.async {
+                            self?.hasRestoredPositionForCurrentEpisode = true
+                            self?.currentEpisodeIdForRestoration = currentEpisode.id
+                            self?.updatePlaybackInfo()
+                            self?.updateNowPlayingInfo()
+                        }
+                    }
+                }
+            } else {
+                // No progress found anywhere - safe to start from beginning
+                os_log("🔍 SEEK DEBUG - No progress found anywhere (saved: %.4f, state: %.4f, episode: %.4f) - starting from beginning", log: log, type: .info, savedProgress, stateManagerProgress, episodeStateProgress)
+                await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                await MainActor.run {
+                    currentTime = 0
+                    currentProgress = 0
+                    hasRestoredPositionForCurrentEpisode = true
+                    currentEpisodeIdForRestoration = currentEpisode.id
+                }
+                updateNowPlayingInfo()
+                os_log("🔍 SEEK DEBUG - Set to beginning: currentTime=0, currentProgress=0", log: log, type: .info)
             }
-            updateNowPlayingInfo()
-            os_log("🔍 SEEK DEBUG - Set to beginning: currentTime=0, currentProgress=0", log: log, type: .info)
         }
     }
     
@@ -1755,42 +1808,53 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL FIX: Update connection state when pausing
         connectionState = .connected
         
-        // Calculate current progress
-        let progress = duration > 0 ? currentTime / duration : 0
+        // Calculate current progress using the most accurate values
+        let actualCurrentTime = player.currentTime().seconds
+        let progress = duration > 0 ? actualCurrentTime / duration : 0
+        let finalProgress = max(progress, currentProgress) // Use the higher value to prevent progress loss
+        
+        // Detect if this pause is likely from lock screen (app is in background)
+        let isLockScreenPause = UIApplication.shared.applicationState != .active
+        let pauseSource = isLockScreenPause ? "lock screen controls" : "in-app controls"
+        
+        os_log("⏸️ User paused episode from %@ - saving progress: %@, Progress: %.2f%%", 
+               log: log, type: .info, pauseSource, currentEpisode.title, finalProgress * 100)
         
         // Save progress to persistent storage when user pauses
         saveProgressIfNeeded()
         
-        // Save to CloudKit when user pauses
-        saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user paused episode")
+        // Save to CloudKit when user pauses - enhanced for lock screen pauses
+        let pauseReason = isLockScreenPause ? "user paused from lock screen" : "user paused episode"
+        saveProgressWithCoreDataPriority(for: currentEpisode, progress: finalProgress, reason: pauseReason)
         
         // Update StateManager with current progress when pausing
-        let actualCurrentTime = player.currentTime().seconds
-        
         // CRITICAL FIX: Only mark as played if progress is actually >= 99%, not during regular pause
-        let isActuallyCompleted = progress >= 0.99
-        stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
+        let isActuallyCompleted = finalProgress >= 0.99
+        stateManager.updateProgress(for: currentEpisode.id, progress: finalProgress, isPlaying: false, currentTime: actualCurrentTime)
         
         // Don't mark as "played" during regular pause unless actually completed
         if isActuallyCompleted {
-            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
+            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
         } else {
             // Just update the progress without changing played status
-            stateManager.setProgress(for: currentEpisode.id, progress: currentProgress)
+            stateManager.setProgress(for: currentEpisode.id, progress: finalProgress)
         }
         
         // REAL-TIME SYNC: Use the new real-time sync method for episode pause with known feedId
-        stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: "episode_paused", feedId: currentEpisode.feedId)
+        stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: finalProgress, reason: "episode_paused", feedId: currentEpisode.feedId)
         
         // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
         NotificationCenter.default.post(
             name: .init("InstantSyncDidUpdatePodcastProgress"),
             object: nil,
-            userInfo: ["episodeId": currentEpisode.id, "progress": progress]
+            userInfo: ["episodeId": currentEpisode.id, "progress": finalProgress]
         )
         
-        os_log("⏸️ User paused episode - progress saved: %@, Progress: %.2f%%", 
-               log: log, type: .info, currentEpisode.title, progress * 100)
+        // CRITICAL FIX: For lock screen pauses, ensure UserDefaults are synchronized immediately
+        if isLockScreenPause {
+            UserDefaults.standard.synchronize()
+            os_log("🔒 Lock screen pause detected - forced UserDefaults synchronization", log: log, type: .info)
+        }
 
         ensureProgressTracking(for: currentEpisode)
 
@@ -2226,7 +2290,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
-    /// Load progress from Core Data (primary source of truth) - SYNCHRONOUS
+    /// Load progress from Core Data (primary source of truth) - SYNCHRONOUS with enhanced validation
     private func loadProgressFromCoreData(episodeId: String) -> Double {
         let context = CoreDataStack.shared.context
         var progress: Double = 0.0
@@ -2245,14 +2309,59 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     progress = episode.progress
                     os_log("Core Data synchronous load: Episode %@ has progress %.4f", 
                            log: log, type: .info, episodeId, progress)
+                    
+                    // ENHANCED VALIDATION: If Core Data shows 0 but other sources have progress, investigate
+                    if progress == 0.0 {
+                        let stateManagerProgress = stateManager.getProgress(for: episodeId)
+                        if stateManagerProgress > 0.0 {
+                            os_log("VALIDATION WARNING: Core Data shows 0 but EpisodeStateManager has %.4f for episode %@", 
+                                   log: log, type: .info, stateManagerProgress, episodeId)
+                            // Use the higher value as a safety measure
+                            progress = stateManagerProgress
+                        }
+                    }
                 }
             } catch {
                 os_log("Failed to load progress from Core Data for episode %@: %@", 
                        log: log, type: .error, episodeId, error.localizedDescription)
+                
+                // FALLBACK PROTECTION: If Core Data fails, try EpisodeStateManager as backup
+                let fallbackProgress = stateManager.getProgress(for: episodeId)
+                if fallbackProgress > 0.0 {
+                    os_log("FALLBACK: Using EpisodeStateManager progress %.4f for episode %@", 
+                           log: log, type: .info, fallbackProgress, episodeId)
+                    progress = fallbackProgress
+                }
             }
         }
         
         return progress
+    }
+    
+    /// ENHANCED PROTECTION: Validate and recover progress if accidentally reset
+    private func validateAndRecoverProgress(for episodeId: String) -> Double {
+        let playerProgress = currentProgress
+        let stateManagerProgress = stateManager.getProgress(for: episodeId)
+        let coreDataProgress = loadProgressFromCoreData(episodeId: episodeId)
+        
+        // Find the highest reliable progress value
+        let maxProgress = max(playerProgress, max(stateManagerProgress, coreDataProgress))
+        
+        // If current progress is significantly lower than stored progress, recover it
+        if playerProgress < maxProgress - 0.01 { // More than 1% difference
+            os_log("PROGRESS RECOVERY: Player progress %.4f is lower than stored progress %.4f for episode %@", 
+                   log: log, type: .info, playerProgress, maxProgress, episodeId)
+            
+            // Update current progress to the recovered value
+            DispatchQueue.main.async { [weak self] in
+                self?.currentProgress = maxProgress
+                self?.currentTime = maxProgress * (self?.duration ?? 0)
+            }
+            
+            return maxProgress
+        }
+        
+        return playerProgress
     }
     
     /// Sync with CloudKit in background while ensuring Core Data stays authoritative
@@ -2536,12 +2645,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return
         }
         
-        // MAIN THREAD FIX: Check app state on main thread to prevent violations
-        Task { @MainActor in
-            // Skip all updates if app is in background to save battery
-            guard UIApplication.shared.applicationState == .active else { return }
-            
-            Task { [weak self] in
+            // MAIN THREAD FIX: Check app state on main thread to prevent violations
+    Task { @MainActor in
+        // Skip updates if app is in background to save battery and resources
+        guard UIApplication.shared.applicationState == .active else { return }
+        
+        Task { [weak self] in
                 guard let self = self else { return }
                 
                 // Only update the time values - no heavy operations
@@ -2577,6 +2686,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         
                         if progressDifference > significantThreshold {
                             self.currentProgress = calculatedProgress
+                            
+                            // ENHANCED PROTECTION: Validate progress every few seconds during playback
+                            if let currentEpisode = self.currentEpisode, Int(self.currentTime) % 10 == 0 {
+                                let validatedProgress = self.validateAndRecoverProgress(for: currentEpisode.id)
+                                if validatedProgress != self.currentProgress {
+                                    os_log("CONTINUOUS PROTECTION: Recovered progress from %.4f to %.4f during playback", 
+                                           log: self.log, type: .info, self.currentProgress, validatedProgress)
+                                }
+                            }
                         }
                     } else {
                         // Protected mode: Keep the chapter-seek progress, just log that we're protecting it
@@ -2652,6 +2770,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         os_log("🔄 Lock Screen Sync: Updated elapsed time to %.1fs for real-time lock screen controls", 
                log: log, type: .debug, elapsedTime)
     }
+    
+
     
     func updateNowPlayingInfo() {
         // Only update Now Playing info if podcast is the active player

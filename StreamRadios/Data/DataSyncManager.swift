@@ -60,6 +60,15 @@ class DataSyncManager: ObservableObject {
     @Published var radioStationsCurrentCount = 0
     @Published var radioStationsTotalCount = 0
     
+    // Resumable Sync State
+    @Published var radioStationsRemainingCount = 0
+    @Published var radioStationsSyncStartTime: Date?
+    @Published var radioStationsEstimatedTimeRemaining: TimeInterval = 0
+    @Published var radioStationsAverageTimePerStation: Double = 0
+    
+    // Detailed Progress Overlay
+    @Published var showDetailedProgressOverlay = false
+    
     // Podcast Feeds
     @Published var podcastFeedsStatus: DataSyncStatus = .pending
     @Published var podcastFeedsProgress: Double = 0.0
@@ -611,6 +620,199 @@ class DataSyncManager: ObservableObject {
     func completeIndividualFeedAddition() {
         isAddingIndividualFeed = false
         print("🔄 DataSyncManager: Completed individual feed addition tracking")
+    }
+    
+    // MARK: - Radio Station Sync Management
+    
+    /// Start radio station sync tracking with resumable support
+    @MainActor
+    func startRadioStationSync(totalStations: Int, country: String?, operationType: String) {
+        radioStationsStatus = .inProgress
+        radioStationsTotalCount = totalStations
+        radioStationsCurrentCount = 0
+        radioStationsRemainingCount = totalStations
+        radioStationsSyncStartTime = Date()
+        radioStationsEstimatedTimeRemaining = 0
+        radioStationsAverageTimePerStation = 0
+        
+        let countryInfo = country != nil ? " for \(country!)" : ""
+        radioStationsOperation = "Starting sync\(countryInfo)..."
+        
+        print("🔄 DataSyncManager: Started radio station sync tracking - \(totalStations) stations")
+        
+        // Update progress periodically
+        startProgressTracking()
+    }
+    
+    /// Update radio station sync progress
+    @MainActor
+    func updateRadioStationProgress(_ progress: Double, currentCount: Int, operation: String) {
+        radioStationsProgress = progress
+        radioStationsCurrentCount = currentCount
+        radioStationsRemainingCount = max(0, radioStationsTotalCount - currentCount)
+        radioStationsOperation = operation
+        
+        // Update performance metrics
+        if let startTime = radioStationsSyncStartTime, currentCount > 0 {
+            let elapsedTime = Date().timeIntervalSince(startTime)
+            radioStationsAverageTimePerStation = elapsedTime / Double(currentCount)
+            
+            if radioStationsRemainingCount > 0 {
+                radioStationsEstimatedTimeRemaining = Double(radioStationsRemainingCount) * radioStationsAverageTimePerStation
+            }
+        }
+    }
+    
+    /// Complete radio station sync
+    @MainActor
+    func completeRadioStationSync() {
+        radioStationsStatus = .completed
+        radioStationsProgress = 1.0
+        radioStationsCurrentCount = radioStationsTotalCount
+        radioStationsRemainingCount = 0
+        radioStationsEstimatedTimeRemaining = 0
+        radioStationsOperation = "✅ All stations synced to CloudKit"
+        
+        print("✅ DataSyncManager: Completed radio station sync tracking")
+        
+        // Auto-reset after showing completion
+        Task { @MainActor in
+            try await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+            self.resetRadioStationSync()
+        }
+    }
+    
+    /// Reset radio station sync tracking
+    @MainActor
+    func resetRadioStationSync() {
+        radioStationsStatus = .none
+        radioStationsProgress = 0.0
+        radioStationsCurrentCount = 0
+        radioStationsTotalCount = 0
+        radioStationsRemainingCount = 0
+        radioStationsSyncStartTime = nil
+        radioStationsEstimatedTimeRemaining = 0
+        radioStationsAverageTimePerStation = 0
+        radioStationsOperation = ""
+        
+        print("🔄 DataSyncManager: Reset radio station sync tracking")
+    }
+    
+    /// Check and resume incomplete sync on app startup
+    @MainActor
+    func checkAndResumeRadioStationSync() {
+        if SyncStateManager.shared.hasIncompleteRadioStationSync(),
+           let syncState = SyncStateManager.shared.getRadioStationSyncState() {
+            
+            radioStationsStatus = .inProgress
+            radioStationsTotalCount = syncState.totalStations
+            radioStationsCurrentCount = syncState.completedCount
+            radioStationsRemainingCount = syncState.remainingCount
+            radioStationsProgress = syncState.progress
+            radioStationsSyncStartTime = syncState.startTime
+            
+            let countryInfo = syncState.country != nil ? " for \(syncState.country!)" : ""
+            radioStationsOperation = "Resuming sync\(countryInfo)... (\(syncState.remainingCount) remaining)"
+            
+            print("🔄 DataSyncManager: Resumed radio station sync tracking - \(syncState.remainingCount) remaining of \(syncState.totalStations)")
+            
+            // Update performance metrics
+            if let metadata = SyncStateManager.shared.getSyncMetadata() {
+                radioStationsAverageTimePerStation = metadata.averageTimePerStation
+                radioStationsEstimatedTimeRemaining = metadata.estimatedTimeRemaining
+            }
+            
+            startProgressTracking()
+            
+            // Actually continue the CloudKit sync process
+            Task {
+                await continueRadioStationSync()
+            }
+        }
+    }
+    
+    /// Continue the radio station sync process after resume
+    @MainActor
+    private func continueRadioStationSync() async {
+        guard let syncState = SyncStateManager.shared.getRadioStationSyncState() else {
+            print("⚠️ No sync state found to continue")
+            return
+        }
+        
+        print("🔄 DataSyncManager: Continuing radio station sync - \(syncState.operationType)")
+        
+        do {
+            let radioViewModel = RadioStationViewModel.shared
+            
+            // Continue the sync based on operation type
+            if syncState.operationType == "order_sync" {
+                // Continue order sync
+                try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(radioViewModel.stations, country: syncState.country) { [weak self] progress, count, message in
+                    Task { @MainActor in
+                        self?.updateRadioStationProgress(progress, currentCount: count, operation: message)
+                    }
+                }
+                
+                // Trigger cross-device order sync notification
+                await RadioStationCloudKitManager.shared.triggerCrossDeviceOrderSync(action: "order_changed")
+                
+                print("📡 ✅ RADIO RESUME: Successfully completed resumed order sync")
+                completeRadioStationSync()
+                
+            } else if syncState.operationType == "batch_save" {
+                // Continue batch save sync
+                try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(radioViewModel.stations, country: syncState.country) { [weak self] progress, count, message in
+                    Task { @MainActor in
+                        self?.updateRadioStationProgress(progress, currentCount: count, operation: message)
+                    }
+                }
+                
+                print("📡 ✅ RADIO RESUME: Successfully completed resumed batch save")
+                completeRadioStationSync()
+                
+            } else {
+                print("⚠️ Unknown operation type for resume: \(syncState.operationType)")
+                resetRadioStationSync()
+            }
+            
+        } catch {
+            print("📡 ❌ RADIO RESUME: Failed to continue sync: \(error)")
+            radioStationsStatus = .failed
+            radioStationsOperation = "Failed to resume sync: \(error.localizedDescription)"
+            
+            // Reset after showing error
+            Task { @MainActor in
+                try await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                self.resetRadioStationSync()
+            }
+        }
+    }
+    
+    /// Start periodic progress tracking updates
+    private func startProgressTracking() {
+        // Update progress from SyncStateManager periodically
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+            Task { @MainActor in
+                guard self.radioStationsStatus == .inProgress else {
+                    timer.invalidate()
+                    return
+                }
+                
+                if let syncState = SyncStateManager.shared.getRadioStationSyncState() {
+                    self.radioStationsCurrentCount = syncState.completedCount
+                    self.radioStationsRemainingCount = syncState.remainingCount
+                    self.radioStationsProgress = syncState.progress
+                    
+                    if let metadata = SyncStateManager.shared.getSyncMetadata() {
+                        self.radioStationsAverageTimePerStation = metadata.averageTimePerStation
+                        self.radioStationsEstimatedTimeRemaining = metadata.estimatedTimeRemaining
+                    }
+                } else {
+                    // Sync completed or cancelled
+                    timer.invalidate()
+                }
+            }
+        }
     }
     
     // MARK: - Minimal CloudKit Sync Indicator

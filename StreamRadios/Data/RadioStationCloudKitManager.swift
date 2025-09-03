@@ -664,6 +664,91 @@ class RadioStationCloudKitManager: ObservableObject {
         os_log("🎉 RADIO Successfully completed all %d batches for %d total records", log: log, type: .info, totalBatches, records.count)
     }
     
+    /// Process CloudKit records in batches with progress tracking and resumable support
+    private func processBatchRecordsWithProgressResumable(_ records: [CKRecord], stationsToProcess: [RadioStation], batchSize: Int, totalStations: Int, alreadyProcessed: Int, progressCallback: @escaping (Double, Int, String) -> Void) async throws {
+        guard !records.isEmpty else { return }
+        
+        let totalBatches = (records.count + batchSize - 1) / batchSize
+        var totalSavedRecords = 0
+        var stationIndex = 0
+        
+        for batchIndex in 0..<totalBatches {
+            let startIndex = batchIndex * batchSize
+            let endIndex = min(startIndex + batchSize, records.count)
+            let batchRecords = Array(records[startIndex..<endIndex])
+            
+            let batchNumber = batchIndex + 1
+            os_log("📡 🔄 RADIO Processing CloudKit batch %d/%d (%d records)", log: log, type: .info, batchNumber, totalBatches, batchRecords.count)
+            
+            // Report batch start progress
+            let baseProgress = Double(alreadyProcessed) / Double(totalStations)
+            let batchStartProgress = baseProgress + (Double(batchIndex) / Double(totalBatches)) * (Double(stationsToProcess.count) / Double(totalStations)) * 0.9
+            await MainActor.run {
+                progressCallback(batchStartProgress, alreadyProcessed + totalSavedRecords, "Saving batch \(batchNumber) of \(totalBatches) to iCloud")
+            }
+            
+            // Use async/await for the batch operation
+            let savedRecords = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord], Error>) in
+                let modifyOperation = CKModifyRecordsOperation(recordsToSave: batchRecords, recordIDsToDelete: nil)
+                
+                // Set save policy to handle conflicts gracefully
+                modifyOperation.savePolicy = .changedKeys
+                modifyOperation.qualityOfService = .userInitiated
+                modifyOperation.isLongLived = records.count > 1000
+                
+                modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
+                    if let error = error {
+                        os_log("❌ RADIO Error in CloudKit batch %d save: %@", log: self.log, type: .error, batchNumber, error.localizedDescription)
+                        
+                        // Handle rate limiting errors with exponential backoff
+                        if let ckError = error as? CKError, ckError.code == .requestRateLimited {
+                            if let retryAfter = ckError.errorUserInfo[CKErrorRetryAfterKey] as? TimeInterval {
+                                os_log("⏱️ RADIO Rate limited. Will retry batch %d after %f seconds", log: self.log, type: .info, batchNumber, retryAfter)
+                                // For rate limiting, we should retry, but for now we'll just fail
+                                continuation.resume(throwing: error)
+                                return
+                            }
+                        }
+                        continuation.resume(throwing: error)
+                    } else {
+                        os_log("✅ RADIO Successfully saved batch %d/%d (%d records)", log: self.log, type: .info, batchNumber, totalBatches, savedRecords?.count ?? 0)
+                        continuation.resume(returning: savedRecords ?? [])
+                    }
+                }
+                
+                // Add the operation to the database
+                privateDatabase.add(modifyOperation)
+            }
+            
+            // Mark individual stations as processed for resumable sync
+            let stationsInThisBatch = min(batchRecords.count, stationsToProcess.count - stationIndex)
+            for i in 0..<stationsInThisBatch {
+                if stationIndex + i < stationsToProcess.count {
+                    let station = stationsToProcess[stationIndex + i]
+                    SyncStateManager.shared.markStationProcessed(station.id)
+                }
+            }
+            stationIndex += stationsInThisBatch
+            
+            totalSavedRecords += savedRecords.count
+            
+            // Report batch completion progress
+            let batchCompleteProgress = baseProgress + (Double(batchNumber) / Double(totalBatches)) * (Double(stationsToProcess.count) / Double(totalStations)) * 0.9
+            await MainActor.run {
+                progressCallback(batchCompleteProgress, alreadyProcessed + totalSavedRecords, "Saved \(alreadyProcessed + totalSavedRecords) of \(totalStations) stations to iCloud")
+            }
+            
+            os_log("📡 ✅ RADIO Completed batch %d/%d with %d saved records (total processed: %d)", log: log, type: .info, batchNumber, totalBatches, savedRecords.count, alreadyProcessed + totalSavedRecords)
+        }
+        
+        // Final completion progress
+        await MainActor.run {
+            progressCallback(1.0, totalStations, "Successfully saved \(totalStations) stations to iCloud")
+        }
+        
+        os_log("🎉 RADIO Successfully completed all %d batches for %d total records (resumable)", log: log, type: .info, totalBatches, records.count)
+    }
+    
     /// Process CloudKit record deletions in batches for optimal performance
     private func processBatchDeletion(_ recordIDs: [CKRecord.ID], batchSize: Int) async throws {
         guard !recordIDs.isEmpty else { return }
@@ -743,16 +828,53 @@ class RadioStationCloudKitManager: ObservableObject {
     
     // MARK: - CloudKit Change Detection Methods
     
-    /// Get the count of radio stations in CloudKit
+    /// Get the count of radio stations in CloudKit with proper pagination
     func getCloudKitStationCount() async throws -> Int {
         let query = CKQuery(recordType: RecordType.radioStation, predicate: NSPredicate(value: true))
         
         do {
-            let (records, _) = try await privateDatabase.records(matching: query)
-            let count = records.count
+            // Use paginated approach to get accurate count
+            var totalCount = 0
+            var cursor: CKQueryOperation.Cursor? = nil
             
-            print("📊 CloudKit station count: \(count)")
-            return count
+            repeat {
+                let operation = CKQueryOperation(query: query)
+                operation.cursor = cursor
+                operation.resultsLimit = 400 // CloudKit's default limit
+                operation.desiredKeys = ["recordID"] // Only fetch record ID to minimize data transfer
+                
+                let (records, nextCursor) = try await withCheckedThrowingContinuation { continuation in
+                    var fetchedRecords: [CKRecord] = []
+                    
+                    operation.recordMatchedBlock = { recordID, result in
+                        switch result {
+                        case .success(let record):
+                            fetchedRecords.append(record)
+                        case .failure(let error):
+                            print("⚠️ Error fetching record \(recordID): \(error)")
+                        }
+                    }
+                    
+                    operation.queryResultBlock = { result in
+                        switch result {
+                        case .success(let nextCursor):
+                            continuation.resume(returning: (fetchedRecords, nextCursor))
+                        case .failure(let error):
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                    
+                    privateDatabase.add(operation)
+                }
+                
+                totalCount += records.count
+                cursor = nextCursor
+                print("📊 CloudKit batch: \(records.count) records (total so far: \(totalCount))")
+                
+            } while cursor != nil
+            
+            print("📊 CloudKit station count (final): \(totalCount)")
+            return totalCount
             
         } catch {
             print("❌ Failed to get CloudKit station count: \(error)")
@@ -806,25 +928,50 @@ class RadioStationCloudKitManager: ObservableObject {
     
     // MARK: - Public API Methods
     
-    /// Save multiple radio stations to CloudKit in batches for improved performance
-    func saveRadioStationsBatchToCloudKit(_ stations: [RadioStation], progressCallback: @escaping (Double, Int, String) -> Void = { _, _, _ in }) async throws {
+    /// Save multiple radio stations to CloudKit in batches for improved performance with resumable support
+    func saveRadioStationsBatchToCloudKit(_ stations: [RadioStation], country: String? = nil, progressCallback: @escaping (Double, Int, String) -> Void = { _, _, _ in }) async throws {
         guard !stations.isEmpty else {
             os_log("⚠️ RADIO No stations to save in batch", log: log, type: .info)
             return
         }
         
-        os_log("📡 🔄 RADIO Starting batch CloudKit save for %d stations", log: log, type: .info, stations.count)
+        let stationIds = stations.map { $0.id }
+        
+        // Check for resumable sync
+        let stationsToProcess: [RadioStation]
+        if SyncStateManager.shared.hasIncompleteRadioStationSync() {
+            let remainingIds = SyncStateManager.shared.getStationsToProcess(from: stationIds)
+            stationsToProcess = stations.filter { remainingIds.contains($0.id) }
+            os_log("📡 🔄 RADIO Resuming batch CloudKit save: %d remaining out of %d total stations", 
+                   log: log, type: .info, stationsToProcess.count, stations.count)
+        } else {
+            stationsToProcess = stations
+            // Start new sync tracking
+            SyncStateManager.shared.startRadioStationSync(
+                totalStations: stations.count,
+                country: country,
+                operationType: "batch_save"
+            )
+            os_log("📡 🔄 RADIO Starting new batch CloudKit save for %d stations", 
+                   log: log, type: .info, stations.count)
+        }
         
         // Report initial progress
+        let syncState = SyncStateManager.shared.getRadioStationSyncState()
+        let totalStations = syncState?.totalStations ?? stations.count
+        let alreadyProcessed = syncState?.completedCount ?? 0
+        
         await MainActor.run {
-            progressCallback(0.0, 0, "Preparing \(stations.count) stations for CloudKit...")
+            let progressText = alreadyProcessed > 0 ? 
+                "Resuming: \(stationsToProcess.count) remaining of \(totalStations) stations..." :
+                "Preparing \(totalStations) stations for CloudKit..."
+            progressCallback(Double(alreadyProcessed) / Double(totalStations), alreadyProcessed, progressText)
         }
         
         // Convert stations to CKRecords with progress updates
         var recordsToSave = [CKRecord]()
-        let totalStations = stations.count
         
-        for (index, station) in stations.enumerated() {
+        for (index, station) in stationsToProcess.enumerated() {
             let recordID = CKRecord.ID(recordName: station.id)
             
             // Try to fetch existing record first or create new one
@@ -854,20 +1001,28 @@ class RadioStationCloudKitManager: ObservableObject {
             recordsToSave.append(record)
             
             // Report preparation progress every 10 stations or at the end
-            if (index + 1) % 10 == 0 || index == totalStations - 1 {
-                let prepareProgress = Double(index + 1) / Double(totalStations) * 0.2 // Preparation is 20% of total progress
+            if (index + 1) % 10 == 0 || index == stationsToProcess.count - 1 {
+                let prepareProgress = 0.1 * (Double(index + 1) / Double(stationsToProcess.count))
+                let currentTotal = alreadyProcessed + index + 1
                 let countryInfo = !station.country.isEmpty ? " from \(station.country)" : ""
                 await MainActor.run {
-                    progressCallback(prepareProgress, index + 1, "Prepared \(index + 1) of \(totalStations) stations\(countryInfo)...")
+                    progressCallback(
+                        (Double(alreadyProcessed) + prepareProgress * Double(stationsToProcess.count)) / Double(totalStations),
+                        currentTotal,
+                        "Prepared \(index + 1) of \(stationsToProcess.count) remaining stations\(countryInfo)..."
+                    )
                 }
             }
         }
         
         // Process in batches for optimal CloudKit performance with progress tracking
         let batchSize = 200 // CloudKit recommended batch size
-        try await processBatchRecordsWithProgress(recordsToSave, batchSize: batchSize, totalStations: totalStations, progressCallback: progressCallback)
+        try await processBatchRecordsWithProgressResumable(recordsToSave, stationsToProcess: stationsToProcess, batchSize: batchSize, totalStations: totalStations, alreadyProcessed: alreadyProcessed, progressCallback: progressCallback)
         
-        os_log("✅ RADIO Successfully saved %d stations to CloudKit in batches", log: log, type: .info, stations.count)
+        // Mark sync as complete
+        SyncStateManager.shared.completeRadioStationSync()
+        
+        os_log("✅ RADIO Successfully saved %d stations to CloudKit in batches", log: log, type: .info, totalStations)
         
         // Trigger bulk cross-device sync notification
         await triggerCrossDeviceBulkStationSync(stations: stations, action: "batch_updated")

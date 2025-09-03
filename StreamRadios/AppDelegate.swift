@@ -80,10 +80,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         DebugLogger.logCritical("App will terminate - saving all state", category: "AppLifecycle")
         DebugLogger.setUserAction("App Termination")
         
-        // Immediately save current state when app is terminated
-        updatePodcastStateAndSave()
-        PodcastPlayer.shared.handleAppWillTerminate()
-        podcastViewModel.saveContextIfNeeded()
+        print("🚨 COMPREHENSIVE SAVE: applicationWillTerminate called - final save attempt")
+        
+        // CRITICAL FIX: Use universal save for maximum reliability
+        performUniversalProgressSave(reason: "app_will_terminate")
+        
         // Request that global player be suppressed on next launch
         UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
         
@@ -99,9 +100,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         DebugLogger.logWarning("App will resign active - potential force close", category: "AppLifecycle")
         DebugLogger.setUserAction("App Resign Active")
         
-        // Save state immediately when app resigns active status (might be force closed)
-        updatePodcastStateAndSave()
-        PodcastPlayer.shared.handleAppWillTerminate()
+        print("🚨 COMPREHENSIVE SAVE: applicationWillResignActive called - saving progress immediately")
+        
+        // CRITICAL FIX: Use universal save to cover all possible termination scenarios
+        performUniversalProgressSave(reason: "app_resign_active_force_close_protection")
         
         // CRITICAL FIX: Don't suppress radio player if it's actively playing in background
         let radioPlayer = RadioPlayer.shared
@@ -170,6 +172,121 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             podcastViewModel.saveContextIfNeeded()
         }
         
+        /// CRITICAL FIX: Universal progress saving that works for ALL app termination scenarios
+        /// This method combines both critical and enhanced saving approaches
+        private func performUniversalProgressSave(reason: String) {
+            print("🚨 UNIVERSAL SAVE: Starting comprehensive progress save for reason: \(reason)")
+            
+            // First, do the critical immediate save
+            performCriticalForceCloseProgressSave(reason: reason)
+            
+            // Then, do the enhanced save as backup
+            performEnhancedProgressSave(reason: reason)
+            
+            print("✅ UNIVERSAL SAVE: Completed comprehensive progress save for reason: \(reason)")
+        }
+        
+        /// CRITICAL FIX: Immediate synchronous progress saving for app switcher force close scenario
+        /// This method is designed to execute as fast as possible with no async operations
+        private func performCriticalForceCloseProgressSave(reason: String) {
+            print("🚨 CRITICAL Force Close Save: Starting immediate synchronous save for reason: \(reason)")
+            
+            // Get current podcast state immediately - no async calls
+            guard let currentEpisode = podcastPlayer.currentEpisode else {
+                print("🚨 CRITICAL Force Close Save: No current episode - skipping")
+                return
+            }
+            
+            // Get all values synchronously
+            let currentProgress = PodcastPlayer.shared.currentProgress
+            let currentTime = PodcastPlayer.shared.currentTime  
+            let duration = PodcastPlayer.shared.duration
+            let isPlaying = PodcastPlayer.shared.isPlaying
+            
+            // Calculate final progress immediately
+            let calculatedProgress = duration > 0 ? currentTime / duration : 0
+            let finalProgress = max(currentProgress, calculatedProgress, 0.0)
+            
+            print("🚨 CRITICAL Force Close Save: Episode: \(currentEpisode.title)")
+            print("🚨 CRITICAL Force Close Save: Final Progress: \(finalProgress * 100)%")
+            print("🚨 CRITICAL Force Close Save: Is Playing: \(isPlaying)")
+            
+            // IMMEDIATE SYNCHRONOUS SAVES - No async operations
+            
+            // 1. Save to EpisodeStateManager (UserDefaults) - synchronous
+            EpisodeStateManager.shared.setProgress(for: currentEpisode.id, progress: finalProgress)
+            
+            // 2. If playing and has progress, mark as in-progress
+            if isPlaying && finalProgress > 0 && finalProgress < 0.99 {
+                EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
+            }
+            
+            // 3. Force immediate UserDefaults synchronization
+            UserDefaults.standard.synchronize()
+            
+            // 4. Also call the enhanced method for additional safety (but don't wait for it)
+            performEnhancedProgressSave(reason: reason)
+            
+            print("🚨 CRITICAL Force Close Save: Completed immediate save for \(currentEpisode.title)")
+        }
+        
+        /// CRITICAL FIX: Enhanced progress saving with multiple attempts for force close protection
+        private func performEnhancedProgressSave(reason: String) {
+            print("🛡️ Enhanced Progress Save: Starting multi-layered save for reason: \(reason)")
+            
+            // 1. Immediate progress save with current player state
+            if let currentEpisode = podcastPlayer.currentEpisode {
+                let currentProgress = PodcastPlayer.shared.currentProgress
+                let currentTime = PodcastPlayer.shared.currentTime
+                let duration = PodcastPlayer.shared.duration
+                
+                // Calculate progress from multiple sources to ensure accuracy
+                let calculatedProgress = duration > 0 ? currentTime / duration : 0
+                let finalProgress = max(currentProgress, calculatedProgress)
+                
+                print("🛡️ Enhanced Progress Save: Episode: \(currentEpisode.title)")
+                print("🛡️ Enhanced Progress Save: Current Progress: \(currentProgress * 100)%")
+                print("🛡️ Enhanced Progress Save: Calculated Progress: \(calculatedProgress * 100)%")
+                print("🛡️ Enhanced Progress Save: Final Progress: \(finalProgress * 100)%")
+                
+                // Save to EpisodeStateManager with real-time sync
+                EpisodeStateManager.shared.setProgressWithRealTimeSync(
+                    for: currentEpisode.id,
+                    progress: finalProgress,
+                    reason: reason,
+                    feedId: currentEpisode.feedId
+                )
+                
+                // Update PodcastViewModel
+                podcastViewModel.updateProgress(for: currentEpisode, progress: finalProgress)
+                
+                // Mark as in progress if playing
+                if podcastPlayer.isPlaying && finalProgress > 0 && finalProgress < 0.99 {
+                    var updatedEpisode = currentEpisode
+                    updatedEpisode.state.progress = finalProgress
+                    updatedEpisode.state.isPlayed = false
+                    podcastViewModel.updateEpisode(updatedEpisode)
+                    
+                    EpisodeStateManager.shared.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
+                }
+                
+                print("🛡️ Enhanced Progress Save: Successfully saved progress for \(currentEpisode.title)")
+            }
+            
+            // 2. Call original save method for additional safety
+            updatePodcastStateAndSave()
+            
+            // 3. Force PodcastPlayer termination handling
+            PodcastPlayer.shared.handleAppWillTerminate()
+            
+            // 4. Save Core Data context
+            podcastViewModel.saveContextIfNeeded()
+            
+            // 5. EpisodeStateManager saves automatically via UserDefaults
+            
+            print("🛡️ Enhanced Progress Save: Completed multi-layered save for reason: \(reason)")
+        }
+        
         /// Synchronize all download states between Core Data and EpisodeStateManager during force close
         private func synchronizeAllDownloadStates() {
             let context = CoreDataStack.shared.context
@@ -233,7 +350,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
          DebugLogger.logInfo("App entered background", category: "AppLifecycle")
          DebugLogger.setUserAction("App Background")
          
-         // CRITICAL FIX: Enhanced background task management to prevent main thread deadlocks
+                 print("🚨 COMPREHENSIVE SAVE: applicationDidEnterBackground called - saving progress immediately")
+        
+        // CRITICAL FIX: Use universal save for app switcher scenarios
+        performUniversalProgressSave(reason: "app_did_enter_background_potential_force_close")
+        
+        // CRITICAL FIX: Enhanced background task management to prevent main thread deadlocks
          let radioPlayer = RadioPlayer.shared
          if radioPlayer.isPlaying && radioPlayer.userWantsToPlay {
              print("🔧 AppDelegate: Starting enhanced background task for radio playback")
@@ -326,13 +448,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
              DebugLogger.logInfo("App entering background with no active podcast playback - no background task needed", category: "BackgroundTask")
          }
          
-         // App entered background - save all current state immediately
-         updatePodcastStateAndSave()
-         PodcastPlayer.shared.handleAppWillTerminate()
-         
-         // Force synchronize to ensure data persistence
-         UserDefaults.standard.synchronize()
-     }
+         // REMOVED: This is now handled by the universal save method above
+        
+        // Force synchronize to ensure data persistence
+        UserDefaults.standard.synchronize()
+    }
     
     lazy var persistentContainer: NSPersistentContainer = {
             let container = NSPersistentContainer(name: "PodcastModel")

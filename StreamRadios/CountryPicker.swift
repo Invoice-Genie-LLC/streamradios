@@ -549,7 +549,7 @@ enum CountryRegion: String, CaseIterable, Hashable {
             "Serbia", "Bosnia & Herzegovina", "Montenegro", "Albania", "Macedonia", "Greece", 
             "Portugal", "Ireland", "Iceland", "Lithuania", "Latvia", "Estonia", "Belarus", 
             "Ukraine", "Moldova", "Russia", "Luxembourg", "Malta", "Cyprus", "Liechtenstein", 
-            "Monaco", "San Marino", "Vatican City", "Andorra", "Kosovo", "European Union"
+            "Monaco", "San Marino", "Vatican City", "Andorra", "Kosovo"
         ]
         
         // Africa
@@ -622,7 +622,7 @@ enum CountryRegion: String, CaseIterable, Hashable {
         
         // Special territories and other regions
         let otherRegions = [
-            "Select Country", "Unknown Region", "European Union"
+            "Select Country", "Unknown Region"
         ]
         
         // Check all regions including additional countries

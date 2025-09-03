@@ -923,7 +923,7 @@ class EpisodeStateManager: ObservableObject {
         setProgress(for: episodeId, progress: progress)
         
         // REAL-TIME SYNC: Instantly sync progress changes for allowed conditions
-        let allowedReasons = ["episode_paused", "app_background", "app_closed"]
+        let allowedReasons = ["episode_paused", "app_background", "app_closed", "app_resign_active_force_close_protection", "app_did_enter_background_potential_force_close"]
         if allowedReasons.contains(reason) {
             if let feedId = feedId {
                 // Use provided feedId for efficient sync
@@ -1572,7 +1572,11 @@ class EpisodeStateManager: ObservableObject {
         let existingProgress = episodeProgress[episodeId] ?? 0.0
         let finalProgress: Double
         
-        if progress < existingProgress && !isChapterProtected && !isRewindProtected {
+        // ENHANCED PROTECTION: Critical check for accidental reset to 0
+        if progress == 0.0 && existingProgress > 0.0 && !isRewindProtected {
+            print("🛡️ CRITICAL PROTECTION: Blocked progress reset from \(String(format: "%.4f", existingProgress)) to 0.0 for episode \(episodeId) - preserving existing progress")
+            finalProgress = existingProgress // Block accidental reset to 0
+        } else if progress < existingProgress && !isChapterProtected && !isRewindProtected {
             print("🛡️ PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
             finalProgress = existingProgress // Keep the higher progress
         } else {
@@ -1581,7 +1585,7 @@ class EpisodeStateManager: ObservableObject {
             } else if isRewindProtected && progress < existingProgress {
                 print("🔄 REWIND PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - rewind override")
             }
-            finalProgress = progress // Allow forward progress, same value, chapter backward progress, or rewind backward progress
+            finalProgress = progress // Allow forward progress, same value, chapter backward progress, or intentional rewind
         }
         
         episodeProgress[episodeId] = finalProgress
@@ -1640,7 +1644,7 @@ class EpisodeStateManager: ObservableObject {
         setProgress(for: episodeId, progress: progress)
         
         // REAL-TIME SYNC: Instantly sync progress changes for allowed conditions
-        let allowedReasons = ["episode_paused", "app_background", "app_closed"]
+        let allowedReasons = ["episode_paused", "app_background", "app_closed", "app_resign_active_force_close_protection", "app_did_enter_background_potential_force_close"]
         if allowedReasons.contains(reason) {
             performRealTimeSyncForEpisode(episodeId, reason: reason)
             
@@ -2233,7 +2237,11 @@ extension EpisodeStateManager {
         let existingProgress = episodeProgress[episodeId] ?? 0.0
         let finalProgress: Double
         
-        if progress < existingProgress && !isChapterProtected && !isRewindProtected {
+        // ENHANCED CLOUDKIT PROTECTION: Critical check for accidental reset to 0 from CloudKit
+        if progress == 0.0 && existingProgress > 0.0 && !isRewindProtected {
+            print("🛡️ CRITICAL CLOUDKIT PROTECTION: Blocked CloudKit progress reset from \(String(format: "%.4f", existingProgress)) to 0.0 for episode \(episodeId) - preserving existing progress")
+            finalProgress = existingProgress // Block accidental reset to 0 from CloudKit
+        } else if progress < existingProgress && !isChapterProtected && !isRewindProtected {
             print("🛡️ CLOUDKIT PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - keeping higher value")
             finalProgress = existingProgress // Keep the higher progress
         } else {
@@ -2242,7 +2250,7 @@ extension EpisodeStateManager {
             } else if isRewindProtected && progress < existingProgress {
                 print("🔄 CLOUDKIT REWIND PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - rewind override")
             }
-            finalProgress = progress // Allow forward progress, same value, chapter backward progress, or rewind backward progress
+            finalProgress = progress // Allow forward progress, same value, chapter backward progress, or intentional rewind
         }
         
         episodeProgress[episodeId] = finalProgress

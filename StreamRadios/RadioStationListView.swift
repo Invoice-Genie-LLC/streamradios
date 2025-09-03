@@ -116,8 +116,12 @@ struct RadioStationListView: View {
         .onDisappear(perform: cleanup)
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
             viewModel.loadStationsFromCoreData()
-            // If current tab filter hides results but country has stations, show All tab
+            
+            // Force UI update immediately after loading stations
             DispatchQueue.main.async {
+                viewModel.objectWillChange.send()
+                
+                // If current tab filter hides results but country has stations, show All tab
                 let countryCount = viewModel.stations.filter { $0.country == viewModel.selectedCountry }.count
                 if countryCount > 0 && selectedSubTab != .all {
                     viewModel.selectedSubTab = .all
@@ -250,11 +254,69 @@ struct RadioStationListView: View {
         VStack {
             // RECENT, FAVORITES & ALL TAB FIX: Don't show anything when stations exist but tabs are empty
             if selectedSubTab == .recent ||
-               (selectedSubTab == .favorites && !viewModel.stations.isEmpty) ||
-               (selectedSubTab == .all && !viewModel.stations.isEmpty && viewModel.selectedCountry != "Select Country") {
-                // Show nothing for Recent tab when empty, Favorites tab when stations exist but no favorites,
-                // or All tab when stations exist but no stations for selected country
+               (selectedSubTab == .favorites && !viewModel.stations.isEmpty) {
+                // Show nothing for Recent tab when empty, Favorites tab when stations exist but no favorites
                 Color.clear
+            } else if selectedSubTab == .all && !viewModel.stations.isEmpty && viewModel.selectedCountry != "Select Country" {
+                // All tab with country selected but no stations for that country
+                VStack(spacing: 16) {
+                    Image(systemName: "radio")
+                        .font(.system(size: 50))
+                        .foregroundColor(.gray)
+                    
+                    Text("No stations available")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.adaptivePrimaryText)
+                    
+                    Text("No radio stations found for \(viewModel.selectedCountry)")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                    
+                    VStack(spacing: 12) {
+                        Button(action: {
+                            Task {
+                                await viewModel.fetchStationsForSelectedCountry()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 16, weight: .medium))
+                                Text("Try Again")
+                                    .font(.system(size: 16, weight: .medium))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.blue)
+                            )
+                        }
+                        
+                        Button(action: {
+                            showingCountryPicker = true
+                        }) {
+                            HStack {
+                                Image(systemName: "globe")
+                                    .font(.system(size: 16, weight: .medium))
+                                Text("Choose Different Country")
+                                    .font(.system(size: 16, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(Color.blue, lineWidth: 1)
+                            )
+                        }
+                    }
+                    .padding(.top, 8)
+                }
+                .padding(.horizontal, 40)
             } else if viewModel.stations.isEmpty {
                 // No stations exist at all - show country selection button
                 Text("No stations configured")
