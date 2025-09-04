@@ -253,48 +253,128 @@ struct RadioStationListView: View {
     private var emptyStateView: some View {
         VStack {
             // RECENT, FAVORITES & ALL TAB FIX: Don't show anything when stations exist but tabs are empty
-            if selectedSubTab == .recent ||
+            if (selectedSubTab == .recent && !viewModel.stations.isEmpty) ||
                (selectedSubTab == .favorites && !viewModel.stations.isEmpty) {
-                // Show nothing for Recent tab when empty, Favorites tab when stations exist but no favorites
+                // Show nothing for Recent/Favorites tabs when stations exist but tabs are empty
                 Color.clear
             } else if selectedSubTab == .all && !viewModel.stations.isEmpty && viewModel.selectedCountry != "Select Country" {
                 // All tab with country selected but no stations for that country
-                VStack(spacing: 16) {
-                    Image(systemName: "radio")
-                        .font(.system(size: 50))
-                        .foregroundColor(.gray)
+                VStack {
+                    Spacer()
+                        .frame(minHeight: 40, maxHeight: 80) // Reduced top spacing for small screens
                     
-                    Text("No stations available")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.adaptivePrimaryText)
-                    
-                    Text("No radio stations found for \(viewModel.selectedCountry)")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                    
-                    VStack(spacing: 12) {
-                        Button(action: {
-                            Task {
-                                await viewModel.fetchStationsForSelectedCountry()
+                    VStack(spacing: 16) {
+                        Image(systemName: "radio")
+                            .font(.system(size: 50))
+                            .foregroundColor(.gray)
+                        
+                        Text("No stations available")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.adaptivePrimaryText)
+                        
+                        Text("No radio stations found for \(viewModel.selectedCountry)")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity)
+                        
+                        VStack(spacing: 12) {
+                            Button(action: {
+                                Task {
+                                    await viewModel.fetchStationsForSelectedCountry()
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 16, weight: .medium))
+                                    Text("Try Again")
+                                        .font(.system(size: 16, weight: .medium))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(Color.blue)
+                                )
                             }
+                            
+                            Button(action: {
+                                showingCountryPicker = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "globe")
+                                        .font(.system(size: 16, weight: .medium))
+                                    Text("Choose Different Country")
+                                        .font(.system(size: 16, weight: .medium))
+                                }
+                                .foregroundColor(.blue)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(Color.blue, lineWidth: 1)
+                                )
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    
+                    Spacer()
+                        .frame(minHeight: 80, maxHeight: 120) // More bottom spacing to ensure buttons are visible
+                }
+                .padding(.horizontal, 40)
+            } else if viewModel.stations.isEmpty {
+                // No stations exist at all - show country selection button
+                VStack {
+                    Spacer()
+                        .frame(minHeight: 60, maxHeight: 100)
+                    
+                    VStack(spacing: 16) {
+                        Text("No stations configured")
+                            .font(.headline)
+                            .foregroundColor(.adaptivePrimaryText)
+                        
+                        Button(action: {
+                            showingCountryPicker = true
                         }) {
                             HStack {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 16, weight: .medium))
-                                Text("Try Again")
-                                    .font(.system(size: 16, weight: .medium))
+                                Image(systemName: "globe")
+                                Text("Select Country")
                             }
+                            .font(.body)
                             .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color.blue)
-                            )
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(.blue)
+                            .cornerRadius(8)
                         }
+                    }
+                    
+                    Spacer()
+                        .frame(minHeight: 100, maxHeight: 140)
+                }
+            } else if viewModel.selectedCountry == "Select Country" {
+                // Stations exist but no country selected - show selection prompt
+                VStack {
+                    Spacer()
+                        .frame(minHeight: 60, maxHeight: 100)
+                    
+                    VStack(spacing: 12) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 40))
+                            .foregroundColor(.blue)
+                        Text("Select a Country")
+                            .font(.headline)
+                            .foregroundColor(.adaptivePrimaryText)
+                        Text("Select any country to explore its radio stations")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
                         
                         Button(action: {
                             showingCountryPicker = true
@@ -302,80 +382,29 @@ struct RadioStationListView: View {
                             HStack {
                                 Image(systemName: "globe")
                                     .font(.system(size: 16, weight: .medium))
-                                Text("Choose Different Country")
+                                Text("Browse Countries")
                                     .font(.system(size: 16, weight: .medium))
                             }
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
                             .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .stroke(Color.blue, lineWidth: 1)
-                            )
-                        }
-                    }
-                    .padding(.top, 8)
-                }
-                .padding(.horizontal, 40)
-            } else if viewModel.stations.isEmpty {
-                // No stations exist at all - show country selection button
-                Text("No stations configured")
-                    .font(.headline)
-                    .foregroundColor(.adaptivePrimaryText)
-                    .padding(.bottom, 15)
-                Button(action: {
-                    showingCountryPicker = true
-                }) {
-                    HStack {
-                        Image(systemName: "globe")
-                        Text("Select Country")
-                    }
-                    .font(.body)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.blue)
-                    .cornerRadius(8)
-                }
-            } else if viewModel.selectedCountry == "Select Country" {
-                // Stations exist but no country selected - show selection prompt
-                VStack(spacing: 12) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 40))
-                        .foregroundColor(.blue)
-                    Text("Select a Country")
-                        .font(.headline)
-                        .foregroundColor(.adaptivePrimaryText)
-                    Text("Select any country to explore its radio stations")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                    
-                    Button(action: {
-                        showingCountryPicker = true
-                    }) {
-                        HStack {
-                            Image(systemName: "globe")
-                                .font(.system(size: 16, weight: .medium))
-                            Text("Browse Countries")
-                                .font(.system(size: 16, weight: .medium))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 25)
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                                        startPoint: .leading,
-                                        endPoint: .trailing
+                                RoundedRectangle(cornerRadius: 25)
+                                    .fill(
+                                        LinearGradient(
+                                            gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
                                     )
-                                )
-                        )
-                        .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                            )
+                            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                        }
+                        .padding(.top, 20)
                     }
-                    .padding(.top, 20)
+                    
+                    Spacer()
+                        .frame(minHeight: 100, maxHeight: 140)
                 }
                 .padding(.horizontal, 40)
             } else {
