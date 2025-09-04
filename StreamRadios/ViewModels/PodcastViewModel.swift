@@ -175,6 +175,7 @@ class PodcastViewModel: ObservableObject {
     @Published var currentTab = 0
     @Published var searchQuery = ""
     @Published var episodeCounts = (all: 0, favorites: 0, downloads: 0)
+    @Published var uiRefreshTrigger: UUID = UUID() // Force UI refresh trigger
     @Published var showNoEpisodesAlert = false
     @Published var noEpisodesAlertMessage = ""
     @Published var isAscendingSort = true
@@ -1093,18 +1094,90 @@ class PodcastViewModel: ObservableObject {
             // All tab shows everything, no filtering needed
             break
         }
+        
+        // 🎯 CROSS-TAB UPDATE: Invalidate cached results for ALL tabs when episode states change
+        // This ensures that when user switches tabs, they see the updated filtering
+        Task { @MainActor in
+            invalidateAllTabCaches()
+        }
+    }
+    
+    /// Invalidate cached filtering results for all tabs to ensure real-time updates
+    @MainActor
+    private func invalidateAllTabCaches() {
+        // Clear any cached episode filtering results
+        // This forces re-filtering when user switches between tabs
+        tabFilterCache.removeAll()
+        tabFilterCounts.removeAll()
+        print("🧹 CACHE CLEAR: Invalidated all tab caches for real-time filtering updates")
+        
+        // 🎯 IMMEDIATE REFRESH: Also refresh the current tab's filtering to show changes instantly
+        Task {
+            await refreshCurrentTabFiltering()
+        }
+    }
+    
+    /// Refresh filtering for the current tab to show episode state changes immediately
+    @MainActor
+    private func refreshCurrentTabFiltering() async {
+        guard let selectedFeedId = selectedFeedId else { return }
+        
+        let currentFilter = EpisodeFilter(rawValue: currentTab) ?? .all
+        print("🔄 Refreshing filtered list for tab: \(currentTab)")
+        
+        // Get the current full episode list (from feed or snapshot)
+        var allEpisodes: [PodcastEpisode] = []
+        
+        // Try to get from current feed first
+        if let feed = podcastFeeds.first(where: { $0.id == selectedFeedId }) {
+            allEpisodes = feed.episodes
+        }
+        
+        // If no episodes from feed, try from snapshot
+        if allEpisodes.isEmpty {
+            if let snapshot = getEpisodeSnapshot(for: selectedFeedId) {
+                allEpisodes = snapshot
+            }
+        }
+        
+        // If still no episodes, use current episodes as fallback
+        if allEpisodes.isEmpty {
+            allEpisodes = currentEpisodes
+        }
+        
+        // Apply the current tab's filter
+        let filteredEpisodes: [PodcastEpisode]
+        switch currentFilter {
+        case .all:
+            filteredEpisodes = allEpisodes
+        case .favorites:
+            filteredEpisodes = allEpisodes.filter { $0.state.isFavorite }
+        case .downloads:
+            filteredEpisodes = allEpisodes.filter { $0.state.isDownloaded }
+        }
+        
+        // Update the current episodes with filtered results
+        let sortedEpisodes = filteredEpisodes.sorted { $0.publicationDate > $1.publicationDate }
+        currentEpisodes = sortedEpisodes
+        
+        print("⚡ INSTANT FILTER UPDATE: Updated current tab to show \(sortedEpisodes.count) episodes")
     }
     
     /// Immediate UI update for real-time sync (bypasses batch processing)
     private func updateEpisodeUIStateImmediate(episodeId: String, isFavorite: Bool?, isDownloaded: Bool?, progress: Double? = nil) {
+        print("🔄 UI STATE UPDATE: Starting immediate update for episode \(episodeId)")
+        print("🔄 UI STATE UPDATE: isFavorite=\(String(describing: isFavorite)), isDownloaded=\(String(describing: isDownloaded)), progress=\(String(describing: progress))")
+        
         // Update episodeProgress cache immediately
         if let progress = progress {
             episodeProgress[episodeId] = progress
         }
         
         // Update currentEpisodes using efficient single-pass update
+        var foundInCurrentEpisodes = false
         for index in 0..<currentEpisodes.count {
             if currentEpisodes[index].id == episodeId {
+                let oldEpisode = currentEpisodes[index]
                 var updatedEpisode = currentEpisodes[index]
                 
                 if let isFavorite = isFavorite {
@@ -1118,8 +1191,17 @@ class PodcastViewModel: ObservableObject {
                 }
                 
                 currentEpisodes[index] = updatedEpisode
+                foundInCurrentEpisodes = true
+                
+                print("🔄 UI STATE UPDATE: Updated episode in currentEpisodes[index: \(index)]")
+                print("🔄 UI STATE UPDATE: OLD - favorite: \(oldEpisode.state.isFavorite), downloaded: \(oldEpisode.state.isDownloaded)")
+                print("🔄 UI STATE UPDATE: NEW - favorite: \(updatedEpisode.state.isFavorite), downloaded: \(updatedEpisode.state.isDownloaded)")
                 break
             }
+        }
+        
+        if !foundInCurrentEpisodes {
+            print("🔄 UI STATE UPDATE: ⚠️ Episode \(episodeId) not found in currentEpisodes array")
         }
         
         // Update podcastFeeds efficiently (single-pass lookup)
@@ -1144,8 +1226,28 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        // Apply tab filtering
-        applyTabFiltering(episodeId: episodeId, isFavorite: isFavorite, isDownloaded: isDownloaded)
+        // Note: Tab filtering is now handled directly in toggle methods for immediate response
+    }
+    
+    /// Force SwiftUI to detect changes in currentEpisodes array
+    private func forceUIRefresh() {
+        // Multiple strategies to force UI refresh
+        
+        // Strategy 1: Update refresh trigger (triggers currentEpisode computed property)
+        uiRefreshTrigger = UUID()
+        
+        // Strategy 2: Force objectWillChange notification
+        objectWillChange.send()
+        
+        // Strategy 3: Force array change detection by recreating the array synchronously
+        let episodes = currentEpisodes
+        currentEpisodes = []
+        currentEpisodes = episodes
+        
+        // Strategy 4: Force another objectWillChange after array recreation
+        objectWillChange.send()
+        
+        print("🔄 UI FORCE REFRESH: Triggered all refresh strategies - trigger: \(uiRefreshTrigger)")
     }
     
     // MARK: - CloudKit Automatic Sync Handlers
@@ -5878,30 +5980,24 @@ class PodcastViewModel: ObservableObject {
             }
             // Note: Persistent cache is retained for instant reloading
             
-            // Update local state immediately for all tabs
+            // ⚡ IMMEDIATE UI UPDATE: Ensure all updates happen on main thread
             await MainActor.run {
-                // Update the episode in place across all states immediately
-                if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                    var updatedEpisode = self.currentEpisodes[index]
-                    updatedEpisode.state.isDownloaded = false
-                    updatedEpisode.localFilePath = nil
-                    self.currentEpisodes[index] = updatedEpisode
-                    print("🔍 DEBUG: Updated episode state immediately - isDownloaded: false")
-                }
+                // Update episode state in EpisodeStateManager first (source of truth)
+                EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
                 
-                // Update the episode in the feed object as well
-                if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
-                   let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
-                    var updatedFeed = self.podcastFeeds[feedIndex]
-                    updatedFeed.episodes[episodeIndex].state.isDownloaded = false
-                    updatedFeed.episodes[episodeIndex].localFilePath = nil
-                    self.podcastFeeds[feedIndex] = updatedFeed
-                }
+                // Update UI state for instant visual feedback
+                self.updateEpisodeUIStateImmediate(episodeId: episode.id, isFavorite: nil, isDownloaded: false)
                 
-                // If we're on downloads tab, remove the episode immediately
+                // If we're on downloads tab, remove immediately
                 if self.currentTab == EpisodeFilter.downloads.rawValue {
                     self.currentEpisodes.removeAll { $0.id == episode.id }
+                    print("🔄 UI UPDATE: Immediately removed deleted download from downloads tab")
                 }
+                
+                // Force UI refresh with aggressive change detection
+                self.forceUIRefresh()
+                
+                print("🔍 DEBUG: ✅ Immediate delete download UI update completed for '\(episode.title)'")
             }
             
             print("✅ Successfully deleted download for episode: \(episode.title)")
@@ -6277,10 +6373,17 @@ extension PodcastViewModel {
         updateEpisodeState(episodeId, isPlayed: true)
     }
     
-    @available(*, deprecated, message: "Use updateEpisodeState instead")
+    @available(*, deprecated, message: "Use toggleFavorite(for episode: PodcastEpisode) instead")
     func toggleFavorite(for episodeId: String) {
-        let currentState = currentEpisodes.first { $0.id == episodeId }?.state.isFavorite ?? false
-        updateEpisodeState(episodeId, isFavorite: !currentState)
+        print("⚠️ DEPRECATED: toggleFavorite(for episodeId: String) called - this should not happen!")
+        // Find the episode and call the new method
+        if let episode = currentEpisodes.first(where: { $0.id == episodeId }) {
+            toggleFavorite(for: episode)
+        } else {
+            // Fallback to old behavior
+            let currentState = currentEpisodes.first { $0.id == episodeId }?.state.isFavorite ?? false
+            updateEpisodeState(episodeId, isFavorite: !currentState)
+        }
     }
     
     // MARK: - PodcastPlayer Compatibility Methods
@@ -6495,11 +6598,51 @@ extension PodcastViewModel {
         print("🔍 DEBUG: Toggling favorite for '\(episode.title)' from \(currentState) to \(newState) on tab \(currentTab)")
         print("📡 FAVORITE TOGGLE: About to call updateEpisodeState with isFavorite: \(newState)")
         
-        // Use updateEpisodeState for consistent sync and data management
-        // This will handle EpisodeStateManager updates, sync, and UI refresh automatically
-        updateEpisodeState(episode.id, isFavorite: newState)
+        // ⚡ IMMEDIATE UI UPDATE: Update episode state in EpisodeStateManager first (source of truth)
+        EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: newState)
         
-        print("🔍 DEBUG: ✅ Called updateEpisodeState for '\(episode.title)' favorite: \(newState)")
+        // ⚡ IMMEDIATE UI UPDATE: Update UI state for instant visual feedback (already on main thread)
+        print("🔍 DEBUG: About to call updateEpisodeUIStateImmediate for episode \(episode.id)")
+        updateEpisodeUIStateImmediate(episodeId: episode.id, isFavorite: newState, isDownloaded: nil)
+        
+        // ⚡ IMMEDIATE FILTER: If we're on favorites tab and unfavoriting, remove immediately
+        if currentTab == EpisodeFilter.favorites.rawValue && !newState {
+            currentEpisodes.removeAll { $0.id == episode.id }
+            print("🔄 UI UPDATE: Immediately removed unfavorited episode from favorites tab")
+        }
+        
+        // ⚡ FORCE UI REFRESH: Trigger all refresh strategies
+        print("🔍 DEBUG: About to call forceUIRefresh()")
+        forceUIRefresh()
+        
+        print("🔍 DEBUG: ✅ Immediate favorite UI update completed for '\(episode.title)' favorite: \(newState)")
+        
+        // Background sync for data persistence and CloudKit
+        Task.detached(priority: .background) {
+            await self.updateEpisodeState(episode.id, isFavorite: newState)
+        }
+    }
+    
+    /// Refresh the current filter view to reflect state changes
+    @MainActor
+    private func refreshCurrentFilter() async {
+        guard let selectedFeedId = selectedFeedId else { return }
+        
+        // Get the current filter
+        let currentFilter: EpisodeFilter
+        switch currentTab {
+        case EpisodeFilter.all.rawValue:
+            currentFilter = .all
+        case EpisodeFilter.favorites.rawValue:
+            currentFilter = .favorites
+        case EpisodeFilter.downloads.rawValue:
+            currentFilter = .downloads
+        default:
+            currentFilter = .all
+        }
+        
+        // Reload episodes with the current filter to reflect changes
+        await loadEpisodesForFeed(selectedFeedId)
     }
     
     /// Toggle download state for an episode with proper filtering update
@@ -6509,48 +6652,29 @@ extension PodcastViewModel {
         
         print("🔍 DEBUG: Toggling download for '\(episode.title)' from \(currentState) to \(newState) on tab \(currentTab)")
         
-        // Update EpisodeStateManager immediately (source of truth)
+        // ⚡ IMMEDIATE UI UPDATE: Update episode state in EpisodeStateManager first (source of truth)
         EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: newState)
         
-        // CONDITIONAL SYNC: Download changes trigger immediate CloudKit sync (allowed condition) - handled by setDownloaded
+        // ⚡ IMMEDIATE UI UPDATE: Update UI state for instant visual feedback (already on main thread)
+        print("🔍 DEBUG: About to call updateEpisodeUIStateImmediate for episode \(episode.id)")
+        updateEpisodeUIStateImmediate(episodeId: episode.id, isFavorite: nil, isDownloaded: newState)
         
-        // Update local state immediately for all tabs
-        Task { @MainActor in
-            // Update the episode in place across all states immediately
-            if let index = self.currentEpisodes.firstIndex(where: { $0.id == episode.id }) {
-                var updatedEpisode = self.currentEpisodes[index]
-                updatedEpisode.state.isDownloaded = newState
-                self.currentEpisodes[index] = updatedEpisode
-                print("🔍 DEBUG: Updated episode state immediately - isDownloaded: \(newState)")
-            }
-            
-            // Update the episode in the feed object as well
-            if let feedIndex = self.podcastFeeds.firstIndex(where: { $0.id == self.selectedFeedId }),
-               let episodeIndex = self.podcastFeeds[feedIndex].episodes.firstIndex(where: { $0.id == episode.id }) {
-                var updatedFeed = self.podcastFeeds[feedIndex]
-                updatedFeed.episodes[episodeIndex].state.isDownloaded = newState
-                self.podcastFeeds[feedIndex] = updatedFeed
-            }
-            
-            // Apply filtering immediately based on current tab without reloading
-            let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
-            switch filter {
-            case .downloads:
-                // If we're on downloads tab and removing download, remove the episode
-                if !newState {
-                    self.currentEpisodes.removeAll { $0.id == episode.id }
-                }
-            case .favorites:
-                // No change needed for favorites tab when downloading
-                break
-            case .all:
-                // All tab shows everything, no filtering needed
-                break
-            }
+        // ⚡ IMMEDIATE FILTER: If we're on downloads tab and removing download, remove immediately
+        if currentTab == EpisodeFilter.downloads.rawValue && !newState {
+            currentEpisodes.removeAll { $0.id == episode.id }
+            print("🔄 UI UPDATE: Immediately removed non-downloaded episode from downloads tab")
         }
         
-        // Update episode state with proper sync (background operation)
-        updateEpisodeState(episode.id, isDownloaded: newState)
+        // ⚡ FORCE UI REFRESH: Trigger all refresh strategies
+        print("🔍 DEBUG: About to call forceUIRefresh()")
+        forceUIRefresh()
+        
+        print("🔍 DEBUG: ✅ Immediate download UI update completed for '\(episode.title)' downloaded: \(newState)")
+        
+        // Background sync for data persistence and CloudKit
+        Task.detached(priority: .background) {
+            await self.updateEpisodeState(episode.id, isDownloaded: newState)
+        }
     }
     
     /// For SettingsView compatibility

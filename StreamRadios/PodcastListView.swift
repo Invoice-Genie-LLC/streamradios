@@ -97,6 +97,11 @@ struct PodcastListView: View {
     @State private var podcastToDelete: PodcastFeed?
     @State private var expandedFeedId: String?
     @State private var isEditing = false
+    
+    // FORCE UI REFRESH: Observe uiRefreshTrigger to force SwiftUI re-evaluation
+    private var uiRefreshObserver: UUID {
+        viewModel.uiRefreshTrigger
+    }
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @StateObject private var radioPlayer = RadioPlayer.shared
     @EnvironmentObject private var radioStationViewModel: RadioStationViewModel
@@ -142,7 +147,8 @@ struct PodcastListView: View {
     
     // Episode results list shown while typing in search
     private var episodeResultsList: some View {
-        List {
+        let _ = uiRefreshObserver // Force SwiftUI to observe uiRefreshTrigger
+        return List {
             if viewModel.globalEpisodeSearchResults.isEmpty {
                 Text("No matching episodes")
                     .foregroundColor(.adaptiveSecondaryText)
@@ -307,24 +313,31 @@ struct PodcastListView: View {
     }
     
     var body: some View {
-           NavigationView {
+        let _ = uiRefreshObserver // Force SwiftUI to observe uiRefreshTrigger
+        return NavigationView {
                ZStack(alignment: .bottom) {
                    // Show episode list inline when a podcast is selected
                    if let selectedPodcast = selectedPodcast {
-                       PodcastPlayerView(
-                           viewModel: viewModel,
-                           feed: selectedPodcast,
-                           initialScrollToEpisodeID: scrollToEpisodeID ?? podcastPlayer.currentEpisode?.id,
-                           podcastPlayer: podcastPlayer,
-                           selectedPodcast: $selectedPodcast,
-                           episodeToScrollTo: Binding(
-                               get: { podcastPlayer.currentEpisode },
-                               set: { _ in }
+                       VStack(spacing: 0) {
+                           // FORCE UI REFRESH: Hidden view that observes uiRefreshTrigger for episode player
+                           Text("").hidden().id(uiRefreshObserver)
+                           PodcastPlayerView(
+                               viewModel: viewModel,
+                               feed: selectedPodcast,
+                               initialScrollToEpisodeID: scrollToEpisodeID ?? podcastPlayer.currentEpisode?.id,
+                               podcastPlayer: podcastPlayer,
+                               selectedPodcast: $selectedPodcast,
+                               episodeToScrollTo: Binding(
+                                   get: { podcastPlayer.currentEpisode },
+                                   set: { _ in }
+                               )
                            )
-                       )
+                       }
                    } else {
                        // Show the podcast list when no podcast is selected
                        VStack(spacing: 0) {
+                           // FORCE UI REFRESH: Hidden view that observes uiRefreshTrigger
+                           Text("").hidden().id(uiRefreshObserver)
                            instructionText
                            searchBar
                            
@@ -1434,6 +1447,22 @@ struct EpisodeRowView: View {
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
     
+    // FORCE UI REFRESH: Get real-time episode state from viewModel
+    private var currentEpisode: PodcastEpisode {
+        // Force SwiftUI to re-evaluate when uiRefreshTrigger changes
+        let refreshTrigger = viewModel.uiRefreshTrigger
+        
+        // Find the current episode state from viewModel's currentEpisodes array
+        let foundEpisode = viewModel.currentEpisodes.first { $0.id == episode.id } ?? episode
+        
+        // Debug logging to track UI refresh
+        if foundEpisode.state.isFavorite != episode.state.isFavorite {
+            print("🎯 EPISODE ROW: Episode \(episode.id) favorite changed: \(episode.state.isFavorite) -> \(foundEpisode.state.isFavorite) (trigger: \(refreshTrigger))")
+        }
+        
+        return foundEpisode
+    }
+    
     // REAL-TIME PROGRESS: Use computed property that always reflects current state
     private var currentProgress: Double {
         if isPlaying {
@@ -1616,14 +1645,14 @@ struct EpisodeRowView: View {
                             viewModel.toggleFavorite(for: episode)
                         }
                     }) {
-                        Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                            .foregroundColor(episode.state.isFavorite ? .blue : .adaptiveSecondaryText)
+                        Image(systemName: currentEpisode.state.isFavorite ? "bookmark.fill" : "bookmark")
+                            .foregroundColor(currentEpisode.state.isFavorite ? .blue : .adaptiveSecondaryText)
                             .frame(width: buttonSize, height: buttonSize)
                     }
                     
                     // Download button
                     Group {
-                        if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                        if viewModel.currentTab == 2 && currentEpisode.state.isDownloaded {
                             // Downloads tab: Show trash can for downloaded episodes
                             Button(action: {
                                 if isPlaying {
@@ -1636,7 +1665,7 @@ struct EpisodeRowView: View {
                                     .foregroundColor(.red)
                                     .frame(width: buttonSize, height: buttonSize)
                             }
-                        } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && episode.state.isDownloaded {
+                        } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && currentEpisode.state.isDownloaded {
                             // All tab and Favorites tab: Show filled green download icon for downloaded episodes (not clickable)
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
@@ -1948,6 +1977,22 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
+    
+    // FORCE UI REFRESH: Get real-time episode state from viewModel
+    private var currentEpisode: PodcastEpisode {
+        // Force SwiftUI to re-evaluate when uiRefreshTrigger changes
+        let refreshTrigger = viewModel.uiRefreshTrigger
+        
+        // Find the current episode state from viewModel's currentEpisodes array
+        let foundEpisode = viewModel.currentEpisodes.first { $0.id == episode.id } ?? episode
+        
+        // Debug logging to track UI refresh
+        if foundEpisode.state.isFavorite != episode.state.isFavorite {
+            print("🎯 OPTIMIZED ROW: Episode \(episode.id) favorite changed: \(episode.state.isFavorite) -> \(foundEpisode.state.isFavorite) (trigger: \(refreshTrigger))")
+        }
+        
+        return foundEpisode
+    }
     @State private var refreshTrigger = UUID() // Force UI refresh when progress/played state changes
     @State private var downloadButtonPressed = false // For download button press animation
     
@@ -2332,14 +2377,14 @@ struct OptimizedEpisodeRowView: View, Equatable {
                         viewModel.toggleFavorite(for: episode)
                     }
                 }) {
-                    Image(systemName: episode.state.isFavorite ? "bookmark.fill" : "bookmark")
-                        .foregroundColor(episode.state.isFavorite ? .blue : .adaptiveSecondaryText)
+                    Image(systemName: currentEpisode.state.isFavorite ? "bookmark.fill" : "bookmark")
+                        .foregroundColor(currentEpisode.state.isFavorite ? .blue : .adaptiveSecondaryText)
                         .frame(width: buttonSize, height: buttonSize)
                 }
                 
                 // Download button
                 Group {
-                    if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                    if viewModel.currentTab == 2 && currentEpisode.state.isDownloaded {
                         // Downloads tab: Show trash can for downloaded episodes
                         Button(action: {
                             if isPlaying {
@@ -2352,7 +2397,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .foregroundColor(.red)
                                 .frame(width: buttonSize, height: buttonSize)
                         }
-                    } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && episode.state.isDownloaded {
+                    } else if (viewModel.currentTab == 0 || viewModel.currentTab == 1) && currentEpisode.state.isDownloaded {
                         // All tab and Favorites tab: Show filled green download icon for downloaded episodes (not clickable)
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
