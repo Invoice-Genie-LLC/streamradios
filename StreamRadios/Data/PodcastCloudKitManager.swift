@@ -2183,6 +2183,11 @@ class PodcastCloudKitManager: ObservableObject {
                 EpisodeStateManager.shared.setFavoriteSilently(episodeId, isFavorite: cloudState.isFavorite)
                 EpisodeStateManager.shared.setPlayedSilently(episodeId, isPlayed: cloudState.isPlayed)
                 
+                // DEBUG: Log CloudKit states being applied (for fresh install debugging)
+                if cloudState.progress > 0 || cloudState.isFavorite || cloudState.isPlayed {
+                    print("☁️ CLOUDKIT DEBUG: Applied state to episode \(episodeId) - Progress: \(String(format: "%.2f", cloudState.progress)), Favorite: \(cloudState.isFavorite), Played: \(cloudState.isPlayed)")
+                }
+                
                 // Handle isDownloaded - ENHANCED with upgrade protection
                 let finalIsDownloaded: Bool
                 if cloudState.isDownloaded {
@@ -2365,19 +2370,31 @@ class PodcastCloudKitManager: ObservableObject {
         return (updates: coreDataUpdates, success: syncSuccess)
     }
     
-    /// Fetch all episode states from CloudKit (for bulk sync operations)
+    /// Fetch all episode states from CloudKit using batched queries (200 records per batch)
     func fetchAllEpisodeStatesFromCloudKit() async throws -> [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool, feedId: String?)] {
-        os_log("🔄 Fetching all episode states from CloudKit", log: log, type: .info)
+        os_log("🔄 Fetching all episode states from CloudKit in batches of 200", log: log, type: .info)
         
         let query = CKQuery(recordType: RecordType.episodeState, predicate: NSPredicate(value: true))
         query.sortDescriptors = [NSSortDescriptor(key: "lastUpdated", ascending: false)]
         
         var episodeStates: [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool, isPlayed: Bool, feedId: String?)] = [:]
+        var cursor: CKQueryOperation.Cursor? = nil
+        var batchNumber = 1
+        let batchSize = 200
         
-        do {
-            let (matchResults, _) = try await privateDatabase.records(matching: query)
+        repeat {
+            os_log("📦 Fetching batch %d of episode states (batch size: %d)", log: log, type: .info, batchNumber, batchSize)
             
-            for (recordID, recordResult) in matchResults {
+            let operation = CKQueryOperation(query: query)
+            operation.resultsLimit = batchSize
+            operation.cursor = cursor
+            operation.database = privateDatabase
+            
+            let (batchResults, nextCursor) = try await performBatchedQuery(operation: operation)
+            cursor = nextCursor
+            
+            // Process this batch
+            for (recordID, recordResult) in batchResults {
                 switch recordResult {
                 case .success(let record):
                     if let episodeId = record["episodeId"] as? String {
@@ -2394,12 +2411,52 @@ class PodcastCloudKitManager: ObservableObject {
                 }
             }
             
-            os_log("✅ Fetched %d episode states from CloudKit", log: log, type: .info, episodeStates.count)
-            return episodeStates
+            os_log("✅ Processed batch %d: %d episode states total so far", log: log, type: .info, batchNumber, episodeStates.count)
             
-        } catch {
-            os_log("❌ Failed to fetch episode states from CloudKit: %@", log: log, type: .error, error.localizedDescription)
-            throw error
+            // Update progress tracking for batched fetching
+            Task { @MainActor in
+                await DataSyncManager.shared.updateEpisodeStateProgress(
+                    currentCount: episodeStates.count,
+                    operation: "Fetched batch \(batchNumber) of episode states (\(episodeStates.count) total)..."
+                )
+            }
+            
+            batchNumber += 1
+            
+        } while cursor != nil
+        
+        os_log("✅ Completed fetching all episode states from CloudKit: %d total records in %d batches", log: log, type: .info, episodeStates.count, batchNumber - 1)
+        
+        // DEBUG: Log summary of fetched states for fresh install debugging
+        let statesWithProgress = episodeStates.values.filter { $0.progress > 0 }.count
+        let statesWithFavorites = episodeStates.values.filter { $0.isFavorite }.count
+        let statesWithPlayed = episodeStates.values.filter { $0.isPlayed }.count
+        print("☁️ CLOUDKIT DEBUG: Fetched \(episodeStates.count) episode states - Progress: \(statesWithProgress), Favorites: \(statesWithFavorites), Played: \(statesWithPlayed)")
+        
+        return episodeStates
+    }
+    
+    /// Helper method to perform batched CloudKit queries
+    private func performBatchedQuery(operation: CKQueryOperation) async throws -> ([CKRecord.ID: Result<CKRecord, Error>], CKQueryOperation.Cursor?) {
+        return try await withCheckedThrowingContinuation { continuation in
+            var results: [CKRecord.ID: Result<CKRecord, Error>] = [:]
+            var cursor: CKQueryOperation.Cursor? = nil
+            
+            operation.recordMatchedBlock = { recordID, recordResult in
+                results[recordID] = recordResult
+            }
+            
+            operation.queryResultBlock = { result in
+                switch result {
+                case .success(let queryCursor):
+                    cursor = queryCursor
+                    continuation.resume(returning: (results, cursor))
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+            
+            privateDatabase.add(operation)
         }
     }
     

@@ -2350,11 +2350,6 @@ class PodcastViewModel: ObservableObject {
         
         pendingInitializationTasks.insert(taskKey)
         
-        // AUTO QUIET SYNC: Automatically sync episode states when feed loads
-        Task.detached(priority: .background) {
-            await self.quietSyncEpisodeStates(for: feedId)
-        }
-        
         // Cancel any existing loading task
         loadingTask?.cancel()
         
@@ -2403,6 +2398,12 @@ class PodcastViewModel: ObservableObject {
             }
             
             return // CRITICAL: Return immediately, bypass all expensive operations below
+        }
+        
+        // AUTO QUIET SYNC: Only sync episode states when NO snapshot is available
+        // This prevents unnecessary syncing when snapshots already contain all episode states
+        Task.detached(priority: .background) {
+            await self.quietSyncEpisodeStates(for: feedId)
         }
         
         // FALLBACK: Check other cache sources if no snapshot available
@@ -3023,10 +3024,16 @@ class PodcastViewModel: ObservableObject {
                 // Use our carefully calculated finalProgress (which may have rejected corrupted explicit progress)
                 EpisodeStateManager.shared.setProgress(for: episodeId, progress: finalProgress)
                 
+                // ⚡ PROACTIVE: Update snapshot immediately for instant loading on next app launch
+                updateSnapshotForEpisodeStateChange(episodeId: episodeId)
+                
                             // CONDITIONAL SYNC: Progress is stored locally, CloudKit sync happens only on allowed conditions
             } else if isCurrentlyPlaying {
                 // For currently playing episodes, sync the player's progress
                 EpisodeStateManager.shared.setProgress(for: episodeId, progress: playerProgress)
+                
+                // ⚡ PROACTIVE: Update snapshot immediately for instant loading on next app launch
+                updateSnapshotForEpisodeStateChange(episodeId: episodeId)
                 
                 // CONDITIONAL SYNC: Progress is stored locally, CloudKit sync happens only on allowed conditions
             }
@@ -3037,6 +3044,9 @@ class PodcastViewModel: ObservableObject {
                 EpisodeStateManager.shared.setFavorite(episodeId, isFavorite: isFavorite, feedId: feedId)
                 
                 // CONDITIONAL SYNC: Favorite changes trigger immediate CloudKit sync (allowed condition)
+                
+                // ⚡ PROACTIVE: Update snapshot immediately for instant loading on next app launch
+                updateSnapshotForEpisodeStateChange(episodeId: episodeId, feedId: feedId)
                 
                 // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
                 await MainActor.run {
@@ -3058,6 +3068,9 @@ class PodcastViewModel: ObservableObject {
                 EpisodeStateManager.shared.setDownloaded(episodeId, isDownloaded: isDownloaded, feedId: feedId)
                 
                 // CONDITIONAL SYNC: Download changes trigger immediate CloudKit sync (allowed condition)
+                
+                // ⚡ PROACTIVE: Update snapshot immediately for instant loading on next app launch
+                updateSnapshotForEpisodeStateChange(episodeId: episodeId, feedId: feedId)
                 
                 // 🔄 CRITICAL: Trigger UI refresh for immediate visual update
                 await MainActor.run {
@@ -3388,11 +3401,105 @@ class PodcastViewModel: ObservableObject {
         print("🧽 Cleared all tab filter caches and counts (snapshots preserved)")
     }
     
+    /// Clear all existing episode snapshots
+    func clearAllEpisodeSnapshots() {
+        episodeSnapshotCache.removeAll()
+        snapshotTimestamps.removeAll()
+        print("🗑️ SNAPSHOT: Cleared all existing episode snapshots")
+        
+        // Reset DataSyncManager snapshot tracking
+        Task { @MainActor in
+            DataSyncManager.shared.updateEpisodeSnapshotReadiness(
+                feedsWithSnapshots: 0,
+                totalFeedsRequiringSnapshots: 0
+            )
+        }
+    }
+    
     /// Create or update episode snapshot for instant loading
-    private func updateEpisodeSnapshot(for feedId: String, episodes: [PodcastEpisode]) {
+    func updateEpisodeSnapshot(for feedId: String, episodes: [PodcastEpisode]) {
         episodeSnapshotCache[feedId] = episodes
         snapshotTimestamps[feedId] = Date()
         print("📸 SNAPSHOT: Cached \(episodes.count) episodes for feed \(feedId)")
+        
+        // Update DataSyncManager snapshot readiness tracking
+        let feedsWithEpisodes = podcastFeeds.filter { !$0.episodes.isEmpty }
+        let feedsWithSnapshots = feedsWithEpisodes.filter { getEpisodeSnapshot(for: $0.id) != nil }.count
+        
+        Task { @MainActor in
+            DataSyncManager.shared.updateEpisodeSnapshotReadiness(
+                feedsWithSnapshots: feedsWithSnapshots,
+                totalFeedsRequiringSnapshots: feedsWithEpisodes.count
+            )
+        }
+    }
+    
+    /// PROACTIVE: Update snapshot immediately when episode state changes (super fast, non-blocking)
+    func updateSnapshotForEpisodeStateChange(episodeId: String, feedId: String? = nil) {
+        Task.detached(priority: .background) { [weak self] in
+            guard let self = self else { return }
+            
+            // Determine feedId if not provided
+            let resolvedFeedId: String
+            if let feedId = feedId {
+                resolvedFeedId = feedId
+            } else {
+                // Find feedId by searching through cached snapshots first (fastest)
+                var foundFeedId: String? = nil
+                await MainActor.run {
+                    for (cachedFeedId, episodes) in self.episodeSnapshotCache {
+                        if episodes.contains(where: { $0.id == episodeId }) {
+                            foundFeedId = cachedFeedId
+                            break
+                        }
+                    }
+                }
+                
+                if let foundFeedId = foundFeedId {
+                    resolvedFeedId = foundFeedId
+                } else {
+                    // Fallback: search through loaded feeds (slower)
+                    guard let foundFeedId = await MainActor.run(body: {
+                        return self.podcastFeeds.first { feed in
+                            feed.episodes.contains { $0.id == episodeId }
+                        }?.id
+                    }) else {
+                        print("⚠️ PROACTIVE SNAPSHOT: Could not find feedId for episode \(episodeId)")
+                        return
+                    }
+                    resolvedFeedId = foundFeedId
+                }
+            }
+            
+            // Get current snapshot
+            guard let currentSnapshot = await MainActor.run(body: {
+                return self.episodeSnapshotCache[resolvedFeedId]
+            }) else {
+                print("⚠️ PROACTIVE SNAPSHOT: No snapshot exists for feed \(resolvedFeedId)")
+                return
+            }
+            
+            // Update the specific episode with current state from EpisodeStateManager
+            let updatedSnapshot = currentSnapshot.map { episode in
+                if episode.id == episodeId {
+                    var updatedEpisode = episode
+                    // Get fresh states from EpisodeStateManager (source of truth)
+                    updatedEpisode.state.progress = EpisodeStateManager.shared.getProgress(for: episodeId)
+                    updatedEpisode.state.isFavorite = EpisodeStateManager.shared.isFavorite(episodeId)
+                    updatedEpisode.state.isDownloaded = EpisodeStateManager.shared.isDownloaded(episodeId)
+                    updatedEpisode.state.isPlayed = EpisodeStateManager.shared.getIsPlayed(episodeId)
+                    return updatedEpisode
+                }
+                return episode
+            }
+            
+            // Update snapshot cache on main thread
+            await MainActor.run {
+                self.episodeSnapshotCache[resolvedFeedId] = updatedSnapshot
+                self.snapshotTimestamps[resolvedFeedId] = Date()
+                print("⚡ PROACTIVE SNAPSHOT: Updated episode \(episodeId) in feed \(resolvedFeedId) snapshot")
+            }
+        }
     }
     
     /// Get episode snapshot if available and recent
@@ -4279,7 +4386,7 @@ class PodcastViewModel: ObservableObject {
     /// - Episode states are still synced TO CloudKit when users make changes
     /// 
     /// To force a re-sync (for troubleshooting), call resetEpisodeStatesSyncFlag()
-    private func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async -> Bool {
+    func syncEpisodeStatesFromCloudKit(isFreshInstall: Bool) async -> Bool {
         // PERFORMANCE: Skip expensive CloudKit episode sync if we have snapshots for ANY feed
         let hasAnySnapshot = await MainActor.run {
             // Check if we have snapshots for any loaded feeds
@@ -4293,10 +4400,9 @@ class PodcastViewModel: ObservableObject {
         }
         
         // Skip CloudKit sync if we have snapshots (regardless of fresh install status)
-        // Exception: Only allow for true fresh installs (first app launch)
-        let isFirstLaunch = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
-        if hasAnySnapshot && !isFirstLaunch {
-            print("⚡ PERFORMANCE: Skipping CloudKit episode sync - using episode snapshots (not first launch)")
+        // Snapshots already contain complete episode data with states
+        if hasAnySnapshot {
+            print("⚡ PERFORMANCE: Skipping CloudKit episode sync - using episode snapshots with complete state data")
             return true
         }
         
@@ -5282,6 +5388,12 @@ class PodcastViewModel: ObservableObject {
     /// This is used when feeds load to keep episode states current without user-visible operations
     private func quietSyncEpisodeStates(for feedId: String) async {
         
+        // PERFORMANCE: Skip sync if episode snapshots are available - they already contain all episode states
+        if await MainActor.run { getEpisodeSnapshot(for: feedId) != nil } {
+            print("⚡ QUIET SYNC: Skipping CloudKit sync - episode snapshot available with all states")
+            return
+        }
+        
         // EMERGENCY PERFORMANCE: Skip sync if large operation is already running
         if isLoadingEpisodes || operationInProgress {
             
@@ -5774,8 +5886,9 @@ class PodcastViewModel: ObservableObject {
     func automaticCloudKitSync() async {
         // PERFORMANCE: Skip expensive CloudKit sync if we have snapshots or recent sync
         let hasSnapshot = await MainActor.run {
-            guard let selectedFeedId = self.selectedFeedId else { return false }
-            return self.getEpisodeSnapshot(for: selectedFeedId) != nil
+            // Check if ANY feed has snapshots, not just the selected feed
+            // This prevents unnecessary CloudKit sync when snapshots exist but selectedFeedId is nil
+            return !self.episodeSnapshotCache.isEmpty
         }
         
         let hasRecentSync = await MainActor.run {
@@ -5816,8 +5929,9 @@ class PodcastViewModel: ObservableObject {
     private func performAutomaticCloudKitCheck() async {
         // PERFORMANCE: Skip expensive CloudKit operations if we have snapshots
         let hasSnapshot = await MainActor.run {
-            guard let selectedFeedId = self.selectedFeedId else { return false }
-            return self.getEpisodeSnapshot(for: selectedFeedId) != nil
+            // Check if ANY feed has snapshots, not just the selected feed
+            // This prevents unnecessary CloudKit sync when snapshots exist but selectedFeedId is nil
+            return !self.episodeSnapshotCache.isEmpty
         }
         
         if hasSnapshot {

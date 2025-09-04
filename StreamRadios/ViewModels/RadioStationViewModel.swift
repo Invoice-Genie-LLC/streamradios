@@ -177,7 +177,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             if isFreshInstall || !hasRadioStationsSynced {
                 print("🔄 Radio station sync needed in ViewModel - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
-                syncStationsWithCloudKit()
+                print("⏭️ SEQUENCING: Radio station sync will be handled by DataSyncManager to prevent CloudKit rate limiting")
+                // NOTE: Radio station sync is now handled by DataSyncManager in sequence to prevent CloudKit rate limiting
+                // syncStationsWithCloudKit() - REMOVED to prevent parallel CloudKit operations
             } else {
                 print("⚡ Skipping CloudKit radio station sync in ViewModel - loading from local storage only for better performance")
                 

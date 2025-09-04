@@ -97,6 +97,11 @@ class DataSyncManager: ObservableObject {
     @Published var episodeStatesCurrentCount = 0
     @Published var episodeStatesTotalCount = 0
     
+    // Episode Snapshots Readiness
+    @Published var episodeSnapshotsReady = false
+    @Published var feedsWithSnapshots = 0
+    @Published var totalFeedsRequiringSnapshots = 0
+    
     // Minimal CloudKit sync indicator (for individual saves)
     @Published var isMinimalCloudKitSyncing = false
     @Published var minimalSyncTimer: Timer?
@@ -152,32 +157,38 @@ class DataSyncManager: ObservableObject {
             
             print("🔄 Starting fresh install data synchronization...")
             
-            // Start all sync operations
+            // Start sync operations in proper sequence
+            // SEQUENCED CLOUDKIT OPERATIONS to prevent rate limiting:
+            print("🔄 Starting sequential CloudKit sync to prevent rate limiting...")
+            
+            // First: Sync Radio Stations (fastest, no dependencies)
+            await syncRadioStations()
+            
+            // Second: Sync Podcast Feeds (after radio stations complete to prevent CloudKit rate limiting)
+            await syncPodcastFeeds()
+            
+            // Parallel operations that don't use CloudKit heavily
             await withTaskGroup(of: Void.self) { group in
-                // Radio Stations Sync
-                group.addTask {
-                    await self.syncRadioStations()
-                }
-                
-                // Podcast Feeds Sync
-                group.addTask {
-                    await self.syncPodcastFeeds()
-                }
-                
-                // Episode States Sync
-                group.addTask {
-                    await self.syncEpisodeStates()
-                }
-                
-                // User Preferences Sync
+                // User Preferences Sync (lightweight, can run in parallel)
                 group.addTask {
                     await self.syncUserPreferences()
                 }
                 
-                // Wait for all tasks to complete
+                // Wait for all parallel operations to complete
                 for await _ in group {
                     // Tasks completed
                 }
+            }
+            
+            // Then: Sync Episode States (depends on feeds being loaded)
+            // SKIP episode state sync during fresh install - it's already done during RSS processing
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let hasPodcastFeedsSynced = UserDefaults.standard.bool(forKey: "HasPodcastFeedsSynced")
+            
+            if isFreshInstall && hasPodcastFeedsSynced {
+                print("⚡ FRESH INSTALL: Skipping separate episode state sync - already completed during RSS processing")
+            } else {
+                await syncEpisodeStates()
             }
             
             // Wait for artwork downloads to complete before finishing
@@ -395,50 +406,95 @@ class DataSyncManager: ObservableObject {
         episodeStatesTotalCount = 0
         
         do {
-            // Get estimated episode count for progress tracking
-            episodeStatesTotalCount = await getEstimatedEpisodeCount()
+            // Get the PodcastViewModel instance
+            let podcastViewModel = PodcastViewModel.shared
             
-            // Simulate progressive sync of episode states with detailed tracking
-            for progress in stride(from: 0.0, through: 1.0, by: 0.25) {
-                episodeStatesProgress = progress
-                episodeStatesCurrentCount = Int(Double(episodeStatesTotalCount) * progress)
-                
-                switch progress {
-                case 0.25:
-                    episodeStatesOperation = "Loading episode progress... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
-                case 0.5:
-                    episodeStatesOperation = "Syncing favorites... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
-                case 0.75:
-                    episodeStatesOperation = "Syncing downloads... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
-                case 1.0:
-                    episodeStatesOperation = "✅ \(episodeStatesTotalCount) episode states synced"
-                default:
-                    episodeStatesOperation = "Processing episode states... (\(episodeStatesCurrentCount)/\(episodeStatesTotalCount))"
+            // Wait for podcast feeds to be loaded first
+            await waitForPodcastFeedsToLoad(podcastViewModel)
+            
+                    // PERFORMANCE: Skip entire episode sync if snapshots are available
+        // Snapshots already contain complete episode data with states
+        let hasSnapshots = await MainActor.run {
+            for feed in podcastViewModel.podcastFeeds {
+                if podcastViewModel.getEpisodeSnapshot(for: feed.id) != nil {
+                    print("⚡ PERFORMANCE: Found episode snapshot for feed \(feed.title)")
+                    return true
                 }
+            }
+            return false
+        }
+        
+        if hasSnapshots {
+            print("⚡ PERFORMANCE: Skipping entire episode state sync - using episode snapshots with complete state data")
+            episodeStatesStatus = .completed
+            episodeStatesProgress = 1.0
+            episodeStatesOperation = "Using episode snapshots (no sync needed)"
+            return
+        }
+        
+        // Get actual episode count from loaded feeds
+        episodeStatesTotalCount = await getActualEpisodeCount(podcastViewModel)
+        
+        if episodeStatesTotalCount == 0 {
+            print("📊 No episodes found - skipping episode state sync")
+            episodeStatesStatus = .completed
+            episodeStatesProgress = 1.0
+            episodeStatesOperation = "No episodes to sync"
+            return
+        }
+        
+        print("📊 Starting episode state sync for \(episodeStatesTotalCount) episodes across \(podcastViewModel.podcastFeeds.count) feeds")
+        
+        // Phase 1: CloudKit Episode State Sync (0-60%)
+        episodeStatesOperation = "Syncing episode states from iCloud..."
+        episodeStatesProgress = 0.1
+            
+            // Check if episode states were already synced during fresh install
+            let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+            let hasPodcastFeedsSynced = UserDefaults.standard.bool(forKey: "HasPodcastFeedsSynced")
+            
+            let syncSuccess: Bool
+            if isFreshInstall && hasPodcastFeedsSynced {
+                // Episode states were already synced during fresh install RSS processing
+                print("⚡ PERFORMANCE: Skipping CloudKit episode sync - already completed during fresh install")
+                syncSuccess = true
+                episodeStatesProgress = 0.6
+                episodeStatesOperation = "Episode states already synced during fresh install..."
+            } else {
+                // Perform actual CloudKit episode state sync
+                syncSuccess = await podcastViewModel.syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
                 
-                if progress < 1.0 {
-                    try await Task.sleep(nanoseconds: 800_000_000) // 0.8 seconds
+                if syncSuccess {
+                    episodeStatesProgress = 0.6
+                    episodeStatesOperation = "Episode states synced from iCloud..."
+                    print("✅ CloudKit episode state sync completed")
+                } else {
+                    print("⚠️ CloudKit episode state sync failed, continuing with local data")
+                    episodeStatesProgress = 0.3
                 }
             }
             
-            // Actual episode state sync - call existing private method indirectly
-            await withCheckedContinuation { continuation in
-                DispatchQueue.main.async {
-                    // The existing EpisodeStateManager will handle this internally
-                    print("🔄 Syncing download states from Core Data...")
-                    continuation.resume()
-                }
-            }
+            // Phase 2: Create Episode Snapshots (60-90%)
+            episodeStatesOperation = "Creating episode snapshots for instant access..."
+            await createEpisodeSnapshotsForAllFeeds(podcastViewModel)
+            episodeStatesProgress = 0.9
+            
+            // Update current count to reflect snapshots created
+            episodeStatesCurrentCount = Int(Double(episodeStatesTotalCount) * 0.9)
+            
+            // Phase 3: Final Verification (90-100%)
+            episodeStatesOperation = "Verifying episode data availability..."
+            await verifyEpisodeDataAvailability(podcastViewModel)
             
             episodeStatesStatus = .completed
             episodeStatesProgress = 1.0
             episodeStatesCurrentCount = episodeStatesTotalCount
-            episodeStatesOperation = "✅ \(episodeStatesTotalCount) episode states completed"
-            print("✅ Episode states sync completed")
+            episodeStatesOperation = "✅ \(episodeStatesTotalCount) episodes ready with instant snapshots"
+            print("✅ Episode states sync completed with snapshots created")
             
         } catch {
             episodeStatesStatus = .failed
-            episodeStatesOperation = "❌ Failed to sync episode states"
+            episodeStatesOperation = "❌ Failed to sync episode states: \(error.localizedDescription)"
             print("❌ Episode states sync failed: \(error)")
         }
     }
@@ -514,6 +570,11 @@ class DataSyncManager: ObservableObject {
         episodeStatesOperation = ""
         episodeStatesCurrentCount = 0
         episodeStatesTotalCount = 0
+        
+        // Episode Snapshots
+        episodeSnapshotsReady = false
+        feedsWithSnapshots = 0
+        totalFeedsRequiringSnapshots = 0
         
         // User Preferences
         userPreferencesStatus = .pending
@@ -603,7 +664,23 @@ class DataSyncManager: ObservableObject {
         episodeStatesCurrentCount = 0
         episodeStatesTotalCount = 0
         episodeStatesOperation = ""
-        print("🔄 DataSyncManager: Reset episode state sync tracking")
+        
+        // Also reset snapshot tracking
+        episodeSnapshotsReady = false
+        feedsWithSnapshots = 0
+        totalFeedsRequiringSnapshots = 0
+        
+        print("🔄 DataSyncManager: Reset episode state sync tracking and snapshots")
+    }
+    
+    /// Update episode snapshot readiness tracking (called by PodcastViewModel when snapshots are created)
+    @MainActor
+    func updateEpisodeSnapshotReadiness(feedsWithSnapshots: Int, totalFeedsRequiringSnapshots: Int) {
+        self.feedsWithSnapshots = feedsWithSnapshots
+        self.totalFeedsRequiringSnapshots = totalFeedsRequiringSnapshots
+        self.episodeSnapshotsReady = (feedsWithSnapshots == totalFeedsRequiringSnapshots && totalFeedsRequiringSnapshots > 0)
+        
+        print("📸 DataSyncManager: Updated snapshot readiness - \(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots) ready: \(episodeSnapshotsReady)")
     }
     
     // MARK: - Individual Feed Addition Tracking
@@ -1071,11 +1148,17 @@ class DataSyncManager: ObservableObject {
         // Final verification that all sync statuses are completed
         await waitForAllSyncStatusesToComplete()
         
+        // CRITICAL: Final verification that episode snapshots are available
+        await verifyEpisodeSnapshotsAreReady(podcastViewModel)
+        
         currentOperation = "Synchronization completed!"
         
         // CRITICAL: Force Core Data save and reload before any verification
         print("🚀 CRITICAL: Forcing Core Data save and reload before UI refresh")
         await podcastViewModel.forceSaveAndReload()
+        
+        // CRITICAL: Ensure episode snapshots are created for all feeds before completion
+        await ensureEpisodeSnapshotsAreCreated(podcastViewModel)
         
         // IMMEDIATE: Trigger PodcastViewModel UI refresh as soon as sync completes
         print("🚀 IMMEDIATE: Triggering UI refresh for fresh install completion")
@@ -1152,10 +1235,27 @@ class DataSyncManager: ObservableObject {
         print("🎯 FINAL VERIFICATION: Current isFreshInstallUIReady=\(isFreshInstallUIReady)")
         
         if finalFeedCount > 0 && finalFeedOrderCount > 0 {
-            print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds and \(finalFeedOrderCount) feed order items")
-            isFreshInstallUIReady = true
-            isSyncing = false
-            print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds")
+            // CRITICAL: Also check that episode snapshots are ready before allowing UI access
+            if episodeSnapshotsReady || totalFeedsRequiringSnapshots == 0 {
+                print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds, \(finalFeedOrderCount) feed order items, and \(feedsWithSnapshots) episode snapshots")
+                isFreshInstallUIReady = true
+                isSyncing = false
+                print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND episode snapshots")
+            } else {
+                print("⏳ WAITING FOR SNAPSHOTS: Feeds ready but episode snapshots not complete (\(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots))")
+                // Wait a bit more for snapshots to complete
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                
+                if episodeSnapshotsReady {
+                    print("✅ SNAPSHOTS READY: Episode snapshots completed after wait")
+                    isFreshInstallUIReady = true
+                    isSyncing = false
+                } else {
+                    print("⚠️ SNAPSHOTS TIMEOUT: Proceeding without complete snapshots")
+                    isFreshInstallUIReady = true
+                    isSyncing = false
+                }
+            }
         } else {
             print("❌ FINAL ERROR: UI still not ready - feeds: \(finalFeedCount), order: \(finalFeedOrderCount)")
             print("🔧 Forcing final refresh attempt...")
@@ -1176,6 +1276,53 @@ class DataSyncManager: ObservableObject {
                 isFreshInstallUIReady = true
                 isSyncing = false
             }
+        }
+    }
+    
+    /// Ensure episode snapshots are created for all feeds before completing sync
+    @MainActor
+    private func ensureEpisodeSnapshotsAreCreated(_ podcastViewModel: PodcastViewModel) async {
+        print("📸 FINAL SNAPSHOT CHECK: Ensuring all feeds have episode snapshots...")
+        
+        let feedsWithEpisodes = podcastViewModel.podcastFeeds.filter { !$0.episodes.isEmpty }
+        var snapshotsCreated = 0
+        var totalEpisodes = 0
+        
+        // Update snapshot tracking
+        totalFeedsRequiringSnapshots = feedsWithEpisodes.count
+        feedsWithSnapshots = 0
+        
+        for feed in podcastViewModel.podcastFeeds {
+            // Check if snapshot already exists
+            if podcastViewModel.getEpisodeSnapshot(for: feed.id) != nil {
+                if !feed.episodes.isEmpty {
+                    feedsWithSnapshots += 1
+                }
+                snapshotsCreated += 1
+                print("📸 Snapshot already exists for '\(feed.title)'")
+            } else if !feed.episodes.isEmpty {
+                // Create snapshot for feeds with episodes
+                podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: feed.episodes)
+                feedsWithSnapshots += 1
+                snapshotsCreated += 1
+                totalEpisodes += feed.episodes.count
+                print("📸 Created final snapshot for '\(feed.title)' with \(feed.episodes.count) episodes")
+            } else {
+                print("📸 Skipped snapshot for '\(feed.title)' - no episodes available")
+            }
+        }
+        
+        // Mark snapshots as ready
+        episodeSnapshotsReady = (feedsWithSnapshots == totalFeedsRequiringSnapshots)
+        
+        print("📸 FINAL SNAPSHOT SUMMARY: \(snapshotsCreated) snapshots available with \(totalEpisodes) total episodes")
+        print("📸 FINAL SNAPSHOT READINESS: \(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots) feeds with episodes have snapshots - Ready: \(episodeSnapshotsReady)")
+        
+        // Update episode states progress to reflect snapshot creation
+        if episodeStatesStatus != .completed {
+            episodeStatesStatus = .completed
+            episodeStatesProgress = 1.0
+            episodeStatesOperation = "✅ \(feedsWithSnapshots) episode snapshots ready for instant access"
         }
     }
     
@@ -1281,6 +1428,50 @@ class DataSyncManager: ObservableObject {
         }
     }
     
+    /// Sync from CloudKit with retry logic for rate limiting
+    private func syncFromCloudKitWithRetry() async throws -> [PodcastFeed] {
+        let maxRetries = 3
+        var retryCount = 0
+        
+        while retryCount < maxRetries {
+            do {
+                print("☁️ FRESH INSTALL: Attempting CloudKit sync (attempt \(retryCount + 1)/\(maxRetries))")
+                return try await PodcastCloudKitManager.shared.syncFromCloudKit()
+            } catch {
+                retryCount += 1
+                
+                // Check if it's a rate limiting error
+                if let ckError = error as? CKError, ckError.code == .requestRateLimited {
+                    let retryAfter = ckError.retryAfterSeconds ?? 30.0
+                    print("⏱️ FRESH INSTALL: Rate limited, waiting \(retryAfter) seconds before retry \(retryCount)/\(maxRetries)")
+                    
+                    if retryCount < maxRetries {
+                        // Update progress to show we're waiting
+                        await MainActor.run {
+                            podcastFeedsOperation = "Rate limited, waiting \(Int(retryAfter))s before retry..."
+                        }
+                        
+                        // Wait for the specified time
+                        try await Task.sleep(nanoseconds: UInt64(retryAfter * 1_000_000_000))
+                        
+                        // Update progress for next attempt
+                        await MainActor.run {
+                            podcastFeedsOperation = "Retrying podcast feeds from iCloud..."
+                        }
+                    } else {
+                        print("❌ FRESH INSTALL: Max retries exceeded for CloudKit rate limiting")
+                        throw error
+                    }
+                } else {
+                    print("❌ FRESH INSTALL: Non-rate-limiting error: \(error)")
+                    throw error
+                }
+            }
+        }
+        
+        throw CKError(.requestRateLimited)
+    }
+    
     /// Initialize CloudKit feeds for fresh install (with RSS processing)
     @MainActor
     private func initializeCloudKitFeedsForFreshInstall(_ podcastViewModel: PodcastViewModel) async {
@@ -1291,27 +1482,80 @@ class DataSyncManager: ObservableObject {
             podcastFeedsOperation = "Fetching podcast feeds from iCloud..."
             podcastFeedsProgress = 0.4
             
-            // Get feeds from CloudKit
-            let cloudKitFeeds = try await PodcastCloudKitManager.shared.syncFromCloudKit()
+            // Get feeds from CloudKit with retry logic for rate limiting
+            let cloudKitFeeds = try await syncFromCloudKitWithRetry()
             
             if !cloudKitFeeds.isEmpty {
                 print("🌟 Found \(cloudKitFeeds.count) feeds in CloudKit for fresh install processing")
                 
-                // Update progress and operation
+                // STEP 1: Clear any existing episode snapshots to start fresh
+                podcastFeedsOperation = "Clearing existing episode snapshots..."
+                podcastFeedsProgress = 0.3
+                print("🗑️ FRESH INSTALL: Clearing any existing episode snapshots...")
+                await podcastViewModel.clearAllEpisodeSnapshots()
+                
+                // STEP 2: Process RSS feeds to get complete episode lists
                 podcastFeedsOperation = "Processing RSS feeds and episodes..."
-                podcastFeedsProgress = 0.5
+                podcastFeedsProgress = 0.4
                 
                 // Start feed parsing progress tracking
                 isParsingFeeds = true
                 feedParsingProgress = 0.0
-                feedParsingMessage = "Starting RSS feed processing..."
+                feedParsingMessage = "Processing RSS feeds for complete episode lists..."
+                print("📡 FRESH INSTALL: Processing RSS feeds for complete episode lists...")
                 
                 // Use PodcastViewModel's fresh install processing
                 await podcastViewModel.loadFreshInstallPodcastData(cloudKitFeeds)
                 
+                // STEP 3: Fetch ALL episode states from CloudKit for complete snapshots
+                podcastFeedsOperation = "Fetching ALL episode states from iCloud..."
+                podcastFeedsProgress = 0.6
+                episodeStatesStatus = .inProgress
+                episodeStatesOperation = "Fetching ALL episode states from CloudKit..."
+                episodeStatesProgress = 0.1
+                print("☁️ FRESH INSTALL: Fetching ALL episode states from CloudKit...")
+                
+                let isFreshInstall = !UserDefaults.standard.bool(forKey: "HasLaunchedBefore")
+                let episodeStatesSyncSuccess = await podcastViewModel.syncEpisodeStatesFromCloudKit(isFreshInstall: isFreshInstall)
+                
+                if episodeStatesSyncSuccess {
+                    podcastFeedsOperation = "All episode states synchronized"
+                    podcastFeedsProgress = 0.8
+                    episodeStatesOperation = "All episode states synchronized"
+                    episodeStatesProgress = 0.8
+                    
+                    // Mark episode states as synced to prevent duplicate sync
+                    UserDefaults.standard.set(true, forKey: "HasEpisodeStatesSynced")
+                    print("✅ FRESH INSTALL: All episode states fetched successfully and marked as synced")
+                } else {
+                    podcastFeedsOperation = "Episode states sync completed with warnings"
+                    podcastFeedsProgress = 0.8
+                    episodeStatesOperation = "Episode states sync completed with warnings"
+                    episodeStatesProgress = 0.8
+                    print("⚠️ FRESH INSTALL: Episode states sync had issues, continuing...")
+                }
+                
+                // STEP 4: Create complete episode snapshots with states
+                podcastFeedsOperation = "Creating complete episode snapshots with states..."
+                podcastFeedsProgress = 0.9
+                episodeStatesOperation = "Creating complete episode snapshots with states..."
+                episodeStatesProgress = 0.9
+                feedParsingMessage = "Creating episode snapshots with complete state data..."
+                print("📸 FRESH INSTALL: Creating complete episode snapshots with states...")
+                
+                // Create snapshots that include complete episode lists with their states
+                await createEpisodeSnapshotsForAllFeeds(podcastViewModel)
+                
+                // Complete episode states sync
+                episodeStatesStatus = .completed
+                episodeStatesOperation = "✅ Episode snapshots ready with complete state data"
+                episodeStatesProgress = 1.0
+                
                 // Complete feed parsing
+                podcastFeedsOperation = "Fresh install completed successfully"
+                podcastFeedsProgress = 1.0
                 feedParsingProgress = 1.0
-                feedParsingMessage = "RSS feed processing completed"
+                feedParsingMessage = "Fresh install processing completed successfully"
                 try? await Task.sleep(nanoseconds: 500_000_000) // Show completion for 0.5 seconds
                 isParsingFeeds = false
                 
@@ -1331,6 +1575,44 @@ class DataSyncManager: ObservableObject {
             // Initialize artwork tracking with 0 feeds even on error
             startArtworkDownloadTracking(totalFeeds: 0)
             podcastFeedsOperation = "❌ Failed to sync podcast feeds from iCloud"
+        }
+    }
+    
+    /// Verify that episode snapshots are ready for immediate use
+    @MainActor
+    private func verifyEpisodeSnapshotsAreReady(_ podcastViewModel: PodcastViewModel) async {
+        print("🔍 FINAL VERIFICATION: Checking episode snapshot availability...")
+        
+        var feedsWithSnapshots = 0
+        var feedsWithEpisodes = 0
+        var totalSnapshotEpisodes = 0
+        
+        for feed in podcastViewModel.podcastFeeds {
+            if !feed.episodes.isEmpty {
+                feedsWithEpisodes += 1
+                
+                if let snapshot = podcastViewModel.getEpisodeSnapshot(for: feed.id) {
+                    feedsWithSnapshots += 1
+                    totalSnapshotEpisodes += snapshot.count
+                    print("✅ Snapshot verified for '\(feed.title)': \(snapshot.count) episodes")
+                } else {
+                    print("⚠️ Missing snapshot for '\(feed.title)' with \(feed.episodes.count) episodes")
+                    // Create missing snapshot
+                    podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: feed.episodes)
+                    feedsWithSnapshots += 1
+                    totalSnapshotEpisodes += feed.episodes.count
+                    print("🔧 Created missing snapshot for '\(feed.title)'")
+                }
+            }
+        }
+        
+        let snapshotCoverage = feedsWithEpisodes > 0 ? (Double(feedsWithSnapshots) / Double(feedsWithEpisodes)) * 100 : 100
+        print("📊 SNAPSHOT COVERAGE: \(feedsWithSnapshots)/\(feedsWithEpisodes) feeds (\(Int(snapshotCoverage))%) with \(totalSnapshotEpisodes) total episodes")
+        
+        if feedsWithSnapshots == feedsWithEpisodes {
+            print("✅ All feeds with episodes have snapshots - ready for instant access")
+        } else {
+            print("⚠️ Some feeds missing snapshots - this may affect performance")
         }
     }
     
@@ -1482,6 +1764,125 @@ class DataSyncManager: ObservableObject {
                     print("❌ Error counting episodes: \(error)")
                     continuation.resume(returning: 100) // Conservative estimate
                 }
+            }
+        }
+    }
+    
+    /// Get actual episode count from loaded podcast feeds
+    private func getActualEpisodeCount(_ podcastViewModel: PodcastViewModel) async -> Int {
+        return await MainActor.run {
+            var totalEpisodes = 0
+            for feed in podcastViewModel.podcastFeeds {
+                totalEpisodes += feed.episodes.count
+            }
+            return totalEpisodes
+        }
+    }
+    
+    /// Wait for podcast feeds to be loaded before syncing episode states
+    private func waitForPodcastFeedsToLoad(_ podcastViewModel: PodcastViewModel) async {
+        print("⏳ Waiting for podcast feeds to load before episode state sync...")
+        
+        var attempts = 0
+        let maxAttempts = 30 // 3 seconds max wait
+        
+        while attempts < maxAttempts {
+            let feedCount = await MainActor.run { podcastViewModel.podcastFeeds.count }
+            if feedCount > 0 {
+                print("✅ Podcast feeds loaded: \(feedCount) feeds available")
+                break
+            }
+            
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            attempts += 1
+        }
+        
+        if attempts >= maxAttempts {
+            print("⚠️ Podcast feeds not loaded within timeout - proceeding with episode sync anyway")
+        }
+    }
+    
+    /// Create episode snapshots for all loaded feeds for instant access
+    private func createEpisodeSnapshotsForAllFeeds(_ podcastViewModel: PodcastViewModel) async {
+        await MainActor.run {
+            let feedCount = podcastViewModel.podcastFeeds.count
+            let feedsWithEpisodes = podcastViewModel.podcastFeeds.filter { !$0.episodes.isEmpty }
+            
+            print("📸 Creating episode snapshots for \(feedCount) feeds (\(feedsWithEpisodes.count) have episodes)...")
+            
+            // Update snapshot tracking
+            self.totalFeedsRequiringSnapshots = feedsWithEpisodes.count
+            self.feedsWithSnapshots = 0
+            self.episodeSnapshotsReady = false
+            
+            var processedFeeds = 0
+            
+            for feed in podcastViewModel.podcastFeeds {
+                if !feed.episodes.isEmpty {
+                    // CRITICAL: Refresh episode states before creating snapshot to ensure they're current
+                    let episodesWithCurrentStates = feed.episodes.map { episode in
+                        var updatedEpisode = episode
+                        
+                        // Get current states from EpisodeStateManager
+                        let progress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                        let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                        let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                        let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
+                        
+                        // DEBUG: Log states for episodes that have non-default values
+                        if progress > 0 || isFavorite || isDownloaded || playbackState == .played {
+                            print("📸 SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
+                        }
+                        
+                        // Update episode state with current values
+                        updatedEpisode.state.progress = progress
+                        updatedEpisode.state.isFavorite = isFavorite
+                        updatedEpisode.state.isDownloaded = isDownloaded
+                        // Note: playbackState is managed separately in EpisodeStateManager, not in EpisodeState struct
+                        updatedEpisode.state.isPlayed = (playbackState == .played)
+                        
+                        return updatedEpisode
+                    }
+                    
+                    // Create snapshot with episodes that have current states
+                    podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: episodesWithCurrentStates)
+                    self.feedsWithSnapshots += 1
+                    print("📸 Created snapshot for '\(feed.title)' with \(feed.episodes.count) episodes with current states (\(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots))")
+                } else {
+                    print("📸 Skipped snapshot for '\(feed.title)' - no episodes loaded")
+                }
+                
+                processedFeeds += 1
+                let progress = 0.6 + (Double(processedFeeds) / Double(feedCount)) * 0.3 // 60% to 90%
+                self.episodeStatesProgress = progress
+                self.episodeStatesOperation = "Created snapshots for \(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots) feeds with episodes..."
+            }
+            
+            // Mark snapshots as ready when all feeds with episodes have snapshots
+            self.episodeSnapshotsReady = (self.feedsWithSnapshots == self.totalFeedsRequiringSnapshots)
+            print("📸 SNAPSHOT READINESS: \(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots) snapshots created - Ready: \(self.episodeSnapshotsReady)")
+        }
+    }
+    
+    /// Verify that episode data is available and snapshots are created
+    private func verifyEpisodeDataAvailability(_ podcastViewModel: PodcastViewModel) async {
+        await MainActor.run {
+            var totalSnapshots = 0
+            var totalEpisodes = 0
+            
+            for feed in podcastViewModel.podcastFeeds {
+                if let snapshot = podcastViewModel.getEpisodeSnapshot(for: feed.id) {
+                    totalSnapshots += 1
+                    totalEpisodes += snapshot.count
+                }
+            }
+            
+            print("🔍 Episode data verification: \(totalSnapshots) snapshots created with \(totalEpisodes) total episodes")
+            
+            if totalSnapshots > 0 {
+                self.episodeStatesOperation = "✅ \(totalSnapshots) feed snapshots ready for instant access"
+            } else {
+                self.episodeStatesOperation = "⚠️ Episode data verified (no snapshots - feeds may be empty)"
             }
         }
     }
@@ -1650,11 +2051,27 @@ class DataSyncManager: ObservableObject {
         }
     }
     
+    /// Test method to manually trigger episode state sync with snapshots
+    @MainActor
+    func testEpisodeStateSyncWithSnapshots() {
+        print("🧪 TEST: Manually triggering episode state sync with snapshot creation")
+        Task {
+            await self.syncEpisodeStates()
+        }
+    }
+    
     /// Reset the podcast feeds sync flag to force cross-device check on next launch
     @MainActor
     func resetPodcastFeedsSyncFlag() {
         UserDefaults.standard.set(false, forKey: "HasPodcastFeedsSynced")
         print("🔄 Reset podcast feeds sync flag - will check CloudKit for cross-device feeds on next initialization")
+    }
+    
+    /// Reset the episode states sync flag to force a complete re-sync on next launch
+    @MainActor
+    func resetEpisodeStatesSyncFlag() {
+        UserDefaults.standard.set(false, forKey: "HasEpisodeStatesSynced")
+        print("🔄 Reset episode states sync flag - will re-sync from CloudKit on next launch")
     }
 }
 

@@ -793,7 +793,9 @@ class DataStore {
             case .success(let record):
                 fetchedRecords.append(record)
             case .failure(let error):
-                print("Error fetching individual record \(recordID.recordName): \(error.localizedDescription)")
+                // RESILIENCE: Skip corrupted/unavailable records instead of failing entire sync
+                print("⚠️ Skipping corrupted record \(recordID.recordName): \(error.localizedDescription)")
+                // Don't add to fetchedRecords - just continue with other records
             }
         }
         
@@ -812,7 +814,14 @@ class DataStore {
             case .failure(let error):
                 DispatchQueue.main.async {
                     print("Error during CloudKit query operation: \(error.localizedDescription)")
-                    completion(nil, error)
+                    
+                    // RESILIENCE: If we have some successfully fetched records, use them instead of failing entirely
+                    if !fetchedRecords.isEmpty {
+                        print("🔧 RESILIENCE: Completing sync with \(fetchedRecords.count) successfully fetched records despite CloudKit errors")
+                        self.processAndReturnStations(from: fetchedRecords, completion: completion)
+                    } else {
+                        completion(nil, error)
+                    }
                 }
             }
         }
@@ -874,7 +883,9 @@ class DataStore {
                     }
                 }
             case .failure(let error):
-                print("Error fetching individual record \(recordID.recordName): \(error.localizedDescription)")
+                // RESILIENCE: Skip corrupted/unavailable records instead of failing entire sync
+                print("⚠️ Skipping corrupted record \(recordID.recordName): \(error.localizedDescription)")
+                // Don't add to fetchedRecords - just continue with other records
             }
         }
         
@@ -943,7 +954,38 @@ class DataStore {
             case .failure(let error):
                 DispatchQueue.main.async {
                     print("Error during CloudKit query operation: \(error.localizedDescription)")
-                    completion(nil, error)
+                    
+                    // RESILIENCE: If we have some successfully fetched records, use them instead of failing entirely
+                    if !fetchedRecords.isEmpty {
+                        print("🔧 RESILIENCE: Completing sync with \(fetchedRecords.count) successfully fetched records despite CloudKit errors")
+                        
+                        // Report final progress with what we have
+                        let currentCount = fetchedRecords.count
+                        let allCountries = fetchedRecords.compactMap { record in
+                            record["country"] as? String
+                        }
+                        let uniqueCountries = Array(Set(allCountries)).sorted()
+                        let countryCount = uniqueCountries.count
+                        
+                        let processingMessage = countryCount > 1 ? 
+                            "🔧 Processing \(currentCount) stations from \(countryCount) countries (some records skipped due to errors)..." :
+                            "🔧 Processing \(currentCount) stations (some records skipped due to errors)..."
+                        progressCallback(0.95, currentCount, processingMessage)
+                        
+                        self.processAndReturnStations(from: fetchedRecords) { stations, error in
+                            DispatchQueue.main.async {
+                                if let stations = stations {
+                                    let completionMessage = countryCount > 1 ?
+                                        "✅ Completed! Loaded \(stations.count) stations from \(countryCount) countries (with error recovery)" :
+                                        "✅ Completed! Loaded \(stations.count) stations (with error recovery)"
+                                    progressCallback(1.0, stations.count, completionMessage)
+                                }
+                            }
+                            completion(stations, error)
+                        }
+                    } else {
+                        completion(nil, error)
+                    }
                 }
             }
         }

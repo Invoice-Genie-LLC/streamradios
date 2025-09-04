@@ -85,6 +85,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // CRITICAL FIX: Use universal save for maximum reliability
         performUniversalProgressSave(reason: "app_will_terminate")
         
+        // ⚡ PROACTIVE: Update all snapshots before app terminates for instant next launch
+        if let currentEpisode = PodcastPlayer.shared.currentEpisode {
+            Task {
+                await PodcastViewModel.shared.updateSnapshotForEpisodeStateChange(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
+            }
+            print("⚡ FORCE CLOSE: Updated snapshot for currently playing episode")
+        }
+        
         // Request that global player be suppressed on next launch
         UserDefaults.standard.set(true, forKey: "SuppressGlobalPlayerOnNextLaunch")
         
@@ -354,6 +362,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // CRITICAL FIX: Use universal save for app switcher scenarios
         performUniversalProgressSave(reason: "app_did_enter_background_potential_force_close")
+        
+        // ⚡ PROACTIVE: Update snapshots when app enters background (potential force close)
+        if let currentEpisode = PodcastPlayer.shared.currentEpisode {
+            Task {
+                await PodcastViewModel.shared.updateSnapshotForEpisodeStateChange(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
+            }
+            print("⚡ BACKGROUND: Updated snapshot for currently playing episode")
+        }
         
         // CRITICAL FIX: Enhanced background task management to prevent main thread deadlocks
          let radioPlayer = RadioPlayer.shared

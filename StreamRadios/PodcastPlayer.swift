@@ -1843,6 +1843,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // REAL-TIME SYNC: Use the new real-time sync method for episode pause with known feedId
         stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: finalProgress, reason: "episode_paused", feedId: currentEpisode.feedId)
         
+        // ⚡ PROACTIVE: Update snapshot immediately for instant loading on next app launch
+        Task {
+            await PodcastViewModel.shared.updateSnapshotForEpisodeStateChange(episodeId: currentEpisode.id, feedId: currentEpisode.feedId)
+        }
+        
         // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
         NotificationCenter.default.post(
             name: .init("InstantSyncDidUpdatePodcastProgress"),

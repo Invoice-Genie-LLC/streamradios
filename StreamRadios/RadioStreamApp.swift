@@ -92,7 +92,9 @@ struct RadioStreamApp: App {
         
         if isFreshInstall || !hasRadioStationsSynced {
             print("🔄 Radio station sync needed - fresh install: \(isFreshInstall), stations synced: \(hasRadioStationsSynced)")
-            fetchStationsFromCloudKit()
+            print("⏭️ SEQUENCING: Radio station sync will be handled by DataSyncManager to prevent CloudKit rate limiting")
+            // NOTE: Radio station sync is now handled by DataSyncManager in sequence to prevent CloudKit rate limiting
+            // fetchStationsFromCloudKit() - REMOVED to prevent parallel CloudKit operations
         } else {
             print("⚡ Skipping CloudKit radio station sync - stations already loaded by ViewModel for instant startup")
             // RadioStationViewModel already loaded stations in its init, no need to reload
