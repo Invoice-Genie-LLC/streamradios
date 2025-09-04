@@ -284,7 +284,7 @@ extension Country {
             Country(name: "United Arab Emirates", flag: "AE"),
             Country(name: "United States", flag: "US"),
             Country(name: "Uruguay", flag: "UY"),
-            Country(name: "U.S. Virgin Islands", flag: "VI"),
+            Country(name: "United States Virgin Islands", flag: "VI"),
             Country(name: "Uzbekistan", flag: "UZ"),
             Country(name: "Vanuatu", flag: "VU"),
             Country(name: "Vatican City", flag: "VA"),

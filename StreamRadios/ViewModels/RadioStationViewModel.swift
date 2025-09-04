@@ -102,6 +102,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 selectedSubTab = .all
                 print("🌍 Country changed from '\(oldValue)' to '\(selectedCountry)' - switching to All tab")
                 
+                // CRITICAL FIX: Force migration for all countries except US and UK to handle API name variations
+                if selectedCountry != "United States" && selectedCountry != "United Kingdom" && selectedCountry != "Select Country" && selectedCountry != "Unknown Region" {
+                    print("🔧 Forcing migration for country name normalization: \(selectedCountry)")
+                    Task { @MainActor in
+                        forceMigrateStationCountryNames()
+                    }
+                }
+                
                 // Automatically fetch stations for the newly selected country if it has no stations
                 print("🌍 Triggering API fetch for newly selected country: \(selectedCountry)")
                 Task { @MainActor [weak self] in
@@ -2705,10 +2713,15 @@ class RadioStationViewModel: NSObject, ObservableObject {
         let trimmed = apiCountryName.trimmingCharacters(in: .whitespacesAndNewlines)
         
         switch trimmed {
+        // United Kingdom variations (excluded from migration)
         case "The United Kingdom Of Great Britain And Northern Ireland":
             return "United Kingdom"
+        
+        // United States variations (excluded from migration)
         case "The United States Of America", "United States Of America", "USA", "United States of America", "US", "America":
             return "United States"
+        
+        // Countries with "The" prefix
         case "The Faroe Islands":
             return "Faroe Islands"
         case "The Netherlands":
@@ -2717,28 +2730,157 @@ class RadioStationViewModel: NSObject, ObservableObject {
             return "Bahamas"
         case "The Gambia":
             return "Gambia"
+        
+        // Countries with alternative names
         case "Czech Republic", "Czechia":
             return "Czech Republic"
-        case "Russian Federation":
+        case "Russian Federation", "Russia (Russian Federation)":
             return "Russia"
-        case "Republic of Korea":
+        case "Republic of Korea", "Korea (Republic of)":
             return "South Korea"
-        case "Democratic People's Republic of Korea":
+        case "Democratic People's Republic of Korea", "Korea (Democratic People's Republic of)":
             return "North Korea"
+        case "Iran (Islamic Republic of)", "Islamic Republic of Iran":
+            return "Iran"
+        case "Syria (Syrian Arab Republic)", "Syrian Arab Republic":
+            return "Syria"
+        case "Venezuela (Bolivarian Republic of)", "Bolivarian Republic of Venezuela":
+            return "Venezuela"
+        case "Bolivia (Plurinational State of)", "Plurinational State of Bolivia":
+            return "Bolivia"
+        case "Tanzania (United Republic of)", "United Republic of Tanzania":
+            return "Tanzania"
+        case "Moldova (Republic of)", "Republic of Moldova":
+            return "Moldova"
+        case "Macedonia (the former Yugoslav Republic of)", "The Former Yugoslav Republic of Macedonia", "North Macedonia":
+            return "Macedonia"
+        case "Congo (Democratic Republic of the)", "Democratic Republic of the Congo", "Congo-Kinshasa", "DR Congo":
+            return "Congo - Kinshasa"
+        case "Congo (Republic of the)", "Republic of the Congo", "Congo-Brazzaville":
+            return "Congo - Brazzaville"
+        case "Lao People's Democratic Republic", "Laos PDR":
+            return "Laos"
+        case "Viet Nam":
+            return "Vietnam"
+        case "Brunei Darussalam":
+            return "Brunei"
+        case "Myanmar (Burma)", "Burma":
+            return "Myanmar"
+        
+        // Countries with & symbols
         case "Bosnia and Herzegovina", "Bosnia And Herzegovina":
             return "Bosnia & Herzegovina"
         case "Trinidad and Tobago", "Trinidad And Tobago":
             return "Trinidad & Tobago"
-        case "São Tomé and Príncipe", "Sao Tome and Principe":
+        case "São Tomé and Príncipe", "Sao Tome and Principe", "Sao Tome & Principe":
             return "São Tomé & Príncipe"
         case "Antigua and Barbuda", "Antigua And Barbuda":
             return "Antigua & Barbuda"
-        case "Vatican", "Holy See", "Vatican City State", "The Vatican":
-            return "Vatican City"
+        case "Saint Kitts and Nevis", "St. Kitts and Nevis", "St Kitts and Nevis", "Saint Kitts & Nevis", "St. Kitts & Nevis", "St Kitts & Nevis":
+            return "Saint Kitts & Nevis"
+        case "Turks and Caicos Islands", "Turks And Caicos Islands":
+            return "Turks & Caicos Islands"
+        case "Wallis and Futuna", "Wallis And Futuna":
+            return "Wallis & Futuna"
+        
+        // Saint/St variations
         case "Saint Vincent and the Grenadines", "St. Vincent and the Grenadines", "St Vincent and the Grenadines", "Saint Vincent and Grenadines", "St. Vincent & Grenadines", "St Vincent & Grenadines":
             return "Saint Vincent & Grenadines"
         case "Saint Pierre and Miquelon", "St. Pierre and Miquelon", "St Pierre and Miquelon", "Saint Pierre et Miquelon", "St. Pierre et Miquelon", "St Pierre et Miquelon":
             return "Saint Pierre & Miquelon"
+        case "Saint Lucia", "St. Lucia", "St Lucia":
+            return "Saint Lucia"
+        case "Saint Martin", "St. Martin", "St Martin":
+            return "Saint Martin"
+        case "Saint Helena", "St. Helena", "St Helena":
+            return "Saint Helena"
+        case "Saint Barthélemy", "St. Barthélemy", "St Barthélemy", "Saint Barthelemy", "St. Barthelemy", "St Barthelemy":
+            return "Saint Barthélemy"
+        
+        // Vatican variations
+        case "Vatican", "Holy See", "Vatican City State", "The Vatican":
+            return "Vatican City"
+        
+        // Virgin Islands variations
+        case "U.S. Virgin Islands", "US Virgin Islands", "Virgin Islands (U.S.)", "Virgin Islands, U.S.":
+            return "United States Virgin Islands"
+        case "British Virgin Islands", "Virgin Islands (British)":
+            return "British Virgin Islands"
+        
+        // Island variations
+        case "Falkland Islands (Malvinas)", "Falkland Islands (Islas Malvinas)":
+            return "Falkland Islands"
+        case "Cocos (Keeling) Islands", "Cocos Islands":
+            return "Cocos (Keeling) Islands"
+        case "Northern Mariana Islands", "Northern Marianas":
+            return "Northern Mariana Islands"
+        case "Marshall Islands", "Marshall Is.":
+            return "Marshall Islands"
+        case "Solomon Islands", "Solomon Is.":
+            return "Solomon Islands"
+        case "Cayman Islands", "Cayman Is.":
+            return "Cayman Islands"
+        case "Cook Islands", "Cook Is.":
+            return "Cook Islands"
+        case "Pitcairn Islands", "Pitcairn":
+            return "Pitcairn Islands"
+        case "Norfolk Island", "Norfolk Is.":
+            return "Norfolk Island"
+        case "Christmas Island", "Christmas Is.":
+            return "Christmas Island"
+        case "Åland Islands", "Aland Islands":
+            return "Åland Islands"
+        
+        // Other territories and dependencies
+        case "Palestinian Territory", "Palestine", "Palestinian Territories", "State of Palestine":
+            return "Palestinian Territories"
+        case "Timor-Leste", "East Timor":
+            return "Timor-Leste"
+        case "Côte d'Ivoire", "Cote d'Ivoire", "Ivory Coast":
+            return "Côte d'Ivoire"
+        case "Swaziland", "eSwatini":
+            return "Swaziland"
+        case "Cape Verde", "Cabo Verde":
+            return "Cape Verde"
+        case "Guinea-Bissau", "Guinea Bissau":
+            return "Guinea-Bissau"
+        case "Papua New Guinea", "Papua N. Guinea":
+            return "Papua New Guinea"
+        case "Equatorial Guinea", "Eq. Guinea":
+            return "Equatorial Guinea"
+        case "Central African Republic", "CAR", "C.A.R.":
+            return "Central African Republic"
+        case "Dominican Republic", "Dom. Rep.":
+            return "Dominican Republic"
+        case "United Arab Emirates", "UAE", "U.A.E.":
+            return "United Arab Emirates"
+        case "South Africa", "S. Africa":
+            return "South Africa"
+        case "South Sudan", "S. Sudan":
+            return "South Sudan"
+        case "New Zealand", "N. Zealand":
+            return "New Zealand"
+        case "New Caledonia", "N. Caledonia":
+            return "New Caledonia"
+        case "El Salvador", "Salvador":
+            return "El Salvador"
+        case "Costa Rica", "C. Rica":
+            return "Costa Rica"
+        case "Puerto Rico", "P. Rico":
+            return "Puerto Rico"
+        case "Sierra Leone", "S. Leone":
+            return "Sierra Leone"
+        case "Saudi Arabia", "S. Arabia":
+            return "Saudi Arabia"
+        case "French Polynesia", "Fr. Polynesia":
+            return "French Polynesia"
+        case "French Guiana", "Fr. Guiana":
+            return "French Guiana"
+        case "American Samoa", "Am. Samoa":
+            return "American Samoa"
+        case "Western Sahara", "W. Sahara":
+            return "Western Sahara"
+        
         default:
             // Handle general cases where API adds "The" prefix
             if trimmed.hasPrefix("The ") {
@@ -2746,6 +2888,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 return withoutThe
             }
             return trimmed
+        }
+    }
+    
+    /// Force migration to run immediately (bypasses cooldown) - used for critical fixes
+    @MainActor
+    func forceMigrateStationCountryNames() {
+        // Reset the cleanup timer to force migration
+        UserDefaults.standard.set(0, forKey: "LastStationCleanupTime")
+        
+        // Run migration immediately
+        Task {
+            await migrateStationCountryNames()
         }
     }
     
@@ -3209,7 +3363,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             "VC": "Saint Vincent & Grenadines",
             "VE": "Venezuela",
             "VG": "British Virgin Islands",
-            "VI": "U.S. Virgin Islands",
+            "VI": "United States Virgin Islands",
             "VN": "Vietnam",
             "VU": "Vanuatu",
             

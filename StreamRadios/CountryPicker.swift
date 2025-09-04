@@ -593,7 +593,7 @@ enum CountryRegion: String, CaseIterable, Hashable {
             "Jamaica", "Cuba", "Haiti", "Dominican Republic", "Puerto Rico", "Trinidad & Tobago", 
             "Barbados", "Bahamas", "Saint Lucia", "Grenada", "Saint Vincent & Grenadines", 
             "Antigua & Barbuda", "Dominica", "Saint Kitts & Nevis", "Aruba", "Curaçao", 
-            "Sint Maarten", "British Virgin Islands", "U.S. Virgin Islands", "Cayman Islands", 
+            "Sint Maarten", "British Virgin Islands", "United States Virgin Islands", "Cayman Islands", 
             "Turks & Caicos Islands", "Anguilla", "Montserrat", "Guadeloupe", "Martinique", 
             "Saint Barthélemy", "Saint Martin"
         ]
