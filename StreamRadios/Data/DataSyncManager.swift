@@ -1535,15 +1535,26 @@ class DataSyncManager: ObservableObject {
                     print("⚠️ FRESH INSTALL: Episode states sync had issues, continuing...")
                 }
                 
-                // STEP 4: Create complete episode snapshots with states
+                // STEP 4: Apply CloudKit feed metadata updates before creating snapshots
+                podcastFeedsOperation = "Applying CloudKit feed metadata updates..."
+                podcastFeedsProgress = 0.85
+                episodeStatesOperation = "Applying CloudKit feed metadata updates..."
+                episodeStatesProgress = 0.85
+                feedParsingMessage = "Applying latest feed metadata from CloudKit..."
+                print("🔄 FRESH INSTALL: Applying CloudKit feed metadata updates...")
+                
+                // Apply CloudKit metadata to existing feeds
+                await podcastViewModel.applyCloudKitFeedMetadata(cloudKitFeeds)
+                
+                // STEP 5: Create complete episode snapshots with states AND updated metadata
                 podcastFeedsOperation = "Creating complete episode snapshots with states..."
                 podcastFeedsProgress = 0.9
                 episodeStatesOperation = "Creating complete episode snapshots with states..."
                 episodeStatesProgress = 0.9
                 feedParsingMessage = "Creating episode snapshots with complete state data..."
-                print("📸 FRESH INSTALL: Creating complete episode snapshots with states...")
+                print("📸 FRESH INSTALL: Creating complete episode snapshots with states and metadata...")
                 
-                // Create snapshots that include complete episode lists with their states
+                // Create snapshots that include complete episode lists with their states AND CloudKit metadata
                 await createEpisodeSnapshotsForAllFeeds(podcastViewModel)
                 
                 // Complete episode states sync
