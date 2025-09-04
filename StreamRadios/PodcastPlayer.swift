@@ -2755,10 +2755,23 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
+    // PERFORMANCE: Track last lock screen update time for throttling
+    private var lastLockScreenUpdate = Date(timeIntervalSince1970: 0)
+    
     // CRITICAL FIX: Lightweight method to update only elapsed time for real-time lock screen sync
     private func updateNowPlayingInfoElapsedTimeOnly() {
         // Only update if podcast is the active player
         guard PlaybackManager.shared.activePlayer == .podcast else { return }
+        
+        let now = Date()
+        
+        // 🎯 SNAPSHOT PERFORMANCE: Reduce lock screen update frequency when using snapshots
+        // For now, assume no snapshot to be safe - this will default to 1 second updates
+        let throttleInterval: TimeInterval = 1.0 // Always use 1 second for now to avoid main actor issues
+        
+        // Skip if we've updated too recently
+        guard now.timeIntervalSince(lastLockScreenUpdate) >= throttleInterval else { return }
+        lastLockScreenUpdate = now
         
         // Get current Now Playing info and update only the elapsed time
         let nowPlayingCenter = MPNowPlayingInfoCenter.default()
@@ -2772,8 +2785,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Set the updated info immediately - no debouncing for elapsed time
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
         
-        os_log("🔄 Lock Screen Sync: Updated elapsed time to %.1fs for real-time lock screen controls", 
-               log: log, type: .debug, elapsedTime)
+        // 📊 PERFORMANCE LOG: Show throttling status
+        os_log("🔄 Lock Screen Sync: Updated elapsed time to %.1fs (throttled to %.1fs intervals)", 
+               log: log, type: .debug, elapsedTime, throttleInterval)
     }
     
 
