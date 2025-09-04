@@ -44,7 +44,19 @@ class PodcastEpisodeManager {
         
         let startTime = CFAbsoluteTimeGetCurrent()
         
-        // ULTRA-FAST MEMORY CACHE CHECK: For immediate responses on feed switching
+        // INSTANT CACHE: Always check persistent cache first for immediate loading
+        if let cachedResult = await cacheManager.getCachedEpisodes(
+            feedId: feedId,
+            page: page,
+            pageSize: pageSize,
+            filter: filter,
+            searchQuery: searchQuery
+        ) {
+            os_log("⚡ INSTANT CACHE HIT: %d episodes in %.4f seconds", log: log, type: .info, cachedResult.episodes.count, CFAbsoluteTimeGetCurrent() - startTime)
+            return cachedResult
+        }
+        
+        // ULTRA-FAST MEMORY CACHE CHECK: Secondary cache for immediate responses
         if filter == .all && searchQuery == nil {
             let memoryCacheKey = "\(feedId)_all"
             if let cachedEpisodes = getFromMemoryCache(key: memoryCacheKey) {
@@ -59,20 +71,8 @@ class PodcastEpisodeManager {
             }
         }
         
-        // For filtering operations (Favorites/Downloads), always bypass cache to ensure fresh results
+        // For filtering operations (Favorites/Downloads), always load fresh to ensure current state
         let shouldUseCache = (filter == .all && searchQuery == nil)
-        
-        // Try cache first only for All tab without search
-        if shouldUseCache, let cachedResult = await cacheManager.getCachedEpisodes(
-            feedId: feedId,
-            page: page,
-            pageSize: pageSize,
-            filter: filter,
-            searchQuery: searchQuery
-        ) {
-            os_log("📦 Cache hit for feed %@ page %d", log: log, type: .debug, feedId, page)
-            return cachedResult
-        }
         
         // PRIORITIZED LOADING: For large feeds and first page, use optimized approach
         if page == 1 && filter == .all && searchQuery == nil {
@@ -165,6 +165,38 @@ class PodcastEpisodeManager {
     /// Clear cache for a feed when episode states change
     func clearCacheForFeed(_ feedId: String) async {
         await cacheManager.clearCacheForFeed(feedId)
+    }
+    
+    /// Force clear persistent cache (only use when feed is deleted)
+    func clearPersistentCacheForFeed(_ feedId: String) async {
+        await cacheManager.clearPersistentCacheForFeed(feedId)
+        // Also clear memory cache
+        clearMemoryCacheForFeed(feedId)
+    }
+    
+    /// Check if episodes are cached for instant loading
+    func hasInstantCache(feedId: String) async -> Bool {
+        return await cacheManager.hasCachedEpisodes(feedId: feedId)
+    }
+    
+    /// Update cache with new episodes detected from RSS
+    func updateCacheWithNewEpisodes(_ newEpisodes: [PodcastEpisode], for feedId: String) async {
+        await cacheManager.updateCacheWithNewEpisodes(newEpisodes, for: feedId)
+        
+        // Also update memory cache if it exists
+        let memoryCacheKey = "\(feedId)_all"
+        if let existingMemoryCache = getFromMemoryCache(key: memoryCacheKey) {
+            // Merge with memory cache
+            let existingIds = Set(existingMemoryCache.map { $0.id })
+            let uniqueNewEpisodes = newEpisodes.filter { !existingIds.contains($0.id) }
+            
+            if !uniqueNewEpisodes.isEmpty {
+                var updatedCache = existingMemoryCache
+                updatedCache.insert(contentsOf: uniqueNewEpisodes, at: 0)
+                updatedCache.sort { $0.publicationDate > $1.publicationDate }
+                storeInMemoryCache(key: memoryCacheKey, episodes: updatedCache)
+            }
+        }
     }
     
     /// Clear all cache - useful for debugging
@@ -775,7 +807,7 @@ struct EpisodeCounts {
     let downloads: Int
 }
 
-// MARK: - Cache Manager
+// MARK: - Persistent Cache Manager
 
 actor PodcastCacheManager {
     private var episodeCache: [String: EpisodeLoadResult] = [:]
@@ -783,6 +815,12 @@ actor PodcastCacheManager {
     private let cacheTimeout: TimeInterval = 300 // 5 minutes
     private let maxCacheSize = 50 // Maximum cached results
     
+    // PERSISTENT EPISODE CACHE: Always load from cache, never timeout
+    private var persistentEpisodeCache: [String: [PodcastEpisode]] = [:]
+    private var persistentCacheTimestamps: [String: Date] = [:]
+    private var feedEpisodeCounts: [String: Int] = [:] // Track episode counts for new episode detection
+    
+    /// INSTANT CACHE: Always return cached episodes immediately, never timeout
     func getCachedEpisodes(
         feedId: String,
         page: Int,
@@ -790,6 +828,16 @@ actor PodcastCacheManager {
         filter: EpisodeFilter,
         searchQuery: String?
     ) async -> EpisodeLoadResult? {
+        // PERSISTENT CACHE: Check for full episode list first (for instant loading)
+        if filter == .all && searchQuery == nil && page == 1 {
+            if let allEpisodes = persistentEpisodeCache[feedId], !allEpisodes.isEmpty {
+                let paginatedEpisodes = Array(allEpisodes.prefix(pageSize))
+                let hasMore = allEpisodes.count > pageSize
+                return EpisodeLoadResult(episodes: paginatedEpisodes, hasMore: hasMore, totalCount: allEpisodes.count)
+            }
+        }
+        
+        // Fallback to regular cache with timeout
         let key = cacheKey(feedId: feedId, page: page, filter: filter, searchQuery: searchQuery)
         
         guard let timestamp = cacheTimestamps[key],
@@ -801,6 +849,7 @@ actor PodcastCacheManager {
         return cachedResult
     }
     
+    /// PERSISTENT CACHE: Store episodes permanently with new episode detection
     func cacheEpisodes(
         _ result: EpisodeLoadResult,
         for feedId: String,
@@ -808,6 +857,24 @@ actor PodcastCacheManager {
         filter: EpisodeFilter,
         searchQuery: String?
     ) async {
+        // PERSISTENT CACHE: Store full episode list for instant future access
+        if filter == .all && searchQuery == nil && page == 1 {
+            let previousCount = feedEpisodeCounts[feedId] ?? 0
+            let currentCount = result.totalCount
+            
+            // Store the full episode list persistently
+            persistentEpisodeCache[feedId] = result.episodes
+            persistentCacheTimestamps[feedId] = Date()
+            feedEpisodeCounts[feedId] = currentCount
+            
+            // Log new episode detection
+            if currentCount > previousCount {
+                let newEpisodeCount = currentCount - previousCount
+                print("🆕 PERSISTENT CACHE: Detected \(newEpisodeCount) new episodes for feed \(feedId) (\(previousCount) -> \(currentCount))")
+            }
+        }
+        
+        // Regular cache with timeout for filtered results
         let key = cacheKey(feedId: feedId, page: page, filter: filter, searchQuery: searchQuery)
         
         // Implement LRU cache eviction
@@ -821,17 +888,76 @@ actor PodcastCacheManager {
         cacheTimestamps[key] = Date()
     }
     
+    /// SMART CACHE CLEARING: Only clear when new episodes are detected
     func clearCacheForFeed(_ feedId: String) async {
+        // Clear regular cache
         let keysToRemove = episodeCache.keys.filter { $0.hasPrefix(feedId) }
         for key in keysToRemove {
             episodeCache.removeValue(forKey: key)
             cacheTimestamps.removeValue(forKey: key)
         }
+        
+        // PERSISTENT CACHE: Only clear if explicitly requested (rare)
+        // Normally we keep persistent cache and just update it
+        print("🧽 CACHE CLEAR: Cleared regular cache for feed \(feedId), persistent cache retained")
+    }
+    
+    /// Force clear persistent cache (only use when feed is deleted or corrupted)
+    func clearPersistentCacheForFeed(_ feedId: String) async {
+        persistentEpisodeCache.removeValue(forKey: feedId)
+        persistentCacheTimestamps.removeValue(forKey: feedId)
+        feedEpisodeCounts.removeValue(forKey: feedId)
+        print("⚠️ PERSISTENT CACHE: Force cleared for feed \(feedId)")
     }
     
     func clearAllCache() async {
         episodeCache.removeAll()
         cacheTimestamps.removeAll()
+        // Keep persistent cache unless explicitly cleared
+        print("🧽 CACHE CLEAR: Cleared regular cache, persistent cache retained")
+    }
+    
+    /// Check if feed has cached episodes available for instant loading
+    func hasCachedEpisodes(feedId: String) async -> Bool {
+        return persistentEpisodeCache[feedId] != nil
+    }
+    
+    /// Get episode count from cache without loading episodes
+    func getCachedEpisodeCount(feedId: String) async -> Int? {
+        return feedEpisodeCounts[feedId]
+    }
+    
+    /// Update persistent cache with new episodes (merge, don't replace)
+    func updateCacheWithNewEpisodes(_ newEpisodes: [PodcastEpisode], for feedId: String) async {
+        guard !newEpisodes.isEmpty else { return }
+        
+        if var existingEpisodes = persistentEpisodeCache[feedId] {
+            // Merge new episodes with existing ones, avoiding duplicates
+            let existingIds = Set(existingEpisodes.map { $0.id })
+            let uniqueNewEpisodes = newEpisodes.filter { !existingIds.contains($0.id) }
+            
+            if !uniqueNewEpisodes.isEmpty {
+                // Add new episodes at the beginning (newest first)
+                existingEpisodes.insert(contentsOf: uniqueNewEpisodes, at: 0)
+                
+                // Sort by publication date (newest first)
+                existingEpisodes.sort { $0.publicationDate > $1.publicationDate }
+                
+                persistentEpisodeCache[feedId] = existingEpisodes
+                persistentCacheTimestamps[feedId] = Date()
+                feedEpisodeCounts[feedId] = existingEpisodes.count
+                
+                print("🆕 PERSISTENT CACHE: Added \(uniqueNewEpisodes.count) new episodes to cache for feed \(feedId) (total: \(existingEpisodes.count))")
+            }
+        } else {
+            // No existing cache, create new one
+            let sortedEpisodes = newEpisodes.sorted { $0.publicationDate > $1.publicationDate }
+            persistentEpisodeCache[feedId] = sortedEpisodes
+            persistentCacheTimestamps[feedId] = Date()
+            feedEpisodeCounts[feedId] = sortedEpisodes.count
+            
+            print("🆕 PERSISTENT CACHE: Created new cache for feed \(feedId) with \(sortedEpisodes.count) episodes")
+        }
     }
     
     private func cacheKey(feedId: String, page: Int, filter: EpisodeFilter, searchQuery: String?) -> String {

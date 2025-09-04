@@ -1241,6 +1241,22 @@ class EpisodeStateManager: ObservableObject {
         return progress
     }
     
+    /// PERFORMANCE OPTIMIZATION: Get batch states for multiple episodes at once
+    /// This is much more efficient than individual calls for each episode
+    func getBatchStates(for episodeIds: [String]) -> [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool)] {
+        var batchStates: [String: (progress: Double, isFavorite: Bool, isDownloaded: Bool)] = [:]
+        batchStates.reserveCapacity(episodeIds.count)
+        
+        for episodeId in episodeIds {
+            let progress = episodeProgress[episodeId] ?? 0.0
+            let isFavorite = self.isFavorite(episodeId)
+            let isDownloaded = self.isDownloaded(episodeId)
+            batchStates[episodeId] = (progress: progress, isFavorite: isFavorite, isDownloaded: isDownloaded)
+        }
+        
+        return batchStates
+    }
+    
     /// HIGH-PERFORMANCE: Batch episode data lookup for optimized episode list loading
     /// This method eliminates individual lookups and provides all episode state data at once
     func getBatchEpisodeData(for episodeIds: [String]) -> [String: EpisodeStateData] {

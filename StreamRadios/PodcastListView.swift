@@ -852,11 +852,19 @@ struct PodcastListView: View {
         // PERFORMANCE: Initialize caches immediately for fast rendering
         initializeCaches()
         
-        // DEFERRED: Move heavy CloudKit sync off main thread with lower priority
-        Task.detached(priority: .background) {
-            // Add small delay to let UI render first
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-            await viewModel.automaticCloudKitSync()
+        // PERFORMANCE: Only trigger CloudKit sync if we don't have cached episodes
+        // This prevents expensive sync operations when just switching between cached tabs
+        let needsCloudKitSync = viewModel.currentEpisodes.isEmpty && viewModel.podcastFeeds.isEmpty
+        
+        if needsCloudKitSync {
+            // DEFERRED: Move heavy CloudKit sync off main thread with lower priority
+            Task.detached(priority: .background) {
+                // Add small delay to let UI render first
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                await viewModel.automaticCloudKitSync()
+            }
+        } else {
+            print("⚡ PERFORMANCE: Skipping CloudKit sync - using cached episode data")
         }
         
         // DEFERRED: Set up notification observers with minimal impact
@@ -2829,15 +2837,15 @@ struct PodcastPlayerView: View {
             alignment: .bottom
         )
         .onChange(of: selectedTab) { _, newValue in
-            // Update the current tab and reload episodes with proper filtering
-            viewModel.currentTab = newValue
+            // PERFORMANCE CRITICAL: Use optimized updateFilter instead of expensive loadEpisodesForFeed
+            // This prevents 500% CPU spikes and app hangs during tab switching
+            print("🔄 PodcastListView: Tab changed from \(viewModel.currentTab) to \(newValue) - using fast switch")
             
             // Reset scroll state when changing tabs so auto-scroll can work again if needed
             hasScrolledToCurrentEpisode = false
             
-            Task {
-                await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
-            }
+            // Use the optimized updateFilter method instead of expensive loadEpisodesForFeed
+            viewModel.updateFilter(tab: newValue)
         }
     }
     
@@ -3156,7 +3164,11 @@ struct PodcastPlayerView: View {
         episodesDidLoad = !viewModel.currentEpisodes.isEmpty && currentEpisodesForThisFeed
                 
         // Synchronize viewModel.currentTab with selectedTab to ensure proper filtering
-        viewModel.currentTab = selectedTab
+        // PERFORMANCE: Only sync if different to avoid triggering expensive operations
+        if viewModel.currentTab != selectedTab {
+            print("🔄 PodcastListView: Syncing tab from \(viewModel.currentTab) to \(selectedTab)")
+            viewModel.updateFilter(tab: selectedTab)
+        }
         
         if viewModel.currentEpisodes.isEmpty || !currentEpisodesForThisFeed {
             loadInitialEpisodes()

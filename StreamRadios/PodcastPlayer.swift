@@ -2952,11 +2952,20 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     ]
                 )
                 
-                // REAL-TIME CROSS-DEVICE SYNC: Sync progress every 10% during playback for cross-device sync
-                PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
-                    episodeId: currentEpisode.id,
-                    progress: progress
-                )
+                // PERFORMANCE: Skip expensive CloudKit sync when snapshots are available
+                let hasSnapshot = await MainActor.run {
+                    viewModel?.getEpisodeSnapshot(for: currentEpisode.feedId) != nil
+                }
+                
+                if hasSnapshot != true {
+                    // REAL-TIME CROSS-DEVICE SYNC: Sync progress every 10% during playback for cross-device sync
+                    PodcastCloudKitManager.shared.syncPodcastProgressInstantly(
+                        episodeId: currentEpisode.id,
+                        progress: progress
+                    )
+                } else {
+                    print("⚡ PERFORMANCE: Skipped playback CloudKit sync - using snapshot for feed \(currentEpisode.feedId)")
+                }
                 
                 os_log("🚗 CarPlay progress update sent: %@, Progress: %.1f%% (CPU optimized)", log: log, type: .debug, currentEpisode.title, progress * 100)
             }
