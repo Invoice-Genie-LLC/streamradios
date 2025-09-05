@@ -3008,7 +3008,16 @@ struct PodcastPlayerView: View {
 
 
     private var episodeRows: some View {
-        ForEach(viewModel.currentEpisodes, id: \.id) { episode in
+        let episodes = viewModel.currentEpisodes
+        // Validation: Ensure all episodes belong to this feed
+        let wrongFeedEpisodes = episodes.filter { $0.feedId != feed.id }
+        if !wrongFeedEpisodes.isEmpty {
+            print("🚨 UI CONTAMINATION: Found \(wrongFeedEpisodes.count) episodes from wrong feed in \(feed.id)")
+            for episode in wrongFeedEpisodes.prefix(3) {
+                print("🚨 WRONG EPISODE: '\(episode.title)' belongs to \(episode.feedId), not \(feed.id)")
+            }
+        }
+        return ForEach(episodes, id: \.id) { episode in
             OptimizedEpisodeRowView(
                 episode: episode,
                 isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
@@ -3291,7 +3300,14 @@ struct PodcastPlayerView: View {
         // This ensures the episode list shows current live progress, not stale saved progress
         syncCurrentPlayingProgress()
         
-        let currentEpisodesForThisFeed = viewModel.currentEpisodes.first?.feedId == feed.id
+        // CRITICAL FIX: Check if current episodes actually belong to this feed
+        // Also ensure the selectedFeedId matches to prevent showing wrong feed episodes
+        let currentEpisodesForThisFeed = !viewModel.currentEpisodes.isEmpty && 
+                                        viewModel.currentEpisodes.first?.feedId == feed.id && 
+                                        viewModel.selectedFeedId == feed.id &&
+                                        viewModel.currentEpisodes.allSatisfy { $0.feedId == feed.id }
+        
+        print("🔄 FEED CHECK: feedId=\(feed.id), selectedFeedId=\(viewModel.selectedFeedId ?? "nil"), episodes=\(viewModel.currentEpisodes.count), firstEpisodeFeedId=\(viewModel.currentEpisodes.first?.feedId ?? "nil"), allMatch=\(viewModel.currentEpisodes.allSatisfy { $0.feedId == feed.id })")
         
         // Initialize state for this view appearance  
         episodesDidLoad = !viewModel.currentEpisodes.isEmpty && currentEpisodesForThisFeed
@@ -3303,14 +3319,30 @@ struct PodcastPlayerView: View {
             viewModel.updateFilter(tab: selectedTab)
         }
         
-        if viewModel.currentEpisodes.isEmpty || !currentEpisodesForThisFeed {
-            loadInitialEpisodes()
-        } else {
-            // Reload episodes with the current tab filter to ensure proper filtering
-            Task {
-                await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
-            }
+        // CRITICAL FIX: Force immediate selectedFeedId update to prevent UI lag
+        // This ensures the ViewModel knows which feed we're trying to display
+        print("🔄 PodcastListView: FORCE updating selectedFeedId from \(viewModel.selectedFeedId ?? "nil") to \(feed.id)")
+        viewModel.selectedFeedId = feed.id
+        
+        // CRITICAL FIX: Immediately clear episodes to prevent showing stale data
+        // This ensures the UI never shows episodes from the wrong feed
+        if !currentEpisodesForThisFeed {
+            print("🔄 PodcastListView: FORCE clearing episodes to prevent stale display")
+            viewModel.currentEpisodes.removeAll()
+            // CRITICAL: Also clear loading state to prevent race conditions
+            viewModel.operationInProgress = false
+            viewModel.isLoadingEpisodes = false
+            // CRITICAL: Clear pending task tracking to allow immediate reload
+            let taskKey = "\(feed.id)-true"
+            viewModel.pendingInitializationTasks.remove(taskKey)
+            print("🔄 PodcastListView: FORCE cleared loading state and pending tasks to allow fresh load")
         }
+        
+        // CRITICAL FIX: Always load episodes to ensure correct feed display
+        // This prevents any possibility of showing wrong feed episodes
+        print("🔄 PodcastListView: ALWAYS loading episodes for feed: \(feed.id) (selectedFeedId: \(viewModel.selectedFeedId ?? "nil"))")
+        print("🔄 PodcastListView: Current episodes count: \(viewModel.currentEpisodes.count), currentEpisodesForThisFeed: \(currentEpisodesForThisFeed)")
+        loadInitialEpisodes()
     }
     
     private func loadInitialEpisodes() {

@@ -41,6 +41,7 @@ class PodcastEpisodeManager {
         filter: EpisodeFilter,
         searchQuery: String?
     ) async throws -> EpisodeLoadResult {
+        print("🔍 EPISODE MANAGER: Loading episodes for feedId '\(feedId)' (page: \(page), filter: \(filter))")
         
         let startTime = CFAbsoluteTimeGetCurrent()
         
@@ -118,10 +119,21 @@ class PodcastEpisodeManager {
             }
         }
         
-        let endTime = CFAbsoluteTimeGetCurrent()
-        os_log("⚡ Loaded %d episodes in %.3f seconds (filter: %@, cached: %@)", log: log, type: .info, result.episodes.count, endTime - startTime, filter.displayName, shouldUseCache ? "yes" : "no")
+        // FINAL SAFETY CHECK: Ensure all episodes belong to the correct feed
+        let safeEpisodes = result.episodes.filter { $0.feedId == feedId }
+        if safeEpisodes.count != result.episodes.count {
+            print("🚨 FINAL ISOLATION: Filtered out \(result.episodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId) at final return")
+        }
+        let finalResult = EpisodeLoadResult(
+            episodes: safeEpisodes,
+            hasMore: result.hasMore,
+            totalCount: result.totalCount
+        )
         
-        return result
+        let endTime = CFAbsoluteTimeGetCurrent()
+        os_log("⚡ Loaded %d episodes in %.3f seconds (filter: %@, cached: %@)", log: log, type: .info, finalResult.episodes.count, endTime - startTime, filter.displayName, shouldUseCache ? "yes" : "no")
+        
+        return finalResult
     }
 
     /// Search episodes across all saved podcasts (Core Data) by title or description
@@ -153,7 +165,7 @@ class PodcastEpisodeManager {
                 request.relationshipKeyPathsForPrefetching = ["feed"]
 
                 let managed = try backgroundContext.fetch(request)
-                let episodes = self.convertToEpisodes(managed)
+                let episodes = self.convertToEpisodes(managed, feedId: "")
                 return episodes
             } catch {
                 os_log("❌ Global episode search failed: %@", log: self.log, type: .error, error.localizedDescription)
@@ -247,7 +259,7 @@ class PodcastEpisodeManager {
                     let newestManagedEpisodes = try backgroundContext.fetch(prioritizedFetchRequest)
                     
                     // Convert to domain models with EpisodeStateManager sync
-                    let newestEpisodes = self.convertToEpisodes(newestManagedEpisodes)
+                    let newestEpisodes = self.convertToEpisodes(newestManagedEpisodes, feedId: feedId)
                     
                     // Apply filtering based on EpisodeStateManager (source of truth)
                     let filteredEpisodes = self.applyStateBasedFiltering(newestEpisodes, filter: filter)
@@ -280,6 +292,7 @@ class PodcastEpisodeManager {
         
         // Only filter by feedId for fastest query
         fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+        print("🔍 CORE DATA QUERY: Fetching episodes for feedId '\(feedId)'")
         
         // Sort by publication date (newest first) - this is the key optimization
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
@@ -562,7 +575,7 @@ class PodcastEpisodeManager {
                     let managedEpisodes = try backgroundContext.fetch(baseFetchRequest)
                     
                     // Convert to domain models with EpisodeStateManager sync
-                    let allEpisodes = self.convertToEpisodes(managedEpisodes)
+                    let allEpisodes = self.convertToEpisodes(managedEpisodes, feedId: feedId)
                     
                     // Apply filtering based on EpisodeStateManager (source of truth)
                     let filteredEpisodes = self.applyStateBasedFiltering(allEpisodes, filter: filter)
@@ -673,7 +686,7 @@ class PodcastEpisodeManager {
         return fetchRequest
     }
     
-    private func convertToEpisodes(_ managedEpisodes: [PodcastModel]) -> [PodcastEpisode] {
+    private func convertToEpisodes(_ managedEpisodes: [PodcastModel], feedId: String) -> [PodcastEpisode] {
         // PERFORMANCE: Early exit for empty arrays
         guard !managedEpisodes.isEmpty else { return [] }
         
@@ -685,10 +698,16 @@ class PodcastEpisodeManager {
         let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
         
         // PARALLEL PROCESSING: Use concurrent map for conversion
-        return managedEpisodes.compactMap { managedEpisode in
+        let convertedEpisodes: [PodcastEpisode] = managedEpisodes.compactMap { managedEpisode in
             guard let episodeId = managedEpisode.id else { return nil }
             
             var episode = managedEpisode.toPodcastEpisode()
+            
+            // CRITICAL SAFETY CHECK: Validate feedId matches expected
+            if episode.feedId != feedId {
+                print("🚨 CORE DATA CONTAMINATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but query was for '\(feedId)'")
+                return nil // Filter out contaminated episodes
+            }
             
             // FAST STATE LOOKUP: Get pre-fetched state data
             guard let stateData = episodeStatesData[episodeId] else {
@@ -726,6 +745,9 @@ class PodcastEpisodeManager {
             
             return episode
         }
+        
+        print("🔍 EPISODE MANAGER: Converted \(convertedEpisodes.count) episodes for feedId '\(feedId)'")
+        return convertedEpisodes
     }
     
     /// Apply filtering based on EpisodeStateManager (source of truth) after Core Data fetch
@@ -772,7 +794,7 @@ class PodcastEpisodeManager {
         case .favorites, .downloads:
             // For state-based filters, fetch episodes and apply EpisodeStateManager filtering
             let managedEpisodes = try context.fetch(fetchRequest)
-            let episodes = convertToEpisodes(managedEpisodes)
+            let episodes = convertToEpisodes(managedEpisodes, feedId: feedId)
             let filteredEpisodes = applyStateBasedFiltering(episodes, filter: filter)
             return filteredEpisodes.count
         }
@@ -1027,7 +1049,7 @@ extension PodcastEpisodeManager {
                     fetchRequest.includesSubentities = false
                     
                     let managedEpisodes = try backgroundContext.fetch(fetchRequest)
-                    let episodes = self.convertToEpisodes(managedEpisodes)
+                    let episodes = self.convertToEpisodes(managedEpisodes, feedId: feedId)
                     
                     continuation.resume(returning: episodes)
                 } catch {

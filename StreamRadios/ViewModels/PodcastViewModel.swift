@@ -231,13 +231,13 @@ class PodcastViewModel: ObservableObject {
     private var isInitializingEpisodeTracking = false
     private var hasInitializedEpisodeTracking = false
     private var isLoadingFromCoreData = false
-    private var pendingInitializationTasks = Set<String>()
+    var pendingInitializationTasks = Set<String>()
     
     // IMMEDIATE NEW EPISODE CHECK: Track immediate check tasks
     private var immediateCheckTasks: [String: Task<Void, Never>] = [:]
     
     // Current state
-    private var selectedFeedId: String?
+    var selectedFeedId: String?
     private var lastLoadTime: Date = Date()
     
     init() {
@@ -1543,7 +1543,12 @@ class PodcastViewModel: ObservableObject {
                             // Process and update episodes on main thread
                             let processedEpisodes = await self.processEpisodesInBackground(result.episodes)
                             await MainActor.run {
-                                self.currentEpisodes = processedEpisodes
+                                // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed
+                                let safeEpisodes = processedEpisodes.filter { $0.feedId == feedId }
+                                if safeEpisodes.count != processedEpisodes.count {
+                                    print("🚨 IMMEDIATE CHECK ISOLATION: Filtered out \(processedEpisodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+                                }
+                                self.currentEpisodes = safeEpisodes
                             }
                         } catch {
                             print("❌ IMMEDIATE CHECK: Failed to reload episodes: \(error)")
@@ -2440,6 +2445,8 @@ class PodcastViewModel: ObservableObject {
     
     /// Load episodes for a specific feed with efficient pagination and deduplication
     func loadEpisodesForFeed(_ feedId: String, isInitialLoad: Bool = false) async {
+        print("🔄 LOAD EPISODES: Starting load for feedId '\(feedId)' (isInitialLoad: \(isInitialLoad))")
+        
         // PERFORMANCE: Prevent redundant episode loading for the same feed
         let taskKey = "\(feedId)-\(isInitialLoad)"
         guard !pendingInitializationTasks.contains(taskKey) else {
@@ -2457,6 +2464,15 @@ class PodcastViewModel: ObservableObject {
         
         // CRITICAL: Cancel all RSS operations when switching feeds for immediate responsiveness
         cancelAllRSSOperations()
+        
+        // CRITICAL FIX: Clear current episodes immediately when switching feeds
+        // This prevents UI from showing wrong feed episodes during feed transitions
+        if selectedFeedId != feedId {
+            await MainActor.run {
+                self.currentEpisodes.removeAll()
+                print("🔄 FEED SWITCH: Cleared episodes for feed transition from \(self.selectedFeedId ?? "nil") to \(feedId)")
+            }
+        }
         
         selectedFeedId = feedId
         currentPage = 1
@@ -2478,7 +2494,18 @@ class PodcastViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                self.currentEpisodes = filteredEpisodes
+                // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed
+                let safeEpisodes = filteredEpisodes.filter { $0.feedId == feedId }
+                if safeEpisodes.count != filteredEpisodes.count {
+                    print("🚨 FEED ISOLATION: Filtered out \(filteredEpisodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+                    // Log details about contaminated episodes for debugging
+                    let contaminatedEpisodes = filteredEpisodes.filter { $0.feedId != feedId }
+                    for episode in contaminatedEpisodes.prefix(3) {
+                        print("🚨 CONTAMINATED EPISODE: '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
+                    }
+                }
+                print("📊 SNAPSHOT LOAD: Loading \(safeEpisodes.count) episodes for feed \(feedId)")
+                self.currentEpisodes = safeEpisodes
                 self.hasMoreEpisodes = false // Snapshots contain complete data
                 self.isLoadingEpisodes = false
                 self.operationInProgress = false
@@ -2666,8 +2693,13 @@ class PodcastViewModel: ObservableObject {
                                     Task {
                                         let processedForDisplay = await self.processEpisodesInBackground(filteredEpisodes)
                                         await MainActor.run {
-                                            self.currentEpisodes = processedForDisplay
-                                            print("🔄 Updated currentEpisodes with \(processedForDisplay.count) episodes from RSS refresh")
+                                            // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed
+                                            let safeEpisodes = processedForDisplay.filter { $0.feedId == feedId }
+                                            if safeEpisodes.count != processedForDisplay.count {
+                                                print("🚨 RSS ISOLATION: Filtered out \(processedForDisplay.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+                                            }
+                                            self.currentEpisodes = safeEpisodes
+                                            print("🔄 Updated currentEpisodes with \(safeEpisodes.count) episodes from RSS refresh")
                                         }
                                     }
                                 }
@@ -2738,7 +2770,18 @@ class PodcastViewModel: ObservableObject {
             let uniqueFilteredEpisodes = await processEpisodesInBackground(filteredEpisodes)
             
             await MainActor.run {
-                self.currentEpisodes = uniqueFilteredEpisodes
+                // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed
+                let safeEpisodes = uniqueFilteredEpisodes.filter { $0.feedId == feedId }
+                if safeEpisodes.count != uniqueFilteredEpisodes.count {
+                    print("🚨 CORE DATA ISOLATION: Filtered out \(uniqueFilteredEpisodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+                    // Log details about contaminated episodes for debugging
+                    let contaminatedEpisodes = uniqueFilteredEpisodes.filter { $0.feedId != feedId }
+                    for episode in contaminatedEpisodes.prefix(3) {
+                        print("🚨 CONTAMINATED EPISODE: '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
+                    }
+                }
+                print("📊 CORE DATA LOAD: Loading \(safeEpisodes.count) episodes for feed \(feedId)")
+                self.currentEpisodes = safeEpisodes
                 self.isLoadingEpisodes = false
                 self.operationInProgress = false
                 self.hasMoreEpisodes = false
@@ -3520,9 +3563,15 @@ class PodcastViewModel: ObservableObject {
     
     /// Create or update episode snapshot for instant loading
     func updateEpisodeSnapshot(for feedId: String, episodes: [PodcastEpisode]) {
-        episodeSnapshotCache[feedId] = episodes
+        // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed before caching
+        let safeEpisodes = episodes.filter { $0.feedId == feedId }
+        if safeEpisodes.count != episodes.count {
+            print("🚨 SNAPSHOT ISOLATION: Filtered out \(episodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+        }
+        
+        episodeSnapshotCache[feedId] = safeEpisodes
         snapshotTimestamps[feedId] = Date()
-        print("📸 SNAPSHOT: Cached \(episodes.count) episodes for feed \(feedId)")
+        print("📸 SNAPSHOT: Cached \(safeEpisodes.count) episodes for feed \(feedId)")
         
         // Update DataSyncManager snapshot readiness tracking
         let feedsWithEpisodes = podcastFeeds.filter { !$0.episodes.isEmpty }
