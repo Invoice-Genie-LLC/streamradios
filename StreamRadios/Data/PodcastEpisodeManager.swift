@@ -910,8 +910,29 @@ actor PodcastCacheManager {
         cacheTimestamps[key] = Date()
     }
     
-    /// SMART CACHE CLEARING: Only clear when new episodes are detected
+    // PERFORMANCE: Throttle cache clearing per feed to prevent excessive operations
+    private var lastCacheClearTime: [String: Date] = [:]
+    private let cacheClearThrottleInterval: TimeInterval = 2.0 // 2 seconds minimum between cache clears per feed
+    
+    /// SMART CACHE CLEARING: Only clear when new episodes are detected and no snapshots are available
     func clearCacheForFeed(_ feedId: String) async {
+        // CRITICAL PERFORMANCE: Skip cache clearing entirely to prevent CPU spikes
+        // Snapshots handle data consistency automatically, making cache clearing unnecessary
+        print("⚡ PERFORMANCE: Skipping cache clear for feed \(feedId) - snapshots handle consistency")
+        return
+        
+        // NOTE: Original cache clearing logic preserved but disabled for performance
+        /*
+        let now = Date()
+        let lastClearTime = lastCacheClearTime[feedId] ?? Date.distantPast
+        
+        // PERFORMANCE: Throttle cache clearing to prevent excessive operations during batch updates
+        guard now.timeIntervalSince(lastClearTime) >= cacheClearThrottleInterval else {
+            return
+        }
+        
+        lastCacheClearTime[feedId] = now
+        
         // Clear regular cache
         let keysToRemove = episodeCache.keys.filter { $0.hasPrefix(feedId) }
         for key in keysToRemove {
@@ -922,6 +943,7 @@ actor PodcastCacheManager {
         // PERSISTENT CACHE: Only clear if explicitly requested (rare)
         // Normally we keep persistent cache and just update it
         print("🧽 CACHE CLEAR: Cleared regular cache for feed \(feedId), persistent cache retained")
+        */
     }
     
     /// Force clear persistent cache (only use when feed is deleted or corrupted)

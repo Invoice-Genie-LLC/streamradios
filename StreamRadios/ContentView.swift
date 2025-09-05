@@ -1010,8 +1010,31 @@ struct UnifiedPodcastPlayerView: View {
         sizeClass == .compact ? 0 : 1
     }
     
+    // PERFORMANCE: Robust navigation throttling to prevent CPU spikes from repeated calls
+    @State private var lastNavigationTime: Date = Date.distantPast
+    @State private var isNavigationInProgress: Bool = false
+    private let navigationThrottleInterval: TimeInterval = 5.0 // 5 seconds minimum between navigations to prevent loops
+    
     // Navigation action to currently playing episode
     private func navigateToCurrentEpisode() {
+        let now = Date()
+        
+        // CRITICAL: Prevent navigation if already in progress or too soon
+        if isNavigationInProgress {
+            print("🚫 Navigation blocked - already in progress")
+            return
+        }
+        
+        // PERFORMANCE: Throttle navigation calls to prevent excessive CPU usage
+        guard now.timeIntervalSince(lastNavigationTime) >= navigationThrottleInterval else {
+            print("🚫 Navigation throttled - too soon since last navigation (\(String(format: "%.1f", now.timeIntervalSince(lastNavigationTime)))s < \(navigationThrottleInterval)s)")
+            return
+        }
+        
+        // Set navigation in progress to prevent concurrent calls
+        isNavigationInProgress = true
+        lastNavigationTime = now
+        
         print("Navigating to currently playing episode: \(currentEpisode.title)")
         
         // CRITICAL FIX: Save current progress before navigating to episode list
@@ -1023,6 +1046,11 @@ struct UnifiedPodcastPlayerView: View {
         viewModel.requestFeedRefresh(currentFeed.id)
         // Use the existing onListButtonTap functionality if available
         onListButtonTap?()
+        
+        // Reset navigation flag after a delay to allow the navigation to complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            isNavigationInProgress = false
+        }
     }
     
     var body: some View {

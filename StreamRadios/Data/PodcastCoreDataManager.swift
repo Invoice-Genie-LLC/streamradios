@@ -337,7 +337,9 @@ class PodcastCoreDataManager {
     private func performBackgroundReconciliation(feedId: String, episodes: [PodcastEpisode]) async throws {
         let backgroundContext = coreDataStack.newBackgroundContext()
         
-        try await backgroundContext.perform {
+        try await withCheckedThrowingContinuation { continuation in
+            backgroundContext.perform {
+                do {
             // Fetch existing episodes for this feed
             let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
             fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
@@ -370,7 +372,7 @@ class PodcastCoreDataManager {
             }
             
             // Process episodes in smaller chunks to avoid blocking
-            let chunkSize = 100  // Reduced chunk size for better performance
+            let chunkSize = 50  // Further reduced chunk size for better performance during playback
             var parsedIds = Set<String>()
             var processed = 0
             var insertedCount = 0
@@ -429,6 +431,12 @@ class PodcastCoreDataManager {
             // Final save
             try backgroundContext.save()
             os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted %d, updated %d, deleted %d", log: self.log, type: .info, feedId, parsedIds.count, insertedCount, updatedCount, deletedCount + coreDataDuplicates.count)
+                    
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
         }
     }
     

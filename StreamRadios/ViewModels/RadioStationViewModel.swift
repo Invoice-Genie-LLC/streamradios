@@ -584,19 +584,34 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Check if there are more stations in CloudKit than locally (new stations added on other devices)
             if cloudKitStationCount > localStationCount {
                 let newStationsCount = cloudKitStationCount - localStationCount
-                print("🆕 Detected \(newStationsCount) new stations in CloudKit, triggering automatic sync...")
+                print("🆕 Detected \(newStationsCount) new stations in CloudKit")
+                
+                // CRITICAL PERFORMANCE: Defer radio station sync to prevent CPU spikes during episode loading
+                // Schedule sync for later to avoid interfering with podcast operations
+                print("⚡ PERFORMANCE: Deferring radio station sync to prevent interference with podcast loading")
                 
                 await MainActor.run {
-                    // Update DataSyncManager to show sync banner
-                    DataSyncManager.shared.radioStationsStatus = .inProgress
-                    DataSyncManager.shared.radioStationsOperation = "Loading \(newStationsCount) new stations from other devices"
-                    DataSyncManager.shared.radioStationsProgress = 0.0
-                    DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
-                    DataSyncManager.shared.radioStationsCurrentCount = localStationCount
+                    // Update DataSyncManager to show that sync is needed but deferred
+                    DataSyncManager.shared.radioStationsOperation = "\(newStationsCount) new stations available - will sync when convenient"
                 }
                 
-                // Trigger the sync with progress tracking
-                await syncStationsFromCloudKitWithProgress()
+                // Schedule deferred sync (10 seconds delay to allow podcast operations to complete)
+                Task.detached(priority: .background) {
+                    try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 second delay
+                    
+                    print("⏰ DEFERRED SYNC: Starting radio station sync after delay")
+                    
+                    await MainActor.run {
+                        DataSyncManager.shared.radioStationsStatus = .inProgress
+                        DataSyncManager.shared.radioStationsOperation = "Loading \(newStationsCount) new stations from other devices"
+                        DataSyncManager.shared.radioStationsProgress = 0.0
+                        DataSyncManager.shared.radioStationsTotalCount = cloudKitStationCount
+                        DataSyncManager.shared.radioStationsCurrentCount = localStationCount
+                    }
+                    
+                    // Trigger the sync with progress tracking
+                    await self.syncStationsFromCloudKitWithProgress()
+                }
                 
             } else if cloudKitStationCount < localStationCount {
                 // More stations locally than in CloudKit (stations deleted on other devices)

@@ -162,6 +162,9 @@ class EpisodeStateManager: ObservableObject {
     private var recentSyncs: [String: Double] = [:]
     private let syncDeduplicationWindow: TimeInterval = 0.5 // 0.5 seconds - much shorter to allow real-time syncs
     
+    // PERFORMANCE: Control verbose logging during batch operations to reduce CPU usage
+    private var isVerboseLoggingEnabled: Bool = false
+    
     // EPISODE-SPECIFIC SYNC TIMING: Track real-time sync timing per episode to prevent refresh conflicts
     private var episodeLastRealTimeSyncTime: [String: Double] = [:]
     
@@ -981,7 +984,10 @@ class EpisodeStateManager: ObservableObject {
                             if episode.isPlayed != shouldBePlayed {
                                 episode.isPlayed = shouldBePlayed
                                 hasChanges = true
-                                print("💾 PLAYED STATE: Saved isPlayed=\(shouldBePlayed) for episode \(episodeId) from episodeStates")
+                                // PERFORMANCE: Reduce excessive logging during batch operations
+                                if self.isVerboseLoggingEnabled {
+                                    print("💾 PLAYED STATE: Saved isPlayed=\(shouldBePlayed) for episode \(episodeId) from episodeStates")
+                                }
                             }
                         } else {
                             // Fallback: If no explicit state, derive from progress
@@ -990,7 +996,10 @@ class EpisodeStateManager: ObservableObject {
                             if episode.isPlayed != derivedPlayed {
                                 episode.isPlayed = derivedPlayed
                                 hasChanges = true
-                                print("💾 PLAYED STATE: Fallback isPlayed=\(derivedPlayed) for episode \(episodeId) from progress (\(progress))")
+                                // PERFORMANCE: Reduce excessive logging during batch operations
+                                if self.isVerboseLoggingEnabled {
+                                    print("💾 PLAYED STATE: Fallback isPlayed=\(derivedPlayed) for episode \(episodeId) from progress (\(progress))")
+                                }
                             }
                         }
                         

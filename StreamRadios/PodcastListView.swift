@@ -3338,11 +3338,22 @@ struct PodcastPlayerView: View {
             print("🔄 PodcastListView: FORCE cleared loading state and pending tasks to allow fresh load")
         }
         
-        // CRITICAL FIX: Always load episodes to ensure correct feed display
-        // This prevents any possibility of showing wrong feed episodes
-        print("🔄 PodcastListView: ALWAYS loading episodes for feed: \(feed.id) (selectedFeedId: \(viewModel.selectedFeedId ?? "nil"))")
-        print("🔄 PodcastListView: Current episodes count: \(viewModel.currentEpisodes.count), currentEpisodesForThisFeed: \(currentEpisodesForThisFeed)")
-        loadInitialEpisodes()
+        // CRITICAL PERFORMANCE: Skip ALL expensive operations when snapshots are available
+        let hasSnapshot = viewModel.getEpisodeSnapshot(for: feed.id) != nil
+        if hasSnapshot {
+            print("⚡ ULTRA PERFORMANCE: Using snapshot for feed \(feed.id) - SKIPPING ALL EXPENSIVE OPERATIONS")
+            // Use snapshot data directly without any loading operations
+            if let snapshot = viewModel.getEpisodeSnapshot(for: feed.id) {
+                print("📸 SNAPSHOT SUCCESS: Displaying \(snapshot.count) episodes instantly - NO EXPENSIVE OPERATIONS NEEDED")
+                // The snapshot will be used automatically by the view model
+            }
+        } else if !currentEpisodesForThisFeed || viewModel.currentEpisodes.isEmpty {
+            print("🔄 PodcastListView: Loading episodes for feed: \(feed.id) (selectedFeedId: \(viewModel.selectedFeedId ?? "nil"))")
+            print("🔄 PodcastListView: Current episodes count: \(viewModel.currentEpisodes.count), currentEpisodesForThisFeed: \(currentEpisodesForThisFeed)")
+            loadInitialEpisodes()
+        } else {
+            print("⚡ PERFORMANCE: Skipping episode load - episodes already loaded for feed: \(feed.id)")
+        }
     }
     
     private func loadInitialEpisodes() {

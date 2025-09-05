@@ -1136,40 +1136,76 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         self.radioPlayer = player
     }
     
+    // PERFORMANCE: Robust throttling for handleNavigationAway to prevent excessive calls and main thread hangs
+    private var lastNavigationAwayTime: Date = Date.distantPast
+    private var isNavigationAwayInProgress: Bool = false
+    private let navigationAwayThrottleInterval: TimeInterval = 2.0 // 2 seconds minimum between calls to prevent loops
+    
     func handleNavigationAway() {
-            if let currentEpisode = currentEpisode, isPlaying {
-                // Save current progress immediately
-                saveProgressIfNeeded()
+        let now = Date()
+        
+        // CRITICAL: Prevent concurrent navigation away operations that cause hangs
+        if isNavigationAwayInProgress {
+            print("🚫 handleNavigationAway blocked - already in progress")
+            return
+        }
+        
+        // PERFORMANCE: Throttle navigation away calls to prevent excessive progress saving
+        guard now.timeIntervalSince(lastNavigationAwayTime) >= navigationAwayThrottleInterval else {
+            print("🚫 handleNavigationAway throttled - too soon since last call (\(String(format: "%.1f", now.timeIntervalSince(lastNavigationAwayTime)))s < \(navigationAwayThrottleInterval)s)")
+            return
+        }
+        
+        isNavigationAwayInProgress = true
+        lastNavigationAwayTime = now
+        
+        guard let currentEpisode = currentEpisode, isPlaying else {
+            isNavigationAwayInProgress = false
+            return
+        }
+        
+        // PERFORMANCE: Move heavy operations to background thread to prevent main thread hangs
+        Task.detached(priority: .background) {
+            // Save current progress immediately (lightweight operation)
+            await MainActor.run {
+                self.saveProgressIfNeeded()
+            }
+            
+            // Update episode state to reflect "In Progress"
+            var updatedEpisode = currentEpisode
+            // CRITICAL FIX: Use currentProgress instead of recalculating to preserve chapter seek progress
+            let progress = await MainActor.run { 
+                self.currentProgress > 0 ? self.currentProgress : (self.duration > 0 ? self.currentTime / self.duration : 0)
+            }
+            updatedEpisode.state.progress = progress
+            
+            // Save to CloudKit when user navigates away (background operation)
+            self.saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user navigated away from episode")
+            
+            // Preserve existing "finished" status - only mark as finished if progress >= 0.99
+            // but don't unmark episodes that were already marked as finished
+            if progress >= 0.99 {
+                updatedEpisode.state.isPlayed = true
+            } else if !currentEpisode.state.isPlayed {
+                // Only update isPlayed to false if it wasn't already marked as finished
+                updatedEpisode.state.isPlayed = false
+            }
+            
+            // Update the current episode reference and ViewModel on main thread
+            await MainActor.run {
+                self.currentEpisode = updatedEpisode
                 
-                // Update episode state to reflect "In Progress"
-                var updatedEpisode = currentEpisode
-                // CRITICAL FIX: Use currentProgress instead of recalculating to preserve chapter seek progress
-                let progress = currentProgress > 0 ? currentProgress : (duration > 0 ? currentTime / duration : 0)
-                updatedEpisode.state.progress = progress
+                // PERFORMANCE: Throttle ViewModel updates to reduce CPU usage
+                let isPlayed = progress >= 0.99 ? true : (currentEpisode.state.isPlayed ? true : false)
+                self.viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: isPlayed)
                 
-                // Save to CloudKit when user navigates away
-                saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user navigated away from episode")
+                os_log("Updated episode status on navigation away: %@, Progress: %.2f", log: self.log, type: .info, currentEpisode.title, progress)
                 
-                // Preserve existing "finished" status - only mark as finished if progress >= 0.99
-                // but don't unmark episodes that were already marked as finished
-                if progress >= 0.99 {
-                    updatedEpisode.state.isPlayed = true
-                } else if !currentEpisode.state.isPlayed {
-                    // Only update isPlayed to false if it wasn't already marked as finished
-                    updatedEpisode.state.isPlayed = false
-                }
-                
-                // Update the episode in ViewModel
-                Task { @MainActor in
-                    let isPlayed = progress >= 0.99 ? true : (currentEpisode.state.isPlayed ? true : false)
-                    viewModel?.updateEpisodeState(currentEpisode.id, progress: progress, isPlayed: isPlayed)
-                }
-                
-                // OPTIMIZE: Eliminate excessive UI updates to reduce CPU usage
-                
-                os_log("Updated episode status on navigation away: %@, Progress: %.2f", log: log, type: .info, currentEpisode.title, progress)
+                // Reset the in-progress flag
+                self.isNavigationAwayInProgress = false
             }
         }
+    }
     
     func ensureProgressTracking(for episode: PodcastEpisode) {
         // If this episode was ever played, ensure it shows as "In Progress"
@@ -2257,19 +2293,22 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
-    /// Save progress with Core Data priority: Core Data first, then CloudKit
+    /// Save progress with Core Data priority: Core Data first, then CloudKit (fully async to prevent hangs)
     private func saveProgressWithCoreDataPriority(for episode: PodcastEpisode, progress: Double, reason: String) {
         os_log("💾 Saving episode progress (Core Data priority) due to: %@ - Episode: %@, Progress: %.2f", 
                log: log, type: .info, reason, episode.title, progress)
         
-        // STEP 1: Save to Core Data immediately (synchronous for reliability)
-        saveProgressToCoreDataSync(episodeId: episode.id, progress: progress)
-        
-        // STEP 2: Update EpisodeStateManager to stay in sync
-        EpisodeStateManager.shared.updateProgress(for: episode.id, progress: progress, isPlaying: isPlaying, currentTime: currentTime)
-        
-        // STEP 3: Save to CloudKit as backup/sync (asynchronous)
-        saveProgressToCloudKit(for: episode, progress: progress, reason: reason)
+        // PERFORMANCE: Move all operations to background thread to prevent main thread hangs
+        Task.detached(priority: .background) { [self] in
+            // STEP 1: Save to Core Data (background operation)
+            self.saveProgressToCoreDataSync(episodeId: episode.id, progress: progress)
+            
+            // STEP 2: Update EpisodeStateManager to stay in sync (background operation)
+            EpisodeStateManager.shared.updateProgress(for: episode.id, progress: progress, isPlaying: self.isPlaying, currentTime: self.currentTime)
+            
+            // STEP 3: Save to CloudKit as backup/sync (asynchronous)
+            self.saveProgressToCloudKit(for: episode, progress: progress, reason: reason)
+        }
     }
     
     /// Save progress directly to Core Data for immediate persistence

@@ -970,17 +970,29 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Process all pending episode updates in batch
+    /// Process all pending episode updates in batch - MOVED TO BACKGROUND THREAD
     private func processBatchUpdates() {
         guard !pendingUpdates.isEmpty else { return }
         
-        // EMERGENCY PERFORMANCE: Minimal logging for large batches
-        if pendingUpdates.count > 100 {
-            print("📦 BATCH UPDATE: Processing \\(pendingUpdates.count) updates")
+        // CRITICAL: Move ALL batch processing to background thread to prevent main thread hangs
+        Task.detached(priority: .userInitiated) { [weak self] in
+            await self?.performBackgroundBatchUpdate()
         }
+    }
+    
+    /// Perform batch update processing on background thread to prevent main thread hangs
+    @MainActor
+    private func performBackgroundBatchUpdate() async {
+        guard !pendingUpdates.isEmpty else { return }
         
+        // Capture updates on main thread
         let updates = pendingUpdates
         pendingUpdates.removeAll()
+        
+        // EMERGENCY PERFORMANCE: Minimal logging for large batches
+        if updates.count > 100 {
+            print("📦 BATCH UPDATE: Processing \\(updates.count) updates on background thread")
+        }
         
         // EMERGENCY PERFORMANCE: Skip UI updates entirely if too many pending
         if updates.count > 1000 {
@@ -994,42 +1006,56 @@ class PodcastViewModel: ObservableObject {
             return
         }
         
-        // Use efficient dictionary lookups for large datasets
-        var currentEpisodesMap = Dictionary(uniqueKeysWithValues: currentEpisodes.enumerated().map { ($1.id, $0) })
-        var updatedCurrentEpisodes = currentEpisodes
+        // Process updates in smaller chunks to prevent blocking
+        let chunkSize = 50
+        let updateArray = Array(updates)
+        let chunks = updateArray.chunked(into: chunkSize)
         
-        // Process updates efficiently (reduced operations for performance)
-        for (episodeId, update) in updates {
-            // Update episodeProgress cache
-            if let progress = update.progress {
-                episodeProgress[episodeId] = progress
-            }
-            
-            // Update currentEpisodes using index lookup
-            if let index = currentEpisodesMap[episodeId] {
-                var episode = updatedCurrentEpisodes[index]
-                
-                if let isFavorite = update.isFavorite {
-                    episode.state.isFavorite = isFavorite
-                }
-                if let isDownloaded = update.isDownloaded {
-                    episode.state.isDownloaded = isDownloaded
-                }
+        for (chunkIndex, chunk) in chunks.enumerated() {
+            // Update progress cache for this chunk
+            for (episodeId, update) in chunk {
                 if let progress = update.progress {
-                    episode.state.progress = progress
+                    episodeProgress[episodeId] = progress
                 }
-                
-                updatedCurrentEpisodes[index] = episode
             }
             
-            // EMERGENCY PERFORMANCE: Skip tab filtering for large batches
-            if updates.count <= 100 {
-                applyTabFiltering(episodeId: episodeId, isFavorite: update.isFavorite, isDownloaded: update.isDownloaded)
+            // Update UI for this chunk
+            var currentEpisodesMap = Dictionary(uniqueKeysWithValues: currentEpisodes.enumerated().map { ($1.id, $0) })
+            var updatedCurrentEpisodes = currentEpisodes
+            
+            // Process updates efficiently (reduced operations for performance)
+            for (episodeId, update) in chunk {
+                // Update currentEpisodes using index lookup
+                if let index = currentEpisodesMap[episodeId] {
+                    var episode = updatedCurrentEpisodes[index]
+                    
+                    if let isFavorite = update.isFavorite {
+                        episode.state.isFavorite = isFavorite
+                    }
+                    if let isDownloaded = update.isDownloaded {
+                        episode.state.isDownloaded = isDownloaded
+                    }
+                    if let progress = update.progress {
+                        episode.state.progress = progress
+                    }
+                    
+                    updatedCurrentEpisodes[index] = episode
+                }
+                
+                // EMERGENCY PERFORMANCE: Skip tab filtering for large batches
+                if updates.count <= 100 {
+                    applyTabFiltering(episodeId: episodeId, isFavorite: update.isFavorite, isDownloaded: update.isDownloaded)
+                }
+            }
+            
+            // Single UI update for this chunk
+            currentEpisodes = updatedCurrentEpisodes
+            
+            // Yield control after each chunk to prevent blocking
+            if chunkIndex < chunks.count - 1 {
+                await Task.yield()
             }
         }
-        
-        // Single UI update for all changes
-        currentEpisodes = updatedCurrentEpisodes
         
         // EMERGENCY PERFORMANCE: Skip podcastFeeds update for large batches to prevent hangs
         if updates.count <= 200 {
@@ -1102,9 +1128,22 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    // PERFORMANCE: Throttle tab cache invalidation to prevent excessive CPU usage
+    private var lastTabCacheInvalidation: Date = Date.distantPast
+    private let tabCacheInvalidationThrottleInterval: TimeInterval = 1.0 // 1 second minimum between invalidations
+    
     /// Invalidate cached filtering results for all tabs to ensure real-time updates
     @MainActor
     private func invalidateAllTabCaches() {
+        let now = Date()
+        
+        // PERFORMANCE: Throttle cache invalidation to prevent excessive operations
+        guard now.timeIntervalSince(lastTabCacheInvalidation) >= tabCacheInvalidationThrottleInterval else {
+            return
+        }
+        
+        lastTabCacheInvalidation = now
+        
         // Clear any cached episode filtering results
         // This forces re-filtering when user switches between tabs
         tabFilterCache.removeAll()
@@ -2586,14 +2625,18 @@ class PodcastViewModel: ObservableObject {
         
         // NOTE: Immediate episode check moved to after snapshot creation for better performance
         
-        // AUTO-REFRESH: Check if feed needs RSS refresh for new episodes
-        let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
-        if shouldAutoRefresh {
-            // PERFORMANCE: Do RSS refresh in background to not block UI loading
-            // Add a small delay to ensure UI is fully loaded first
-            
-            // Cancel any existing RSS parsing for this feed
-            self.cancelRSSParsingForFeed(feedId)
+        // CRITICAL PERFORMANCE: Skip RSS refresh entirely when snapshots are available
+        if hasSnapshot {
+            print("⚡ PERFORMANCE: Skipping background RSS check - recent snapshot available (0 min old)")
+        } else {
+            // AUTO-REFRESH: Check if feed needs RSS refresh for new episodes
+            let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
+            if shouldAutoRefresh {
+                // PERFORMANCE: Do RSS refresh in background to not block UI loading
+                // Add a small delay to ensure UI is fully loaded first
+                
+                // Cancel any existing RSS parsing for this feed
+                self.cancelRSSParsingForFeed(feedId)
             
             let rssTask = Task.detached(priority: .background) {
                 // Wait a moment for UI to settle before starting background refresh
@@ -2725,6 +2768,7 @@ class PodcastViewModel: ObservableObject {
             
             // Store task for potential cancellation
             rssParsingTasks[feedId] = rssTask
+            }
         }
         
         // First check if episodes are already loaded in the feed object
@@ -3324,7 +3368,7 @@ class PodcastViewModel: ObservableObject {
             if isFavorite != nil || isDownloaded != nil {
                 await updateEpisodeCountsForCurrentFeed()
                 
-                // PERFORMANCE: Only clear cache if no snapshots available
+                // PERFORMANCE: Skip cache clearing when snapshots are available to prevent CPU spikes
                 if let feedId = self.selectedFeedId {
                     if self.getEpisodeSnapshot(for: feedId) == nil {
                         await self.episodeManager.clearCacheForFeed(feedId)
@@ -3332,11 +3376,11 @@ class PodcastViewModel: ObservableObject {
                         self.episodeManager.clearMemoryCacheForFeed(feedId)
                         print("🧽 CACHE: Cleared cache for feed \(feedId) - no snapshot available")
                     } else {
-                        print("⚡ PERFORMANCE: Keeping cache - using episode snapshot for feed \(feedId)")
+                        print("⚡ PERFORMANCE: Skipping cache clear - using episode snapshot for feed \(feedId)")
                     }
                 }
                 
-                // Immediately refresh the filtered list if we're on favorites or downloads tab
+                // PERFORMANCE: Only refresh filtered list if actually needed to reduce CPU usage
                 if self.currentTab == EpisodeFilter.favorites.rawValue || self.currentTab == EpisodeFilter.downloads.rawValue {
                     await self.refreshCurrentFilteredList()
                 }
@@ -5641,11 +5685,16 @@ class PodcastViewModel: ObservableObject {
         // EMERGENCY PERFORMANCE: Limit sync to only recent episodes for large feeds to prevent hangs
         let episodesToSync = episodeIds.count > 1000 ? Array(episodeIds.prefix(200)) : Array(episodeIds)
         
-        // Perform quiet CloudKit sync (no UI progress indicators)
-        let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
-            for: episodesToSync,
-            isFreshInstall: false
-        )
+        // Perform quiet CloudKit sync (no UI progress indicators) on dedicated background thread
+        let syncResult = await withCheckedContinuation { continuation in
+            Task.detached(priority: .background) {
+                let result = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+                    for: episodesToSync,
+                    isFreshInstall: false
+                )
+                continuation.resume(returning: result)
+            }
+        }
         
         let coreDataUpdates = syncResult.updates
         let syncSuccess = syncResult.success
@@ -6676,6 +6725,9 @@ extension PodcastViewModel {
         print("🔍 DEBUG: About to call forceUIRefresh()")
         forceUIRefresh()
         
+        // 🎯 CROSS-TAB UPDATE: Apply filtering to ensure changes appear across all tabs
+        applyTabFiltering(episodeId: episode.id, isFavorite: newState, isDownloaded: nil)
+        
         print("🔍 DEBUG: ✅ Immediate favorite UI update completed for '\(episode.title)' favorite: \(newState)")
         
         // Background sync for data persistence and CloudKit
@@ -6729,6 +6781,9 @@ extension PodcastViewModel {
         // ⚡ FORCE UI REFRESH: Trigger all refresh strategies
         print("🔍 DEBUG: About to call forceUIRefresh()")
         forceUIRefresh()
+        
+        // 🎯 CROSS-TAB UPDATE: Apply filtering to ensure changes appear across all tabs
+        applyTabFiltering(episodeId: episode.id, isFavorite: nil, isDownloaded: newState)
         
         print("🔍 DEBUG: ✅ Immediate download UI update completed for '\(episode.title)' downloaded: \(newState)")
         
