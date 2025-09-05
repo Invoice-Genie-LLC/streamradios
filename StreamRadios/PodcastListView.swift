@@ -1977,6 +1977,24 @@ struct OptimizedEpisodeRowView: View, Equatable {
     @State private var showingDeleteConfirmation = false
     @State private var showingBannerAlert = false
     @State private var bannerAlertMessage = ""
+    @State private var showingShareSheet = false
+    @State private var shareURL: URL?
+    @State private var pendingExportURL: URL?
+    
+    // Use a class to persist the export URL across SwiftUI state invalidations
+    private class ExportURLHolder: ObservableObject {
+        @Published var exportURL: URL?
+        
+        func setURL(_ url: URL) {
+            exportURL = url
+        }
+        
+        func clearURL() {
+            exportURL = nil
+        }
+    }
+    
+    @StateObject private var exportURLHolder = ExportURLHolder()
     
     // FORCE UI REFRESH: Get real-time episode state from viewModel
     private var currentEpisode: PodcastEpisode {
@@ -2192,6 +2210,45 @@ struct OptimizedEpisodeRowView: View, Equatable {
             episodeCard
         }
         .id(refreshTrigger) // Force view refresh when progress/played state changes
+        .contextMenu {
+            if viewModel.currentTab == 2 && episode.state.isDownloaded {
+                // Export Audio button
+                Button(action: {
+                    exportEpisodeFile()
+                }) {
+                    Label("Export Audio", systemImage: "square.and.arrow.up")
+                }
+            }
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            // Try URLs in order of preference: persistent holder first, then fallbacks
+            if let fileURL = exportURLHolder.exportURL ?? shareURL ?? pendingExportURL {
+                ExportSheet(fileURL: fileURL) {
+                    showingShareSheet = false
+                    // Clean up temp file after sharing
+                    if fileURL.path.contains("tmp/") {
+                        try? FileManager.default.removeItem(at: fileURL)
+                    }
+                    // Clear all URL references
+                    self.exportURLHolder.clearURL()
+                    self.shareURL = nil
+                    self.pendingExportURL = nil
+                }
+            } else {
+                VStack {
+                    Text("Error: No file to share")
+                        .foregroundColor(.red)
+                    Text("Export URL was lost. Please try again.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button("Dismiss") {
+                        showingShareSheet = false
+                    }
+                    .padding(.top)
+                }
+                .padding()
+            }
+        }
         .alert(isPresented: $showingDeleteConfirmation) {
             Alert(
                 title: Text("Delete Download"),
@@ -2223,11 +2280,7 @@ struct OptimizedEpisodeRowView: View, Equatable {
         VStack(spacing: 0) {
             // Simplified episode content without expensive gradients
             Group {
-                if viewModel.currentTab == 2 && episode.state.isDownloaded {
-                    episodeContentWithSwipe
-                } else {
-                    episodeContent
-                }
+                episodeContent
             }
             .background(
                 // Enhanced background that covers the entire available space - similar to radio station styling
@@ -2484,22 +2537,6 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
     }
     
-        private var episodeContentWithSwipe: some View {
-        episodeContent
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(action: {
-                    if isPlaying {
-                        showBannerAlert(message: "You can't delete downloads while the episode is playing.")
-                    } else {
-                        showingDeleteConfirmation = true
-                    }
-                }) {
-                    Label("Delete Download", systemImage: "trash.fill")
-                }
-                .tint(.red)
-            }
-    }
-    
     private var simplifiedDownloadButton: some View {
         Button(action: {
             // Trigger button press animation
@@ -2581,6 +2618,57 @@ struct OptimizedEpisodeRowView: View, Equatable {
         }
         .frame(width: 22, height: 22)
         .disabled(isDownloading) // Disable button during download
+    }
+    
+    private func exportEpisodeFile() {
+        // Check if episode has a local file path
+        guard let localFilePath = currentEpisode.localFilePath,
+              !localFilePath.isEmpty,
+              FileManager.default.fileExists(atPath: localFilePath) else {
+            showBannerAlert(message: "Downloaded file not found")
+            return
+        }
+        
+        let fileURL = URL(fileURLWithPath: localFilePath)
+        
+        // Create a temporary copy with .mp3 extension to ensure compatibility
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = currentEpisode.title.replacingOccurrences(of: "[^a-zA-Z0-9 ]", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "_")
+        let tempURL = tempDir.appendingPathComponent("\(fileName).mp3")
+        
+        do {
+            // Remove existing temp file if it exists
+            if FileManager.default.fileExists(atPath: tempURL.path) {
+                try FileManager.default.removeItem(at: tempURL)
+            }
+            
+            // Copy the file to temp directory with .mp3 extension
+            try FileManager.default.copyItem(at: fileURL, to: tempURL)
+            
+            // Verify the file was copied successfully
+            guard FileManager.default.fileExists(atPath: tempURL.path) else {
+                showBannerAlert(message: "Failed to prepare file for export")
+                return
+            }
+            
+            // Set the export URL using the persistent holder and show the share sheet
+            DispatchQueue.main.async {
+                // Use the persistent holder that won't be affected by SwiftUI state invalidation
+                self.exportURLHolder.setURL(tempURL)
+                
+                // Also set the state variables as backup (though they may get invalidated)
+                self.shareURL = tempURL
+                self.pendingExportURL = tempURL
+                
+                // Present the sheet
+                self.showingShareSheet = true
+            }
+            
+        } catch {
+            showBannerAlert(message: "Failed to prepare file for export")
+        }
     }
     
     private func showBannerAlert(message: String) {
