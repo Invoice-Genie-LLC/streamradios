@@ -1473,12 +1473,14 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        // PERFORMANCE: Skip expensive RSS parsing if we have recent snapshots
+        // PERFORMANCE: Skip expensive RSS parsing if we have very recent snapshots
         if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
             let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
             if snapshotAge < 900 { // 15 minutes
                 print("⚡ PERFORMANCE: Skipping immediate RSS check - recent snapshot available (\(Int(snapshotAge/60)) min old, \(snapshotEpisodes.count) episodes)")
                 return
+            } else {
+                print("🔍 IMMEDIATE CHECK: Snapshot is \(Int(snapshotAge/60)) min old - checking for new episodes")
             }
         }
         
@@ -3676,12 +3678,14 @@ class PodcastViewModel: ObservableObject {
     
     /// Background check for new episodes without blocking UI
     private func checkForNewEpisodesInBackground(feedId: String) async {
-        // PERFORMANCE: Skip background check if snapshots are available and recent
+        // PERFORMANCE: Skip background check if snapshots are very recent (reduce server load)
         if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
             let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
-            if snapshotAge < 1800 { // 30 minutes
+            if snapshotAge < 1800 { // 30 minutes - longer threshold for background checks
                 print("⚡ PERFORMANCE: Skipping background RSS check - recent snapshot available (\(Int(snapshotAge/60)) min old)")
                 return
+            } else {
+                print("🔍 BACKGROUND CHECK: Snapshot is \(Int(snapshotAge/60)) min old - checking for new episodes")
             }
         }
         
@@ -5670,13 +5674,21 @@ class PodcastViewModel: ObservableObject {
     
     /// Check if a feed should be refreshed from RSS for new episodes
     private func shouldRefreshFeedFromRSS(feedId: String, isInitialLoad: Bool) async -> Bool {
-        // PERFORMANCE: Skip expensive RSS refresh check if we have snapshots
+        // PERFORMANCE: Check if we should refresh based on snapshot age
         let snapshot = getEpisodeSnapshot(for: feedId)
         print("🔍 RSS REFRESH CHECK: Feed \(feedId) - snapshot available: \(snapshot != nil), count: \(snapshot?.count ?? 0)")
         
         if let snapshotEpisodes = snapshot, !snapshotEpisodes.isEmpty {
-            print("⚡ PERFORMANCE: Skipping RSS refresh check - using episode snapshot with \(snapshotEpisodes.count) episodes")
-            return false
+            let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
+            let refreshThreshold: TimeInterval = isInitialLoad ? 900 : 1800 // 15 min for initial, 30 min for background
+            
+            if snapshotAge < refreshThreshold {
+                print("⚡ PERFORMANCE: Skipping RSS refresh check - recent snapshot (\(Int(snapshotAge/60)) min old, threshold: \(Int(refreshThreshold/60)) min)")
+                return false
+            } else {
+                print("🔍 RSS REFRESH CHECK: Snapshot is \(Int(snapshotAge/60)) min old - proceeding with RSS check for new episodes")
+                return true
+            }
         } else {
             print("🔍 RSS REFRESH CHECK: No snapshot available for feed \(feedId) - proceeding with RSS check")
         }
