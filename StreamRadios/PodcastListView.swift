@@ -228,7 +228,8 @@ struct PodcastListView: View {
                         DispatchQueue.main.async {
                             PodcastPlayer.shared.playEpisode(ep, feed: feed)
                             selectedPodcast = feed
-                            Task { await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true) }
+                            // PERFORMANCE: Use optimized feed refresh instead of expensive loadEpisodesForFeed
+                            viewModel.requestFeedRefresh(feed.id)
                             scrollToEpisodeID = ep.id
                         }
                     }
@@ -1061,16 +1062,16 @@ struct PodcastListView: View {
     }
     
     private func playLatestEpisode(for feed: PodcastFeed) {
-        viewModel.fetchEpisodes(for: feed, completion: { result in
-            switch result {
-            case .success(let episodes):
-                if let latestEpisode = episodes.first {
-                    podcastPlayer.playEpisode(latestEpisode, feed: feed)
-                }
-            case .failure(let error):
-                os_log("Failed to fetch episodes: %@", log: log, type: .error, error.localizedDescription)
-            }
-        })
+        // PERFORMANCE: Use optimized feed refresh instead of expensive fetchEpisodes
+        viewModel.requestFeedRefresh(feed.id)
+        
+        // Get episodes immediately from snapshot or current episodes
+        let episodes = viewModel.getEpisodeSnapshot(for: feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
+        if let latestEpisode = episodes.first {
+            podcastPlayer.playEpisode(latestEpisode, feed: feed)
+        } else {
+            print("⚠️ No episodes available for feed: \(feed.title)")
+        }
     }
     
     // PERFORMANCE: Initialize all caches for fast rendering
@@ -2757,9 +2758,9 @@ struct PodcastPlayerView: View {
             episodesDidLoad = false
         }
                 .onChange(of: viewModel.podcastFeedOrder) { _ in 
-                    // Only refresh if episodes haven't been loaded yet or if there's a significant change
+                    // PERFORMANCE: Use optimized feed refresh instead of expensive fetchAllEpisodes
                     if viewModel.currentEpisodes.isEmpty {
-                        viewModel.fetchAllEpisodes(for: feed)
+                        viewModel.requestFeedRefresh(feed.id)
                     }
                 }
                 .sheet(isPresented: $showPodcastPlayerSheet) {
@@ -3357,9 +3358,8 @@ struct PodcastPlayerView: View {
     }
     
     private func loadInitialEpisodes() {
-        Task {
-            await viewModel.loadEpisodesForFeed(feed.id, isInitialLoad: true)
-        }
+        // PERFORMANCE: Use optimized feed refresh to leverage snapshots
+        viewModel.requestFeedRefresh(feed.id)
     }
     
     private func loadMoreIfNeeded() {

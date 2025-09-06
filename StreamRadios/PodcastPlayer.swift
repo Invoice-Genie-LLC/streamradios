@@ -27,6 +27,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var currentEpisode: PodcastEpisode?
     @Published var isPlaying: Bool = false
     @Published var userWantsToPlay: Bool = false  // CRITICAL: Persistent user intent flag like RadioPlayer
+    @Published var wasManuallyPaused: Bool = false  // Track if user manually paused to prevent auto-resume
     @Published var loadingEpisodeId: String? = nil  // Track which episode is currently loading
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0.01
@@ -159,14 +160,18 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     @objc private func handleAppWillEnterForeground() {
-        // CRITICAL FIX: Restore audio session when app returns to foreground
-        if userWantsToPlay {
+        // CRITICAL FIX: Only restore playback if it was interrupted by the system, not if user paused
+        // We should only resume if:
+        // 1. User wants to play (userWantsToPlay = true)
+        // 2. Player is not currently playing (was interrupted)
+        // 3. Was NOT manually paused by user
+        if userWantsToPlay && !isPlaying && !wasManuallyPaused {
             print("🔧 PodcastPlayer: App entering foreground - restoring podcast playback if needed")
             DebugLogger.logInfo("App entering foreground with podcast playback intent - checking restoration needs", category: "BackgroundAudio")
             DebugLogger.setUserAction("Podcast Foreground Transition")
             
-            // Check if we need to restart playback
-            if !isPlaying && player != nil {
+            // Check if we need to restart playback (only if it was system-interrupted, not user-paused)
+            if player != nil {
                 DebugLogger.logWarning("Podcast playback was interrupted during background - attempting restoration", category: "BackgroundAudio")
                 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -179,8 +184,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         // Reactivate audio session
                         PlaybackManager.shared.setActivePlayer(.podcast)
                         
-                        // Resume playback if user wants it
-                        if self.userWantsToPlay {
+                        // Resume playback only if user wants it and it wasn't manually paused
+                        if self.userWantsToPlay && !self.wasManuallyPaused {
                             self.player?.play()
                             print("✅ PodcastPlayer: Podcast playback resumed after foreground transition")
                             DebugLogger.logInfo("Podcast playback successfully restored after foreground transition", category: "BackgroundAudio")
@@ -189,11 +194,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         DebugLogger.logError("Failed to restore podcast playback during foreground transition: \(error.localizedDescription)", category: "BackgroundAudio")
                     }
                 }
-            } else if isPlaying {
-                DebugLogger.logInfo("Podcast playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
-            } else {
-                DebugLogger.logInfo("No podcast playback restoration needed - user did not want playback", category: "BackgroundAudio")
             }
+        } else if isPlaying {
+            DebugLogger.logInfo("Podcast playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
+        } else if wasManuallyPaused {
+            DebugLogger.logInfo("Podcast was manually paused by user - not resuming automatically", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering foreground with no podcast playback intent", category: "BackgroundAudio")
         }
@@ -898,8 +903,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return
             }
             
+            // PERFORMANCE: Use optimized feed refresh instead of expensive operations
             Task { @MainActor in
-                allEpisodesInFeed = viewModel.allEpisodes.filter { $0.feedId == feed.id }
+                viewModel.requestFeedRefresh(feed.id)
+            }
+            
+            Task { @MainActor in
+                // PERFORMANCE: Get episodes from snapshot if available, otherwise use current episodes
+                let episodes = viewModel.getEpisodeSnapshot(for: feed.id) ?? viewModel.currentEpisodes.filter { $0.feedId == feed.id }
+                allEpisodesInFeed = episodes
                 allEpisodesInFeed.sort { $0.publicationDate > $1.publicationDate } // Sort by newest first
                 os_log("Loaded %d episodes for feed: %{public}@", log: log, type: .info, allEpisodesInFeed.count, feed.title)
                 
@@ -1734,6 +1746,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL: Set user intent when resuming playback
         userWantsToPlay = true
         
+        // CRITICAL FIX: Clear manual pause flag when user explicitly plays
+        wasManuallyPaused = false
+        
         stopRadioPlayback()
         
         guard let player = player, let currentEpisode = currentEpisode, let _ = currentFeed else {
@@ -1836,6 +1851,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         player.pause()
         isPlaying = false
         
+        // CRITICAL FIX: Mark as manually paused to prevent auto-resume
+        wasManuallyPaused = true
+        
         // CRITICAL FIX: Clear loading state when user pauses to prevent stuck buffering spinner
         if loadingEpisodeId == currentEpisode.id {
             loadingEpisodeId = nil
@@ -1926,6 +1944,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     /// Stops podcast and clears user intent (like RadioPlayer stop functionality)
     func stop() {
         guard let player = player else { return }
+        
+        // CRITICAL FIX: Clear user intent and manual pause flags when stopping
+        userWantsToPlay = false
+        wasManuallyPaused = false
         
         // Save progress before stopping if we have a current episode
         if let currentEpisode = currentEpisode {

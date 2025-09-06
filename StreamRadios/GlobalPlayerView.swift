@@ -78,35 +78,21 @@ struct GlobalPlayerView: View {
     }
     
     /// Determines if podcast player should be shown
-    /// Shows podcast player when:
-    /// - User wants to play podcast (persistent intent), OR
-    /// - Podcast is actively playing (current state)
-    /// This mirrors the RadioPlayer logic exactly for consistent CarPlay behavior
+    /// Shows podcast player when there's a current episode and feed loaded
+    /// Player stays visible whether playing, paused, or stopped
     private var shouldShowPodcastPlayer: Bool {
-        // CRITICAL: Mirror RadioPlayer logic exactly - check user intent first
-        // This is the key to surviving CarPlay connections/disconnections
-        if podcastPlayer.userWantsToPlay && podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil {
-            return true
-        }
-        
-        // Fallback: Show if actively playing (secondary check)
-        if podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil {
-            return true
-        }
-        
-        return false
+        // Show player whenever there's a current episode and feed
+        // This keeps the player visible even when paused
+        return podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil
     }
     
     /// Determines if radio player should be shown
-    /// Show only when:
-    /// - User wants to play radio, OR
-    /// - Radio is actively playing or paused and a station is set
+    /// Shows radio player when there's a current station set
+    /// Player stays visible whether playing, paused, or stopped
     private var shouldShowRadioPlayer: Bool {
-        if radioPlayer.userWantsToPlay { return true }
-        if (radioPlayer.isPlaying || radioPlayer.connectionState == .paused) && radioPlayer.currentlyPlayingStation != nil {
-            return true
-        }
-        return false
+        // Show player whenever there's a current station
+        // This keeps the player visible even when paused
+        return radioPlayer.currentlyPlayingStation != nil
     }
 }
 

@@ -37,6 +37,7 @@ class RadioPlayer: NSObject, ObservableObject {
 
     // Simplified state management - no complex reconnection logic
     @Published var userWantsToPlay: Bool = false
+    @Published var wasManuallyPaused: Bool = false  // Track if user manually paused to prevent auto-resume
     @Published var connectionState: ConnectionState = .connected
 
     @Published var currentStationIndex: Int?
@@ -719,14 +720,18 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     @objc private func handleAppWillEnterForeground() {
-        // CRITICAL FIX: Restore audio session when app returns to foreground
-        if userWantsToPlay {
+        // CRITICAL FIX: Only restore playback if it was interrupted by the system, not if user paused
+        // We should only resume if:
+        // 1. User wants to play (userWantsToPlay = true)
+        // 2. Player is not currently playing (was interrupted)
+        // 3. Was NOT manually paused by user
+        if userWantsToPlay && !isPlaying && !wasManuallyPaused {
             print("🔧 RadioPlayer: App entering foreground - restoring radio playback if needed")
             DebugLogger.logInfo("App entering foreground with radio playback intent - checking restoration needs", category: "BackgroundAudio")
             DebugLogger.setUserAction("Radio Foreground Transition")
             
-            // Check if we need to restart playback
-            if !isPlaying && player != nil {
+            // Check if we need to restart playback (only if it was system-interrupted, not user-paused)
+            if player != nil {
                 DebugLogger.logWarning("Radio playback was interrupted during background - attempting restoration", category: "BackgroundAudio")
                 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -739,8 +744,8 @@ class RadioPlayer: NSObject, ObservableObject {
                         // Reactivate audio session
                         PlaybackManager.shared.setActivePlayer(.radio)
                         
-                        // Resume playback if user wants it
-                        if self.userWantsToPlay {
+                        // Resume playback only if user wants it and it wasn't manually paused
+                        if self.userWantsToPlay && !self.wasManuallyPaused {
                             self.player?.play()
                             print("✅ RadioPlayer: Radio playback resumed after foreground transition")
                             DebugLogger.logInfo("Radio playback successfully restored after foreground transition", category: "BackgroundAudio")
@@ -749,11 +754,11 @@ class RadioPlayer: NSObject, ObservableObject {
                         DebugLogger.logError("Failed to restore radio playback during foreground transition: \(error.localizedDescription)", category: "BackgroundAudio")
                     }
                 }
-            } else if isPlaying {
-                DebugLogger.logInfo("Radio playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
-            } else {
-                DebugLogger.logInfo("No radio playback restoration needed - user did not want playback", category: "BackgroundAudio")
             }
+        } else if isPlaying {
+            DebugLogger.logInfo("Radio playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
+        } else if wasManuallyPaused {
+            DebugLogger.logInfo("Radio was manually paused by user - not resuming automatically", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering foreground with no radio playback intent", category: "BackgroundAudio")
         }
@@ -1166,6 +1171,9 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func play() {
+        // CRITICAL FIX: Clear manual pause flag when user explicitly plays
+        wasManuallyPaused = false
+        
         // CRITICAL: Only stop podcast if user explicitly wants radio or if no podcast is active
         // This prevents CarPlay disconnection from accidentally stopping podcast playback
         let podcastPlayer = PodcastPlayer.shared
@@ -1273,10 +1281,12 @@ class RadioPlayer: NSObject, ObservableObject {
     func pause() {
         guard let player = player else { return }
         
-        // User explicitly paused - keep intent so UI remains visible
-        
         player.pause()
         isPlaying = false
+        
+        // CRITICAL FIX: Mark as manually paused to prevent auto-resume
+        wasManuallyPaused = true
+        
         connectionState = .paused
         isBuffering = false
         updateNowPlayingInfo()
@@ -1341,14 +1351,17 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     
     func stop() {
-           player?.pause()
-           player = nil
-           currentStationIndex = nil
-           isPlaying = false
+        // CRITICAL FIX: Clear user intent and manual pause flags when stopping
+        userWantsToPlay = false
+        wasManuallyPaused = false
+        
+        player?.pause()
+        player = nil
+        currentStationIndex = nil
+        isPlaying = false
            
-           // Clear user intent and connection state
-           userWantsToPlay = false
-           connectionState = .disconnected
+        // Clear connection state
+        connectionState = .disconnected
            
            // Clear all song metadata and Shazam artwork completely
            metadata = nil
