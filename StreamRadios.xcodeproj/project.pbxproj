@@ -11,6 +11,7 @@
 		7706149B2E65F71D0022C94A /* StationSubmissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149A2E65F71D0022C94A /* StationSubmissionView.swift */; };
 		7706149D2E67DF9C0022C94A /* SyncStateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149C2E67DF9C0022C94A /* SyncStateManager.swift */; };
 		7706149F2E67E16B0022C94A /* DetailedSyncProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7706149E2E67E16B0022C94A /* DetailedSyncProgressView.swift */; };
+		770614A32E6BE48A0022C94A /* ManualStations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770614A22E6BE48A0022C94A /* ManualStations.swift */; };
 		7707DA3B2C152EF2006D5EBB /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7707DA3A2C152EF2006D5EBB /* ContentView.swift */; };
 		7707DA3D2C152EF5006D5EBB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3C2C152EF5006D5EBB /* Assets.xcassets */; };
 		7707DA402C152EF5006D5EBB /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7707DA3F2C152EF5006D5EBB /* Preview Assets.xcassets */; };
@@ -134,6 +135,7 @@
 		7706149A2E65F71D0022C94A /* StationSubmissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StationSubmissionView.swift; sourceTree = "<group>"; };
 		7706149C2E67DF9C0022C94A /* SyncStateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStateManager.swift; sourceTree = "<group>"; };
 		7706149E2E67E16B0022C94A /* DetailedSyncProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailedSyncProgressView.swift; sourceTree = "<group>"; };
+		770614A22E6BE48A0022C94A /* ManualStations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualStations.swift; sourceTree = "<group>"; };
 		7707DA352C152EF2006D5EBB /* StreamRadios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreamRadios.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7707DA3A2C152EF2006D5EBB /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7707DA3C2C152EF5006D5EBB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -301,6 +303,7 @@
 				7707DA692C156FDA006D5EBB /* RadioStationListView.swift */,
 				778610632E50A5F600108721 /* SearchPodcastsView.swift */,
 				7715539F2C19E6C800BE43FA /* AppDelegate.swift */,
+				770614A22E6BE48A0022C94A /* ManualStations.swift */,
 				77F50BCA2C647AEF00187488 /* PodcastListView.swift */,
 				774180512C6708020030B459 /* AudioPlayerProtocol.swift */,
 				7780E9672C3D01DA009CCF6F /* CoreDataStack.swift */,
@@ -622,6 +625,7 @@
 				77322EEA2C442C8700C5D449 /* BackgroundTaskManager.swift in Sources */,
 				7707DA632C156D92006D5EBB /* AddStationView.swift in Sources */,
 				778610642E50A5F600108721 /* SearchPodcastsView.swift in Sources */,
+				770614A32E6BE48A0022C94A /* ManualStations.swift in Sources */,
 				7746179C2C17834200F442B3 /* CircularProgressView.swift in Sources */,
 				774FED5B2E1983FD0084FA72 /* AboutView.swift in Sources */,
 				774FED5C2E1983FD0084FA72 /* PrivacyPolicyView.swift in Sources */,

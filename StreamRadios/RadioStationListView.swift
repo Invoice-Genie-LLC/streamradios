@@ -115,9 +115,11 @@ struct RadioStationListView: View {
         }
         .onDisappear(perform: cleanup)
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
-            viewModel.loadStationsFromCoreData()
+            // CRITICAL FIX: Don't reload from Core Data if stations were just loaded via fetchStationsForSelectedCountry
+            // This prevents manual stations from being wiped out after they're loaded
+            print("📻 🔧 FIX: Received stationsUpdated notification - preserving in-memory stations to avoid wiping manual stations")
             
-            // Force UI update immediately after loading stations
+            // Force UI update immediately without reloading from Core Data
             DispatchQueue.main.async {
                 viewModel.objectWillChange.send()
                 
@@ -469,8 +471,10 @@ struct RadioStationListView: View {
             await viewModel.fetchStationsForSelectedCountry()
             await MainActor.run {
                 viewModel.syncStationsWithCloudKit()
-                // Ensure UI reflects latest Core Data after sync
-                viewModel.loadStationsFromCoreData()
+                // CRITICAL FIX: Don't call loadStationsFromCoreData() after fetchStationsForSelectedCountry()
+                // fetchStationsForSelectedCountry() already loads both manual and API stations
+                // loadStationsFromCoreData() would override manual stations with Core Data only
+                print("📻 🔧 FIX: Skipping loadStationsFromCoreData() to preserve manual stations loaded by fetchStationsForSelectedCountry()")
             }
         }
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))

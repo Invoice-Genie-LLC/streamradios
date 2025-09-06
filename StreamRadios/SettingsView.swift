@@ -2252,7 +2252,21 @@ struct InternalDataManagementView: View {
                            selectedCountry: $viewModel.selectedCountry,
                            countries: viewModel.countries,
                            stationCount: { country in
-                               viewModel.stations.filter { $0.country == country }.count
+                               let stationCount = viewModel.stations.filter { $0.country == country }.count
+                               
+                               // Don't show count for countries with manual stations on fresh installs
+                               // Only show count when both manual and API stations are combined
+                               let hasManualStations = ManualStationManager.shared.hasManualStations(for: country)
+                               let hasAPIStations = viewModel.stations.filter { $0.country == country }.count > ManualStationManager.shared.getManualStationCount(for: country)
+                               
+                               // Show count only if:
+                               // 1. Country has no manual stations, OR
+                               // 2. Country has both manual and API stations
+                               if !hasManualStations || (hasManualStations && hasAPIStations) {
+                                   return stationCount
+                               } else {
+                                   return 0 // Hide count for manual-only stations
+                               }
                            }
                        )
                        .onChange(of: viewModel.selectedCountry) { newValue in

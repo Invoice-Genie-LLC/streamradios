@@ -1450,6 +1450,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
         if userDefaults.bool(forKey: hasLaunchedBeforeKey) == false {
             print("Initializing default stations for first time setup or new default stations detected.")
             
+            // CRITICAL: Load all manual stations on fresh install
+            // This ensures manual stations are available immediately, even before country selection
+            let allManualStations = ManualStationManager.shared.getAllManualStations()
+            if !allManualStations.isEmpty {
+                print("📻 Loading \(allManualStations.count) manual stations across all countries on fresh install")
+                stations = allManualStations
+            }
+            
             // Save locally first, then sync to CloudKit
             saveStationsToCoreData()
             saveStationsToCloudKit()
@@ -2296,6 +2304,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     return nil
                 }
                 
+                // CRITICAL: Skip API stations that duplicate manual stations
+                if ManualStationManager.shared.isManualStation(name: apiStation.name, country: country.name) {
+                    print("📻 Skipping API station '\(apiStation.name)' - duplicate of manual station")
+                    return nil
+                }
+                
                 // Check if we already have this station with favicon data
                 let existingIconData = existingStationsMap[apiStation.stationuuid]?.iconData
                 if existingIconData != nil {
@@ -2673,7 +2687,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     
     @MainActor
     func fetchStationsForSelectedCountry() async {
-        print("🌐 Radio Browser API: fetchStationsForSelectedCountry called for country: \(selectedCountry)")
+        print("🌐 Manual + API Station Loading: fetchStationsForSelectedCountry called for country: \(selectedCountry)")
         
         // Cancel any ongoing fetch to prevent memory issues and conflicts
         currentFetchTask?.cancel()
@@ -2686,6 +2700,12 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let selectedCountryName = self.selectedCountry
             let countriesArray = self.countries
             
+            // STEP 1: Load manual stations first (they take priority)
+            print("📻 🔍 DEBUG: About to load manual stations for \(selectedCountryName)")
+            await self.loadManualStationsForCountry(selectedCountryName)
+            print("📻 🔍 DEBUG: Finished loading manual stations for \(selectedCountryName)")
+            
+            // STEP 2: Then load API stations (excluding duplicates)
             // First try to find the country in the existing countries array
             var currentCountry = countriesArray.first(where: { $0.name == selectedCountryName })
             
@@ -2713,6 +2733,61 @@ class RadioStationViewModel: NSObject, ObservableObject {
         }
         
         await currentFetchTask?.value
+    }
+    
+    /// Load manual stations for a specific country
+    @MainActor
+    private func loadManualStationsForCountry(_ country: String) async {
+        guard country != "Select Country" else { return }
+        
+        let allManualStations = ManualStationManager.shared.getManualStations(for: country)
+        print("📻 🔍 DEBUG: Found \(allManualStations.count) total manual stations for \(country)")
+        
+        // Debug: Log all manual station IDs and their deleted status
+        for station in allManualStations {
+            let isDeleted = isStationDeleted(station.id)
+            print("📻 🔍 Manual station: \(station.name) (ID: \(station.id)) - Deleted: \(isDeleted)")
+        }
+        
+        // CRITICAL: Filter out manually deleted stations
+        // Apply the same protection rule as API stations
+        let manualStations = allManualStations.filter { station in
+            if isStationDeleted(station.id) {
+                print("🚫 Skipping deleted manual station: \(station.name) (ID: \(station.id))")
+                return false
+            }
+            return true
+        }
+        
+        if !manualStations.isEmpty {
+            print("📻 Loading \(manualStations.count) manual stations for \(country) (filtered \(allManualStations.count - manualStations.count) deleted)")
+            
+            // Add manual stations to the beginning of the stations array
+            // This ensures they appear first and have priority
+            let existingStations = stations.filter { $0.country != country }
+            stations = manualStations + existingStations
+            
+            // Save to Core Data
+            saveStationsToCoreData()
+            
+            // CRITICAL FIX: Sync manual stations to CloudKit so they can be deleted later
+            print("📻 ☁️ Syncing \(manualStations.count) manual stations to CloudKit...")
+            Task {
+                for manualStation in manualStations {
+                    do {
+                        try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(manualStation)
+                        print("📻 ☁️ Synced manual station to CloudKit: \(manualStation.name)")
+                    } catch {
+                        print("📻 ☁️ Failed to sync manual station to CloudKit: \(manualStation.name) - \(error)")
+                    }
+                }
+                print("📻 ☁️ ✅ Completed syncing \(manualStations.count) manual stations to CloudKit")
+            }
+            
+            print("📻 ✅ Successfully loaded \(manualStations.count) manual stations for \(country)")
+        } else {
+            print("📻 No manual stations defined for \(country)")
+        }
     }
     
     func reportStationClick(for station: RadioStation) {
@@ -3606,11 +3681,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
     /// Remove multiple station IDs from the deleted stations list (for country deletion)
     private func removeMultipleFromDeletedStations(_ stationIds: [String]) {
         var deleted = deletedStationIds
+        let beforeCount = deleted.count
+        
+        print("📝 🔍 DEBUG: Removing \(stationIds.count) stations from deleted list")
         for stationId in stationIds {
-            deleted.remove(stationId)
+            let wasRemoved = deleted.remove(stationId) != nil
+            print("📝 🔍 Removing \(stationId): \(wasRemoved ? "✅ Success" : "❌ Not found")")
         }
+        
         deletedStationIds = deleted
-        print("📝 Removed \(stationIds.count) stations from deleted list for country deletion")
+        let afterCount = deleted.count
+        print("📝 Removed \(beforeCount - afterCount) stations from deleted list (was \(beforeCount), now \(afterCount))")
     }
     
     /// Clear all deleted station IDs (for troubleshooting or data reset)
@@ -4069,23 +4150,61 @@ extension RadioStationViewModel {
     func deleteStationsForCountry(_ countryName: String, progressViewModel: CountryDeletionProgressViewModel? = nil) async {
         print("🌍🗑️ Starting deletion of all stations for country: \(countryName)")
         
-        // Get all stations for this country
+        // Get all currently loaded stations for this country
         let countryStations = stations.filter { $0.country == countryName }
         
-        guard !countryStations.isEmpty else {
+        // CRITICAL FIX: Also get all manual stations for this country (including those not currently loaded)
+        let allManualStationsForCountry = ManualStationManager.shared.getManualStations(for: countryName)
+        
+        // Combine loaded stations with all manual stations to ensure comprehensive deletion
+        var allStationsToDelete = countryStations
+        
+        // Add any manual stations that aren't already in the loaded stations
+        for manualStation in allManualStationsForCountry {
+            if !allStationsToDelete.contains(where: { $0.id == manualStation.id }) {
+                allStationsToDelete.append(manualStation)
+            }
+        }
+        
+        guard !allStationsToDelete.isEmpty else {
             print("🌍🗑️ No stations found for country: \(countryName)")
             NotificationManager.shared.notifyUserImmediate(title: "No Stations", message: "No stations found for \(countryName)")
             return
         }
         
-        let stationCount = countryStations.count
-        let stationIds = countryStations.map { $0.id }
+        let stationCount = allStationsToDelete.count
+        let stationIds = allStationsToDelete.map { $0.id }
         
-        print("🌍🗑️ Found \(stationCount) stations to delete for \(countryName)")
+        // Count manual stations for logging
+        let manualStationIds = stationIds.filter { $0.hasPrefix("manual_") }
         
-        // Clear protection for these stations so they can be re-added later
-        removeMultipleFromDeletedStations(stationIds)
-        print("🌍🗑️ Cleared protection for \(stationCount) stations - they can be re-added from API")
+        print("🌍🗑️ Found \(stationCount) stations to delete for \(countryName) (including \(manualStationIds.count) manual stations)")
+        
+        // CRITICAL FIX: First sync manual stations to CloudKit so they can be deleted
+        if !manualStationIds.isEmpty {
+            progressViewModel?.updateProgress(0.05, step: "Syncing \(manualStationIds.count) manual stations to CloudKit...")
+            print("🌍🗑️ ☁️ Syncing \(manualStationIds.count) manual stations to CloudKit before deletion...")
+            
+            let manualStationsToSync = allStationsToDelete.filter { $0.id.hasPrefix("manual_") }
+            
+            // Sync manual stations to CloudKit first
+            for manualStation in manualStationsToSync {
+                do {
+                    try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(manualStation)
+                    print("🌍🗑️ ☁️ Synced manual station to CloudKit: \(manualStation.name)")
+                } catch {
+                    print("🌍🗑️ ☁️ Failed to sync manual station to CloudKit: \(manualStation.name) - \(error)")
+                }
+            }
+            
+            print("🌍🗑️ ☁️ Completed syncing manual stations to CloudKit")
+        }
+        
+        // IMPORTANT: For country-level deletion, we DON'T mark manual stations as permanently deleted
+        // This allows users to get manual stations back if they want them after country deletion
+        // Manual station protection only applies to individual station deletion
+        
+        print("🌍🗑️ Prepared \(stationCount) stations for deletion")
         
         progressViewModel?.updateProgress(0.1, step: "Preparing deletion of \(stationCount) stations...")
         
@@ -4114,6 +4233,11 @@ extension RadioStationViewModel {
             }
             
             success = true
+            
+            // CRITICAL FIX: Clear protection AFTER successful deletion so stations can be re-added
+            removeMultipleFromDeletedStations(stationIds)
+            print("🌍🗑️ ✅ Cleared protection for \(stationCount) stations - they can now be re-added")
+            
             progressViewModel?.updateProgress(1.0, step: "Deletion completed successfully!")
             progressViewModel?.markCompleted()
             print("🌍✅ Successfully deleted all \(stationCount) stations for \(countryName)")

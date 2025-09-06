@@ -362,7 +362,21 @@ struct ContentView: View {
                                     selectedCountry: $viewModel.selectedCountry,
                                     countries: viewModel.countries,
                                     stationCount: { country in
-                                        viewModel.stations.filter { $0.country == country }.count
+                                        let stationCount = viewModel.stations.filter { $0.country == country }.count
+                                        
+                                        // Don't show count for countries with manual stations on fresh installs
+                                        // Only show count when both manual and API stations are combined
+                                        let hasManualStations = ManualStationManager.shared.hasManualStations(for: country)
+                                        let hasAPIStations = viewModel.stations.filter { $0.country == country }.count > ManualStationManager.shared.getManualStationCount(for: country)
+                                        
+                                        // Show count only if:
+                                        // 1. Country has no manual stations, OR
+                                        // 2. Country has both manual and API stations
+                                        if !hasManualStations || (hasManualStations && hasAPIStations) {
+                                            return stationCount
+                                        } else {
+                                            return 0 // Hide count for manual-only stations
+                                        }
                                     },
                                     onSelect: { [weak viewModel] country in
                                         // Trigger refresh even if same country tapped; also when empty
@@ -426,12 +440,20 @@ struct ContentView: View {
                     await viewModel.fetchStationsForSelectedCountry()
                     await MainActor.run {
                         viewModel.syncStationsWithCloudKit()
-                        viewModel.loadStationsFromCoreData()
+                        // CRITICAL FIX: Don't call loadStationsFromCoreData() after fetchStationsForSelectedCountry()
+                        // fetchStationsForSelectedCountry() already loads both manual and API stations
+                        // loadStationsFromCoreData() would override manual stations with Core Data only
+                        print("📻 🔧 FIX: Skipping loadStationsFromCoreData() to preserve manual stations loaded by fetchStationsForSelectedCountry()")
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
-                    // Ensure the list reflects any add/save done elsewhere
-                    viewModel.loadStationsFromCoreData()
+                    // CRITICAL FIX: Don't reload from Core Data if stations were just loaded via fetchStationsForSelectedCountry
+                    // This prevents manual stations from being wiped out after they're loaded
+                    print("📻 🔧 FIX: Received stationsUpdated notification - preserving in-memory stations to avoid wiping manual stations")
+                    
+                    // Force UI update without reloading from Core Data
+                    viewModel.objectWillChange.send()
+                    
                     // If newly added stations belong to current country, ensure All tab is visible
                     let countryCount = viewModel.stations.filter { $0.country == viewModel.selectedCountry }.count
                     if countryCount > 0 && viewModel.selectedSubTab != .all {
