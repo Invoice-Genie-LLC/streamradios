@@ -693,6 +693,13 @@ struct PodcastListView: View {
                         .opacity(isEditing ? 0.6 : 1.0)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             if !isEditing {
+                                Button {
+                                    sharePodcastFeed(feed)
+                                } label: {
+                                    Label("Share", systemImage: "square.and.arrow.up")
+                                }
+                                .tint(.blue)
+                                
                                 Button(role: .destructive) {
                                     podcastToDelete = feed
                                     showingDeleteConfirmation = true
@@ -1172,6 +1179,95 @@ struct PodcastListView: View {
                 newlyAddedPodcastId = lastFeedId
             }
         }
+    }
+    
+    // MARK: - Share Functionality
+    private func sharePodcastFeed(_ feed: PodcastFeed) {
+        let subject = "Check out this podcast: \(feed.title)"
+        let body = """
+        I thought you might enjoy this podcast!
+        
+        \(feed.title)
+        \(feed.descriptionText?.isEmpty == false ? "\n\(feed.descriptionText!)\n" : "")
+        Feed URL: \(feed.url)
+        """
+        
+        // Let iOS handle the sharing - it will show available apps that can handle RSS feeds
+        
+        // Create a simple URL that can be handled by podcast apps
+        let feedURL = URL(string: feed.url)!
+        
+        let activityController = UIActivityViewController(
+            activityItems: [subject, body, feedURL],
+            applicationActivities: nil
+        )
+        
+        // Configure for specific sharing options
+        activityController.completionWithItemsHandler = { (activityType: UIActivity.ActivityType?, completed: Bool, returnedItems: [Any]?, error: Error?) in
+            if completed {
+                print("Successfully shared podcast: \(feed.title)")
+            }
+        }
+        
+        // Present the share sheet
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController {
+            
+            // Handle iPad presentation
+            if let popover = activityController.popoverPresentationController {
+                popover.sourceView = window
+                popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+            
+            rootViewController.present(activityController, animated: true)
+        }
+    }
+    
+}
+
+// MARK: - Share Content Handler
+class ShareContent: NSObject, UIActivityItemSource {
+    private let subject: String
+    private let body: String
+    private let url: String
+    
+    init(subject: String, body: String, url: String) {
+        self.subject = subject
+        self.body = body
+        self.url = url
+        super.init()
+    }
+    
+    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
+        return body
+    }
+    
+    func activityViewController(_ activityViewController: UIActivityViewController, itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
+        // Handle different sharing types
+        switch activityType {
+        case .mail:
+            // For email, return the body text (subject will be handled separately)
+            return body
+        case .message:
+            // For SMS, return the body text
+            return body
+        case .copyToPasteboard:
+            // For copy to clipboard, return the feed URL for easy pasting into podcast apps
+            return url
+        default:
+            // For other sharing options (social media, etc.), return the feed URL
+            return url
+        }
+    }
+    
+    func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
+        // Provide subject for email
+        if activityType == .mail {
+            return subject
+        }
+        return ""
     }
 }
 
@@ -3651,6 +3747,13 @@ struct PodcastList: View {
                     isEditMode: false  // Add the missing parameter - PodcastList is not in edit mode
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button {
+                        sharePodcastFeed(feed)
+                    } label: {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                    .tint(.blue)
+                    
                     Button(role: .destructive) {
                         onDelete(feed)
                     } label: {
@@ -3684,6 +3787,51 @@ struct PodcastList: View {
         let remainingFeeds = feeds.filter { !orderedIds.contains($0.id) }
         return orderedFeeds + remainingFeeds
     }
+    
+    // MARK: - Share Functionality
+    private func sharePodcastFeed(_ feed: PodcastFeed) {
+        let subject = "Check out this podcast: \(feed.title)"
+        let body = """
+        I thought you might enjoy this podcast!
+        
+        \(feed.title)
+        \(feed.descriptionText?.isEmpty == false ? "\n\(feed.descriptionText!)\n" : "")
+        Feed URL: \(feed.url)
+        """
+        
+        // Let iOS handle the sharing - it will show available apps that can handle RSS feeds
+        
+        // Create a simple URL that can be handled by podcast apps
+        let feedURL = URL(string: feed.url)!
+        
+        let activityController = UIActivityViewController(
+            activityItems: [subject, body, feedURL],
+            applicationActivities: nil
+        )
+        
+        // Configure for specific sharing options
+        activityController.completionWithItemsHandler = { (activityType: UIActivity.ActivityType?, completed: Bool, returnedItems: [Any]?, error: Error?) in
+            if completed {
+                print("Successfully shared podcast: \(feed.title)")
+            }
+        }
+        
+        // Present the share sheet
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first,
+           let rootViewController = window.rootViewController {
+            
+            // Handle iPad presentation
+            if let popover = activityController.popoverPresentationController {
+                popover.sourceView = window
+                popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+            
+            rootViewController.present(activityController, animated: true)
+        }
+    }
+    
 }
 
 extension View {
@@ -3712,6 +3860,125 @@ struct DebouncedAction: ViewModifier {
                 workItem = newWorkItem
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: newWorkItem)
             }
+    }
+}
+
+// MARK: - Custom Podcast App Activity
+class PodcastAppActivity: UIActivity {
+    private let title: String
+    private let imageName: String
+    private let feedURL: String
+    private let urlScheme: String?
+    
+    init(title: String, image: String, feedURL: String, urlScheme: String?) {
+        self.title = title
+        self.imageName = image
+        self.feedURL = feedURL
+        self.urlScheme = urlScheme
+        super.init()
+    }
+    
+    override var activityType: UIActivity.ActivityType? {
+        return UIActivity.ActivityType("com.streamradios.\(title.lowercased().replacingOccurrences(of: " ", with: ""))")
+    }
+    
+    override var activityTitle: String? {
+        return title
+    }
+    
+    override var activityImage: UIImage? {
+        return UIImage(systemName: imageName)
+    }
+    
+    override func canPerform(withActivityItems activityItems: [Any]) -> Bool {
+        return true
+    }
+    
+    override func perform() {
+        if title == "Copy Feed URL" {
+            // Copy to clipboard
+            UIPasteboard.general.string = feedURL
+            print("📋 Copied feed URL to clipboard: \(feedURL)")
+            activityDidFinish(true)
+            return
+        }
+        
+        // Try multiple URL schemes for each app to maximize compatibility
+        let urlsToTry = getURLsToTry(for: title, feedURL: feedURL)
+        
+        tryOpeningURLs(urlsToTry, appName: title) { [weak self] success in
+            if !success {
+                // Final fallback: copy URL to clipboard
+                UIPasteboard.general.string = self?.feedURL ?? ""
+                print("📋 All URL schemes failed, copied feed URL to clipboard as fallback")
+            }
+            self?.activityDidFinish(true)
+        }
+    }
+    
+    private func getURLsToTry(for appName: String, feedURL: String) -> [String] {
+        let encodedURL = feedURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? feedURL
+        
+        switch appName {
+        case "Apple Podcasts":
+            return [
+                "podcast://\(feedURL)",
+                "podcasts://\(feedURL)",
+                "https://podcasts.apple.com/podcast/id?url=\(encodedURL)"
+            ]
+        case "Overcast":
+            return [
+                "overcast://x-callback-url/add?url=\(encodedURL)",
+                "overcast://add?url=\(encodedURL)"
+            ]
+        case "Pocket Casts":
+            return [
+                "pocketcasts://subscribe/\(encodedURL)",
+                "https://pca.st/subscribe?url=\(encodedURL)"
+            ]
+        case "Castro":
+            return [
+                "castro://subscribe/\(encodedURL)",
+                "castro://add/\(encodedURL)"
+            ]
+        default:
+            return [feedURL]
+        }
+    }
+    
+    private func tryOpeningURLs(_ urls: [String], appName: String, completion: @escaping (Bool) -> Void) {
+        guard !urls.isEmpty else {
+            completion(false)
+            return
+        }
+        
+        let urlString = urls[0]
+        let remainingURLs = Array(urls.dropFirst())
+        
+        guard let url = URL(string: urlString) else {
+            // Try next URL
+            tryOpeningURLs(remainingURLs, appName: appName, completion: completion)
+            return
+        }
+        
+        DispatchQueue.main.async {
+            if UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url) { success in
+                    if success {
+                        print("🎧 Successfully opened \(appName) with URL: \(urlString)")
+                        completion(true)
+                    } else {
+                        print("❌ Failed to open \(appName) with URL: \(urlString)")
+                        // Try next URL
+                        self.tryOpeningURLs(remainingURLs, appName: appName, completion: completion)
+                    }
+                }
+            } else {
+                print("📱 Cannot open URL scheme for \(appName): \(urlString)")
+                // Try next URL
+                self.tryOpeningURLs(remainingURLs, appName: appName, completion: completion)
+            }
+        }
     }
 }
 
