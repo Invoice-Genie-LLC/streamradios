@@ -536,37 +536,127 @@ class DataStore {
         }
     }
     
-    // Add a method to fetch existing station IDs from CloudKit
+    // Add a method to fetch existing station IDs from CloudKit using modern API
     private func fetchExistingStationIDs(completion: @escaping (Set<String>, Error?) -> Void) {
-            let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
-            privateDatabase.perform(query, inZoneWith: nil) { records, error in
-                DispatchQueue.main.async {
-                    if let error = error {
-                        print("Failed to fetch existing station IDs: \(error.localizedDescription)")
-                        completion([], error)
+        Task {
+            do {
+                print("📡 🔍 FETCH CHECK: Starting paginated fetch of ALL existing station IDs from CloudKit...")
+                let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
+                
+                var allMatchResults: [(CKRecord.ID, Result<CKRecord, Error>)] = []
+                var currentCursor: CKQueryOperation.Cursor? = nil
+                var pageCount = 0
+                
+                // Fetch all pages of results using proper CloudKit cursor API
+                repeat {
+                    pageCount += 1
+                    let (matchResults, cursor): ([(CKRecord.ID, Result<CKRecord, Error>)], CKQueryOperation.Cursor?)
+                    
+                    if let currentCursor = currentCursor {
+                        // Continue from cursor
+                        (matchResults, cursor) = try await privateDatabase.records(continuingMatchFrom: currentCursor)
                     } else {
-                        let ids = Set(records?.map { $0.recordID.recordName } ?? [])
-                        completion(ids, nil)
+                        // Initial query
+                        (matchResults, cursor) = try await privateDatabase.records(matching: query)
                     }
+                    
+                    allMatchResults.append(contentsOf: matchResults)
+                    currentCursor = cursor
+                    
+                    print("📡 📊 FETCH PAGE \(pageCount): Retrieved \(matchResults.count) IDs (total: \(allMatchResults.count))")
+                    
+                    if cursor != nil {
+                        print("📡 ➡️ FETCH PAGINATION: More records available, fetching next page...")
+                    }
+                } while currentCursor != nil
+                
+                let existingIds = Set(allMatchResults.compactMap { (recordID, result) -> String? in
+                    switch result {
+                    case .success:
+                        return recordID.recordName
+                    case .failure(let error):
+                        print("📡 ⚠️ Failed to process record \(recordID.recordName): \(error.localizedDescription)")
+                        return nil
+                    }
+                })
+                
+                print("📡 ✅ FETCH RESULT: Found \(existingIds.count) existing station IDs in CloudKit across \(pageCount) pages")
+                if existingIds.count > 0 {
+                    print("📡 📋 Sample existing IDs: \(Array(existingIds.prefix(5)).joined(separator: ", "))")
+                }
+                
+                await MainActor.run {
+                    completion(existingIds, nil)
+                }
+            } catch {
+                print("📡 ❌ FETCH ERROR: Failed to fetch existing station IDs: \(error.localizedDescription)")
+                await MainActor.run {
+                    completion([], error)
                 }
             }
         }
+    }
     
-    // Add a method to fetch existing station URLs from CloudKit
+    // Add a method to fetch existing station URLs from CloudKit using modern API with pagination
     private func fetchExistingStationURLs(completion: @escaping (Set<String>, Error?) -> Void) {
-            let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
-            privateDatabase.perform(query, inZoneWith: nil) { records, error in
-                DispatchQueue.main.async {
-                    if let error = error {
-                        print("Failed to fetch existing station URLs: \(error.localizedDescription)")
-                        completion([], error)
+        Task {
+            do {
+                print("📡 🔍 URL CHECK: Starting paginated fetch of ALL existing station URLs from CloudKit...")
+                let query = CKQuery(recordType: "streamingRadios", predicate: NSPredicate(value: true))
+                
+                var allMatchResults: [(CKRecord.ID, Result<CKRecord, Error>)] = []
+                var currentCursor: CKQueryOperation.Cursor? = nil
+                var pageCount = 0
+                
+                // Fetch all pages of results using proper CloudKit cursor API
+                repeat {
+                    pageCount += 1
+                    let (matchResults, cursor): ([(CKRecord.ID, Result<CKRecord, Error>)], CKQueryOperation.Cursor?)
+                    
+                    if let currentCursor = currentCursor {
+                        // Continue from cursor
+                        (matchResults, cursor) = try await privateDatabase.records(continuingMatchFrom: currentCursor)
                     } else {
-                        let urls = Set(records?.compactMap { $0["url"] as? String } ?? [])
-                        completion(urls, nil)
+                        // Initial query
+                        (matchResults, cursor) = try await privateDatabase.records(matching: query)
                     }
+                    
+                    allMatchResults.append(contentsOf: matchResults)
+                    currentCursor = cursor
+                    
+                    print("📡 📊 URL PAGE \(pageCount): Retrieved \(matchResults.count) URLs (total: \(allMatchResults.count))")
+                    
+                    if cursor != nil {
+                        print("📡 ➡️ URL PAGINATION: More records available, fetching next page...")
+                    }
+                } while currentCursor != nil
+                
+                let existingUrls = Set(allMatchResults.compactMap { (recordID, result) -> String? in
+                    switch result {
+                    case .success(let record):
+                        return record["url"] as? String
+                    case .failure(let error):
+                        print("📡 ⚠️ Failed to process record \(recordID.recordName): \(error.localizedDescription)")
+                        return nil
+                    }
+                })
+                
+                print("📡 ✅ URL RESULT: Found \(existingUrls.count) existing station URLs in CloudKit across \(pageCount) pages")
+                if existingUrls.count > 0 {
+                    print("📡 📋 Sample existing URLs: \(Array(existingUrls.prefix(3)).joined(separator: ", "))")
+                }
+                
+                await MainActor.run {
+                    completion(existingUrls, nil)
+                }
+            } catch {
+                print("📡 ❌ URL ERROR: Failed to fetch existing station URLs: \(error.localizedDescription)")
+                await MainActor.run {
+                    completion([], error)
                 }
             }
         }
+    }
 
     // Save stations to CloudKit - replaces all existing stations
     func saveStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
@@ -590,21 +680,73 @@ class DataStore {
             print("📻 ⚠️ DATASTORE: Filtered out \(stations.count - nonManualStations.count) manual stations from CloudKit save")
         }
         
+        // Enhanced duplicate prevention: Check both IDs and URLs
         fetchExistingStationIDs { existingIDs, error in
             guard error == nil else {
                 print("Error fetching existing station IDs: \(error?.localizedDescription ?? "Unknown error")")
                 completion(false, nil)
                 return
             }
-
-            let newStations = nonManualStations.filter { !existingIDs.contains($0.id) }
-            if newStations.isEmpty {
-                print("No new stations to save; all stations already exist in CloudKit.")
-                completion(true, [])
-                return
+            
+            // Also fetch existing URLs to prevent URL duplicates
+            self.fetchExistingStationURLs { existingURLs, urlError in
+                guard urlError == nil else {
+                    print("Error fetching existing station URLs: \(urlError?.localizedDescription ?? "Unknown error")")
+                    completion(false, nil)
+                    return
+                }
+                
+                print("📡 🔍 DUPLICATE CHECK: Found \(existingIDs.count) existing station IDs and \(existingURLs.count) existing URLs in CloudKit")
+                
+                // Filter out stations that already exist by ID OR URL
+                let newStations = nonManualStations.filter { station in
+                    // Check if station ID already exists
+                    if existingIDs.contains(station.id) {
+                        print("📻 🚫 DUPLICATE ID: Station \(station.name) (ID: \(station.id)) already exists in CloudKit")
+                        return false
+                    }
+                    
+                    // Check if station URL already exists (with normalization)
+                    let normalizedURL = station.url.lowercased()
+                    let normalizedExistingURLs = existingURLs.map { $0.lowercased() }
+                    
+                    // Also check for protocol variations (http vs https)
+                    let urlWithoutProtocol = normalizedURL
+                        .replacingOccurrences(of: "https://", with: "")
+                        .replacingOccurrences(of: "http://", with: "")
+                    
+                    let hasURLDuplicate = normalizedExistingURLs.contains(normalizedURL) ||
+                                        normalizedExistingURLs.contains { existingURL in
+                                            let existingWithoutProtocol = existingURL
+                                                .replacingOccurrences(of: "https://", with: "")
+                                                .replacingOccurrences(of: "http://", with: "")
+                                            return existingWithoutProtocol == urlWithoutProtocol
+                                        }
+                    
+                    if hasURLDuplicate {
+                        print("📻 🚫 DUPLICATE URL: Station \(station.name) (URL: \(station.url)) has duplicate URL in CloudKit")
+                        return false
+                    }
+                    
+                    return true
+                }
+                
+                let duplicatesFilteredByID = nonManualStations.count - newStations.count - (nonManualStations.count - nonManualStations.filter { !existingIDs.contains($0.id) }.count)
+                let duplicatesFilteredByURL = nonManualStations.filter { !existingIDs.contains($0.id) }.count - newStations.count
+                
+                print("📡 📊 DUPLICATE SUMMARY: Filtered \(duplicatesFilteredByID) ID duplicates and \(duplicatesFilteredByURL) URL duplicates")
+                
+                if newStations.isEmpty {
+                    print("📡 ✅ NO NEW STATIONS: All \(nonManualStations.count) stations already exist in CloudKit (duplicates prevented)")
+                    print("📡 🚫 CLOUDKIT SAVE SKIPPED: No actual new stations to save after duplicate filtering")
+                    completion(true, [])
+                    return
+                }
+                
+                print("📡 🆕 SAVING: \(newStations.count) unique new stations to CloudKit (from \(nonManualStations.count) candidates)")
+                print("📡 🔄 PROCEEDING with CloudKit batch save for \(newStations.count) truly new stations")
+                self.processNewStations(newStations, completion: completion)
             }
-
-            self.processNewStations(newStations, completion: completion)
         }
     }
     
@@ -678,7 +820,7 @@ class DataStore {
         processBatch(records: recordsToSave, maxBatchSize: 200, completion: completion)
     }
 
-    private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, completion: @escaping (Bool, [String]?) -> Void) {
+    private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, allSavedRecords: [String] = [], completion: @escaping (Bool, [String]?) -> Void) {
         let end = min(start + maxBatchSize, records.count)
         let batch = Array(records[start..<end])
         let batchNumber = (start / maxBatchSize) + 1
@@ -696,6 +838,11 @@ class DataStore {
         modifyOperation.isLongLived = records.count > 1000 // Use long-lived operations for large datasets
 
         modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
+            var updatedSavedRecords = allSavedRecords
+            if let batchSavedRecords = savedRecords {
+                updatedSavedRecords.append(contentsOf: batchSavedRecords.map { $0.recordID.recordName })
+            }
+            
             if let error = error {
                 print("❌ Error during CloudKit batch \(batchNumber) save: \(error.localizedDescription)")
                 
@@ -704,7 +851,7 @@ class DataStore {
                     if let retryAfter = ckError.errorUserInfo[CKErrorRetryAfterKey] as? TimeInterval {
                         print("⏱️ Rate limited. Retrying batch \(batchNumber) after \(retryAfter) seconds...")
                         DispatchQueue.global().asyncAfter(deadline: .now() + retryAfter) {
-                            self.processBatch(records: records, maxBatchSize: maxBatchSize, start: start, completion: completion)
+                            self.processBatch(records: records, maxBatchSize: maxBatchSize, start: start, allSavedRecords: allSavedRecords, completion: completion)
                         }
                         return
                     }
@@ -712,20 +859,20 @@ class DataStore {
                 
                 // Continue with next batch even if current batch fails
                 if end >= records.count {
-                    print("⚠️ Completed processing with errors. Some records may not have been saved.")
-                    completion(false, savedRecords?.map { $0.recordID.recordName })
+                    print("⚠️ Completed processing with errors. Successfully saved \(updatedSavedRecords.count) out of \(records.count) records.")
+                    completion(false, updatedSavedRecords)
                 } else {
                     print("⏭️ Processing next batch despite error in batch \(batchNumber).")
-                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
+                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, allSavedRecords: updatedSavedRecords, completion: completion)
                 }
             } else {
-                print("✅ Successfully saved batch \(batchNumber)/\(totalBatches)")
+                print("✅ Successfully saved batch \(batchNumber)/\(totalBatches) (\(savedRecords?.count ?? 0) records)")
                 if end >= records.count {
-                    print("🎉 Successfully saved all \(records.count) records to CloudKit in \(totalBatches) batches.")
-                    completion(true, savedRecords?.map { $0.recordID.recordName })
+                    print("🎉 Successfully saved all \(updatedSavedRecords.count) records to CloudKit in \(totalBatches) batches.")
+                    completion(true, updatedSavedRecords)
                 } else {
                     // Continue with next batch
-                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, completion: completion)
+                    self.processBatch(records: records, maxBatchSize: maxBatchSize, start: end, allSavedRecords: updatedSavedRecords, completion: completion)
                 }
             }
         }

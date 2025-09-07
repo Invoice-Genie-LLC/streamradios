@@ -2519,11 +2519,6 @@ class PodcastViewModel: ObservableObject {
                 print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) episodes instantly - NO EXPENSIVE OPERATIONS NEEDED")
             }
             
-            // Optional: Ultra-lightweight background refresh (30+ min threshold)
-            Task.detached(priority: .background) {
-                await self.performUltraLightweightBackgroundRefresh(feedId)
-            }
-            
             return
         }
         
@@ -2665,11 +2660,6 @@ class PodcastViewModel: ObservableObject {
                     self.updateEpisodeCounts(for: feedId, episodes: snapshotEpisodes)
                     
                     print("📸 SNAPSHOT SUCCESS: Displayed \(filteredEpisodes.count) episodes instantly - ZERO EXPENSIVE OPERATIONS")
-                }
-                
-                // Optional: Trigger ultra-lightweight background refresh (no UI blocking)
-                Task.detached(priority: .background) {
-                    await self.performUltraLightweightBackgroundRefresh(feedId)
                 }
                 
                 return
@@ -2960,20 +2950,12 @@ class PodcastViewModel: ObservableObject {
                 }
             }
             
-            // PERFORMANCE: Now that snapshot is created, check if we need immediate episode check
-            // This is moved here to happen AFTER snapshot creation for better performance
-            if getEpisodeSnapshot(for: feedId) == nil {
-                // IMMEDIATE NEW EPISODE CHECK: Check for new episodes when feed opens
-                // Cancel any existing immediate check for this feed
-                immediateCheckTasks[feedId]?.cancel()
-                
-                immediateCheckTasks[feedId] = Task.detached(priority: .userInitiated) {
-                    await self.checkForNewEpisodesImmediately(feedId: feedId)
-                }
-                print("🔍 IMMEDIATE CHECK: Started for feed \(feedId) - no snapshot available")
-            } else {
-                print("⚡ PERFORMANCE: Skipping immediate episode check - using snapshot for feed \(feedId)")
+            // IMMEDIATE NEW EPISODE CHECK: Always check for new episodes on feed load
+            // This ensures users get new episodes immediately, regardless of snapshots
+            Task.detached(priority: .userInitiated) {
+                await self.performImmediateEpisodeCheck(feedId)
             }
+            print("⚡ IMMEDIATE CHECK: Started for feed \(feedId) - checking for new episodes")
             
             // CRITICAL FIX: Check for new episodes in background even when we have cached episodes
             // This ensures new episodes are detected on large feeds with existing episodes
@@ -3242,9 +3224,9 @@ class PodcastViewModel: ObservableObject {
                 self.updateFilter(tab: self.currentTab)
             }
             
-            // Optionally trigger background RSS check (but don't block UI)
+            // Trigger immediate episode check for user-initiated refresh (more aggressive than background check)
             Task {
-                await performBackgroundRSSCheck(feedId)
+                await performImmediateEpisodeCheck(feedId)
             }
             return
         }
@@ -3292,6 +3274,100 @@ class PodcastViewModel: ObservableObject {
         }
         
         print("🪶 ULTRA LIGHTWEIGHT: Background check completed for \(feed.title)")
+    }
+    
+    /// Perform immediate episode check on every feed load for instant new episode detection
+    /// Optimized for performance while ensuring users get new episodes immediately
+    private func performImmediateEpisodeCheck(_ feedId: String) async {
+        guard let feed = podcastFeeds.first(where: { $0.id == feedId }) else {
+            print("⚠️ IMMEDIATE CHECK: Feed not found: \(feedId)")
+            return
+        }
+        
+        print("⚡ IMMEDIATE CHECK: Starting fast new episode detection for \(feed.title)")
+        
+        // PERFORMANCE OPTIMIZATION: Use minimal throttling to prevent spam
+        let throttleKey = "ImmediateCheck_\(feedId)"
+        let lastCheckTime = UserDefaults.standard.double(forKey: throttleKey)
+        let timeSinceLastCheck = Date().timeIntervalSince1970 - lastCheckTime
+        
+        // Only throttle if checked within last 30 seconds (very minimal throttling for immediate response)
+        if lastCheckTime > 0 && timeSinceLastCheck < 30 {
+            print("⏭️ IMMEDIATE CHECK: Throttled - checked \(Int(timeSinceLastCheck)) seconds ago (30s threshold)")
+            return
+        }
+        
+        // Update throttle timestamp
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: throttleKey)
+        
+        // Perform lightweight RSS check for new episodes only
+        guard let url = URL(string: feed.url) else {
+            print("⚠️ IMMEDIATE CHECK: Invalid URL for feed \(feed.title)")
+            return
+        }
+        
+        do {
+            print("🔍 IMMEDIATE CHECK: Fetching RSS feed for \(feed.title)...")
+            
+            // SMART NEW EPISODE DETECTION: Compare against persistent cache first
+            let newEpisodes = try await parseNewEpisodesOnly(from: url, feedId: feedId)
+            
+            guard !newEpisodes.isEmpty else {
+                print("✅ IMMEDIATE CHECK: No new episodes found for \(feed.title)")
+                return
+            }
+            
+            print("🆕 IMMEDIATE CHECK: Found \(newEpisodes.count) new episodes for \(feed.title) - updating immediately")
+            
+            // UPDATE PERSISTENT CACHE with new episodes immediately
+            await self.episodeManager.updateCacheWithNewEpisodes(newEpisodes, for: feedId)
+            
+            // RECONCILE EPISODES: Add new episodes to Core Data
+            try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+            
+            // UPDATE UI IMMEDIATELY if this is the currently selected feed
+            await MainActor.run {
+                if self.selectedFeedId == feedId {
+                    print("🔄 IMMEDIATE CHECK: Updating UI with new episodes for currently selected feed")
+                    
+                    Task {
+                        do {
+                            // Reload episodes to include new ones
+                            let result = try await self.episodeManager.loadEpisodes(
+                                feedId: feedId,
+                                page: 1,
+                                pageSize: self.episodesPerPage,
+                                filter: EpisodeFilter(rawValue: self.currentTab) ?? .all,
+                                searchQuery: self.searchQuery.isEmpty ? nil : self.searchQuery
+                            )
+                            
+                            let processedEpisodes = await self.processEpisodesInBackground(result.episodes)
+                            await MainActor.run {
+                                let safeEpisodes = processedEpisodes.filter { $0.feedId == feedId }
+                                self.currentEpisodes = safeEpisodes
+                                print("✅ IMMEDIATE CHECK: UI updated with \(safeEpisodes.count) episodes including \(newEpisodes.count) new ones")
+                            }
+                        } catch {
+                            print("❌ IMMEDIATE CHECK: Failed to update UI: \(error)")
+                        }
+                    }
+                }
+                
+                // UPDATE SNAPSHOT if it exists to include new episodes
+                if var existingSnapshot = self.episodeSnapshotCache[feedId] {
+                    let mergedEpisodes = newEpisodes + existingSnapshot
+                    self.updateEpisodeSnapshot(for: feedId, episodes: mergedEpisodes)
+                    print("📸 IMMEDIATE CHECK: Updated snapshot with \(newEpisodes.count) new episodes")
+                }
+                
+                self.objectWillChange.send()
+            }
+            
+        } catch {
+            print("❌ IMMEDIATE CHECK: Failed for \(feed.title): \(error)")
+        }
+        
+        print("⚡ IMMEDIATE CHECK: Completed for \(feed.title)")
     }
     
     /// Perform lightweight background RSS check without expensive operations

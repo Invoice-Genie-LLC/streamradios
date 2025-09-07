@@ -99,15 +99,15 @@ class RadioBrowserAPI: ObservableObject {
     
     // MARK: - API Methods
     
-    func fetchTopStationsByCountry(countryCode: String, limit: Int = 20) async throws -> [RadioBrowserStation] {
+    func fetchTopStationsByCountry(countryCode: String, limit: Int = 20, offset: Int = 0, order: String = "clickcount") async throws -> [RadioBrowserStation] {
         let server = selectBestServer()
-        let urlString = "https://\(server)/json/stations/bycountrycodeexact/\(countryCode)?limit=\(limit)&order=clickcount&reverse=true"
+        let urlString = "https://\(server)/json/stations/bycountrycodeexact/\(countryCode)?limit=\(limit)&offset=\(offset)&order=\(order)&reverse=true"
         
         guard let url = URL(string: urlString) else {
             throw RadioBrowserError.invalidURL
         }
         
-        print("🌐 RadioBrowserAPI: Fetching top \(limit) stations for country '\(countryCode)' from \(server)")
+        print("🌐 RadioBrowserAPI: Fetching \(limit) stations for country '\(countryCode)' from \(server) (offset: \(offset), order: \(order))")
         
         var request = URLRequest(url: url)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")

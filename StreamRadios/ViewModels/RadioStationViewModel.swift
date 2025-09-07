@@ -2145,7 +2145,103 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
             }
             
-            let apiStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(countryCode: country.apiCountryCode, limit: 500)
+            // Fetch stations using multiple strategies to ensure we get exactly 500 unique stations
+            let targetUniqueStations = 500
+            var allApiStations: [RadioBrowserStation] = []
+            var uniqueURLs = Set<String>()
+            
+            print("🎯 TARGET: Fetching stations using multiple strategies until we have \(targetUniqueStations) unique stations")
+            
+            // Strategy 1: Fetch by clickcount (most popular first)
+            print("📡 Strategy 1: Fetching by clickcount...")
+            let clickcountStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(
+                countryCode: country.apiCountryCode, 
+                limit: 1000,
+                offset: 0,
+                order: "clickcount"
+            )
+            
+            // Add unique stations from clickcount strategy
+            for station in clickcountStations {
+                let normalizedURL = station.url.lowercased()
+                    .replacingOccurrences(of: "https://", with: "")
+                    .replacingOccurrences(of: "http://", with: "")
+                
+                if !uniqueURLs.contains(normalizedURL) {
+                    uniqueURLs.insert(normalizedURL)
+                    allApiStations.append(station)
+                }
+                
+                if uniqueURLs.count >= targetUniqueStations {
+                    break
+                }
+            }
+            
+            print("📡 Strategy 1: Added \(uniqueURLs.count) unique stations from clickcount")
+            
+            // Strategy 2: If we still need more, fetch by votes (highest rated)
+            if uniqueURLs.count < targetUniqueStations {
+                print("📡 Strategy 2: Fetching by votes...")
+                let votesStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(
+                    countryCode: country.apiCountryCode, 
+                    limit: 1000,
+                    offset: 0,
+                    order: "votes"
+                )
+                
+                for station in votesStations {
+                    let normalizedURL = station.url.lowercased()
+                        .replacingOccurrences(of: "https://", with: "")
+                        .replacingOccurrences(of: "http://", with: "")
+                    
+                    if !uniqueURLs.contains(normalizedURL) {
+                        uniqueURLs.insert(normalizedURL)
+                        allApiStations.append(station)
+                    }
+                    
+                    if uniqueURLs.count >= targetUniqueStations {
+                        break
+                    }
+                }
+                
+                print("📡 Strategy 2: Total unique stations after votes: \(uniqueURLs.count)")
+            }
+            
+            // Strategy 3: If we still need more, fetch by lastchangetime (recently updated)
+            if uniqueURLs.count < targetUniqueStations {
+                print("📡 Strategy 3: Fetching by lastchangetime...")
+                let recentStations = try await RadioBrowserAPI.shared.fetchTopStationsByCountry(
+                    countryCode: country.apiCountryCode, 
+                    limit: 1000,
+                    offset: 0,
+                    order: "lastchangetime"
+                )
+                
+                for station in recentStations {
+                    let normalizedURL = station.url.lowercased()
+                        .replacingOccurrences(of: "https://", with: "")
+                        .replacingOccurrences(of: "http://", with: "")
+                    
+                    if !uniqueURLs.contains(normalizedURL) {
+                        uniqueURLs.insert(normalizedURL)
+                        allApiStations.append(station)
+                    }
+                    
+                    if uniqueURLs.count >= targetUniqueStations {
+                        break
+                    }
+                }
+                
+                print("📡 Strategy 3: Total unique stations after recent: \(uniqueURLs.count)")
+            }
+            
+            // Trim to exact target if we have more than needed
+            if allApiStations.count > targetUniqueStations {
+                allApiStations = Array(allApiStations.prefix(targetUniqueStations))
+            }
+            
+            let apiStations = allApiStations
+            print("🎯 FINAL: Collected \(apiStations.count) unique stations for processing")
             
             // Cancel progress simulation as API call completed
             progressTask.cancel()
@@ -2592,6 +2688,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Only call CloudKit save if there are new stations
             if !uniqueNewStations.isEmpty {
+                // Check if this is the first time loading API stations for this country
+                let userDefaults = UserDefaults.standard
+                let firstLoadKey = "APIStationsFirstLoad_\(country.name)"
+                let isFirstLoad = !userDefaults.bool(forKey: firstLoadKey)
+                
+                print("📡 🔍 FIRST LOAD CHECK: Country \(country.name) - First load: \(isFirstLoad)")
+                
                 // ENHANCED FILTERING: Double-check to ensure we only save NEW API stations (not manual stations)
                 let manualStationsFound = uniqueNewStations.filter { $0.id.hasPrefix("manual_") }
                 let apiOnlyNewStations = uniqueNewStations.filter { station in
@@ -2612,22 +2715,103 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 if apiOnlyNewStations.isEmpty {
                     print("📡 ℹ️ No new API stations to save to CloudKit - all new stations were manual stations (\(manualStationsFound.count) manual stations excluded)")
-                } else {
-                    print("📡 🔄 Saving ONLY \(apiOnlyNewStations.count) new API stations to CloudKit (excluding \(uniqueNewStations.count - apiOnlyNewStations.count) manual stations)")
                     
-                    DataStore.shared.saveNewStationsToCloudKit(stations: apiOnlyNewStations) { success, recordIDs in
+                    // Show notification for no new stations case
+                    await MainActor.run {
+                        self.showStationFetchNotification(
+                            country: country,
+                            actualNewStations: 0,
+                            duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
+                            duplicatesSkipped: duplicatesSkipped,
+                            deletedStationsFiltered: deletedStationsFiltered
+                        )
+                    }
+                } else {
+                    // Determine which stations to save based on first load vs subsequent loads
+                    let stationsToSave: [RadioStation]
+                    if isFirstLoad {
+                        // First load: Save all API stations to CloudKit
+                        stationsToSave = apiOnlyNewStations
+                        print("📡 🔄 FIRST LOAD: Saving ALL \(apiOnlyNewStations.count) API stations to CloudKit for \(country.name)")
+                    } else {
+                        // Subsequent loads: Only save stations that are actually new (not in CloudKit)
+                        print("📡 🔄 SUBSEQUENT LOAD: Only saving truly new stations to CloudKit for \(country.name)")
+                        stationsToSave = apiOnlyNewStations
+                    }
+                    
+                    print("📡 🔄 Saving \(stationsToSave.count) API stations to CloudKit (excluding \(uniqueNewStations.count - apiOnlyNewStations.count) manual stations)")
+                    
+                    // Use different save methods based on first load vs subsequent loads
+                    if isFirstLoad {
+                        // First load: Use batch save method to save all stations efficiently
+                        Task {
+                            do {
+                                try await RadioStationCloudKitManager.shared.saveRadioStationsBatchToCloudKit(
+                                    stationsToSave,
+                                    country: country.name,
+                                    progressCallback: { progress, count, message in
+                                        Task { @MainActor in
+                                            DataSyncManager.shared.updateRadioStationProgress(progress, currentCount: count, operation: message)
+                                        }
+                                    }
+                                )
+                                
+                                // Mark first load as complete
+                                userDefaults.set(true, forKey: firstLoadKey)
+                                userDefaults.synchronize()
+                                print("📡 ✅ FIRST LOAD COMPLETE: Marked API stations as loaded for \(country.name)")
+                                
+                                await MainActor.run {
+                                    DataSyncManager.shared.radioStationsStatus = .completed
+                                    DataSyncManager.shared.radioStationsOperation = "Saved \(stationsToSave.count) stations to iCloud (first load)"
+                                    DataSyncManager.shared.radioStationsProgress = 1.0
+                                    DataSyncManager.shared.radioStationsCurrentCount = stationsToSave.count
+                                    
+                                    // Show notification
+                                    self.showStationFetchNotification(
+                                        country: country,
+                                        actualNewStations: stationsToSave.count,
+                                        duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
+                                        duplicatesSkipped: duplicatesSkipped,
+                                        deletedStationsFiltered: deletedStationsFiltered
+                                    )
+                                }
+                            } catch {
+                                print("📡 ❌ First load CloudKit save failed: \(error)")
+                                await MainActor.run {
+                                    DataSyncManager.shared.radioStationsStatus = .failed
+                                    DataSyncManager.shared.radioStationsOperation = "Failed to save stations: \(error.localizedDescription)"
+                                }
+                            }
+                        }
+                    } else {
+                        // Subsequent loads: Use selective save method (existing logic)
+                        DataStore.shared.saveNewStationsToCloudKit(stations: stationsToSave) { success, recordIDs in
                 DispatchQueue.main.async {
+                    let actualSavedCount = recordIDs?.count ?? 0
+                    
                     if success {
-                        print("📡 ✅ Successfully saved \(apiOnlyNewStations.count) API-fetched stations to CloudKit for \(country.name)")
+                        print("📡 ✅ Successfully saved \(actualSavedCount) API-fetched stations to CloudKit for \(country.name)")
                         
                         // Update DataSyncManager on success
                         DataSyncManager.shared.radioStationsStatus = .completed
-                        DataSyncManager.shared.radioStationsOperation = "Saved \(apiOnlyNewStations.count) new stations to iCloud"
+                        DataSyncManager.shared.radioStationsOperation = "Saved \(actualSavedCount) new stations to iCloud"
                         DataSyncManager.shared.radioStationsProgress = 1.0
-                        DataSyncManager.shared.radioStationsCurrentCount = apiOnlyNewStations.count
+                        DataSyncManager.shared.radioStationsCurrentCount = actualSavedCount
                         // Re-save merged set to Core Data to ensure we don't lose just-added items
                         self.saveStationsToCoreData()
                         NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                        
+                        // FIXED: Show notification with actual count of saved stations
+                        Task { @MainActor in
+                            self.showStationFetchNotification(
+                                country: country,
+                                actualNewStations: actualSavedCount,
+                                duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
+                                duplicatesSkipped: duplicatesSkipped,
+                                deletedStationsFiltered: deletedStationsFiltered
+                            )
+                        }
                     } else {
                         print("📡 ⚠️ Failed to save some API-fetched stations to CloudKit for \(country.name)")
                         
@@ -2635,8 +2819,20 @@ class RadioStationViewModel: NSObject, ObservableObject {
                         DataSyncManager.shared.radioStationsStatus = .failed
                         DataSyncManager.shared.radioStationsOperation = "Failed to save new stations to iCloud"
                         DataSyncManager.shared.radioStationsProgress = 0.0
+                        
+                        // Show notification for failure case
+                        Task { @MainActor in
+                            self.showStationFetchNotification(
+                                country: country,
+                                actualNewStations: 0,
+                                duplicatesSkippedFromAPI: duplicatesSkippedFromAPI,
+                                duplicatesSkipped: duplicatesSkipped,
+                                deletedStationsFiltered: deletedStationsFiltered
+                            )
+                        }
                     }
-                }
+                        }
+                    }
                 }
             }
             } // End of uniqueNewStations.isEmpty condition
@@ -2646,35 +2842,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 loadingProgress = 0.96
             }
             
-            // Notify user about the fetch results
-            await MainActor.run {
-                var notificationMessage: String
-                if newStationsAdded > 0 {
-                    notificationMessage = "Found \(newStationsAdded) new stations for \(country.name)."
-                } else {
-                    notificationMessage = "No new stations found for \(country.name). All stations are up to date."
-                }
-                
-                var skipDetails: [String] = []
-                if duplicatesSkippedFromAPI > 0 {
-                    skipDetails.append("\(duplicatesSkippedFromAPI) duplicate URLs")
-                }
-                if duplicatesSkipped > 0 {
-                    skipDetails.append("\(duplicatesSkipped) existing stations")
-                }
-                if deletedStationsFiltered > 0 {
-                    skipDetails.append("\(deletedStationsFiltered) previously deleted")
-                }
-                
-                if !skipDetails.isEmpty && newStationsAdded > 0 {
-                    notificationMessage += " Skipped \(skipDetails.joined(separator: ", ")) stations."
-                }
-                
-                NotificationManager.shared.notifyUserImmediate(
-                    title: newStationsAdded > 0 ? "New Stations Found" : "Stations Updated",
-                    message: notificationMessage
-                )
-            }
+            // Notification is now handled in CloudKit save callback or no-new-stations case
             
             // Notify that stations have been updated
             await MainActor.run {
@@ -3887,6 +4055,62 @@ class RadioStationViewModel: NSObject, ObservableObject {
         if count > 0 {
             print("📝 Currently tracking \(count) manually deleted stations to prevent re-fetching")
         }
+    }
+    
+    /// Reset first load flags for all countries (useful for testing or fresh start)
+    func resetFirstLoadFlags() {
+        let userDefaults = UserDefaults.standard
+        let allKeys = userDefaults.dictionaryRepresentation().keys
+        
+        for key in allKeys {
+            if key.hasPrefix("APIStationsFirstLoad_") {
+                userDefaults.removeObject(forKey: key)
+                let countryName = String(key.dropFirst("APIStationsFirstLoad_".count))
+                print("📡 🔄 RESET: Cleared first load flag for \(countryName)")
+            }
+        }
+        
+        userDefaults.synchronize()
+        print("📡 ✅ RESET COMPLETE: All first load flags cleared")
+    }
+    
+    /// Show notification about station fetch results with accurate count
+    @MainActor
+    private func showStationFetchNotification(
+        country: Country,
+        actualNewStations: Int,
+        duplicatesSkippedFromAPI: Int,
+        duplicatesSkipped: Int,
+        deletedStationsFiltered: Int
+    ) {
+        var notificationMessage: String
+        if actualNewStations > 0 {
+            notificationMessage = "Found \(actualNewStations) new stations for \(country.name)."
+        } else {
+            notificationMessage = "No new stations found for \(country.name). All stations are up to date."
+        }
+        
+        var skipDetails: [String] = []
+        if duplicatesSkippedFromAPI > 0 {
+            skipDetails.append("\(duplicatesSkippedFromAPI) duplicate URLs")
+        }
+        if duplicatesSkipped > 0 {
+            skipDetails.append("\(duplicatesSkipped) existing stations")
+        }
+        if deletedStationsFiltered > 0 {
+            skipDetails.append("\(deletedStationsFiltered) previously deleted")
+        }
+        
+        if !skipDetails.isEmpty && actualNewStations > 0 {
+            notificationMessage += " Skipped \(skipDetails.joined(separator: ", ")) stations."
+        }
+        
+        NotificationManager.shared.notifyUserImmediate(
+            title: actualNewStations > 0 ? "New Stations Found" : "Stations Updated",
+            message: notificationMessage
+        )
+        
+        print("📱 NOTIFICATION: \(actualNewStations > 0 ? "New Stations Found" : "Stations Updated") - \(notificationMessage)")
     }
     
     // MARK: - Background Favicon Download
