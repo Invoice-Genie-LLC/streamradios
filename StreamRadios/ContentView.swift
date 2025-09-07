@@ -379,10 +379,10 @@ struct ContentView: View {
                                         }
                                     },
                                     onSelect: { [weak viewModel] country in
-                                        // Trigger refresh even if same country tapped; also when empty
+                                        // Load stations for selected country (use cache if available)
                                         Task {
                                             UIDevice.playHapticFeedback()
-                                            await viewModel?.fetchStationsForSelectedCountry()
+                                            await viewModel?.fetchStationsForSelectedCountry(forceRefresh: false)
                                             await MainActor.run {
                                                 viewModel?.syncStationsWithCloudKit()
                                             }
@@ -433,19 +433,6 @@ struct ContentView: View {
                         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     }
                 )
-                .refreshable {
-                    // Top-level pull-to-refresh (applies to the stations List via hierarchy)
-                    guard viewModel.selectedTab == .radio else { return }
-                    UIDevice.playHapticFeedback()
-                    await viewModel.fetchStationsForSelectedCountry()
-                    await MainActor.run {
-                        viewModel.syncStationsWithCloudKit()
-                        // CRITICAL FIX: Don't call loadStationsFromCoreData() after fetchStationsForSelectedCountry()
-                        // fetchStationsForSelectedCountry() already loads both manual and API stations
-                        // loadStationsFromCoreData() would override manual stations with Core Data only
-                        print("📻 🔧 FIX: Skipping loadStationsFromCoreData() to preserve manual stations loaded by fetchStationsForSelectedCountry()")
-                    }
-                }
                 .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
                     // CRITICAL FIX: Don't reload from Core Data if stations were just loaded via fetchStationsForSelectedCountry
                     // This prevents manual stations from being wiped out after they're loaded

@@ -691,10 +691,32 @@ class RadioStationCloudKitManager: ObservableObject {
             let savedRecords = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[CKRecord], Error>) in
                 let modifyOperation = CKModifyRecordsOperation(recordsToSave: batchRecords, recordIDsToDelete: nil)
                 
-                // Set save policy to handle conflicts gracefully
+                // Set save policy to handle conflicts gracefully - use changedKeys to allow updates
                 modifyOperation.savePolicy = .changedKeys
                 modifyOperation.qualityOfService = .userInitiated
                 modifyOperation.isLongLived = records.count > 1000
+                
+                // Add per-record progress tracking and duplicate detection
+                modifyOperation.perRecordProgressBlock = { record, progress in
+                    os_log("📡 🔄 RADIO Saving record progress: %@ - %.1f%%", log: self.log, type: .debug, record.recordID.recordName, progress * 100)
+                }
+                
+                modifyOperation.perRecordCompletionBlock = { record, error in
+                    if let error = error {
+                        if let ckError = error as? CKError {
+                            switch ckError.code {
+                            case .serverRecordChanged:
+                                os_log("⚠️ RADIO Record changed on server, will be handled by conflict resolution: %@", log: self.log, type: .info, record.recordID.recordName)
+                            case .batchRequestFailed:
+                                os_log("⚠️ RADIO Batch request failed for record (may be expected): %@", log: self.log, type: .info, record.recordID.recordName)
+                            default:
+                                os_log("❌ RADIO Error saving record %@: %@", log: self.log, type: .error, record.recordID.recordName, error.localizedDescription)
+                            }
+                        }
+                    } else {
+                        os_log("✅ RADIO Successfully saved record: %@", log: self.log, type: .debug, record.recordID.recordName)
+                    }
+                }
                 
                 modifyOperation.modifyRecordsCompletionBlock = { savedRecords, _, error in
                     if let error = error {
@@ -935,6 +957,15 @@ class RadioStationCloudKitManager: ObservableObject {
             return
         }
         
+        os_log("📡 🔄 RADIO Starting batch save for %d stations (country: %@)", log: log, type: .info, stations.count, country ?? "nil")
+        print("📡 🔄 RADIO Starting batch save for \(stations.count) stations (country: \(country ?? "nil"))")
+        
+        // Debug: Print first few station IDs and names for verification
+        let debugStations = stations.prefix(3)
+        for (index, station) in debugStations.enumerated() {
+            print("📡 🔍 RADIO Station \(index + 1): ID=\(station.id), Name=\(station.name), Country=\(station.country)")
+        }
+        
         let stationIds = stations.map { $0.id }
         
         // Check for resumable sync
@@ -972,33 +1003,45 @@ class RadioStationCloudKitManager: ObservableObject {
         var recordsToSave = [CKRecord]()
         
         for (index, station) in stationsToProcess.enumerated() {
-            let recordID = CKRecord.ID(recordName: station.id)
-            
-            // Try to fetch existing record first or create new one
-            var record: CKRecord
             do {
-                record = try await privateDatabase.record(for: recordID)
-            } catch CKError.unknownItem {
-                record = CKRecord(recordType: RecordType.radioStation, recordID: recordID)
+                let recordID = CKRecord.ID(recordName: station.id)
+                print("📡 🔍 RADIO Processing station \(index + 1)/\(stationsToProcess.count): \(station.name) (ID: \(station.id))")
+                
+                // Try to fetch existing record first or create new one
+                var record: CKRecord
+                do {
+                    record = try await privateDatabase.record(for: recordID)
+                    print("📡 🔄 RADIO Found existing record for station: \(station.name)")
+                } catch CKError.unknownItem {
+                    record = CKRecord(recordType: RecordType.radioStation, recordID: recordID)
+                    print("📡 ➕ RADIO Creating new record for station: \(station.name)")
+                } catch {
+                    print("📡 ❌ RADIO Error fetching record for station \(station.name): \(error)")
+                    throw error
+                }
+                
+                // Update record fields
+                record["name"] = station.name as CKRecordValue
+                record["url"] = station.url as CKRecordValue
+                record["country"] = station.country as CKRecordValue
+                record["isFavorite"] = station.isFavorite ? "true" : "false"
+                record["favoritedAt"] = station.favoritedAt as CKRecordValue?
+                record["favoriteOrder"] = station.favoriteOrder as CKRecordValue?
+                record["order"] = station.order as CKRecordValue
+                record["lastPlayed"] = station.lastPlayed as CKRecordValue?
+                
+                // CRITICAL FIX: Convert Base64 artwork data to CKAsset for CloudKit compatibility
+                record["iconData"] = try base64StringToCKAsset(station.iconData, fieldName: "iconData")
+                record["iTunesArtworkData"] = try base64StringToCKAsset(station.iTunesArtworkData, fieldName: "iTunesArtworkData")
+                
+                record["lastUpdated"] = Date() as CKRecordValue
+                
+                recordsToSave.append(record)
+                print("📡 ✅ RADIO Successfully prepared record for station: \(station.name)")
+            } catch {
+                print("📡 ❌ RADIO Failed to prepare record for station \(station.name): \(error)")
+                throw error
             }
-            
-            // Update record fields
-            record["name"] = station.name as CKRecordValue
-            record["url"] = station.url as CKRecordValue
-            record["country"] = station.country as CKRecordValue
-            record["isFavorite"] = station.isFavorite ? "true" : "false"
-            record["favoritedAt"] = station.favoritedAt as CKRecordValue?
-            record["favoriteOrder"] = station.favoriteOrder as CKRecordValue?
-            record["order"] = station.order as CKRecordValue
-            record["lastPlayed"] = station.lastPlayed as CKRecordValue?
-            
-            // CRITICAL FIX: Convert Base64 artwork data to CKAsset for CloudKit compatibility
-            record["iconData"] = try base64StringToCKAsset(station.iconData, fieldName: "iconData")
-            record["iTunesArtworkData"] = try base64StringToCKAsset(station.iTunesArtworkData, fieldName: "iTunesArtworkData")
-            
-            record["lastUpdated"] = Date() as CKRecordValue
-            
-            recordsToSave.append(record)
             
             // Report preparation progress every 10 stations or at the end
             if (index + 1) % 10 == 0 || index == stationsToProcess.count - 1 {

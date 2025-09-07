@@ -577,6 +577,19 @@ class DataStore {
     
     // Original method for incremental saves (used elsewhere)
     func saveNewStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        // CRITICAL: First filter out any manual stations that shouldn't be saved during API fetch
+        let nonManualStations = stations.filter { station in
+            let isManual = station.id.hasPrefix("manual_")
+            if isManual {
+                print("📻 🚫 DATASTORE EXCLUSION: Manual station \(station.name) (ID: \(station.id)) excluded from CloudKit save in DataStore")
+            }
+            return !isManual
+        }
+        
+        if nonManualStations.count != stations.count {
+            print("📻 ⚠️ DATASTORE: Filtered out \(stations.count - nonManualStations.count) manual stations from CloudKit save")
+        }
+        
         fetchExistingStationIDs { existingIDs, error in
             guard error == nil else {
                 print("Error fetching existing station IDs: \(error?.localizedDescription ?? "Unknown error")")
@@ -584,7 +597,7 @@ class DataStore {
                 return
             }
 
-            let newStations = stations.filter { !existingIDs.contains($0.id) }
+            let newStations = nonManualStations.filter { !existingIDs.contains($0.id) }
             if newStations.isEmpty {
                 print("No new stations to save; all stations already exist in CloudKit.")
                 completion(true, [])

@@ -242,7 +242,7 @@ struct RadioStationListView: View {
                     // Trigger refresh when country is selected
                     Task {
                         UIDevice.playHapticFeedback()
-                        await viewModel.fetchStationsForSelectedCountry()
+                        await viewModel.fetchStationsForSelectedCountry(forceRefresh: false)
                         await MainActor.run {
                             viewModel.syncStationsWithCloudKit()
                         }
@@ -287,7 +287,7 @@ struct RadioStationListView: View {
                         VStack(spacing: 12) {
                             Button(action: {
                                 Task {
-                                    await viewModel.fetchStationsForSelectedCountry()
+                                    await viewModel.fetchStationsForSelectedCountry(forceRefresh: true)
                                 }
                             }) {
                                 HStack {
@@ -466,17 +466,6 @@ struct RadioStationListView: View {
         .listStyle(PlainListStyle())
         .background(Color.adaptiveBackground)
         .scrollContentBackground(.hidden)
-        .refreshable {
-            UIDevice.playHapticFeedback()
-            await viewModel.fetchStationsForSelectedCountry()
-            await MainActor.run {
-                viewModel.syncStationsWithCloudKit()
-                // CRITICAL FIX: Don't call loadStationsFromCoreData() after fetchStationsForSelectedCountry()
-                // fetchStationsForSelectedCountry() already loads both manual and API stations
-                // loadStationsFromCoreData() would override manual stations with Core Data only
-                print("📻 🔧 FIX: Skipping loadStationsFromCoreData() to preserve manual stations loaded by fetchStationsForSelectedCountry()")
-            }
-        }
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))
         .onReceive(radioPlayer.$currentStationIndex) { _ in
             if !isEditing { scrollToCurrentStation(proxy: proxy) }
