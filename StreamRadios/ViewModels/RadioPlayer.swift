@@ -884,13 +884,19 @@ class RadioPlayer: NSObject, ObservableObject {
         }
         
         if type == .began {
-            // Interruption began, pause the player
+            // Interruption began, pause the player immediately
             print("🔧 RadioPlayer: Audio interruption began - pausing playback")
             DebugLogger.logWarning("Audio interruption began - pausing radio playback (likely phone call or other audio)", category: "AudioInterruption")
             DebugLogger.setUserAction("Audio Interruption Started")
             
             wasPlayingBeforeInterruption = isPlaying
-            player?.pause()
+            
+            // CRITICAL: Immediately pause playback to prevent audio mixing with phone calls
+            if isPlaying {
+                player?.pause()
+                isPlaying = false
+                print("✅ RadioPlayer: Playback paused due to interruption")
+            }
             
             DebugLogger.logInfo("Audio interruption handled - Radio was playing: \(wasPlayingBeforeInterruption), Station: \(currentlyPlayingStation?.name ?? "None")", category: "AudioInterruption")
             
@@ -915,21 +921,50 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
-        // Ensure audio session is properly configured
+        // CRITICAL: More aggressive audio session reactivation for lock screen phone call scenarios
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
             
-            // Resume playback
-            player.play()
-            wasPlayingBeforeInterruption = false // Reset the flag
+            // First, ensure the category is correct
+            try audioSession.setCategory(.playback, 
+                                       mode: .default, 
+                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
             
-            print("✅ RadioPlayer: Successfully resumed playback after interruption")
-            DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
+            // Then activate with more aggressive options for lock screen scenarios
+            try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
+            
+            // Additional delay to ensure audio session is fully ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self = self else { return }
+                
+                // Resume playback
+                player.play()
+                self.isPlaying = true
+                self.wasPlayingBeforeInterruption = false // Reset the flag
+                
+                print("✅ RadioPlayer: Successfully resumed playback after interruption")
+                DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
+            }
             
         } catch {
             print("❌ RadioPlayer: Failed to resume after interruption: \(error)")
             DebugLogger.logError("Failed to resume radio playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
+            
+            // Retry with a longer delay for stubborn cases
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self = self else { return }
+                
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    try audioSession.setActive(true, options: [])
+                    player.play()
+                    self.isPlaying = true
+                    self.wasPlayingBeforeInterruption = false
+                    print("✅ RadioPlayer: Successfully resumed playback after retry")
+                } catch {
+                    print("❌ RadioPlayer: Final retry failed: \(error)")
+                }
+            }
         }
     }
 

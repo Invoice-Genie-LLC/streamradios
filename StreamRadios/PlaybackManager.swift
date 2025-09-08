@@ -181,14 +181,21 @@ class PlaybackManager: ObservableObject {
         
         switch type {
         case .began:
-            print("🔇 PlaybackManager: Audio interruption began")
-            // Store the current playback state before interruption
-            if activePlayer == .radio {
-                RadioPlayer.shared.wasPlayingBeforeInterruption = RadioPlayer.shared.isPlaying
-            } else if activePlayer == .podcast {
-                PodcastPlayer.shared.wasPlayingBeforeInterruption = PodcastPlayer.shared.isPlaying
+            print("🔇 PlaybackManager: Audio interruption began - activePlayer: \(activePlayer)")
+            
+            // CRITICAL: Let individual players handle their own state first, then read it
+            // This prevents race conditions where we read state before players set it
+            
+            // Small delay to ensure players have processed the interruption first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if self.activePlayer == .radio {
+                    print("📻 PlaybackManager: Radio wasPlayingBeforeInterruption = \(RadioPlayer.shared.wasPlayingBeforeInterruption)")
+                } else if self.activePlayer == .podcast {
+                    print("🎧 PlaybackManager: Podcast wasPlayingBeforeInterruption = \(PodcastPlayer.shared.wasPlayingBeforeInterruption)")
+                } else {
+                    print("⚠️ PlaybackManager: No active player detected during interruption begin")
+                }
             }
-            // Let individual players handle their own pause logic
             
         case .ended:
             print("🔊 PlaybackManager: Audio interruption ended")
@@ -216,19 +223,59 @@ class PlaybackManager: ObservableObject {
                     
                     // Trigger resume for the active player with a delay to ensure audio session is ready
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        print("🔄 PlaybackManager: Attempting resume for activePlayer: \(self.activePlayer)")
                         switch self.activePlayer {
                         case .radio:
+                            print("📻 PlaybackManager: Checking radio resume conditions - wasPlaying: \(RadioPlayer.shared.wasPlayingBeforeInterruption), userWants: \(RadioPlayer.shared.userWantsToPlay)")
                             if RadioPlayer.shared.wasPlayingBeforeInterruption && RadioPlayer.shared.userWantsToPlay {
+                                print("✅ PlaybackManager: Resuming radio playback")
                                 RadioPlayer.shared.resumeAfterInterruption()
                             }
                         case .podcast:
+                            print("🎧 PlaybackManager: Checking podcast resume conditions - wasPlaying: \(PodcastPlayer.shared.wasPlayingBeforeInterruption), userWants: \(PodcastPlayer.shared.userWantsToPlay)")
                             if PodcastPlayer.shared.wasPlayingBeforeInterruption && PodcastPlayer.shared.userWantsToPlay {
+                                print("✅ PlaybackManager: Resuming podcast playback")
                                 PodcastPlayer.shared.resumeAfterInterruption()
+                            } else {
+                                print("❌ PlaybackManager: Podcast resume conditions not met")
                             }
                         }
                     }
                 } else {
                     print("🔇 PlaybackManager: System indicates not to resume after interruption")
+                }
+            } else {
+                // CRITICAL: Handle cases where interruption options are not provided (common in lock screen scenarios)
+                print("⚠️ PlaybackManager: No interruption options provided - checking if we should resume anyway")
+                
+                // For lock screen phone call scenarios, we may not get proper options
+                // Check if we have interrupted playback that should resume
+                let shouldAttemptResume = (activePlayer == .radio && RadioPlayer.shared.wasPlayingBeforeInterruption && RadioPlayer.shared.userWantsToPlay) ||
+                                        (activePlayer == .podcast && PodcastPlayer.shared.wasPlayingBeforeInterruption && PodcastPlayer.shared.userWantsToPlay)
+                
+                if shouldAttemptResume {
+                    print("🔊 PlaybackManager: Attempting resume despite missing options (likely lock screen phone call)")
+                    
+                    // Use longer delay for lock screen scenarios
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        print("🔄 PlaybackManager: Lock screen resume attempt for activePlayer: \(self.activePlayer)")
+                        switch self.activePlayer {
+                        case .radio:
+                            print("📻 PlaybackManager: Lock screen radio resume - wasPlaying: \(RadioPlayer.shared.wasPlayingBeforeInterruption), userWants: \(RadioPlayer.shared.userWantsToPlay)")
+                            if RadioPlayer.shared.wasPlayingBeforeInterruption && RadioPlayer.shared.userWantsToPlay {
+                                print("✅ PlaybackManager: Lock screen resuming radio playback")
+                                RadioPlayer.shared.resumeAfterInterruption()
+                            }
+                        case .podcast:
+                            print("🎧 PlaybackManager: Lock screen podcast resume - wasPlaying: \(PodcastPlayer.shared.wasPlayingBeforeInterruption), userWants: \(PodcastPlayer.shared.userWantsToPlay)")
+                            if PodcastPlayer.shared.wasPlayingBeforeInterruption && PodcastPlayer.shared.userWantsToPlay {
+                                print("✅ PlaybackManager: Lock screen resuming podcast playback")
+                                PodcastPlayer.shared.resumeAfterInterruption()
+                            } else {
+                                print("❌ PlaybackManager: Lock screen podcast resume conditions not met")
+                            }
+                        }
+                    }
                 }
             }
             
