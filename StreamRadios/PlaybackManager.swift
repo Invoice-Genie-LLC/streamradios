@@ -61,9 +61,10 @@ class PlaybackManager: ObservableObject {
                 
                 // Use optimized audio session configuration for background stability
                 // This configuration is essential for preventing app termination during lock screen playback
+                // Remove .mixWithOthers to ensure proper interruption handling for alarms
                 try audioSession.setCategory(.playback, 
                                            mode: .default, 
-                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP, .mixWithOthers])
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
                 
                 // Set preferred buffer duration for better background performance
                 try audioSession.setPreferredIOBufferDuration(0.1) // 100ms buffer for stability
@@ -181,6 +182,12 @@ class PlaybackManager: ObservableObject {
         switch type {
         case .began:
             print("🔇 PlaybackManager: Audio interruption began")
+            // Store the current playback state before interruption
+            if activePlayer == .radio {
+                RadioPlayer.shared.wasPlayingBeforeInterruption = RadioPlayer.shared.isPlaying
+            } else if activePlayer == .podcast {
+                PodcastPlayer.shared.wasPlayingBeforeInterruption = PodcastPlayer.shared.isPlaying
+            }
             // Let individual players handle their own pause logic
             
         case .ended:
@@ -206,7 +213,22 @@ class PlaybackManager: ObservableObject {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
                 if options.contains(.shouldResume) {
                     print("🔊 PlaybackManager: Should resume playback after interruption")
-                    // Let individual players handle their own resume logic
+                    
+                    // Trigger resume for the active player with a delay to ensure audio session is ready
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        switch self.activePlayer {
+                        case .radio:
+                            if RadioPlayer.shared.wasPlayingBeforeInterruption && RadioPlayer.shared.userWantsToPlay {
+                                RadioPlayer.shared.resumeAfterInterruption()
+                            }
+                        case .podcast:
+                            if PodcastPlayer.shared.wasPlayingBeforeInterruption && PodcastPlayer.shared.userWantsToPlay {
+                                PodcastPlayer.shared.resumeAfterInterruption()
+                            }
+                        }
+                    }
+                } else {
+                    print("🔇 PlaybackManager: System indicates not to resume after interruption")
                 }
             }
             

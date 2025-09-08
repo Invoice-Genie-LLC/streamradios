@@ -38,6 +38,7 @@ class RadioPlayer: NSObject, ObservableObject {
     // Simplified state management - no complex reconnection logic
     @Published var userWantsToPlay: Bool = false
     @Published var wasManuallyPaused: Bool = false  // Track if user manually paused to prevent auto-resume
+    @Published var wasPlayingBeforeInterruption: Bool = false  // Track playback state before interruption
     @Published var connectionState: ConnectionState = .connected
 
     @Published var currentStationIndex: Int?
@@ -691,6 +692,7 @@ class RadioPlayer: NSObject, ObservableObject {
         // CRITICAL: Add app lifecycle observers for background audio session maintenance
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
     
     @objc private func handleAppDidEnterBackground() {
@@ -761,6 +763,46 @@ class RadioPlayer: NSObject, ObservableObject {
             DebugLogger.logInfo("Radio was manually paused by user - not resuming automatically", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering foreground with no radio playback intent", category: "BackgroundAudio")
+        }
+    }
+    
+    @objc private func handleAppDidBecomeActive() {
+        // CRITICAL: Handle lock screen alarm scenarios where interruption end notifications may be missed
+        // This catches cases where alarms interrupt audio during lock screen and app becomes active after snooze
+        if wasPlayingBeforeInterruption && userWantsToPlay && !isPlaying && !wasManuallyPaused {
+            print("🔧 RadioPlayer: App became active after potential lock screen interruption - checking resume")
+            DebugLogger.logInfo("App became active with interrupted radio playback - attempting lock screen alarm resume", category: "LockScreenAudio")
+            DebugLogger.setUserAction("Lock Screen Alarm Resume")
+            
+            // Delay to ensure system is ready after alarm dismissal
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self = self else { 
+                    DebugLogger.logError("RadioPlayer instance lost during lock screen resume", category: "LockScreenAudio")
+                    return 
+                }
+                
+                // Double-check conditions are still valid
+                if self.wasPlayingBeforeInterruption && self.userWantsToPlay && !self.isPlaying && !self.wasManuallyPaused {
+                    print("🔄 RadioPlayer: Attempting lock screen alarm resume")
+                    DebugLogger.logInfo("Executing lock screen alarm resume for radio", category: "LockScreenAudio")
+                    
+                    // Use the existing resume method
+                    self.resumeAfterInterruption()
+                } else {
+                    DebugLogger.logInfo("Lock screen resume conditions no longer met - skipping resume", category: "LockScreenAudio")
+                }
+            }
+        } else {
+            // Log why we're not resuming for debugging
+            if !wasPlayingBeforeInterruption {
+                DebugLogger.logInfo("App became active but radio was not playing before interruption", category: "LockScreenAudio")
+            } else if !userWantsToPlay {
+                DebugLogger.logInfo("App became active but user does not want radio playback", category: "LockScreenAudio")
+            } else if isPlaying {
+                DebugLogger.logInfo("App became active and radio is already playing", category: "LockScreenAudio")
+            } else if wasManuallyPaused {
+                DebugLogger.logInfo("App became active but radio was manually paused by user", category: "LockScreenAudio")
+            }
         }
     }
     
@@ -847,59 +889,49 @@ class RadioPlayer: NSObject, ObservableObject {
             DebugLogger.logWarning("Audio interruption began - pausing radio playback (likely phone call or other audio)", category: "AudioInterruption")
             DebugLogger.setUserAction("Audio Interruption Started")
             
-            let wasPlaying = isPlaying
+            wasPlayingBeforeInterruption = isPlaying
             player?.pause()
             
-            DebugLogger.logInfo("Audio interruption handled - Radio was playing: \(wasPlaying), Station: \(currentlyPlayingStation?.name ?? "None")", category: "AudioInterruption")
+            DebugLogger.logInfo("Audio interruption handled - Radio was playing: \(wasPlayingBeforeInterruption), Station: \(currentlyPlayingStation?.name ?? "None")", category: "AudioInterruption")
             
         } else if type == .ended {
-            // Interruption ended - let PlaybackManager handle audio session reactivation
-            print("🔧 RadioPlayer: Audio interruption ended")
-            DebugLogger.logInfo("Audio interruption ended - checking resume options", category: "AudioInterruption")
+            // Interruption ended - PlaybackManager will handle the resume logic
+            print("🔧 RadioPlayer: Audio interruption ended - letting PlaybackManager handle resume")
+            DebugLogger.logInfo("Audio interruption ended - PlaybackManager will handle resume", category: "AudioInterruption")
             DebugLogger.setUserAction("Audio Interruption Ended")
-            
-            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { 
-                DebugLogger.logWarning("Audio interruption ended but no options provided - cannot determine if should resume", category: "AudioInterruption")
-                return 
-            }
-            
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            let shouldResume = options.contains(.shouldResume)
-            let isActivePlayer = PlaybackManager.shared.activePlayer == .radio
-            
-            DebugLogger.logInfo("Interruption resume analysis - Should resume: \(shouldResume), Is active player: \(isActivePlayer), User wants playback: \(userWantsToPlay)", category: "AudioInterruption")
-            
-            if shouldResume && isActivePlayer && userWantsToPlay {
-                // Resume playback if it should resume and radio is the active player
-                DebugLogger.logInfo("Attempting to resume radio playback after interruption", category: "AudioInterruption")
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self = self else { 
-                        DebugLogger.logError("RadioPlayer instance lost during interruption recovery", category: "AudioInterruption")
-                        return 
-                    }
-                    
-                    do {
-                        // Reactivate audio session first
-                        PlaybackManager.shared.setActivePlayer(.radio)
-                        
-                        // Then resume playback
-                        self.player?.play()
-                        print("✅ RadioPlayer: Radio playback resumed after interruption")
-                        DebugLogger.logInfo("Radio playback successfully resumed after audio interruption", category: "AudioInterruption")
-                    } catch {
-                        DebugLogger.logError("Failed to resume radio playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
-                    }
-                }
-            } else {
-                let reason = !shouldResume ? "system indicated not to resume" : 
-                           !isActivePlayer ? "radio is not the active player" : 
-                           !userWantsToPlay ? "user does not want playback" : "unknown reason"
-                DebugLogger.logInfo("Not resuming radio playback after interruption - \(reason)", category: "AudioInterruption")
-            }
         }
     }
     
+    /// Resumes playback after an audio interruption (e.g., alarm, phone call)
+    func resumeAfterInterruption() {
+        print("🔊 RadioPlayer: Attempting to resume playback after interruption")
+        DebugLogger.logInfo("Resuming radio playback after audio interruption", category: "AudioInterruption")
+        
+        guard let player = player, 
+              wasPlayingBeforeInterruption,
+              userWantsToPlay else {
+            print("⚠️ RadioPlayer: Cannot resume - conditions not met")
+            DebugLogger.logWarning("Cannot resume after interruption - player: \(player != nil), wasPlaying: \(wasPlayingBeforeInterruption), userWants: \(userWantsToPlay)", category: "AudioInterruption")
+            return
+        }
+        
+        // Ensure audio session is properly configured
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            
+            // Resume playback
+            player.play()
+            wasPlayingBeforeInterruption = false // Reset the flag
+            
+            print("✅ RadioPlayer: Successfully resumed playback after interruption")
+            DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
+            
+        } catch {
+            print("❌ RadioPlayer: Failed to resume after interruption: \(error)")
+            DebugLogger.logError("Failed to resume radio playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
+        }
+    }
 
     
     func setStationURL(_ url: URL) {

@@ -28,6 +28,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @Published var isPlaying: Bool = false
     @Published var userWantsToPlay: Bool = false  // CRITICAL: Persistent user intent flag like RadioPlayer
     @Published var wasManuallyPaused: Bool = false  // Track if user manually paused to prevent auto-resume
+    @Published var wasPlayingBeforeInterruption: Bool = false  // Track playback state before interruption
     @Published var loadingEpisodeId: String? = nil  // Track which episode is currently loading
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0.01
@@ -121,6 +122,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL: Add app lifecycle observers for background audio session maintenance
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppWillEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
         
         // CRITICAL: Add memory warning observer to prevent termination during podcast playback
         NotificationCenter.default.addObserver(self, selector: #selector(handleMemoryWarning), name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
@@ -201,6 +203,46 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             DebugLogger.logInfo("Podcast was manually paused by user - not resuming automatically", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering foreground with no podcast playback intent", category: "BackgroundAudio")
+        }
+    }
+    
+    @objc private func handleAppDidBecomeActive() {
+        // CRITICAL: Handle lock screen alarm scenarios where interruption end notifications may be missed
+        // This catches cases where alarms interrupt audio during lock screen and app becomes active after snooze
+        if wasPlayingBeforeInterruption && userWantsToPlay && !isPlaying && !wasManuallyPaused {
+            print("🔧 PodcastPlayer: App became active after potential lock screen interruption - checking resume")
+            DebugLogger.logInfo("App became active with interrupted podcast playback - attempting lock screen alarm resume", category: "LockScreenAudio")
+            DebugLogger.setUserAction("Lock Screen Alarm Resume")
+            
+            // Delay to ensure system is ready after alarm dismissal
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self = self else { 
+                    DebugLogger.logError("PodcastPlayer instance lost during lock screen resume", category: "LockScreenAudio")
+                    return 
+                }
+                
+                // Double-check conditions are still valid
+                if self.wasPlayingBeforeInterruption && self.userWantsToPlay && !self.isPlaying && !self.wasManuallyPaused {
+                    print("🔄 PodcastPlayer: Attempting lock screen alarm resume")
+                    DebugLogger.logInfo("Executing lock screen alarm resume for podcast", category: "LockScreenAudio")
+                    
+                    // Use the existing resume method
+                    self.resumeAfterInterruption()
+                } else {
+                    DebugLogger.logInfo("Lock screen resume conditions no longer met - skipping resume", category: "LockScreenAudio")
+                }
+            }
+        } else {
+            // Log why we're not resuming for debugging
+            if !wasPlayingBeforeInterruption {
+                DebugLogger.logInfo("App became active but podcast was not playing before interruption", category: "LockScreenAudio")
+            } else if !userWantsToPlay {
+                DebugLogger.logInfo("App became active but user does not want podcast playback", category: "LockScreenAudio")
+            } else if isPlaying {
+                DebugLogger.logInfo("App became active and podcast is already playing", category: "LockScreenAudio")
+            } else if wasManuallyPaused {
+                DebugLogger.logInfo("App became active but podcast was manually paused by user", category: "LockScreenAudio")
+            }
         }
     }
     
@@ -2005,9 +2047,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             DebugLogger.logWarning("Audio interruption began - pausing podcast playback (likely phone call or other audio)", category: "AudioInterruption")
             DebugLogger.setUserAction("Podcast Audio Interruption Started")
             
-            let wasPlaying = isPlaying
+            wasPlayingBeforeInterruption = isPlaying
             let episodeTitle = currentEpisode?.title ?? "None"
-            DebugLogger.logInfo("Podcast audio interruption handled - Was playing: \(wasPlaying), Episode: \(episodeTitle)", category: "AudioInterruption")
+            DebugLogger.logInfo("Podcast audio interruption handled - Was playing: \(wasPlayingBeforeInterruption), Episode: \(episodeTitle)", category: "AudioInterruption")
             
             // CRITICAL: Don't pause if this is a CarPlay transition and user wants to continue podcast
             if userWantsToPlay && currentEpisode != nil {
@@ -2045,28 +2087,50 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
             
         case .ended:
-            print("🔊 PodcastPlayer: Audio interruption ended")
-            DebugLogger.logInfo("Podcast audio interruption ended - checking resume options", category: "AudioInterruption")
+            // Interruption ended - PlaybackManager will handle the resume logic
+            print("🔊 PodcastPlayer: Audio interruption ended - letting PlaybackManager handle resume")
+            DebugLogger.logInfo("Podcast audio interruption ended - PlaybackManager will handle resume", category: "AudioInterruption")
             DebugLogger.setUserAction("Podcast Audio Interruption Ended")
-            
-            let shouldResume = userWantsToPlay && currentEpisode != nil && !isPlaying
-            DebugLogger.logInfo("Interruption resume analysis - Should resume: \(shouldResume), User wants playback: \(userWantsToPlay), Has episode: \(currentEpisode != nil), Is playing: \(isPlaying)", category: "AudioInterruption")
-            
-            // Resume if user wants to continue and we have content
-            if shouldResume {
-                print("🔄 PodcastPlayer: Resuming podcast after interruption ended")
-                DebugLogger.logInfo("Resuming podcast playback after audio interruption ended", category: "AudioInterruption")
-                play()
-            } else {
-                let reason = !userWantsToPlay ? "user does not want playback" : 
-                           currentEpisode == nil ? "no episode loaded" : 
-                           isPlaying ? "already playing" : "unknown reason"
-                DebugLogger.logInfo("Not resuming podcast playback after interruption - \(reason)", category: "AudioInterruption")
-            }
             
         @unknown default:
             DebugLogger.logWarning("Unknown podcast audio interruption type received", category: "AudioInterruption")
             break
+        }
+    }
+    
+    /// Resumes playback after an audio interruption (e.g., alarm, phone call)
+    func resumeAfterInterruption() {
+        print("🔊 PodcastPlayer: Attempting to resume playback after interruption")
+        DebugLogger.logInfo("Resuming podcast playback after audio interruption", category: "AudioInterruption")
+        
+        guard let player = player, 
+              wasPlayingBeforeInterruption,
+              userWantsToPlay,
+              currentEpisode != nil else {
+            print("⚠️ PodcastPlayer: Cannot resume - conditions not met")
+            DebugLogger.logWarning("Cannot resume after interruption - player: \(player != nil), wasPlaying: \(wasPlayingBeforeInterruption), userWants: \(userWantsToPlay), hasEpisode: \(currentEpisode != nil)", category: "AudioInterruption")
+            return
+        }
+        
+        // Ensure audio session is properly configured
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            
+            // Resume playback
+            player.play()
+            isPlaying = true
+            wasPlayingBeforeInterruption = false // Reset the flag
+            
+            // Update Now Playing info
+            updateNowPlayingInfo()
+            
+            print("✅ PodcastPlayer: Successfully resumed playback after interruption")
+            DebugLogger.logInfo("Podcast playback successfully resumed after interruption", category: "AudioInterruption")
+            
+        } catch {
+            print("❌ PodcastPlayer: Failed to resume after interruption: \(error)")
+            DebugLogger.logError("Failed to resume podcast playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
         }
     }
     
