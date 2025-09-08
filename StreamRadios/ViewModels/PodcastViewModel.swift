@@ -1512,17 +1512,27 @@ class PodcastViewModel: ObservableObject {
             }
         }
         
-        // PERFORMANCE: For user-initiated immediate checks, be more aggressive about getting fresh content
-        if userInitiated {
-            print("🔍 USER-INITIATED CHECK: Always checking for new episodes when user actively selects feed")
-        } else if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
+        // PERFORMANCE: Even for user-initiated checks, respect fresh snapshots to prevent CPU spikes
+        if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
             let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
-            if snapshotAge < 120 { // 2 minutes - only for non-user-initiated checks
-                print("⚡ PERFORMANCE: Skipping background RSS check - recent snapshot available (\(Int(snapshotAge/60)) min old, \(snapshotEpisodes.count) episodes)")
+            // For user-initiated checks, use a shorter threshold (5 minutes) vs background checks (30 minutes)
+            let threshold = userInitiated ? 300 : 1800 // 5 minutes for user-initiated, 30 minutes for background
+            if snapshotAge < TimeInterval(threshold) {
+                if userInitiated {
+                    print("⚡ USER-INITIATED OPTIMIZATION: Skipping RSS check - fresh snapshot available (\(Int(snapshotAge/60)) min old, \(snapshotEpisodes.count) episodes)")
+                } else {
+                    print("⚡ PERFORMANCE: Skipping background RSS check - recent snapshot available (\(Int(snapshotAge/60)) min old, \(snapshotEpisodes.count) episodes)")
+                }
                 return
             } else {
-                print("🔍 IMMEDIATE CHECK: Snapshot is \(Int(snapshotAge/60)) min old - checking for new episodes")
+                if userInitiated {
+                    print("🔍 USER-INITIATED CHECK: Snapshot is \(Int(snapshotAge/60)) min old - checking for new episodes")
+                } else {
+                    print("🔍 IMMEDIATE CHECK: Snapshot is \(Int(snapshotAge/60)) min old - checking for new episodes")
+                }
             }
+        } else if userInitiated {
+            print("🔍 USER-INITIATED CHECK: No snapshot available - checking for new episodes")
         }
         
         guard let feedUrl = await MainActor.run(body: {
@@ -2612,10 +2622,17 @@ class PodcastViewModel: ObservableObject {
             }
             
             // CRITICAL: Skip all expensive operations - we have everything we need
-            // Only start background check for new episodes (completely non-blocking)
-            Task.detached(priority: .background) {
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // Wait 2 seconds to avoid interfering with UI
-                await self.checkForNewEpisodesInBackground(feedId: feedId)
+            // Only start background check for new episodes if snapshot is old enough
+            // This prevents defeating the entire purpose of the snapshot system
+            let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
+            if snapshotAge > 1800 { // 30 minutes - much more conservative
+                Task.detached(priority: .background) {
+                    try? await Task.sleep(nanoseconds: 30_000_000_000) // Wait 30 seconds to avoid interfering with UI
+                    await self.checkForNewEpisodesInBackground(feedId: feedId)
+                }
+                print("⏰ SNAPSHOT: Scheduling background check in 30 seconds (snapshot is \(Int(snapshotAge/60)) min old)")
+            } else {
+                print("⚡ SNAPSHOT: Skipping background check - snapshot is fresh (\(Int(snapshotAge/60)) min old)")
             }
             
             return // CRITICAL: Return immediately, bypass all expensive operations below
@@ -4066,12 +4083,12 @@ class PodcastViewModel: ObservableObject {
     
     /// Background check for new episodes without blocking UI
     private func checkForNewEpisodesInBackground(feedId: String) async {
-        // PERFORMANCE: For user-initiated feed selections, be more aggressive about checking for new episodes
-        // Only skip if snapshot is very recent (5 minutes) to balance performance with fresh content
+        // PERFORMANCE: Be very conservative about background checks when snapshots exist
+        // Only check if snapshot is significantly old to preserve the snapshot system benefits
         if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
             let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
-            if snapshotAge < 300 { // 5 minutes - shorter threshold for user-initiated checks
-                print("⚡ PERFORMANCE: Skipping background RSS check - very recent snapshot available (\(Int(snapshotAge/60)) min old)")
+            if snapshotAge < 1800 { // 30 minutes - much more conservative to preserve snapshot benefits
+                print("⚡ PERFORMANCE: Skipping background RSS check - snapshot is fresh (\(Int(snapshotAge/60)) min old)")
                 return
             } else {
                 print("🔍 BACKGROUND CHECK: Snapshot is \(Int(snapshotAge/60)) min old - checking for new episodes")
