@@ -138,6 +138,7 @@ class BackgroundTaskManager {
             DispatchQueue.main.async {
                 if let image = image {
                     radioPlayer.iTunesAlbumArt = image
+                    radioPlayer.iTunesArtworkJustSet = true
                     radioPlayer.saveITunesArtworkToCurrentStation(image)
                     radioPlayer.updateNowPlayingInfo()
                     radioPlayer.updateWidget()

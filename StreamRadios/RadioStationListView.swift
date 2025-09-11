@@ -922,6 +922,13 @@ struct RadioStationListView: View {
                     .resizable()
                     .scaledToFit()
                     .background(Color.white.opacity(0.1))
+            } else if let iTunesArtworkData = station.iTunesArtworkData,
+                      let imageData = Data(base64Encoded: iTunesArtworkData),
+                      let image = UIImage(data: imageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .background(Color.white.opacity(0.1))
             } else {
                 defaultStationImage(station)
             }
@@ -931,6 +938,13 @@ struct RadioStationListView: View {
             if let iconData = station.iconData,
                let imageData = Data(base64Encoded: iconData),
                let image = UIImage(data: imageData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .background(Color.white.opacity(0.1))
+            } else if let iTunesArtworkData = station.iTunesArtworkData,
+                      let imageData = Data(base64Encoded: iTunesArtworkData),
+                      let image = UIImage(data: imageData) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()

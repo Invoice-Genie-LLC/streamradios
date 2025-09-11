@@ -66,8 +66,9 @@ struct AlarmTriggeredView: View {
     
     private func stationView(for station: RadioStation) -> some View {
         VStack(spacing: 15) {
-            // Priority: iTunes album art > stream album art > station icon > default radio icon
-            if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+            // Priority: When playing (iTunes artwork > station artwork), When paused (station artwork > iTunes artwork)
+            if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+                // When playing, prioritize song artwork
                 Image(uiImage: iTunesAlbumArt)
                     .resizable()
                     .aspectRatio(contentMode: .fit)

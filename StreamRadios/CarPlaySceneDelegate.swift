@@ -3376,6 +3376,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                         
                         // Update RadioPlayer immediately
                         radioPlayer.iTunesAlbumArt = image
+                        radioPlayer.iTunesArtworkJustSet = true
                         radioPlayer.saveITunesArtworkToCurrentStation(image)
                         
                         // Force immediate Now Playing update for CarPlay

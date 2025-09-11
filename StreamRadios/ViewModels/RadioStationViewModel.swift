@@ -201,6 +201,9 @@ class RadioStationViewModel: NSObject, ObservableObject {
             Task { @MainActor in
                 await migrateStationCountryNames()
                 self.isMigrationComplete = true
+                
+                // CROSS-COUNTRY CONTAMINATION PREVENTION: Run cleanup after migration
+                await checkAndPerformContaminationCleanupIfNeeded()
             }
             
             let userDefaults = UserDefaults.standard
@@ -713,8 +716,256 @@ class RadioStationViewModel: NSObject, ObservableObject {
         UserDefaults.standard.set(true, forKey: "ExpectingCloudKitChanges")
     }
     
+    // MARK: - Cross-Country Contamination Prevention
+    
+    /// Validate and clean stations to prevent cross-country contamination
+    private func validateAndCleanStationsCountry(_ stations: [RadioStation]) -> [RadioStation] {
+        var validatedStations: [RadioStation] = []
+        var contaminationCount = 0
+        
+        for station in stations {
+            if isStationCountryValid(station) {
+                validatedStations.append(station)
+            } else {
+                contaminationCount += 1
+                print("🚨 CONTAMINATION BLOCKED: Station '\(station.name)' (Country: '\(station.country)') failed validation")
+                
+                // Try to fix the country if possible
+                if let correctedStation = attemptStationCountryCorrection(station) {
+                    validatedStations.append(correctedStation)
+                    print("🛡️ CONTAMINATION FIXED: Corrected station '\(station.name)' country to '\(correctedStation.country)'")
+                } else {
+                    print("🗑️ CONTAMINATION REMOVED: Discarded station '\(station.name)' - could not determine correct country")
+                }
+            }
+        }
+        
+        if contaminationCount > 0 {
+            print("🛡️ CONTAMINATION PREVENTION: Blocked/fixed \(contaminationCount) contaminated stations out of \(stations.count) total")
+        }
+        
+        return validatedStations
+    }
+    
+    /// Check if a station's country assignment is valid
+    private func isStationCountryValid(_ station: RadioStation) -> Bool {
+        let stationName = station.name.lowercased()
+        let stationCountry = station.country
+        
+        // Check for obvious country mismatches based on station names
+        
+        // Italian stations should only be in Italy
+        if stationCountry != "Italy" && isItalianStation(stationName) {
+            return false
+        }
+        
+        // UK stations should only be in United Kingdom
+        if stationCountry != "United Kingdom" && isUKStation(stationName) {
+            return false
+        }
+        
+        // German stations should only be in Germany
+        if stationCountry != "Germany" && isGermanStation(stationName) {
+            return false
+        }
+        
+        // French stations should only be in France
+        if stationCountry != "France" && isFrenchStation(stationName) {
+            return false
+        }
+        
+        // Spanish stations should only be in Spain
+        if stationCountry != "Spain" && isSpanishStation(stationName) {
+            return false
+        }
+        
+        // US stations should only be in United States
+        if stationCountry != "United States" && isUSStation(stationName) {
+            return false
+        }
+        
+        // Add more country validations as needed
+        
+        return true
+    }
+    
+    /// Attempt to correct a station's country assignment
+    private func attemptStationCountryCorrection(_ station: RadioStation) -> RadioStation? {
+        let stationName = station.name.lowercased()
+        var correctedStation = station
+        
+        // Attempt to determine correct country based on station name
+        if isItalianStation(stationName) {
+            correctedStation.country = "Italy"
+            return correctedStation
+        } else if isUKStation(stationName) {
+            correctedStation.country = "United Kingdom"
+            return correctedStation
+        } else if isGermanStation(stationName) {
+            correctedStation.country = "Germany"
+            return correctedStation
+        } else if isFrenchStation(stationName) {
+            correctedStation.country = "France"
+            return correctedStation
+        } else if isSpanishStation(stationName) {
+            correctedStation.country = "Spain"
+            return correctedStation
+        } else if isUSStation(stationName) {
+            correctedStation.country = "United States"
+            return correctedStation
+        }
+        
+        // Could not determine correct country
+        return nil
+    }
+    
+    // MARK: - Country Detection Helpers
+    
+    private func isItalianStation(_ name: String) -> Bool {
+        return name.contains("radio rai") || 
+               name.contains("rai radio") ||
+               name.contains("radio italia") ||
+               name.contains("virgin radio italia") ||
+               name.contains("radio kiss kiss") ||
+               name.contains("radio norba") ||
+               name.contains("radio monte carlo") ||
+               name.hasPrefix("rai ") ||
+               name.contains("radio maria") ||
+               name.contains("radio popolare") ||
+               name.contains("radio deejay") ||
+               name.contains("radio 105") ||
+               name.contains("rtl 102.5") ||
+               name.contains("radio capitale") ||
+               name.contains("radio 24") ||
+               name.contains("radio lombardia")
+    }
+    
+    private func isUKStation(_ name: String) -> Bool {
+        return name.contains("bbc") ||
+               name.contains("talksport") ||
+               name.contains("talkradio") ||
+               name.contains("virgin radio uk") ||
+               name.contains("smooth radio") ||
+               name.contains("resonance fm") ||
+               name.contains("sky news uk") ||
+               name.contains("gb news") ||
+               name.contains("capital fm") ||
+               name.contains("heart radio") ||
+               name.contains("magic radio") ||
+               name.contains("classic fm") ||
+               name.contains("lbc") ||
+               name.contains("radio x")
+    }
+    
+    private func isGermanStation(_ name: String) -> Bool {
+        return name.contains("deutschlandfunk") ||
+               name.contains("wdr") ||
+               name.contains("swr") ||
+               name.contains("ndr") ||
+               name.contains("br klassik") ||
+               name.contains("hr") ||
+               name.contains("mdr") ||
+               name.contains("rbb") ||
+               name.contains("antenne bayern") ||
+               name.contains("radio ffh") ||
+               name.contains("1live")
+    }
+    
+    private func isFrenchStation(_ name: String) -> Bool {
+        return name.contains("france inter") ||
+               name.contains("france info") ||
+               name.contains("france culture") ||
+               name.contains("france musique") ||
+               name.contains("rtl france") ||
+               name.contains("europe 1") ||
+               name.contains("rmc") ||
+               name.contains("nostalgie france") ||
+               name.contains("nrj france") ||
+               name.contains("skyrock")
+    }
+    
+    private func isSpanishStation(_ name: String) -> Bool {
+        return name.contains("radio nacional") ||
+               name.contains("cadena ser") ||
+               name.contains("cope") ||
+               name.contains("onda cero") ||
+               name.contains("radio marca") ||
+               name.contains("esradio") ||
+               name.contains("radio intereconomía") ||
+               name.contains("catalunya radio") ||
+               name.contains("rac1")
+    }
+    
+    private func isUSStation(_ name: String) -> Bool {
+        return name.contains("npr") ||
+               name.contains("cnn") ||
+               name.contains("fox news") ||
+               name.contains("msnbc") ||
+               name.contains("bloomberg") ||
+               name.contains("espn radio") ||
+               name.contains("siriusxm") ||
+               name.contains("iheartradio") ||
+               name.contains("kqed") ||
+               name.contains("wnyc") ||
+               name.contains("wxrt") ||
+               name.contains("kroq")
+    }
+    
+    // MARK: - Data Integrity & Cleanup
+    
+    /// Perform comprehensive cleanup of cross-country contamination
+    @MainActor
+    func performCrossCountryContaminationCleanup() async {
+        print("🛡️ STARTING COMPREHENSIVE CROSS-COUNTRY CONTAMINATION CLEANUP")
+        
+        let originalCount = stations.count
+        
+        // Apply validation and cleanup to all stations
+        let cleanedStations = validateAndCleanStationsCountry(stations)
+        let removedCount = originalCount - cleanedStations.count
+        
+        if removedCount > 0 {
+            stations = cleanedStations
+            
+            // Save cleaned data to Core Data
+            saveStationsToCoreData()
+            
+            // Also clean up CloudKit by uploading the cleaned data
+            syncStationsWithCloudKit()
+            
+            print("🛡️ CONTAMINATION CLEANUP COMPLETE: Removed/corrected \(removedCount) contaminated stations out of \(originalCount) total")
+            print("🛡️ CLEAN STATIONS REMAINING: \(stations.count)")
+            
+            // Force UI refresh
+            objectWillChange.send()
+        } else {
+            print("🛡️ CONTAMINATION CLEANUP: No contaminated stations found - data is clean")
+        }
+    }
+    
+    /// Check if the data needs contamination cleanup (run on app launch)
+    @MainActor
+    func checkAndPerformContaminationCleanupIfNeeded() async {
+        let lastCleanupVersion = UserDefaults.standard.string(forKey: "LastContaminationCleanupVersion") ?? "0.0.0"
+        let currentVersion = "2.0.6" // Update this when making cleanup improvements
+        
+        if lastCleanupVersion != currentVersion {
+            print("🛡️ CONTAMINATION CHECK: Running cleanup for version \(currentVersion) (last cleanup: \(lastCleanupVersion))")
+            await performCrossCountryContaminationCleanup()
+            
+            // Mark cleanup as completed for this version
+            UserDefaults.standard.set(currentVersion, forKey: "LastContaminationCleanupVersion")
+        } else {
+            print("🛡️ CONTAMINATION CHECK: Data already cleaned for version \(currentVersion)")
+        }
+    }
+    
     /// Merge CloudKit stations with local state to preserve Recent, Favorites, and other local data
     private func mergeCloudKitStationsWithLocalState(_ cloudKitStations: [RadioStation]) {
+        
+        // CROSS-COUNTRY CONTAMINATION PREVENTION: Validate and filter CloudKit stations
+        let validatedCloudKitStations = validateAndCleanStationsCountry(cloudKitStations)
+        print("🛡️ COUNTRY VALIDATION: Filtered \(cloudKitStations.count - validatedCloudKitStations.count) contaminated stations from CloudKit")
         
         // Create a dictionary of current local stations by ID for fast lookup
         var localStationsById: [String: RadioStation] = [:]
@@ -725,10 +976,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
         // Merge CloudKit stations with preserved local state
         var mergedStations: [RadioStation] = []
         
-        for cloudKitStation in cloudKitStations {
+        for cloudKitStation in validatedCloudKitStations {
             if let localStation = localStationsById[cloudKitStation.id] {
                 // Station exists locally - merge CloudKit data with local state
                 var mergedStation = cloudKitStation
+                
+                // CROSS-COUNTRY CONTAMINATION PREVENTION: Validate country consistency
+                if localStation.country != cloudKitStation.country {
+                    print("🚨 COUNTRY CONTAMINATION DETECTED: Station '\(cloudKitStation.name)' has mismatched countries - Local: '\(localStation.country)' vs CloudKit: '\(cloudKitStation.country)'")
+                    // Keep local country as it's more trusted (user has been using it)
+                    mergedStation.country = localStation.country
+                    print("🛡️ COUNTRY PROTECTION: Preserved local country '\(localStation.country)' for station '\(cloudKitStation.name)'")
+                }
                 
                 // PRESERVE LOCAL STATE: These fields should never be overwritten by CloudKit
                 mergedStation.lastPlayed = localStation.lastPlayed  // Preserve Recent stations
@@ -749,7 +1008,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 
                 mergedStations.append(mergedStation)
             } else {
-                // New station from CloudKit - add as-is
+                // New station from CloudKit - add as-is (already validated)
                 mergedStations.append(cloudKitStation)
             }
         }
@@ -2412,6 +2671,34 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     return nil
                 }
                 
+                // CROSS-COUNTRY CONTAMINATION PREVENTION: Validate station country
+                let stationCountryFromAPI = apiStation.country ?? country.name
+                let tempStation = RadioStation(
+                    id: apiStation.stationuuid,
+                    name: apiStation.name,
+                    url: apiStation.url,
+                    iconData: nil,
+                    country: stationCountryFromAPI,
+                    isFavorite: false,
+                    favoritedAt: nil,
+                    favoriteOrder: nil,
+                    order: 0,
+                    lastPlayed: nil
+                )
+                
+                if !isStationCountryValid(tempStation) {
+                    print("🚨 API CONTAMINATION BLOCKED: Station '\(apiStation.name)' (API Country: '\(stationCountryFromAPI)') failed validation for '\(country.name)'")
+                    
+                    // Try to correct the country
+                    if let correctedStation = attemptStationCountryCorrection(tempStation) {
+                        print("🛡️ API CONTAMINATION FIXED: Corrected station '\(apiStation.name)' country to '\(correctedStation.country)'")
+                        // Continue with corrected country
+                    } else {
+                        print("🗑️ API CONTAMINATION REMOVED: Discarded station '\(apiStation.name)' - could not determine correct country")
+                        return nil
+                    }
+                }
+                
                 // Check if we already have this station with favicon data
                 let existingIconData = existingStationsMap[apiStation.stationuuid]?.iconData
                 if existingIconData != nil {
@@ -3406,45 +3693,33 @@ class RadioStationViewModel: NSObject, ObservableObject {
             }
         }
         
-        // First pass: Remove obviously corrupted stations (Italian/UK stations mixed with others)
+        // ENHANCED CROSS-COUNTRY CONTAMINATION CLEANUP
+        print("🛡️ Starting comprehensive cross-country contamination cleanup...")
+        
         var stationsToRemove: [RadioStation] = []
+        var stationsToCorrect: [(original: RadioStation, corrected: RadioStation)] = []
+        
         for station in stations {
-            // Identify corrupted data: stations that are clearly from wrong countries
-            let stationName = station.name.lowercased()
-            let stationCountry = station.country
-            
-            // Remove Italian stations that are not assigned to Italy
-            if stationCountry != "Italy" && (
-                stationName.contains("radio rai") || 
-                stationName.contains("rai radio") ||
-                stationName.contains("radio italia") ||
-                stationName.contains("virgin radio italia") ||
-                stationName.contains("radio kiss kiss") ||
-                stationName.contains("radio norba") ||
-                stationName.contains("radio monte carlo") ||
-                stationName.hasPrefix("rai ") ||
-                stationName.contains("radio maria") ||
-                stationName.contains("radio popolare")
-            ) {
-                stationsToRemove.append(station)
-                print("🗑️ Removing corrupted Italian station: '\(station.name)' (was assigned to '\(stationCountry)')")
-            }
-            
-            // Remove UK stations that are not assigned to United Kingdom
-            else if stationCountry != "United Kingdom" && (
-                stationName.contains("bbc") ||
-                stationName.contains("talksport") ||
-                stationName.contains("talkradio") ||
-                stationName.contains("virgin radio uk") ||
-                stationName.contains("smooth radio") ||
-                stationName.contains("resonance fm") ||
-                stationName.contains("sky news uk") ||
-                stationName.contains("gb news")
-            ) {
-                stationsToRemove.append(station)
-                print("🗑️ Removing corrupted UK station: '\(station.name)' (was assigned to '\(stationCountry)')")
+            if !isStationCountryValid(station) {
+                // Try to correct the station first
+                if let correctedStation = attemptStationCountryCorrection(station) {
+                    stationsToCorrect.append((original: station, corrected: correctedStation))
+                    print("🛡️ CLEANUP: Will correct station '\(station.name)' from '\(station.country)' to '\(correctedStation.country)'")
+                } else {
+                    stationsToRemove.append(station)
+                    print("🗑️ CLEANUP: Will remove contaminated station '\(station.name)' (Country: '\(station.country)') - could not determine correct country")
+                }
             }
         }
+        
+        // Apply corrections
+        for correction in stationsToCorrect {
+            if let index = stations.firstIndex(where: { $0.id == correction.original.id }) {
+                stations[index] = correction.corrected
+            }
+        }
+        
+        print("🛡️ CLEANUP SUMMARY: Corrected \(stationsToCorrect.count) stations, will remove \(stationsToRemove.count) stations")
         
         // Remove corrupted stations from memory and Core Data
         for station in stationsToRemove {

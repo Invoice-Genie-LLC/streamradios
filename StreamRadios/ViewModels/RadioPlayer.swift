@@ -47,6 +47,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var albumArt: UIImage?
     @Published var metadata: String?
     @Published var iTunesAlbumArt: UIImage?
+    var iTunesArtworkJustSet: Bool = false
     @Published var displayTitle: String?
     @Published var displayArtist: String?
     @Published var isHandlingAlarm = false
@@ -155,7 +156,8 @@ class RadioPlayer: NSObject, ObservableObject {
             return 
         }
         
-        print("🎵 Shazam MATCH FOUND: '\(title)' by '\(artist)'")
+        let isManualShazam = info["isManualShazam"] as? Bool ?? false
+        print("🎵 Shazam MATCH FOUND (\(isManualShazam ? "MANUAL" : "AUTO")): '\(title)' by '\(artist)'")
         print("   - Artwork URL: \(urlString)")
         
         // Update metadata with Shazam's verified information
@@ -177,6 +179,13 @@ class RadioPlayer: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     print("✅ Setting Shazam artwork - image size: \(image.size)")
                     self.iTunesAlbumArt = image
+                    self.iTunesArtworkJustSet = true
+                    
+                    // MANUAL SHAZAM FEATURE: Save artwork to station for station list display
+                    if isManualShazam {
+                        self.saveShazamArtworkToCurrentStation(image, songTitle: title, artist: artist)
+                    }
+                    
                     self.updateNowPlayingInfo()
                     self.updateWidget()
                     print("🎨 Shazam artwork successfully applied and UI updated")
@@ -300,9 +309,19 @@ class RadioPlayer: NSObject, ObservableObject {
             let similarity = metadataWords.isEmpty ? 0.0 : Double(commonWords.count) / Double(metadataWords.count)
             
             if similarity < 0.5 {
-                // Clear existing artwork only for genuinely different songs
-                iTunesAlbumArt = nil
-                print("🔄 New song detected: '\(currentMetadata)' - clearing previous artwork (similarity: \(String(format: "%.2f", similarity)))")
+                // Only clear artwork if it's genuinely old artwork from a different song
+                // Don't clear if we just got fresh iTunes artwork for the current metadata
+                let shouldClearArtwork = (iTunesAlbumArt != nil && !iTunesArtworkJustSet)
+                
+                if shouldClearArtwork {
+                    iTunesAlbumArt = nil
+                    print("🔄 New song detected: '\(currentMetadata)' - clearing previous artwork (similarity: \(String(format: "%.2f", similarity)))")
+                } else {
+                    print("🔄 New song detected: '\(currentMetadata)' - keeping fresh iTunes artwork (similarity: \(String(format: "%.2f", similarity)))")
+                }
+                
+                // Reset the flag after processing
+                iTunesArtworkJustSet = false
             } else {
                 print("🔄 Similar song metadata: '\(currentMetadata)' - keeping existing artwork (similarity: \(String(format: "%.2f", similarity)))")
             }
@@ -320,9 +339,10 @@ class RadioPlayer: NSObject, ObservableObject {
             print("   - Station: \(stationName)")
             print("   - Current iTunesAlbumArt: \(iTunesAlbumArt != nil ? "present" : "nil")")
             
-            Task {
-                await ShazamViewModel.shared.matchCurrentStationStreamURL(url.absoluteString, seconds: 10)
-            }
+            // SHAZAM FIX: Temporarily disabled - method doesn't exist in current ShazamViewModel
+            // Task {
+            //     await ShazamViewModel.shared.matchCurrentStationStreamURL(url.absoluteString, seconds: 10)
+            // }
             
             // Update the search tracker to prevent immediate re-search of same metadata
             if let currentMetadata = metadata {
@@ -889,14 +909,35 @@ class RadioPlayer: NSObject, ObservableObject {
             DebugLogger.logWarning("Audio interruption began - pausing radio playback (likely phone call or other audio)", category: "AudioInterruption")
             DebugLogger.setUserAction("Audio Interruption Started")
             
-            wasPlayingBeforeInterruption = isPlaying
-            
-            // CRITICAL: Immediately pause playback to prevent audio mixing with phone calls
-            if isPlaying {
-                player?.pause()
-                isPlaying = false
-                print("✅ RadioPlayer: Playback paused due to interruption")
+            // PHONE CALL FIX: Multiple interruption protection with PlaybackManager state coordination
+            let isFirstInterruption = !wasPlayingBeforeInterruption
+            if isFirstInterruption {
+                // Check both our state AND PlaybackManager state (in case PlaybackManager captured it first)
+                let actuallyWasPlaying = isPlaying || (PlaybackManager.shared.activePlayer == .radio && PlaybackManager.shared.radioWasPlayingBeforeInterruption)
+                wasPlayingBeforeInterruption = actuallyWasPlaying
+                print("🔧 RadioPlayer: Set wasPlayingBeforeInterruption = \(wasPlayingBeforeInterruption) (FIRST interruption - coordinated with PlaybackManager)")
+            } else {
+                print("🔧 RadioPlayer: State unchanged (subsequent interruption) = \(wasPlayingBeforeInterruption)")
             }
+            
+            // PHONE CALL FIX: Force immediate pause to prevent ANY audio mixing with phone calls
+            // This must happen synchronously and immediately
+            player?.pause()
+            isPlaying = false
+            
+            // CRITICAL: Also ensure no audio session mixing by deactivating briefly
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    // Briefly deactivate to ensure complete audio stop for phone calls
+                    try audioSession.setActive(false, options: [])
+                    print("✅ RadioPlayer: Audio session deactivated for phone call")
+                } catch {
+                    print("⚠️ RadioPlayer: Could not deactivate audio session: \(error)")
+                }
+            }
+            
+            print("✅ RadioPlayer: Playback paused due to interruption")
             
             DebugLogger.logInfo("Audio interruption handled - Radio was playing: \(wasPlayingBeforeInterruption), Station: \(currentlyPlayingStation?.name ?? "None")", category: "AudioInterruption")
             
@@ -905,10 +946,19 @@ class RadioPlayer: NSObject, ObservableObject {
             print("🔧 RadioPlayer: Audio interruption ended - letting PlaybackManager handle resume")
             DebugLogger.logInfo("Audio interruption ended - PlaybackManager will handle resume", category: "AudioInterruption")
             DebugLogger.setUserAction("Audio Interruption Ended")
+            
+            // PHONE CALL FIX: Reset interruption state after a delay to allow for resume
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                if let self = self, !self.isPlaying {
+                    // Only reset if we're still not playing after resume attempts
+                    self.wasPlayingBeforeInterruption = false
+                    print("🔧 RadioPlayer: Reset interruption state for next phone call")
+                }
+            }
         }
     }
     
-    /// Resumes playback after an audio interruption (e.g., alarm, phone call)
+    /// Resumes playback after an audio interruption (e.g., alarm, phone call, other apps)
     func resumeAfterInterruption() {
         print("🔊 RadioPlayer: Attempting to resume playback after interruption")
         DebugLogger.logInfo("Resuming radio playback after audio interruption", category: "AudioInterruption")
@@ -921,48 +971,72 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
-        // CRITICAL: More aggressive audio session reactivation for lock screen phone call scenarios
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            
-            // First, ensure the category is correct
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-            
-            // Then activate with more aggressive options for lock screen scenarios
-            try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-            
-            // Additional delay to ensure audio session is fully ready
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                guard let self = self else { return }
+        // PHONE CALL FIX: Check if audio session is already active to prevent OSStatus -50 errors
+        // PlaybackManager may have already activated the session successfully
+        let audioSession = AVAudioSession.sharedInstance()
+        let isSessionActive = audioSession.category == .playback
+        
+        if !isSessionActive {
+            // Only activate session if it's not already in the correct state
+            do {
+                // First, ensure the category is correct and take control of audio
+                try audioSession.setCategory(.playback, 
+                                           mode: .default, 
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
                 
+                // Aggressively activate audio session to reclaim audio from other apps
+                try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
+                
+                print("✅ RadioPlayer: Audio session reactivated, attempting playback resume")
+            } catch {
+                print("❌ RadioPlayer: Failed to activate audio session: \(error)")
+                DebugLogger.logError("Failed to activate audio session for radio resume: \(error.localizedDescription)", category: "AudioInterruption")
+                
+                // Continue anyway - PlaybackManager might have already activated it
+                print("🔄 RadioPlayer: Continuing with resume despite session activation error")
+            }
+        } else {
+            print("✅ RadioPlayer: Audio session already active, proceeding with resume")
+        }
+        
+        // Resume playback with small delay to ensure session is ready
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self else { return }
+            
+            do {
                 // Resume playback
                 player.play()
                 self.isPlaying = true
                 self.wasPlayingBeforeInterruption = false // Reset the flag
                 
+                // STATION ARTWORK FIX: Ensure station artwork is loaded when resuming
+                if self.albumArt == nil && self.iTunesAlbumArt == nil {
+                    self.loadStationArtwork()
+                }
+                
                 print("✅ RadioPlayer: Successfully resumed playback after interruption")
                 DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
-            }
-            
-        } catch {
-            print("❌ RadioPlayer: Failed to resume after interruption: \(error)")
-            DebugLogger.logError("Failed to resume radio playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
-            
-            // Retry with a longer delay for stubborn cases
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                guard let self = self else { return }
                 
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    try audioSession.setActive(true, options: [])
-                    player.play()
-                    self.isPlaying = true
-                    self.wasPlayingBeforeInterruption = false
-                    print("✅ RadioPlayer: Successfully resumed playback after retry")
-                } catch {
-                    print("❌ RadioPlayer: Final retry failed: \(error)")
+            } catch {
+                print("❌ RadioPlayer: Failed to resume playback: \(error)")
+                DebugLogger.logError("Failed to resume radio playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
+                
+                // Retry with more aggressive approach and longer delay for stubborn cases (other apps holding audio)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self = self else { return }
+                    
+                    do {
+                        let audioSession = AVAudioSession.sharedInstance()
+                        // Force reactivation without notifying others to aggressively reclaim audio
+                        try audioSession.setActive(false)
+                        try audioSession.setActive(true, options: [])
+                        player.play()
+                        self.isPlaying = true
+                        self.wasPlayingBeforeInterruption = false
+                        print("✅ RadioPlayer: Successfully resumed playback after aggressive retry")
+                    } catch {
+                        print("❌ RadioPlayer: Final aggressive retry failed: \(error)")
+                    }
                 }
             }
         }
@@ -1312,6 +1386,11 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("▶️ Play: Player started with seamless quality management")
         
+        // STATION ARTWORK FIX: Reload artwork when resuming playback to prioritize song artwork over station artwork
+        print("🔍 STATION ARTWORK DEBUG: albumArt=\(albumArt != nil), iTunesAlbumArt=\(iTunesAlbumArt != nil)")
+        loadStationArtwork()
+        print("🎨 Play: Reloaded station artwork (prioritizes song artwork when playing)")
+        
         // Update Now Playing immediately since audio session is already activated
         updateNowPlayingInfo()
         
@@ -1373,10 +1452,20 @@ class RadioPlayer: NSObject, ObservableObject {
         // This immediately removes song info while keeping the station active
         metadata = nil
         iTunesAlbumArt = nil
-        albumArt = nil
         songTitle = ""
         artistName = ""
         lastMetadataSearched = ""
+        
+        print("🎨 DEBUG: Cleared iTunesAlbumArt - now nil: \(iTunesAlbumArt == nil)")
+        
+        // Load station's default artwork when paused (instead of clearing all artwork)
+        loadStationArtwork()
+        print("🎨 Pause: Loaded station default artwork - albumArt is now: \(albumArt != nil ? "present" : "nil")")
+        
+        // Force UI update to ensure artwork changes are reflected immediately
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
         
         // Cancel any pending iTunes searches when paused
         artworkSearchTimer?.invalidate()
@@ -1511,6 +1600,16 @@ class RadioPlayer: NSObject, ObservableObject {
         artistName = ""
         lastMetadataSearched = ""
         artworkSearchTimer?.invalidate()
+        
+        // STATION ARTWORK FIX: Load station artwork immediately when switching stations
+        print("🎨 DEBUG: Station switch - Cleared iTunesAlbumArt and albumArt, loading station artwork")
+        loadStationArtwork()
+        print("🎨 Station Switch: Loaded station artwork - albumArt is now: \(albumArt != nil ? "present" : "nil")")
+        
+        // Force UI update to ensure artwork changes are reflected immediately
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
         
         // Reset elapsed time when switching stations
         playbackStartTime = nil
@@ -2190,9 +2289,10 @@ class RadioPlayer: NSObject, ObservableObject {
                     // Cache the result using normalized key (even if nil)
                     self.cacheImage(image, for: cacheKey)
                     
-                    // Only update if we're still on the same song
-                    if cacheKey == self.lastMetadataSearched {
+                    // Only update if we're still on the same song (normalize case for comparison)
+                    if cacheKey.lowercased() == self.lastMetadataSearched.lowercased() {
                         self.iTunesAlbumArt = image
+                        self.iTunesArtworkJustSet = true
                         
                         // Save iTunes artwork to current station if image was found
                         if let image = image {
@@ -3045,32 +3145,167 @@ class RadioPlayer: NSObject, ObservableObject {
         }
     }
     
+    // STATION ARTWORK FIX: Load station artwork into albumArt property for UI display
+    func loadStationArtwork() {
+        // Get the most up-to-date station data from the viewModel if possible
+        let station: RadioStation
+        if let currentIndex = currentStationIndex, let viewModel = viewModel, currentIndex < viewModel.stations.count {
+            station = viewModel.stations[currentIndex]
+            print("🎨 Using fresh station data from viewModel at index \(currentIndex)")
+        } else if let currentStation = currentlyPlayingStation {
+            station = currentStation
+            print("🎨 Using currentlyPlayingStation reference")
+        } else {
+            print("🎨 No current station to load artwork from")
+            return
+        }
+        
+        print("🎨 STATION ARTWORK DEBUG for '\(station.name)':")
+        print("  - iconData: \(station.iconData != nil ? "present (\(station.iconData!.prefix(20))...)" : "nil")")
+        print("  - iTunesArtworkData: \(station.iTunesArtworkData != nil ? "present (\(station.iTunesArtworkData!.prefix(20))...)" : "nil")")
+        print("  - Current iTunesAlbumArt: \(iTunesAlbumArt != nil ? "present" : "nil")")
+        print("  - isPlaying: \(isPlaying)")
+        
+        // When paused, prioritize station default artwork over iTunes song artwork
+        if !isPlaying {
+            // Priority 1 (when paused): Station icon data
+            if let iconData = station.iconData,
+               let imageData = Data(base64Encoded: iconData),
+               let image = UIImage(data: imageData) {
+                albumArt = image
+                print("🎨 ✅ Using station icon artwork (paused state) for '\(station.name)' (size: \(image.size))")
+                return
+            }
+            
+            // Priority 2 (when paused): Station's saved iTunes artwork data
+            if let iTunesArtworkData = station.iTunesArtworkData,
+               let imageData = Data(base64Encoded: iTunesArtworkData),
+               let image = UIImage(data: imageData) {
+                albumArt = image
+                print("🎨 ✅ Using station iTunes artwork (paused state) for '\(station.name)' (size: \(image.size))")
+                return
+            }
+        } else {
+            // When playing, prioritize current song artwork over station artwork
+            // Priority 1 (when playing): Use current iTunes artwork if available (live artwork from currently playing song)
+            if let currentiTunesArt = iTunesAlbumArt {
+                albumArt = currentiTunesArt
+                print("🎨 ✅ Using current iTunes artwork (playing state) for '\(station.name)' (size: \(currentiTunesArt.size))")
+                return
+            }
+            
+            // Priority 2 (when playing): Station icon data
+            if let iconData = station.iconData,
+               let imageData = Data(base64Encoded: iconData),
+               let image = UIImage(data: imageData) {
+                albumArt = image
+                print("🎨 ✅ Using station icon artwork (playing state) for '\(station.name)' (size: \(image.size))")
+                return
+            }
+            
+            // Priority 3 (when playing): Station's saved iTunes artwork data
+            if let iTunesArtworkData = station.iTunesArtworkData,
+               let imageData = Data(base64Encoded: iTunesArtworkData),
+               let image = UIImage(data: imageData) {
+                albumArt = image
+                print("🎨 ✅ Using station iTunes artwork (playing state) for '\(station.name)' (size: \(image.size))")
+                return
+            }
+        }
+        
+        // No station artwork available - create default radio icon
+        albumArt = createDefaultRadioIcon()
+        print("🎨 🔄 No station artwork available for '\(station.name)' - using default radio icon")
+    }
+    
+    // Create a default radio icon image for stations without custom artwork
+    private func createDefaultRadioIcon() -> UIImage? {
+        let size = CGSize(width: 200, height: 200)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        
+        return renderer.image { context in
+            let rect = CGRect(origin: .zero, size: size)
+            
+            // Create gradient background
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let colors = [
+                UIColor.systemBlue.withAlphaComponent(0.6).cgColor,
+                UIColor.systemPurple.withAlphaComponent(0.4).cgColor
+            ]
+            let gradient = CGGradient(colorsSpace: colorSpace, colors: colors as CFArray, locations: [0.0, 1.0])!
+            
+            // Draw gradient background with rounded corners
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: 16)
+            context.cgContext.addPath(path.cgPath)
+            context.cgContext.clip()
+            
+            context.cgContext.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: 0, y: 0),
+                end: CGPoint(x: size.width, y: size.height),
+                options: []
+            )
+            
+            // Draw radio icon
+            let iconSize: CGFloat = 60
+            let iconRect = CGRect(
+                x: (size.width - iconSize) / 2,
+                y: (size.height - iconSize) / 2,
+                width: iconSize,
+                height: iconSize
+            )
+            
+            // Create radio icon using SF Symbols
+            if let radioImage = UIImage(systemName: "radio", withConfiguration: UIImage.SymbolConfiguration(pointSize: iconSize, weight: .medium)) {
+                radioImage.withTintColor(.white.withAlphaComponent(0.8), renderingMode: .alwaysTemplate).draw(in: iconRect)
+            }
+        }
+    }
+    
     func saveITunesArtworkToCurrentStation(_ image: UIImage) {
         guard let currentIndex = currentStationIndex, let viewModel = viewModel else {
-            print("Cannot save iTunes artwork: no current station")
+            print("🎨 ❌ Cannot save iTunes artwork: no current station (currentIndex=\(currentStationIndex), viewModel=\(viewModel != nil))")
             return
         }
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            print("Failed to convert iTunes artwork to JPEG data")
+            print("🎨 ❌ Failed to convert iTunes artwork to JPEG data")
             return
         }
         let base64String = imageData.base64EncodedString()
+        
+        print("🎨 💾 SAVING iTunes artwork to station at index \(currentIndex)")
+        print("🎨    - Image size: \(image.size)")
+        print("🎨    - Data size: \(imageData.count) bytes")
+        print("🎨    - Base64 preview: \(base64String.prefix(50))...")
         
         // Store artwork for current track persistence
         currentTrackArtwork = image
         
         // CRITICAL: Set iTunesAlbumArt immediately for highest priority display
         iTunesAlbumArt = image
+        iTunesArtworkJustSet = true
         
         // Update the station
         var updatedStation = viewModel.stations[currentIndex]
+        let oldArtworkData = updatedStation.iTunesArtworkData
         updatedStation.iTunesArtworkData = base64String
         viewModel.stations[currentIndex] = updatedStation
         
+        // CRITICAL: Update currentlyPlayingStation to point to the updated station object
+        currentlyPlayingStation = updatedStation
+        print("🎨 🔄 Updated currentlyPlayingStation reference with new artwork data")
+        
+        print("🎨 ✅ iTunes artwork assigned to station: '\(updatedStation.name)'")
+        print("🎨    - Had old artwork: \(oldArtworkData != nil)")
+        print("🎨    - New artwork data: \(updatedStation.iTunesArtworkData != nil)")
+        
         // Save to Core Data
         viewModel.saveStationsToCoreData()
+        print("🎨 💾 Station data saved to Core Data")
         
-        print("iTunes artwork saved to station: \(updatedStation.name)")
+        // STATION ARTWORK FIX: Immediately reload station artwork so albumArt gets the new iTunes artwork
+        loadStationArtwork()
+        print("🎨 🔄 Station artwork reloaded after saving iTunes artwork")
         
         // CRITICAL: Cache artwork for CarPlay independent operation
         cacheITunesArtworkForCarPlay(image: image, station: updatedStation)
@@ -3098,6 +3333,61 @@ class RadioPlayer: NSObject, ObservableObject {
         updateWidget()
         
         print("✅ iTunes artwork updated in real-time - Now Playing, CarPlay cache, and Widget refreshed")
+    }
+    
+    // MANUAL SHAZAM FEATURE: Save Shazam artwork to current station for station list display
+    func saveShazamArtworkToCurrentStation(_ image: UIImage, songTitle: String, artist: String) {
+        guard let currentIndex = currentStationIndex, let viewModel = viewModel else {
+            print("🎵 ❌ Cannot save Shazam artwork: no current station (currentIndex=\(currentStationIndex), viewModel=\(viewModel != nil))")
+            return
+        }
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("🎵 ❌ Failed to convert Shazam artwork to JPEG data")
+            return
+        }
+        let base64String = imageData.base64EncodedString()
+        
+        print("🎵 💾 SAVING Shazam artwork to station at index \(currentIndex)")
+        print("🎵    - Song: '\(songTitle)' by '\(artist)'")
+        print("🎵    - Image size: \(image.size)")
+        print("🎵    - Data size: \(imageData.count) bytes")
+        print("🎵    - Base64 preview: \(base64String.prefix(50))...")
+        
+        // Update the station with Shazam artwork (replaces iTunes artwork)
+        var updatedStation = viewModel.stations[currentIndex]
+        let oldArtworkData = updatedStation.iTunesArtworkData
+        updatedStation.iTunesArtworkData = base64String
+        viewModel.stations[currentIndex] = updatedStation
+        
+        // CRITICAL: Update currentlyPlayingStation to point to the updated station object
+        currentlyPlayingStation = updatedStation
+        print("🎵 🔄 Updated currentlyPlayingStation reference with new Shazam artwork data")
+        
+        print("🎵 ✅ Shazam artwork assigned to station: '\(updatedStation.name)'")
+        print("🎵    - Replaced previous artwork: \(oldArtworkData != nil)")
+        print("🎵    - New Shazam artwork data: \(updatedStation.iTunesArtworkData != nil)")
+        
+        // Save to Core Data
+        viewModel.saveStationsToCoreData()
+        print("🎵 💾 Station data saved to Core Data with Shazam artwork")
+        
+        // STATION ARTWORK FIX: Immediately reload station artwork so albumArt gets the new Shazam artwork
+        loadStationArtwork()
+        print("🎵 🔄 Station artwork reloaded after saving Shazam artwork")
+        
+        // CRITICAL: Cache artwork for CarPlay independent operation
+        cacheITunesArtworkForCarPlay(image: image, station: updatedStation)
+        
+        // CRITICAL: Immediately update Now Playing with new artwork
+        updateNowPlayingInfo()
+        
+        // ENHANCED: Force immediate CarPlay Now Playing update for real-time response
+        self.forceUpdateNowPlayingInfo()
+        
+        // Widget update for immediate reflection
+        updateWidget()
+        
+        print("✅ Shazam artwork updated in real-time - Station list will show this artwork when user returns")
     }
     
     /// Caches iTunes artwork for CarPlay independent operation
@@ -4646,11 +4936,14 @@ class RadioPlayer: NSObject, ObservableObject {
                 let cleanedMetadata = self.cleanHTMLMetadata(rawMetadata)
                 
                 if !cleanedMetadata.isEmpty {
-                    // Update metadata (artwork will only come from Shazam)
+                    // Update metadata and trigger both iTunes artwork search and Shazam recognition
                     DispatchQueue.main.async { [weak self] in
                         self?.metadata = cleanedMetadata
-                        // No iTunes artwork fetch - artwork only comes from Shazam
-                        print("📻 Metadata found: \(cleanedMetadata) - triggering immediate Shazam recognition")
+                        
+                        // Trigger iTunes artwork search for new metadata
+                        self?.fetchITunesAlbumArt(for: cleanedMetadata)
+                        
+                        print("📻 Metadata found: \(cleanedMetadata) - triggering iTunes artwork search and Shazam recognition")
                         // Trigger immediate Shazam recognition for detected metadata
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                             self?.attemptShazamRecognition()
@@ -5135,17 +5428,31 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
             let isNewSongContent = (lastMetadataSearched != value)
             
             if isNewSongContent {
-                // Clear old artwork when genuinely new metadata is detected
-                iTunesAlbumArt = nil
-                print("🧹 Cleared old artwork for fresh song recognition")
+                // Only clear artwork if it's genuinely old artwork from a different song
+                // Don't clear if we just got fresh iTunes artwork for the current metadata
+                let shouldClearArtwork = (iTunesAlbumArt != nil && !iTunesArtworkJustSet && lastMetadataSearched != value && !lastMetadataSearched.isEmpty)
+                
+                if shouldClearArtwork {
+                    iTunesAlbumArt = nil
+                    print("🧹 Cleared old artwork for fresh song recognition")
+                } else {
+                    print("🎯 Keeping current artwork - either no artwork to clear or fresh iTunes artwork")
+                }
+                
+                // Reset the flag after processing
+                iTunesArtworkJustSet = false
             } else if displayTitle != nil && displayArtist != nil {
                 print("🎯 Keeping Shazam-verified artwork - same song detected")
             }
             
-            // Artwork will only come from Shazam
+            // Trigger both iTunes artwork search and Shazam recognition
             if !value.isEmpty {
                 if isNewSongContent {
-                    print("📻 New metadata detected: \(value) - triggering immediate Shazam recognition")
+                    print("📻 New metadata detected: \(value) - triggering iTunes artwork search and Shazam recognition")
+                    
+                    // Trigger immediate iTunes artwork search for new songs
+                    fetchITunesAlbumArt(for: value)
+                    
                     // Trigger immediate Shazam recognition for new songs
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                         self?.attemptShazamRecognition()
@@ -5354,6 +5661,7 @@ extension RadioPlayer {
                         
                         // CRITICAL: Set artwork immediately for highest priority display
                         self.iTunesAlbumArt = image
+                        self.iTunesArtworkJustSet = true
                         
                         // Save to station and cache for persistence
                         self.saveITunesArtworkToCurrentStation(image)

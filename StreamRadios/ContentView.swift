@@ -904,8 +904,9 @@ struct CompactPlayerView: View {
     
     @ViewBuilder
     private var albumArtworkView: some View {
-        // Priority: iTunes album art > stream album art > station icon > default
-        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+        // Priority: When playing (iTunes artwork > station artwork), When paused (station artwork > iTunes artwork)
+        if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+            // When playing, prioritize song artwork
             Image(uiImage: iTunesAlbumArt)
                 .resizable()
                 .scaledToFill()
@@ -917,6 +918,13 @@ struct CompactPlayerView: View {
                 .clipped()
         } else if let iconData = currentStation.iconData, 
                   let imageData = Data(base64Encoded: iconData),
+                  let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .background(Color.white.opacity(0.1))
+        } else if let iTunesArtworkData = currentStation.iTunesArtworkData,
+                  let imageData = Data(base64Encoded: iTunesArtworkData),
                   let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
@@ -1424,8 +1432,9 @@ struct CurrentlyPlayingView: View {
     
     @ViewBuilder
     private var albumArtworkView: some View {
-        // Priority: iTunes album art > stream album art > station icon > default
-        if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+        // Priority: When playing (iTunes artwork > station artwork), When paused (station artwork > iTunes artwork)
+        if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+            // When playing, prioritize song artwork
             Image(uiImage: iTunesAlbumArt)
                 .resizable()
                 .scaledToFill()

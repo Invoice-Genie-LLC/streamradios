@@ -2043,39 +2043,59 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         switch type {
         case .began:
             print("🔇 PodcastPlayer: Audio interruption began - pausing playback immediately")
-            DebugLogger.logWarning("Audio interruption began - pausing podcast playback (likely phone call or other audio)", category: "AudioInterruption")
+            DebugLogger.logWarning("Audio interruption began - pausing podcast playbook (likely phone call or other audio)", category: "AudioInterruption")
             
-            // CRITICAL: Store state IMMEDIATELY and notify PlaybackManager synchronously
-            wasPlayingBeforeInterruption = isPlaying
-            print("🎧 PodcastPlayer: Set wasPlayingBeforeInterruption = \(wasPlayingBeforeInterruption)")
-            
-            // CRITICAL: Update PlaybackManager state immediately to prevent race condition
-            if PlaybackManager.shared.activePlayer == .podcast {
-                // Force PlaybackManager to use our state
-                DispatchQueue.main.async {
-                    print("🔄 PodcastPlayer: Ensuring PlaybackManager has correct interruption state")
-                }
+            // PHONE CALL FIX: Multiple interruption protection with PlaybackManager state coordination
+            let isFirstInterruption = !wasPlayingBeforeInterruption
+            if isFirstInterruption {
+                // Check both our state AND PlaybackManager state (in case PlaybackManager captured it first)
+                let actuallyWasPlaying = isPlaying || (PlaybackManager.shared.activePlayer == .podcast && PlaybackManager.shared.podcastWasPlayingBeforeInterruption)
+                wasPlayingBeforeInterruption = actuallyWasPlaying
+                print("🎧 PodcastPlayer: Set wasPlayingBeforeInterruption = \(wasPlayingBeforeInterruption) (FIRST interruption - coordinated with PlaybackManager)")
+            } else {
+                print("🎧 PodcastPlayer: State unchanged (subsequent interruption) = \(wasPlayingBeforeInterruption)")
             }
             
-            if isPlaying {
-                player?.pause()
-                isPlaying = false
-                print("✅ PodcastPlayer: Playback paused due to interruption")
+            // PHONE CALL FIX: Force immediate pause to prevent ANY audio mixing with phone calls
+            // This must happen synchronously and immediately
+            player?.pause()
+            isPlaying = false
+            
+            // CRITICAL: Immediately deactivate audio session to prevent mixing - DO NOT make async
+            // This MUST be synchronous to ensure no audio mixing with phone calls
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                // Immediately deactivate to ensure complete audio stop for phone calls
+                try audioSession.setActive(false, options: [])
+                print("✅ PodcastPlayer: Audio session immediately deactivated for phone call")
+            } catch {
+                print("⚠️ PodcastPlayer: Could not deactivate audio session: \(error)")
+                // Even if deactivation fails, the player.pause() above should stop the audio
             }
+            
+            print("✅ PodcastPlayer: Playback paused and audio session deactivated due to interruption")
             
             DebugLogger.logInfo("Podcast audio interruption handled - Was playing: \(wasPlayingBeforeInterruption), Episode: \(currentEpisode?.title ?? "None")", category: "AudioInterruption")
             
         case .ended:
             print("🔊 PodcastPlayer: Audio interruption ended - letting PlaybackManager handle resume")
             DebugLogger.logInfo("Podcast audio interruption ended - PlaybackManager will handle resume", category: "AudioInterruption")
-            // Let PlaybackManager handle resume
+            
+            // PHONE CALL FIX: Reset interruption state after a delay to allow for resume
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                if let self = self, !self.isPlaying {
+                    // Only reset if we're still not playing after resume attempts
+                    self.wasPlayingBeforeInterruption = false
+                    print("🎧 PodcastPlayer: Reset interruption state for next phone call")
+                }
+            }
             
         @unknown default:
             break
         }
     }
     
-    /// Resumes playback after an audio interruption (e.g., alarm, phone call)
+    /// Resumes playback after an audio interruption (e.g., alarm, phone call, other apps)
     func resumeAfterInterruption() {
         print("🔊 PodcastPlayer: Attempting to resume playback after interruption")
         DebugLogger.logInfo("Resuming podcast playback after audio interruption", category: "AudioInterruption")
@@ -2088,29 +2108,46 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return
         }
         
-        // CRITICAL: For lock screen phone call scenarios, currentEpisode might be temporarily nil
+        // CRITICAL: For various interruption scenarios, currentEpisode might be temporarily nil
         // but we should still attempt resume if we have a valid player and were playing before
         if currentEpisode == nil {
-            print("⚠️ PodcastPlayer: No current episode - this might be a lock screen phone call scenario")
-            DebugLogger.logWarning("Attempting resume without current episode (possible lock screen phone call)", category: "AudioInterruption")
+            print("⚠️ PodcastPlayer: No current episode - this might be an app interruption scenario")
+            DebugLogger.logWarning("Attempting resume without current episode (possible app interruption)", category: "AudioInterruption")
         }
         
-        // CRITICAL: More aggressive audio session reactivation for lock screen phone call scenarios
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            
-            // First, ensure the category is correct
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-            
-            // Then activate with more aggressive options for lock screen scenarios
-            try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-            
-            // Additional delay to ensure audio session is fully ready
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                guard let self = self else { return }
+        // PHONE CALL FIX: Check if audio session is already active to prevent OSStatus -50 errors
+        // PlaybackManager may have already activated the session successfully
+        let audioSession = AVAudioSession.sharedInstance()
+        let isSessionActive = audioSession.category == .playback
+        
+        if !isSessionActive {
+            // Only activate session if it's not already in the correct state
+            do {
+                // First, ensure the category is correct and take control of audio
+                try audioSession.setCategory(.playback, 
+                                           mode: .default, 
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
                 
+                // Aggressively activate audio session to reclaim audio from other apps
+                try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
+                
+                print("✅ PodcastPlayer: Audio session reactivated, attempting playback resume")
+            } catch {
+                print("❌ PodcastPlayer: Failed to activate audio session: \(error)")
+                DebugLogger.logError("Failed to activate audio session for podcast resume: \(error.localizedDescription)", category: "AudioInterruption")
+                
+                // Continue anyway - PlaybackManager might have already activated it
+                print("🔄 PodcastPlayer: Continuing with resume despite session activation error")
+            }
+        } else {
+            print("✅ PodcastPlayer: Audio session already active, proceeding with resume")
+        }
+        
+        // Resume playback with small delay to ensure session is ready
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self else { return }
+            
+            do {
                 // Resume playback
                 player.play()
                 self.isPlaying = true
@@ -2121,26 +2158,28 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 
                 print("✅ PodcastPlayer: Successfully resumed playback after interruption")
                 DebugLogger.logInfo("Podcast playback successfully resumed after interruption", category: "AudioInterruption")
-            }
-            
-        } catch {
-            print("❌ PodcastPlayer: Failed to resume after interruption: \(error)")
-            DebugLogger.logError("Failed to resume podcast playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
-            
-            // Retry with a longer delay for stubborn cases
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                guard let self = self else { return }
                 
-                do {
-                    let audioSession = AVAudioSession.sharedInstance()
-                    try audioSession.setActive(true, options: [])
-                    player.play()
-                    self.isPlaying = true
-                    self.wasPlayingBeforeInterruption = false
-                    self.updateNowPlayingInfo()
-                    print("✅ PodcastPlayer: Successfully resumed playback after retry")
-                } catch {
-                    print("❌ PodcastPlayer: Final retry failed: \(error)")
+            } catch {
+                print("❌ PodcastPlayer: Failed to resume playback: \(error)")
+                DebugLogger.logError("Failed to resume podcast playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
+                
+                // Retry with more aggressive approach and longer delay for stubborn cases (other apps holding audio)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self = self else { return }
+                    
+                    do {
+                        let audioSession = AVAudioSession.sharedInstance()
+                        // Force reactivation without notifying others to aggressively reclaim audio
+                        try audioSession.setActive(false)
+                        try audioSession.setActive(true, options: [])
+                        player.play()
+                        self.isPlaying = true
+                        self.wasPlayingBeforeInterruption = false
+                        self.updateNowPlayingInfo()
+                        print("✅ PodcastPlayer: Successfully resumed playback after aggressive retry")
+                    } catch {
+                        print("❌ PodcastPlayer: Final aggressive retry failed: \(error)")
+                    }
                 }
             }
         }

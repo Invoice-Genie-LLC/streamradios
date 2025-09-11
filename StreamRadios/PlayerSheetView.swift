@@ -640,8 +640,10 @@ struct StationImage: View {
         GeometryReader { geometry in
             let artworkSize = min(geometry.size.width * 0.65, 240)
             
-            // Priority: iTunes album art > stream album art > station icon > default radio icon
-            if let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+            // Priority: When playing (iTunes artwork > station artwork), When paused (station artwork > iTunes artwork)
+            if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+                // When playing, prioritize song artwork
+                let _ = print("🎨 UI DEBUG: Showing iTunes artwork (playing=\(radioPlayer.isPlaying))")
                 HStack {
                     Spacer()
                     Image(uiImage: iTunesAlbumArt)
@@ -654,6 +656,7 @@ struct StationImage: View {
                 }
                 .frame(maxWidth: .infinity)
             } else if let albumArt = radioPlayer.albumArt {
+                let _ = print("🎨 UI DEBUG: Showing station artwork (playing=\(radioPlayer.isPlaying))")
                 HStack {
                     Spacer()
                     Image(uiImage: albumArt)
@@ -677,7 +680,20 @@ struct StationImage: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
+            } else if let iTunesArtworkData = currentStation.iTunesArtworkData, let imageData = Data(base64Encoded: iTunesArtworkData), let image = UIImage(data: imageData) {
+                HStack {
+                    Spacer()
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
             } else {
+                let _ = print("🎨 UI DEBUG: No artwork available (playing=\(radioPlayer.isPlaying), iTunesAlbumArt=\(radioPlayer.iTunesAlbumArt != nil), albumArt=\(radioPlayer.albumArt != nil))")
                 HStack {
                     Spacer()
                     RoundedRectangle(cornerRadius: 16)
