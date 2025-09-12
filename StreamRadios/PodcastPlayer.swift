@@ -857,7 +857,7 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // Enable skip forward command (for seeking within episodes)
         commandCenter.skipForwardCommand.isEnabled = true
-        commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: 15)]
+        commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: 30)]
         commandCenter.skipForwardCommand.addTarget { [weak self] _ in
             if PlaybackManager.shared.activePlayer == .podcast {
                 self?.skipForward()
@@ -2701,9 +2701,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func skipForward() {
         os_log("⏭️ SKIP FORWARD: Lock screen skip forward command received", log: log, type: .info)
-        seek(by: 15)
+        seek(by: 30)
         // REMOVED: Redundant progress saving - seek(to:) already handles all progress saving with chapter protection
-        os_log("⏭️ SEEK FORWARD: 15s forward seek completed with chapter protection", log: log, type: .info)
+        os_log("⏭️ SEEK FORWARD: 30s forward seek completed with chapter protection", log: log, type: .info)
     }
     
     func skipBackward() {
