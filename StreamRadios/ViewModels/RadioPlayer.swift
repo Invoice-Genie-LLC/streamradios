@@ -1838,7 +1838,8 @@ class RadioPlayer: NSObject, ObservableObject {
         // Check if we're the active player, but allow override if we're actually playing
         if PlaybackManager.shared.activePlayer != .radio {
             // If radio is actually playing but not set as active player, force set it
-            if isPlaying && player?.timeControlStatus == .playing {
+            // BUT don't force it during pause operations to prevent station switching
+            if isPlaying && player?.timeControlStatus == .playing && !wasManuallyPaused {
                 print("⚠️ Now Playing: Radio is playing but not active player - forcing active state")
                 PlaybackManager.shared.activePlayer = .radio
             } else {
