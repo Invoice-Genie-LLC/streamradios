@@ -102,6 +102,11 @@ class DataSyncManager: ObservableObject {
     @Published var feedsWithSnapshots = 0
     @Published var totalFeedsRequiringSnapshots = 0
     
+    // Radio Station Snapshots Readiness
+    @Published var stationSnapshotsReady = false
+    @Published var countriesWithSnapshots = 0
+    @Published var totalCountriesRequiringSnapshots = 0
+    
     // Minimal CloudKit sync indicator (for individual saves)
     @Published var isMinimalCloudKitSyncing = false
     @Published var minimalSyncTimer: Timer?
@@ -680,7 +685,17 @@ class DataSyncManager: ObservableObject {
         self.totalFeedsRequiringSnapshots = totalFeedsRequiringSnapshots
         self.episodeSnapshotsReady = (feedsWithSnapshots == totalFeedsRequiringSnapshots && totalFeedsRequiringSnapshots > 0)
         
-        print("📸 DataSyncManager: Updated snapshot readiness - \(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots) ready: \(episodeSnapshotsReady)")
+        print("📸 DataSyncManager: Updated episode snapshot readiness - \(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots) ready: \(episodeSnapshotsReady)")
+    }
+    
+    /// Update radio station snapshot readiness tracking (called by RadioStationViewModel when snapshots are created)
+    @MainActor
+    func updateStationSnapshotReadiness(countriesWithSnapshots: Int, totalCountriesRequiringSnapshots: Int) {
+        self.countriesWithSnapshots = countriesWithSnapshots
+        self.totalCountriesRequiringSnapshots = totalCountriesRequiringSnapshots
+        self.stationSnapshotsReady = (countriesWithSnapshots == totalCountriesRequiringSnapshots && totalCountriesRequiringSnapshots > 0)
+        
+        print("📸 DataSyncManager: Updated station snapshot readiness - \(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots) ready: \(stationSnapshotsReady)")
     }
     
     // MARK: - Individual Feed Addition Tracking
@@ -1160,6 +1175,9 @@ class DataSyncManager: ObservableObject {
         // CRITICAL: Ensure episode snapshots are created for all feeds before completion
         await ensureEpisodeSnapshotsAreCreated(podcastViewModel)
         
+        // CRITICAL: Ensure radio station snapshots are created for all countries before completion
+        await ensureStationSnapshotsAreCreated(RadioStationViewModel.shared)
+        
         // IMMEDIATE: Trigger PodcastViewModel UI refresh as soon as sync completes
         print("🚀 IMMEDIATE: Triggering UI refresh for fresh install completion")
         await podcastViewModel.ensureFeedsAreLoaded()
@@ -1235,25 +1253,30 @@ class DataSyncManager: ObservableObject {
         print("🎯 FINAL VERIFICATION: Current isFreshInstallUIReady=\(isFreshInstallUIReady)")
         
         if finalFeedCount > 0 && finalFeedOrderCount > 0 {
-            // CRITICAL: Also check that episode snapshots are ready before allowing UI access
-            if episodeSnapshotsReady || totalFeedsRequiringSnapshots == 0 {
-                print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds, \(finalFeedOrderCount) feed order items, and \(feedsWithSnapshots) episode snapshots")
+            // CRITICAL: Also check that both episode and station snapshots are ready before allowing UI access
+            let snapshotsReady = (episodeSnapshotsReady || totalFeedsRequiringSnapshots == 0) && 
+                                (stationSnapshotsReady || totalCountriesRequiringSnapshots == 0)
+            
+            if snapshotsReady {
+                print("✅ FINAL SUCCESS: UI is ready with \(finalFeedCount) feeds, \(finalFeedOrderCount) feed order items, \(feedsWithSnapshots) episode snapshots, and \(countriesWithSnapshots) station snapshots")
                 isFreshInstallUIReady = true
                 isSyncing = false
-                print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND episode snapshots")
+                print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND all snapshots")
             } else {
-                print("⏳ WAITING FOR SNAPSHOTS: Feeds ready but episode snapshots not complete (\(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots))")
+                print("⏳ WAITING FOR SNAPSHOTS: Feeds ready but snapshots not complete - Episodes: (\(feedsWithSnapshots)/\(totalFeedsRequiringSnapshots)), Stations: (\(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots))")
                 // Wait a bit more for snapshots to complete
                 try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 
-                if episodeSnapshotsReady {
-                    print("✅ SNAPSHOTS READY: Episode snapshots completed after wait")
+                let snapshotsReadyAfterWait = (episodeSnapshotsReady || totalFeedsRequiringSnapshots == 0) && 
+                                             (stationSnapshotsReady || totalCountriesRequiringSnapshots == 0)
+                
+                if snapshotsReadyAfterWait {
+                    print("✅ SNAPSHOTS READY: All snapshots completed after wait")
                     isFreshInstallUIReady = true
                     isSyncing = false
+                    print("🚀 DataSyncProgressView hidden - UI is confirmed ready with feeds AND all snapshots")
                 } else {
-                    print("⚠️ SNAPSHOTS TIMEOUT: Proceeding without complete snapshots")
-                    isFreshInstallUIReady = true
-                    isSyncing = false
+                    print("⏳ STILL WAITING: Snapshots not ready after wait - will retry")
                 }
             }
         } else {
@@ -1323,6 +1346,51 @@ class DataSyncManager: ObservableObject {
             episodeStatesStatus = .completed
             episodeStatesProgress = 1.0
             episodeStatesOperation = "✅ \(feedsWithSnapshots) episode snapshots ready for instant access"
+        }
+    }
+    
+    /// Ensure radio station snapshots are created for all countries before completing sync
+    @MainActor
+    private func ensureStationSnapshotsAreCreated(_ radioStationViewModel: RadioStationViewModel) async {
+        print("📸 FINAL STATION SNAPSHOT CHECK: Ensuring all countries have station snapshots...")
+        
+        let countriesWithStations = Dictionary(grouping: radioStationViewModel.stations) { $0.country }
+            .filter { !$0.key.isEmpty && $0.key != "Unknown Region" && $0.key != "Select Country" }
+        
+        var snapshotsCreated = 0
+        var totalStations = 0
+        
+        // Update snapshot tracking
+        totalCountriesRequiringSnapshots = countriesWithStations.count
+        countriesWithSnapshots = 0
+        
+        for (country, stations) in countriesWithStations {
+            // Check if snapshot already exists
+            if radioStationViewModel.getStationSnapshot(for: country) != nil {
+                countriesWithSnapshots += 1
+                snapshotsCreated += 1
+                print("📸 Station snapshot already exists for '\(country)'")
+            } else {
+                // Create snapshot for countries with stations
+                radioStationViewModel.updateStationSnapshot(for: country, stations: stations)
+                countriesWithSnapshots += 1
+                snapshotsCreated += 1
+                totalStations += stations.count
+                print("📸 Created final station snapshot for '\(country)' with \(stations.count) stations")
+            }
+        }
+        
+        // Mark snapshots as ready
+        stationSnapshotsReady = (countriesWithSnapshots == totalCountriesRequiringSnapshots)
+        
+        print("📸 FINAL STATION SNAPSHOT SUMMARY: \(snapshotsCreated) snapshots available with \(totalStations) total stations")
+        print("📸 FINAL STATION SNAPSHOT READINESS: \(countriesWithSnapshots)/\(totalCountriesRequiringSnapshots) countries have snapshots - Ready: \(stationSnapshotsReady)")
+        
+        // Update radio stations progress to reflect snapshot creation
+        if radioStationsStatus != .completed {
+            radioStationsStatus = .completed
+            radioStationsProgress = 1.0
+            radioStationsOperation = "✅ \(countriesWithSnapshots) station snapshots ready for instant access"
         }
     }
     

@@ -92,6 +92,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
     // Flag to prevent infinite loop in favorite timestamp migration
     private var isMigrationInProgress = false
     
+    // MARK: - Radio Station Snapshots (Performance Optimization)
+    
+    /// Cache for radio station snapshots by country for instant access
+    private var stationSnapshotCache: [String: [RadioStation]] = [:]
+    
+    /// Timestamps for snapshot creation to manage cleanup
+    private var snapshotTimestamps: [String: Date] = [:]
+    
     @Published var selectedCountry: String = UserDefaults.standard.string(forKey: "selectedCountry") ?? "Select Country" {
         didSet {
             print("🌍 Country selection changed from '\(oldValue)' to '\(selectedCountry)'")
@@ -1919,6 +1927,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
         stations.append(newStation)
         print("Added new station: \(newStation) at the top of \(country) list")
         saveStationsToCoreData()
+        
+        // PERFORMANCE: Update station snapshot for the country when new station is added
+        let countryStations = stations.filter { $0.country == country }
+        updateStationSnapshot(for: country, stations: countryStations)
+        
         // Force UI refresh and notify listeners that stations changed
         DispatchQueue.main.async {
             self.objectWillChange.send()
@@ -2031,6 +2044,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // RESET COUNTRY: When no stations exist, reset to "Select Country"
                 print("🌍 RESET: No stations remaining after individual deletion, resetting country to 'Select Country'")
                 self.selectedCountry = "Select Country"
+                
+                // Clear all station snapshots when no stations remain
+                clearAllStationSnapshots()
+            } else {
+                // PERFORMANCE: Update station snapshot for the country when station is deleted
+                let countryStations = stations.filter { $0.country == station.country }
+                updateStationSnapshot(for: station.country, stations: countryStations)
             }
             
             // ENHANCED CLOUDKIT SYNC: Delete from CloudKit and sync across all devices
@@ -4751,6 +4771,11 @@ extension RadioStationViewModel {
             // Set loading to false immediately to show stations
             isLoading = false
             
+            // PERFORMANCE: Create station snapshots for all countries after loading
+            Task {
+                await createStationSnapshotsForAllCountries()
+            }
+            
             // Force UI update to ensure immediate refresh
             DispatchQueue.main.async { [weak self] in
                 self?.objectWillChange.send()
@@ -5060,6 +5085,126 @@ extension RadioStationViewModel {
     /// Legacy method for backward compatibility
     private func deleteCountryStationsFromCoreData(countryName: String) async throws {
         try await deleteCountryStationsFromCoreDataWithProgress(countryName: countryName, progressViewModel: nil)
+    }
+    
+    // MARK: - Radio Station Snapshot Management
+    
+    /// Get radio station snapshot for a specific country
+    func getStationSnapshot(for country: String) -> [RadioStation]? {
+        return stationSnapshotCache[country]
+    }
+    
+    /// Update or create radio station snapshot for a country
+    func updateStationSnapshot(for country: String, stations: [RadioStation]) {
+        // PERFORMANCE: Skip snapshot creation if we already have a recent one
+        if let existingTimestamp = snapshotTimestamps[country],
+           Date().timeIntervalSince(existingTimestamp) < 5.0 { // 5 second threshold
+            return
+        }
+        
+        // PERFORMANCE: Run expensive operations on background queue
+        Task.detached(priority: .utility) {
+            // CLEANUP: Periodically clean up old snapshots to prevent memory buildup
+            if await self.stationSnapshotCache.count > 20 {
+                await self.cleanupOldStationSnapshots()
+            }
+            
+            // CRITICAL SAFETY CHECK: Ensure all stations actually belong to this country before caching
+            let safeStations = stations.filter { $0.country == country }
+            if safeStations.count != stations.count {
+                print("🚨 STATION SNAPSHOT ISOLATION: Filtered out \(stations.count - safeStations.count) stations that didn't belong to country \(country)")
+            }
+            
+            // PERFORMANCE OPTIMIZATION: Use efficient sorting algorithm
+            let sortedStations = safeStations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            
+            // Update cache on main actor
+            await MainActor.run {
+                self.stationSnapshotCache[country] = sortedStations
+                self.snapshotTimestamps[country] = Date()
+                print("📸 STATION SNAPSHOT: Cached \(sortedStations.count) stations for country \(country)")
+            }
+            
+            // Update DataSyncManager snapshot readiness tracking
+            await self.updateStationSnapshotReadiness()
+        }
+    }
+    
+    /// Clean up old station snapshots to prevent memory buildup
+    private func cleanupOldStationSnapshots() async {
+        await MainActor.run {
+            let now = Date()
+            let maxAge: TimeInterval = 600 // 10 minutes
+            
+            var snapshotsToRemove: [String] = []
+            
+            for (country, timestamp) in snapshotTimestamps {
+                if now.timeIntervalSince(timestamp) > maxAge {
+                    snapshotsToRemove.append(country)
+                }
+            }
+            
+            for country in snapshotsToRemove {
+                stationSnapshotCache.removeValue(forKey: country)
+                snapshotTimestamps.removeValue(forKey: country)
+            }
+            
+            if !snapshotsToRemove.isEmpty {
+                print("🗑️ STATION CLEANUP: Removed \(snapshotsToRemove.count) old station snapshots")
+            }
+        }
+    }
+    
+    /// Clear all existing station snapshots
+    func clearAllStationSnapshots() {
+        stationSnapshotCache.removeAll()
+        snapshotTimestamps.removeAll()
+        print("🗑️ STATION SNAPSHOT: Cleared all existing station snapshots")
+        
+        // Reset DataSyncManager snapshot tracking
+        Task { @MainActor in
+            DataSyncManager.shared.updateStationSnapshotReadiness(
+                countriesWithSnapshots: 0,
+                totalCountriesRequiringSnapshots: 0
+            )
+        }
+    }
+    
+    /// Update DataSyncManager with station snapshot readiness
+    private func updateStationSnapshotReadiness() async {
+        let countriesWithStations = await MainActor.run {
+            Set(self.stations.compactMap { station in
+                station.country.isEmpty || station.country == "Unknown Region" || station.country == "Select Country" ? nil : station.country
+            })
+        }
+        
+        var countriesWithSnapshots = 0
+        for country in countriesWithStations {
+            if await MainActor.run(body: { self.getStationSnapshot(for: country) != nil }) {
+                countriesWithSnapshots += 1
+            }
+        }
+        
+        await MainActor.run {
+            DataSyncManager.shared.updateStationSnapshotReadiness(
+                countriesWithSnapshots: countriesWithSnapshots,
+                totalCountriesRequiringSnapshots: countriesWithStations.count
+            )
+        }
+    }
+    
+    /// Create station snapshots for all countries with stations
+    func createStationSnapshotsForAllCountries() async {
+        await MainActor.run {
+            let countriesWithStations = Dictionary(grouping: self.stations) { $0.country }
+                .filter { !$0.key.isEmpty && $0.key != "Unknown Region" && $0.key != "Select Country" }
+            
+            print("📸 Creating station snapshots for \(countriesWithStations.count) countries...")
+            
+            for (country, stations) in countriesWithStations {
+                self.updateStationSnapshot(for: country, stations: stations)
+            }
+        }
     }
 }
 

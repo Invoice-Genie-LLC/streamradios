@@ -1528,7 +1528,16 @@ class PodcastViewModel: ObservableObject {
         }
         
         // STEP 1: Quick HEAD request to check if feed was modified recently
-        let wasRecentlyModified = await checkFeedModificationWithHEAD(url: url, feedId: feedId)
+        // Check if this is a user-initiated request
+        let userRefreshKey = "UserRequestedRefresh_\(feedId)"
+        let isUserInitiated = UserDefaults.standard.bool(forKey: userRefreshKey)
+        
+        let wasRecentlyModified = await checkFeedModificationWithHEAD(url: url, feedId: feedId, isUserInitiated: isUserInitiated)
+        
+        // Clear the user-initiated flag after checking
+        if isUserInitiated {
+            UserDefaults.standard.removeObject(forKey: userRefreshKey)
+        }
         
         if !wasRecentlyModified {
             print("🪶 LIGHTWEIGHT: Feed not recently modified - skipping expensive parsing")
@@ -1540,7 +1549,7 @@ class PodcastViewModel: ObservableObject {
     }
     
     /// PERFORMANCE OPTIMIZATION: Check feed modification using HEAD request (ultra-fast)
-    private func checkFeedModificationWithHEAD(url: URL, feedId: String) async -> Bool {
+    private func checkFeedModificationWithHEAD(url: URL, feedId: String, isUserInitiated: Bool = false) async -> Bool {
         do {
             var request = URLRequest(url: url)
             request.httpMethod = "HEAD"  // Only get headers, no body content
@@ -1565,6 +1574,12 @@ class PodcastViewModel: ObservableObject {
                         print("🪶 HEAD: Feed not modified since last check")
                         return false
                     }
+                }
+                
+                // CRITICAL FIX: Always allow user-initiated checks to bypass throttling
+                if isUserInitiated {
+                    print("🪶 HEAD: User-initiated check - bypassing throttling to check for new episodes")
+                    return true
                 }
                 
                 // Fallback: Check if it's been more than 30 minutes since last check
@@ -1663,10 +1678,31 @@ class PodcastViewModel: ObservableObject {
             if !newEpisodes.isEmpty {
                 print("🪶 BACKGROUND: Found \(newEpisodes.count) new episodes - updating snapshot")
                 
+                // Get updated episodes from Core Data after reconciliation
+                let updatedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                
                 await MainActor.run {
+                    // Update snapshot with new episodes
+                    self.updateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
+                    
                     // Only update UI if user is still on this feed
                     if self.selectedFeedId == feedId {
-                        // Trigger minimal UI update
+                        // CRITICAL FIX: Update currentEpisodes with new data, not just trigger UI refresh
+                        let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+                        let filteredEpisodes: [PodcastEpisode]
+                        switch filter {
+                        case .all:
+                            filteredEpisodes = updatedEpisodes
+                        case .favorites:
+                            filteredEpisodes = updatedEpisodes.filter { $0.state.isFavorite }
+                        case .downloads:
+                            filteredEpisodes = updatedEpisodes.filter { $0.state.isDownloaded }
+                        }
+                        
+                        self.currentEpisodes = filteredEpisodes
+                        print("🪶 BACKGROUND: Updated UI with \(filteredEpisodes.count) episodes including \(newEpisodes.count) new ones")
+                        
+                        // Trigger UI update
                         self.throttledUIUpdate()
                     }
                 }
@@ -3169,6 +3205,12 @@ class PodcastViewModel: ObservableObject {
                             await MainActor.run {
                                 self.updateEpisodeSnapshot(for: feedId, episodes: reconciledEpisodes)
                                 print("🔄 RECONCILE: Updated snapshot with correct \(reconciledEpisodes.count) episodes from Core Data after reconciliation")
+                                
+                                // CRITICAL FIX: Update refresh timestamp only after successful RSS refresh
+                                let currentTime = Date().timeIntervalSince1970
+                                let lastRefreshKey = "LastRSSRefresh_\(feedId)"
+                                UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+                                print("✅ RSS REFRESH: Updated last refresh time for feed \(feedId)")
                             }
                             
                             // CRITICAL PERFORMANCE: Skip expensive CloudKit sync for snapshot-based loads
@@ -6552,11 +6594,7 @@ class PodcastViewModel: ObservableObject {
         
         // ALWAYS refresh if this feed has no episodes (new feeds or fresh installs)
         if episodeCount == 0 {
-            let currentTime = Date().timeIntervalSince1970
-            let lastRefreshKey = "LastRSSRefresh_\(feedId)"
-            
             print("🆕 Feed \(feedId) has no episodes - allowing RSS parsing (new feed or fresh install)")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         
@@ -6565,13 +6603,19 @@ class PodcastViewModel: ObservableObject {
         let lastRefreshKey = "LastRSSRefresh_\(feedId)"
         let lastRefreshTime = UserDefaults.standard.double(forKey: lastRefreshKey)
         
-        // Refresh policy: Immediate check on initial load for newest episodes
-        let refreshInterval: TimeInterval = isInitialLoad ? 0 : 60 * 60 // Immediate on first load, 1 hour otherwise
+        // CRITICAL FIX: Always allow RSS refresh on initial load regardless of last refresh time
+        // This ensures new episodes are fetched immediately when user opens a feed
+        if isInitialLoad {
+            print("🔄 Feed \(feedId) initial load - forcing RSS refresh for newest episodes (\(episodeCount) episodes cached)")
+            return true
+        }
+        
+        // For non-initial loads, use time-based refresh policy
+        let refreshInterval: TimeInterval = 60 * 60 // 1 hour for background refreshes
         let timeSinceLastRefresh = currentTime - lastRefreshTime
         
         if timeSinceLastRefresh >= refreshInterval || lastRefreshTime == 0 {
             print("🔄 Feed \(feedId) ready for RSS refresh - last check: \(Int(timeSinceLastRefresh/60)) min ago (\(episodeCount) episodes cached)")
-            UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
             return true
         }
         

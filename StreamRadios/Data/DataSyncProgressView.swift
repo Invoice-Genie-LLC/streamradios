@@ -98,6 +98,15 @@ struct DataSyncProgressView: View {
                             totalCount: syncManager.totalFeedsRequiringSnapshots > 0 ? syncManager.totalFeedsRequiringSnapshots : syncManager.episodeStatesTotalCount
                         )
                         
+                        DetailedSyncStatusItem(
+                            title: "Station Snapshots",
+                            status: syncManager.stationSnapshotsReady ? .completed : .pending,
+                            progress: syncManager.totalCountriesRequiringSnapshots > 0 ? Double(syncManager.countriesWithSnapshots) / Double(syncManager.totalCountriesRequiringSnapshots) : 0.0,
+                            operation: syncManager.totalCountriesRequiringSnapshots > 0 ? "Creating snapshots for \(syncManager.totalCountriesRequiringSnapshots) countries..." : "Preparing station snapshots...",
+                            currentCount: syncManager.countriesWithSnapshots,
+                            totalCount: syncManager.totalCountriesRequiringSnapshots
+                        )
+                        
                         SyncStatusItem(
                             title: "User Preferences",
                             status: syncManager.userPreferencesStatus,
