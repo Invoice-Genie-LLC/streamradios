@@ -911,20 +911,13 @@ struct CompactPlayerView: View {
                 .resizable()
                 .scaledToFill()
                 .clipped()
-        } else if let albumArt = radioPlayer.albumArt {
+        } else if radioPlayer.isPlaying, let albumArt = radioPlayer.albumArt {
             Image(uiImage: albumArt)
                 .resizable()
                 .scaledToFill()
                 .clipped()
         } else if let iconData = currentStation.iconData, 
                   let imageData = Data(base64Encoded: iconData),
-                  let image = UIImage(data: imageData) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .background(Color.white.opacity(0.1))
-        } else if let iTunesArtworkData = currentStation.iTunesArtworkData,
-                  let imageData = Data(base64Encoded: iTunesArtworkData),
                   let image = UIImage(data: imageData) {
             Image(uiImage: image)
                 .resizable()
@@ -1439,7 +1432,7 @@ struct CurrentlyPlayingView: View {
                 .resizable()
                 .scaledToFill()
                 .clipped()
-        } else if let albumArt = radioPlayer.albumArt {
+        } else if radioPlayer.isPlaying, let albumArt = radioPlayer.albumArt {
             Image(uiImage: albumArt)
                 .resizable()
                 .scaledToFill()

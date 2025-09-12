@@ -655,7 +655,7 @@ struct StationImage: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
-            } else if let albumArt = radioPlayer.albumArt {
+            } else if radioPlayer.isPlaying, let albumArt = radioPlayer.albumArt {
                 let _ = print("🎨 UI DEBUG: Showing station artwork (playing=\(radioPlayer.isPlaying))")
                 HStack {
                     Spacer()
@@ -669,18 +669,6 @@ struct StationImage: View {
                 }
                 .frame(maxWidth: .infinity)
             } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                HStack {
-                    Spacer()
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: artworkSize, height: artworkSize)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else if let iTunesArtworkData = currentStation.iTunesArtworkData, let imageData = Data(base64Encoded: iTunesArtworkData), let image = UIImage(data: imageData) {
                 HStack {
                     Spacer()
                     Image(uiImage: image)

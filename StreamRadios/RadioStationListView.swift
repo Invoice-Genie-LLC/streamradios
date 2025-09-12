@@ -909,8 +909,9 @@ struct RadioStationListView: View {
         // Show iTunes artwork for currently playing station if available
         // Use more stable condition to prevent flickering during brief isPlaying state changes
         if isCurrentStation(station: station) {
-            // Prioritize iTunes artwork if available (regardless of brief isPlaying flickers)
-            if let iTunesArt = radioPlayer.iTunesAlbumArt {
+            // When playing: show iTunes artwork if available
+            // When paused/stopped: only show custom icon or default
+            if radioPlayer.isPlaying, let iTunesArt = radioPlayer.iTunesAlbumArt {
                 Image(uiImage: iTunesArt)
                     .resizable()
                     .scaledToFill()
@@ -922,29 +923,13 @@ struct RadioStationListView: View {
                     .resizable()
                     .scaledToFit()
                     .background(Color.white.opacity(0.1))
-            } else if let iTunesArtworkData = station.iTunesArtworkData,
-                      let imageData = Data(base64Encoded: iTunesArtworkData),
-                      let image = UIImage(data: imageData) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .background(Color.white.opacity(0.1))
             } else {
                 defaultStationImage(station)
             }
         }
         // For non-current stations, always show station icon or default
         else {
-            if let iconData = station.iconData,
-               let imageData = Data(base64Encoded: iconData),
-               let image = UIImage(data: imageData) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .background(Color.white.opacity(0.1))
-            } else if let iTunesArtworkData = station.iTunesArtworkData,
-                      let imageData = Data(base64Encoded: iTunesArtworkData),
-                      let image = UIImage(data: imageData) {
+            if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
