@@ -144,14 +144,20 @@ class PlaybackManager: ObservableObject {
             }
             
             // CRITICAL: Only clear Now Playing info when explicitly switching between different players
-            // Don't clear during CarPlay transitions or when reactivating the same player
+            // Don't clear during CarPlay transitions, interruption resume, or when reactivating the same player
             let currentRoute = audioSession.currentRoute
             let hasCarPlayRoute = currentRoute.outputs.contains { $0.portType == .carAudio }
             
-            // Only clear Now Playing if we're not in a CarPlay transition and the player actually changed
-            if !hasCarPlayRoute && !CarPlayManager.shared.isCarPlayConnected {
+            // Check if we're in an interruption resume scenario
+            let isInterruptionResume = radioWasPlayingBeforeInterruption || podcastWasPlayingBeforeInterruption ||
+                                     RadioPlayer.shared.wasPlayingBeforeInterruption || PodcastPlayer.shared.wasPlayingBeforeInterruption
+            
+            // Only clear Now Playing if we're not in a CarPlay transition, not resuming from interruption, and the player actually changed
+            if !hasCarPlayRoute && !CarPlayManager.shared.isCarPlayConnected && !isInterruptionResume {
                 print("🔄 PlaybackManager: Clearing Now Playing info for player switch")
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+            } else if isInterruptionResume {
+                print("🎵 PlaybackManager: Preserving Now Playing info during interruption resume")
             } else {
                 print("🚗 PlaybackManager: Preserving Now Playing info during CarPlay transition")
             }

@@ -774,7 +774,14 @@ class RadioPlayer: NSObject, ObservableObject {
                         // Resume playback only if user wants it and it wasn't manually paused
                         if self.userWantsToPlay && !self.wasManuallyPaused {
                             self.player?.play()
+                            self.isPlaying = true
+                            
+                            // CRITICAL FIX: Update Now Playing info after foreground resume to restore lock screen display
+                            self.updateNowPlayingInfo()
+                            self.updateWidget()
+                            
                             print("✅ RadioPlayer: Radio playback resumed after foreground transition")
+                            print("🔄 RadioPlayer: Updated Now Playing info after foreground resume")
                             DebugLogger.logInfo("Radio playback successfully restored after foreground transition", category: "BackgroundAudio")
                         }
                     } catch {
@@ -813,6 +820,12 @@ class RadioPlayer: NSObject, ObservableObject {
                     
                     // Use the existing resume method
                     self.resumeAfterInterruption()
+                    
+                    // CRITICAL FIX: Ensure Now Playing info is updated after lock screen resume
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        self?.updateNowPlayingInfo()
+                        print("🔄 RadioPlayer: Updated Now Playing info after lock screen resume")
+                    }
                 } else {
                     DebugLogger.logInfo("Lock screen resume conditions no longer met - skipping resume", category: "LockScreenAudio")
                 }
@@ -1018,6 +1031,11 @@ class RadioPlayer: NSObject, ObservableObject {
                 if self.albumArt == nil && self.iTunesAlbumArt == nil {
                     self.loadStationArtwork()
                 }
+                
+                // CRITICAL FIX: Update Now Playing info after resume to restore metadata and artwork on lock screen
+                self.updateNowPlayingInfo()
+                self.updateWidget()
+                print("🔄 RadioPlayer: Updated Now Playing info after interruption resume")
                 
                 print("✅ RadioPlayer: Successfully resumed playback after interruption")
                 DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
@@ -5628,18 +5646,19 @@ extension RadioPlayer {
         player.addPeriodicTimeObserver(forInterval: time, queue: .main) { [weak self] time in
             guard let self = self else { return }
             
-            // PERFORMANCE: Skip updates if app is in background to save battery
-            guard UIApplication.shared.applicationState == .active else { return }
-            
-            // PERFORMANCE: Skip updates if user is scrolling to improve performance
-            let isUserScrolling = UserDefaults.standard.bool(forKey: "isUserScrolling")
-            if isUserScrolling { return }
-            
             // Update elapsed time in Now Playing info (now aligned with observer interval)
             if self.isPlaying {
                 self.updateNowPlayingInfoElapsedTime()
                 self.lastElapsedTimeUpdate = Date()
             }
+            
+            // PERFORMANCE: Skip heavy operations if app is in background to save battery
+            // But still allow Now Playing info updates for lock screen
+            let isAppActive = UIApplication.shared.applicationState == .active
+            
+            // PERFORMANCE: Skip heavy operations if user is scrolling to improve performance (only when app is active)
+            let isUserScrolling = isAppActive && UserDefaults.standard.bool(forKey: "isUserScrolling")
+            if isUserScrolling { return }
             
             // Trigger artwork fetch if we have metadata but no artwork during CarPlay
             if CarPlayManager.shared.isCarPlayConnected,
