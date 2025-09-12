@@ -48,6 +48,7 @@ class RadioPlayer: NSObject, ObservableObject {
     @Published var metadata: String?
     @Published var iTunesAlbumArt: UIImage?
     var iTunesArtworkJustSet: Bool = false
+    private var artworkProtectionTimer: Timer?
     @Published var displayTitle: String?
     @Published var displayArtist: String?
     @Published var isHandlingAlarm = false
@@ -180,6 +181,7 @@ class RadioPlayer: NSObject, ObservableObject {
                     print("✅ Setting Shazam artwork - image size: \(image.size)")
                     self.iTunesAlbumArt = image
                     self.iTunesArtworkJustSet = true
+                    self.startArtworkProtectionTimer()
                     
                     // MANUAL SHAZAM FEATURE: Save artwork to station for station list display
                     if isManualShazam {
@@ -316,14 +318,17 @@ class RadioPlayer: NSObject, ObservableObject {
                 if shouldClearArtwork {
                     iTunesAlbumArt = nil
                     print("🔄 New song detected: '\(currentMetadata)' - clearing previous artwork (similarity: \(String(format: "%.2f", similarity)))")
+                    // Only reset the flag when we actually clear artwork
+                    iTunesArtworkJustSet = false
                 } else {
                     print("🔄 New song detected: '\(currentMetadata)' - keeping fresh iTunes artwork (similarity: \(String(format: "%.2f", similarity)))")
+                    // CRITICAL FIX: Don't reset the flag if we're keeping the artwork
+                    // This prevents the artwork from being cleared on the next metadata update
                 }
-                
-                // Reset the flag after processing
-                iTunesArtworkJustSet = false
             } else {
                 print("🔄 Similar song metadata: '\(currentMetadata)' - keeping existing artwork (similarity: \(String(format: "%.2f", similarity)))")
+                // CRITICAL FIX: Don't reset the flag for similar metadata
+                // This protects iTunes artwork from being cleared by repeated similar metadata
             }
             
             updateNowPlayingInfo()
@@ -1470,6 +1475,10 @@ class RadioPlayer: NSObject, ObservableObject {
         // Cancel any pending iTunes searches when paused
         artworkSearchTimer?.invalidate()
         
+        // Cancel artwork protection timer when pausing
+        artworkProtectionTimer?.invalidate()
+        artworkProtectionTimer = nil
+        
         // Note: We keep currentlyPlayingStation and currentStationIndex intact
         // This allows the user to resume playing the same station easily
         
@@ -1548,8 +1557,30 @@ class RadioPlayer: NSObject, ObservableObject {
            // Stop Shazam recognition when playback stops
            stopShazamTimer()
            
-           print("🛑 Radio player stopped - all metadata and iTunes artwork cleared")
-       }
+        print("🛑 Radio player stopped - all metadata and iTunes artwork cleared")
+        
+        // Cancel artwork protection timer
+        artworkProtectionTimer?.invalidate()
+        artworkProtectionTimer = nil
+        iTunesArtworkJustSet = false
+    }
+    
+    /// Starts artwork protection timer to prevent indefinite protection
+    private func startArtworkProtectionTimer() {
+        // Cancel any existing timer
+        artworkProtectionTimer?.invalidate()
+        
+        // Start new timer for 30 seconds
+        artworkProtectionTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.iTunesArtworkJustSet = false
+                self.artworkProtectionTimer = nil
+                print("🕰️ Artwork protection timer expired - artwork can now be cleared by new songs")
+            }
+        }
+        print("🕰️ Started 30-second artwork protection timer")
+    }
     
     func playStation(at index: Int, from stations: [RadioStation]) {
         // CRITICAL: This is an explicit user action to play radio - stop podcast if active
@@ -1600,6 +1631,10 @@ class RadioPlayer: NSObject, ObservableObject {
         artistName = ""
         lastMetadataSearched = ""
         artworkSearchTimer?.invalidate()
+        
+        // Cancel artwork protection timer when switching stations
+        artworkProtectionTimer?.invalidate()
+        artworkProtectionTimer = nil
         
         // STATION ARTWORK FIX: Load station artwork immediately when switching stations
         print("🎨 DEBUG: Station switch - Cleared iTunesAlbumArt and albumArt, loading station artwork")
@@ -2293,6 +2328,7 @@ class RadioPlayer: NSObject, ObservableObject {
                     if cacheKey.lowercased() == self.lastMetadataSearched.lowercased() {
                         self.iTunesAlbumArt = image
                         self.iTunesArtworkJustSet = true
+                        self.startArtworkProtectionTimer()
                         
                         // Save iTunes artwork to current station if image was found
                         if let image = image {
@@ -3284,6 +3320,7 @@ class RadioPlayer: NSObject, ObservableObject {
         // CRITICAL: Set iTunesAlbumArt immediately for highest priority display
         iTunesAlbumArt = image
         iTunesArtworkJustSet = true
+        startArtworkProtectionTimer()
         
         // Update the station
         var updatedStation = viewModel.stations[currentIndex]
@@ -5435,14 +5472,17 @@ extension RadioPlayer: AVPlayerItemMetadataOutputPushDelegate {
                 if shouldClearArtwork {
                     iTunesAlbumArt = nil
                     print("🧹 Cleared old artwork for fresh song recognition")
+                    // Only reset the flag when we actually clear artwork
+                    iTunesArtworkJustSet = false
                 } else {
                     print("🎯 Keeping current artwork - either no artwork to clear or fresh iTunes artwork")
+                    // CRITICAL FIX: Don't reset the flag if we're keeping the artwork
+                    // This prevents premature clearing of fresh iTunes artwork
                 }
-                
-                // Reset the flag after processing
-                iTunesArtworkJustSet = false
             } else if displayTitle != nil && displayArtist != nil {
                 print("🎯 Keeping Shazam-verified artwork - same song detected")
+                // CRITICAL FIX: Don't reset the flag for same song detection
+                // This protects iTunes artwork from being cleared by repeated metadata
             }
             
             // Trigger both iTunes artwork search and Shazam recognition
@@ -5662,6 +5702,7 @@ extension RadioPlayer {
                         // CRITICAL: Set artwork immediately for highest priority display
                         self.iTunesAlbumArt = image
                         self.iTunesArtworkJustSet = true
+                        self.startArtworkProtectionTimer()
                         
                         // Save to station and cache for persistence
                         self.saveITunesArtworkToCurrentStation(image)
