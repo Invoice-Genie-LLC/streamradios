@@ -584,14 +584,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         if let iconDataString = station.iconData, 
            let iconData = Data(base64Encoded: iconDataString),
            let image = UIImage(data: iconData) {
-            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
                 return image
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
         } else if let iTunesArtworkDataString = station.iTunesArtworkData,
                   let iTunesArtworkData = Data(base64Encoded: iTunesArtworkDataString),
                   let image = UIImage(data: iTunesArtworkData) {
-            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
                 return image
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
@@ -792,14 +792,14 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         if let iconDataString = station.iconData, 
            let iconData = Data(base64Encoded: iconDataString),
            let image = UIImage(data: iconData) {
-            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
                 return image
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
         } else if let iTunesArtworkDataString = station.iTunesArtworkData,
                   let iTunesArtworkData = Data(base64Encoded: iTunesArtworkDataString),
                   let image = UIImage(data: iTunesArtworkData) {
-            let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
                 return image
             }
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
@@ -842,7 +842,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
             
             if let imageData = imageData, let image = UIImage(data: imageData) {
-                let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
                     return image
                 }
                 nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
@@ -946,19 +946,19 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         print("🚗 CarPlay: Starting template setup...")
         
         // Create the 4 main tabs
-        print("🚗 CarPlay: Creating stations tab...")
-        let stationsTab = self.createStationsTab()
-        print("🚗 CarPlay: Creating downloads tab...")
-        let downloadsTab = self.createDownloadsTab()
         print("🚗 CarPlay: Creating recents tab...")
         let recentsTab = self.createRecentsTab() 
+        print("🚗 CarPlay: Creating stations tab...")
+        let stationsTab = self.createStationsTab()
         print("🚗 CarPlay: Creating podcasts tab...")
         let podcastsTab = self.createPodcastsTab()
+        print("🚗 CarPlay: Creating downloads tab...")
+        let downloadsTab = self.createDownloadsTab()
         
-        print("🚗 CarPlay: Creating tab bar template with \([stationsTab, downloadsTab, recentsTab, podcastsTab].count) tabs")
+        print("🚗 CarPlay: Creating tab bar template with \([recentsTab, stationsTab, podcastsTab, downloadsTab].count) tabs")
         
-        // Create tab bar template
-        let tabBarTemplate = CPTabBarTemplate(templates: [stationsTab, downloadsTab, recentsTab, podcastsTab])
+        // Create tab bar template - Order: Recent, Radio, Podcast, Downloads
+        let tabBarTemplate = CPTabBarTemplate(templates: [recentsTab, stationsTab, podcastsTab, downloadsTab])
         
         print("🚗 CarPlay: Setting root template...")
         
@@ -1043,8 +1043,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             }
         }
         
-        let listTemplate = CPListTemplate(title: "Stations", sections: sections)
-        listTemplate.tabTitle = "Stations"
+        let listTemplate = CPListTemplate(title: "Radio", sections: sections)
+        listTemplate.tabTitle = "Radio"
         listTemplate.tabImage = UIImage(systemName: "radio")
         
         print("🚗 CarPlay: Stations tab created with \(sections.count) sections")
@@ -1313,8 +1313,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let podcastSection = CPListSection(items: podcastItems, header: "Your Podcasts", sectionIndexTitle: nil)
         sections.append(podcastSection)
         
-        let listTemplate = CPListTemplate(title: "Podcasts", sections: sections)
-        listTemplate.tabTitle = "Podcasts"
+        let listTemplate = CPListTemplate(title: "Podcast", sections: sections)
+        listTemplate.tabTitle = "Podcast"
         listTemplate.tabImage = UIImage(systemName: "microphone")
         
         return listTemplate
@@ -2779,8 +2779,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             return
         }
         
-        // Find the podcast tab (index 3 based on setupRootTemplate order: stations, downloads, recents, podcasts)
-        let podcastTabIndex = 3
+        // Find the podcast tab (index 2 based on setupRootTemplate order: recents, stations, podcasts, downloads)
+        let podcastTabIndex = 2
         guard podcastTabIndex < tabBarTemplate.templates.count,
               let currentPodcastTab = tabBarTemplate.templates[podcastTabIndex] as? CPListTemplate else {
             os_log("🚗 CarPlay: Unable to find podcast tab to refresh", log: log, type: .error)
@@ -3952,7 +3952,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     
     /// Applies instant artwork to CarPlay Now Playing with zero delays
     private func applyArtworkToCarPlayNowPlaying(image: UIImage, metadata: String) {
-        let artwork = MPMediaItemArtwork(boundsSize: CGSize(width: 300, height: 300)) { _ in
+        let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
             return image
         }
         
