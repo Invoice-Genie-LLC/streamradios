@@ -286,14 +286,20 @@ class PlaybackManager: ObservableObject {
             }
             
             if isInBackground {
-                print("🌙 PlaybackManager: Background interruption detected - starting immediate monitoring")
-                // Start background monitoring timer after delay
+                print("🌙 PlaybackManager: Background interruption detected - checking network conditions")
+                // GPS FIX: Check network conditions before starting aggressive timer
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                     guard let self = self else { return }
                     let shouldMonitor = (self.activePlayer == .radio && self.radioWasPlayingBeforeInterruption) ||
                                       (self.activePlayer == .podcast && self.podcastWasPlayingBeforeInterruption)
                     if shouldMonitor {
-                        self.startBackgroundInterruptionTimer()
+                        // GPS FIX: Only start timer if network conditions are good
+                        if self.isNetworkConditionGoodForTimer() {
+                            self.startBackgroundInterruptionTimer()
+                        } else {
+                            print("🛰️ PlaybackManager: Poor network detected - skipping timer to protect GPS")
+                            UserDefaults.standard.set(true, forKey: "NetworkInterruptionActive")
+                        }
                     }
                 }
             }
@@ -397,10 +403,18 @@ class PlaybackManager: ObservableObject {
         let shouldAttemptResume = radioNeedsBackgroundResume || podcastNeedsBackgroundResume
         
         if shouldAttemptResume {
-            print("🌙 PlaybackManager: Background resume needed - starting background task and timer")
+            print("🌙 PlaybackManager: Background resume needed - checking network conditions")
             
-            // Start a timer to periodically check if other audio has stopped
-            startBackgroundInterruptionTimer()
+            // GPS FIX: Only start timer if network conditions are acceptable
+            if isNetworkConditionGoodForTimer() {
+                print("🌙 PlaybackManager: Network conditions acceptable - starting background timer")
+                startBackgroundInterruptionTimer()
+            } else {
+                print("🛰️ PlaybackManager: Poor network detected - using single resume attempt to protect GPS")
+                // Single gentle resume attempt instead of aggressive timer
+                attemptSingleGentleResume()
+                return
+            }
             
             // Request background execution time for resume
             let backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "AudioInterruptionResume") {
@@ -523,6 +537,7 @@ class PlaybackManager: ObservableObject {
     }
     
     /// Starts a timer to periodically check if other audio has stopped and we can resume
+    /// GPS FIX: Reduced frequency and resource usage to prevent GPS interference
     private func startBackgroundInterruptionTimer() {
         // Cancel any existing timer
         backgroundInterruptionTimer?.invalidate()
@@ -535,13 +550,14 @@ class PlaybackManager: ObservableObject {
             object: nil
         )
         
-        // Track retry attempts for exponential backoff
+        // GPS FIX: Reduced retry attempts and increased intervals to prevent system resource conflicts
         var retryCount = 0
-        let maxRetries = 20
+        let maxRetries = 8  // Reduced from 20 to 8
         
-        print("⏰ PlaybackManager: Starting background interruption timer with exponential backoff for Apple Music conflicts")
+        print("⏰ PlaybackManager: Starting background interruption timer with GPS-safe intervals")
         
-        backgroundInterruptionTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+        // GPS FIX: Increased interval from 0.5s to 3.0s to reduce system load
+        backgroundInterruptionTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] timer in
             guard let self = self else {
                 print("⏰ PlaybackManager: Timer - self deallocated, stopping")
                 timer.invalidate()
@@ -550,12 +566,12 @@ class PlaybackManager: ObservableObject {
             
             retryCount += 1
             
-            // Implement exponential backoff for Apple Music conflicts
-            let backoffInterval = min(pow(2.0, Double(retryCount / 4)), 8.0) // Max 8 seconds between attempts
-            let shouldSkipThisCycle = (retryCount % Int(backoffInterval * 2)) != 0
+            // GPS FIX: Implement GPS-safe exponential backoff with longer intervals
+            let backoffInterval = min(pow(2.0, Double(retryCount / 2)), 15.0) // Max 15 seconds between attempts
+            let shouldSkipThisCycle = (retryCount % Int(backoffInterval)) != 0
             
-            if shouldSkipThisCycle && retryCount > 4 {
-                print("⏰ PlaybackManager: Timer cycle \(retryCount) - backing off due to persistent Apple Music conflicts")
+            if shouldSkipThisCycle && retryCount > 2 {
+                print("⏰ PlaybackManager: Timer cycle \(retryCount) - GPS-safe backoff active")
                 return
             }
             
@@ -580,18 +596,19 @@ class PlaybackManager: ObservableObject {
                 return
             }
             
-            // Stop trying after max retries to prevent infinite loops
+            // GPS FIX: Stop trying after reduced max retries to prevent GPS interference
             if retryCount >= maxRetries {
-                print("⏰ PlaybackManager: Timer - max retries (\(maxRetries)) reached, Apple Music session conflict unresolvable")
-                print("🚨 PlaybackManager: APPLE MUSIC WORKAROUND - Attempting system-level session reset")
+                print("⏰ PlaybackManager: Timer - max retries (\(maxRetries)) reached, stopping to prevent GPS interference")
+                print("🛰️ PlaybackManager: GPS PROTECTION - Stopping aggressive audio session attempts")
                 
-                // Last resort: Try to force system audio reset by switching apps
-                DispatchQueue.main.async {
-                    self.attemptSystemAudioReset()
-                }
+                // GPS FIX: Skip system audio reset to prevent GPS interference
+                print("🛰️ PlaybackManager: Skipping system audio reset to protect GPS functionality")
                 
                 timer.invalidate()
                 self.backgroundInterruptionTimer = nil
+                
+                // GPS FIX: Set flag to enable manual resume instead of aggressive retries
+                UserDefaults.standard.set(true, forKey: "NetworkInterruptionActive")
                 return
             }
             
@@ -636,79 +653,19 @@ class PlaybackManager: ObservableObject {
                 // Try progressively more aggressive session activation approaches
                 var sessionActivated = false
                 
-                // Approach 1: Gentle activation
+                // GPS FIX: Simplified approach to prevent GPS interference
+                // Only attempt gentle activation to avoid system resource conflicts
                 do {
                     try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
                     try audioSession.setActive(true, options: [])
-                    print("⏰ PlaybackManager: Timer - gentle audio session activation succeeded")
+                    print("⏰ PlaybackManager: Timer - GPS-safe audio session activation succeeded")
                     sessionActivated = true
                 } catch let error as NSError {
                     if error.code == -50 {
-                        print("⏰ PlaybackManager: Timer - gentle activation failed (Apple Music session conflict), trying aggressive approach...")
-                        
-                        // Approach 2: Force deactivation of other sessions
-                        do {
-                            try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-                            print("⏰ PlaybackManager: Timer - aggressive audio session activation succeeded")
-                            sessionActivated = true
-                        } catch let aggressiveError as NSError {
-                            if aggressiveError.code == -50 {
-                                print("⏰ PlaybackManager: Timer - Apple Music session still locked, will retry in next cycle...")
-                                return
-                            } else {
-                                print("⏰ PlaybackManager: Timer - aggressive activation failed: \(aggressiveError)")
-                                
-                                // Approach 3: Apple Music nuclear option - complete session reset
-                                do {
-                                    print("⏰ PlaybackManager: Timer - attempting Apple Music nuclear session reset...")
-                                    
-                                    // Step 1: Completely deactivate our session
-                                    try audioSession.setActive(false, options: [])
-                                    
-                                    // Step 2: Change to a different category temporarily to force system cleanup
-                                    try audioSession.setCategory(.ambient, mode: .default, options: [])
-                                    try audioSession.setActive(true, options: [])
-                                    
-                                    // Step 3: Wait for system to process the change
-                                    Thread.sleep(forTimeInterval: 0.2)
-                                    
-                                    // Step 4: Deactivate ambient session
-                                    try audioSession.setActive(false, options: [])
-                                    
-                                    // Step 5: Switch back to playback category aggressively
-                                    try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-                                    try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-                                    
-                                    print("⏰ PlaybackManager: Timer - Apple Music nuclear reset succeeded")
-                                    sessionActivated = true
-                                } catch {
-                                    print("⏰ PlaybackManager: Timer - Apple Music nuclear reset failed: \(error)")
-                                    
-                                    // Approach 4: Ultimate fallback - try system audio services reset
-                                    do {
-                                        print("⏰ PlaybackManager: Timer - attempting ultimate fallback...")
-                                        
-                                        // Force complete session teardown
-                                        try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
-                                        
-                                        // Wait longer for Apple Music to fully release
-                                        Thread.sleep(forTimeInterval: 0.5)
-                                        
-                                        // Try one more time with maximum aggression
-                                        try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-                                        try audioSession.setActive(true, options: [.notifyOthersOnDeactivation])
-                                        
-                                        print("⏰ PlaybackManager: Timer - ultimate fallback succeeded")
-                                        sessionActivated = true
-                                    } catch {
-                                        print("⏰ PlaybackManager: Timer - all session activation attempts failed: \(error)")
-                                        return
-                                    }
-                                }
-                            }
-                        }
+                        print("⏰ PlaybackManager: Timer - session conflict detected, will retry in next cycle (GPS-safe mode)")
+                        return
                     } else {
-                        print("⏰ PlaybackManager: Timer - unexpected session error: \(error)")
+                        print("⏰ PlaybackManager: Timer - session error: \(error)")
                         return
                     }
                 }
@@ -1046,7 +1003,76 @@ class PlaybackManager: ObservableObject {
         podcastWasPlayingBeforeInterruption = false
     }
     
+    /// GPS FIX: Check if network conditions are good enough to run aggressive background timer
+    private func isNetworkConditionGoodForTimer() -> Bool {
+        // Check if there have been recent network failures that suggest poor connectivity
+        let recentNetworkFailures = UserDefaults.standard.integer(forKey: "RecentNetworkFailures")
+        let lastFailureTime = UserDefaults.standard.double(forKey: "LastNetworkFailureTime")
+        let timeSinceLastFailure = Date().timeIntervalSince1970 - lastFailureTime
+        
+        // If there have been multiple recent failures, avoid aggressive timer
+        if recentNetworkFailures > 3 && timeSinceLastFailure < 60 {
+            print("🛰️ PlaybackManager: Recent network failures detected - avoiding timer to protect GPS")
+            return false
+        }
+        
+        // Check if we're currently in airplane mode or have no network
+        // This is a simple check that doesn't require additional frameworks
+        let networkFlags = UserDefaults.standard.bool(forKey: "NetworkUnavailable")
+        if networkFlags {
+            print("🛰️ PlaybackManager: Network unavailable - timer would cause GPS interference")
+            return false
+        }
+        
+        return true
+    }
+    
+    /// GPS FIX: Attempt a single gentle resume without aggressive timer
+    private func attemptSingleGentleResume() {
+        print("🛰️ PlaybackManager: Attempting single gentle resume to protect GPS")
+        
+        let audioSession = AVAudioSession.sharedInstance()
+        
+        // Single gentle attempt without retries
+        do {
+            try audioSession.setCategory(.playback, mode: .default, options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+            try audioSession.setActive(true, options: [])
+            
+            print("🛰️ PlaybackManager: Single gentle resume - audio session activated")
+            
+            // Determine which player needs resume
+            let radioNeedsResume = (radioWasPlayingBeforeInterruption || RadioPlayer.shared.wasPlayingBeforeInterruption) && 
+                                  RadioPlayer.shared.userWantsToPlay && 
+                                  !RadioPlayer.shared.wasManuallyPaused
+            let podcastNeedsResume = (podcastWasPlayingBeforeInterruption || PodcastPlayer.shared.wasPlayingBeforeInterruption) && 
+                                    PodcastPlayer.shared.userWantsToPlay && 
+                                    !PodcastPlayer.shared.wasManuallyPaused
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if radioNeedsResume {
+                    print("🛰️ PlaybackManager: Single gentle resume - attempting radio playback")
+                    PlaybackManager.shared.setActivePlayer(.radio)
+                    RadioPlayer.shared.resumeAfterInterruption()
+                } else if podcastNeedsResume {
+                    print("🛰️ PlaybackManager: Single gentle resume - attempting podcast playback")
+                    PlaybackManager.shared.setActivePlayer(.podcast)
+                    PodcastPlayer.shared.resumeAfterInterruption()
+                }
+                
+                // Reset interruption state after single attempt
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.resetInterruptionState()
+                }
+            }
+            
+        } catch {
+            print("🛰️ PlaybackManager: Single gentle resume failed: \(error) - manual resume required")
+            UserDefaults.standard.set(true, forKey: "NetworkInterruptionActive")
+        }
+    }
+    
     deinit {
         NotificationCenter.default.removeObserver(self)
+        backgroundInterruptionTimer?.invalidate()
     }
 }

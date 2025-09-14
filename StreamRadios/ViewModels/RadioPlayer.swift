@@ -381,6 +381,9 @@ class RadioPlayer: NSObject, ObservableObject {
     private func handleNetworkDisconnection() {
         print("🌐 RadioPlayer: Network disconnected while user wants to play: \(userWantsToPlay)")
         
+        // GPS FIX: Track network failures to help GPS protection system
+        self.trackNetworkFailure()
+        
         // If user wants to play but network is gone, mark for reconnection
         if userWantsToPlay {
             connectionState = .disconnected
@@ -469,6 +472,8 @@ class RadioPlayer: NSObject, ObservableObject {
         if player?.timeControlStatus != .playing {
             print("❌ RadioPlayer: Failed to reconnect after \(maxReconnectionAttempts) attempts")
             connectionState = .error
+            // GPS FIX: Track multiple reconnection failures
+            self.trackNetworkFailure()
             // Don't clear userWantsToPlay so they can try again manually
         }
     }
@@ -4815,6 +4820,30 @@ class RadioPlayer: NSObject, ObservableObject {
         // Network retry is handled by StreamQualityManager automatically
         
         task.setTaskCompleted(success: true)
+    }
+    
+    /// GPS FIX: Track network failures to help GPS protection system
+    private func trackNetworkFailure() {
+        let currentFailures = UserDefaults.standard.integer(forKey: "RecentNetworkFailures")
+        let newFailureCount = currentFailures + 1
+        
+        UserDefaults.standard.set(newFailureCount, forKey: "RecentNetworkFailures")
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LastNetworkFailureTime")
+        
+        print("🛰️ RadioPlayer: Network failure tracked (count: \(newFailureCount)) for GPS protection")
+        
+        // Reset failure count after 5 minutes of no failures
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300) {
+            let currentTime = Date().timeIntervalSince1970
+            let lastFailureTime = UserDefaults.standard.double(forKey: "LastNetworkFailureTime")
+            
+            // Only reset if no new failures occurred in the last 5 minutes
+            if currentTime - lastFailureTime >= 300 {
+                UserDefaults.standard.removeObject(forKey: "RecentNetworkFailures")
+                UserDefaults.standard.removeObject(forKey: "LastNetworkFailureTime")
+                print("🛰️ RadioPlayer: Network failure count reset - GPS protection normalized")
+            }
+        }
     }
     
     deinit {

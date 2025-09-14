@@ -1399,7 +1399,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         print("🌍 DEBUG: Selected country: \(self.selectedCountry)")
         
         let filteredStations = self.stations.filter { $0.country == self.selectedCountry || self.selectedCountry == "Select Country" }
-                                            .map(ExportStation.init)
+                                            .map { ExportStation(from: $0, includeImages: false) }
 
         print("📋 DEBUG: Filtered stations for export: \(filteredStations.count)")
         
@@ -1426,6 +1426,568 @@ class RadioStationViewModel: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 print("💥 DEBUG: Calling completion with nil due to error")
                 completion(nil)
+            }
+        }
+    }
+    
+    // MARK: - Enhanced Import/Export Methods
+    
+    /// Export stations as list (metadata only)
+    func exportStationsAsList(completion: @escaping (URL?) -> Void) {
+        print("🚀 DEBUG: exportStationsAsList called")
+        print("📊 DEBUG: Total stations: \(self.stations.count)")
+        print("🌍 DEBUG: Selected country: \(self.selectedCountry)")
+        
+        let filteredStations = self.stations.filter { $0.country == self.selectedCountry || self.selectedCountry == "Select Country" }
+                                            .map { ExportStation(from: $0, includeImages: false) }
+
+        print("📋 DEBUG: Filtered stations for list export: \(filteredStations.count)")
+        
+        let fileName = "stations_list_export.json"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        print("📁 DEBUG: Export file path: \(fileURL.path)")
+
+        do {
+            let jsonEncoder = JSONEncoder()
+            jsonEncoder.outputFormatting = .prettyPrinted
+            let jsonData = try jsonEncoder.encode(filteredStations)
+            
+            try jsonData.write(to: fileURL)
+            print("✅ DEBUG: JSON file written successfully (list only)")
+            print("📏 DEBUG: JSON data length: \(jsonData.count) bytes")
+            DispatchQueue.main.async {
+                completion(fileURL)
+            }
+        } catch {
+            print("❌ DEBUG: Failed to export stations list: \(error)")
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+        }
+    }
+    
+    /// Export stations with images (metadata + custom images)
+    func exportStationsWithImages(completion: @escaping (URL?) -> Void) {
+        print("🚀 DEBUG: exportStationsWithImages called")
+        print("📊 DEBUG: Total stations: \(self.stations.count)")
+        print("🌍 DEBUG: Selected country: \(self.selectedCountry)")
+        
+        let filteredStations = self.stations.filter { $0.country == self.selectedCountry || self.selectedCountry == "Select Country" }
+                                            .map { ExportStation(from: $0, includeImages: true) }
+
+        print("📋 DEBUG: Filtered stations for image export: \(filteredStations.count)")
+        
+        // Count stations with custom images
+        let stationsWithImages = filteredStations.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+        print("🖼️ DEBUG: Stations with custom images: \(stationsWithImages.count)")
+        
+        let fileName = "stations_with_images_export.json"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        print("📁 DEBUG: Export file path: \(fileURL.path)")
+
+        do {
+            let jsonEncoder = JSONEncoder()
+            jsonEncoder.outputFormatting = .prettyPrinted
+            let jsonData = try jsonEncoder.encode(filteredStations)
+            
+            try jsonData.write(to: fileURL)
+            print("✅ DEBUG: JSON file written successfully (with images)")
+            print("📏 DEBUG: JSON data length: \(jsonData.count) bytes")
+            DispatchQueue.main.async {
+                completion(fileURL)
+            }
+        } catch {
+            print("❌ DEBUG: Failed to export stations with images: \(error)")
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+        }
+    }
+    
+    /// Import stations as list (metadata only)
+    func importStationsAsList(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+        print("🚀 DEBUG: importStationsAsList called")
+        
+        // Set import flag to prevent sync interference
+        DispatchQueue.main.async {
+            self.isImportInProgress = true
+        }
+        
+        // Ensure notification permissions are granted
+        NotificationManager.shared.requestAuthorization()
+        
+        // Notify user that import has started
+        NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing station list from file (metadata only)")
+        
+        do {
+            let data = try Data(contentsOf: url)
+            print("📄 Import: Read \(data.count) bytes from file")
+            
+            let jsonDecoder = JSONDecoder()
+            let exportStationsFromJson = try jsonDecoder.decode([ExportStation].self, from: data)
+            print("✅ Import: Successfully decoded \(exportStationsFromJson.count) ExportStation objects")
+            
+            // Convert ExportStation to RadioStation with proper defaults (no images)
+            let stationsFromJson = exportStationsFromJson.map { exportStation in
+                RadioStation(
+                    id: exportStation.id,
+                    name: exportStation.name,
+                    url: exportStation.url,
+                    iconData: nil,                    // Explicitly ignore any image data
+                    iTunesArtworkData: nil,           // Explicitly ignore any image data
+                    country: exportStation.country,
+                    isFavorite: exportStation.isFavorite,
+                    favoritedAt: exportStation.isFavorite ? Date() : nil,
+                    favoriteOrder: nil,
+                    order: 0,
+                    lastPlayed: nil,
+                    isRecent: false
+                )
+            }
+
+            // Get existing URLs to check for duplicates
+            let existingURLs = Set(stations.map { $0.url })
+            
+            // Filter out stations that already exist by URL
+            let newStations = stationsFromJson.filter { !existingURLs.contains($0.url) }
+            
+            let totalNewStations = Double(newStations.count)
+            var importedStations = 0.0
+
+            DispatchQueue.main.async {
+                // Append new stations instead of removing existing ones
+                for station in newStations {
+                    self.stations.append(station)
+                    importedStations += 1
+                    progressHandler(importedStations / max(totalNewStations, 1))
+                }
+
+                print("Imported \(newStations.count) new stations (list only). Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+
+                // Save these to CoreData first
+                self.saveStationsToCoreData()
+
+                // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // Only save the newly imported stations to CloudKit (with URL duplicate checking)
+                    DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
+                        DispatchQueue.main.async {
+                            if success {
+                                print("Successfully saved \(newStations.count) new stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed", message: "Successfully imported \(newStations.count) new stations (list only).")
+                            } else {
+                                print("Failed to save some or all new stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
+                            }
+                            
+                            // Clear import flag and notify completion
+                            self.isImportInProgress = false
+                            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                            completion()
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("❌ Import: Failed to import stations list: \(error)")
+            DispatchQueue.main.async {
+                self.isImportInProgress = false
+                NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import stations list: \(error.localizedDescription)")
+                completion()
+            }
+        }
+    }
+    
+    /// Import stations with images (metadata + custom images)
+    func importStationsWithImages(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+        print("🚀 DEBUG: importStationsWithImages called")
+        
+        // Set import flag to prevent sync interference
+        DispatchQueue.main.async {
+            self.isImportInProgress = true
+        }
+        
+        // Ensure notification permissions are granted
+        NotificationManager.shared.requestAuthorization()
+        
+        // Notify user that import has started
+        NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing stations with images from file")
+        
+        do {
+            let data = try Data(contentsOf: url)
+            print("📄 Import: Read \(data.count) bytes from file")
+            
+            let jsonDecoder = JSONDecoder()
+            let exportStationsFromJson = try jsonDecoder.decode([ExportStation].self, from: data)
+            print("✅ Import: Successfully decoded \(exportStationsFromJson.count) ExportStation objects")
+            
+            // Count stations with images
+            let stationsWithImages = exportStationsFromJson.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+            print("🖼️ Import: Stations with custom images: \(stationsWithImages.count)")
+            
+            // Convert ExportStation to RadioStation preserving image data
+            let stationsFromJson = exportStationsFromJson.map { exportStation in
+                RadioStation(
+                    id: exportStation.id,
+                    name: exportStation.name,
+                    url: exportStation.url,
+                    iconData: exportStation.iconData,           // Preserve custom image data
+                    iTunesArtworkData: exportStation.iTunesArtworkData, // Preserve custom image data
+                    country: exportStation.country,
+                    isFavorite: exportStation.isFavorite,
+                    favoritedAt: exportStation.isFavorite ? Date() : nil,
+                    favoriteOrder: nil,
+                    order: 0,
+                    lastPlayed: nil,
+                    isRecent: false
+                )
+            }
+
+            // Get existing URLs to check for duplicates
+            let existingURLs = Set(stations.map { $0.url })
+            
+            // Filter out stations that already exist by URL
+            let newStations = stationsFromJson.filter { !existingURLs.contains($0.url) }
+            
+            let totalNewStations = Double(newStations.count)
+            var importedStations = 0.0
+
+            DispatchQueue.main.async {
+                // Append new stations instead of removing existing ones
+                for station in newStations {
+                    self.stations.append(station)
+                    importedStations += 1
+                    progressHandler(importedStations / max(totalNewStations, 1))
+                }
+
+                let newStationsWithImages = newStations.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+                print("Imported \(newStations.count) new stations with \(newStationsWithImages.count) custom images. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+
+                // Save these to CoreData first
+                self.saveStationsToCoreData()
+
+                // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // Only save the newly imported stations to CloudKit (with URL duplicate checking)
+                    DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
+                        DispatchQueue.main.async {
+                            if success {
+                                print("Successfully saved \(newStations.count) new stations with images to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed", message: "Successfully imported \(newStations.count) new stations with \(newStationsWithImages.count) custom images.")
+                            } else {
+                                print("Failed to save some or all new stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
+                            }
+                            
+                            // Clear import flag and notify completion
+                            self.isImportInProgress = false
+                            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                            completion()
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("❌ Import: Failed to import stations with images: \(error)")
+            DispatchQueue.main.async {
+                self.isImportInProgress = false
+                NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import stations with images: \(error.localizedDescription)")
+                completion()
+            }
+        }
+    }
+    
+    // MARK: - Favorites Import/Export Methods
+    
+    /// Export favorite stations as list (metadata only)
+    func exportFavoritesAsList(completion: @escaping (URL?) -> Void) {
+        print("🚀 DEBUG: exportFavoritesAsList called")
+        
+        let favoriteStations = self.stations.filter { $0.isFavorite }
+                                           .map { ExportStation(from: $0, includeImages: false) }
+
+        print("📋 DEBUG: Filtered favorite stations for list export: \(favoriteStations.count)")
+        
+        if favoriteStations.isEmpty {
+            print("⚠️ DEBUG: No favorite stations to export")
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+            return
+        }
+        
+        let fileName = "favorites_list_export.json"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        print("📁 DEBUG: Export favorites file path: \(fileURL.path)")
+
+        do {
+            let jsonEncoder = JSONEncoder()
+            jsonEncoder.outputFormatting = .prettyPrinted
+            let jsonData = try jsonEncoder.encode(favoriteStations)
+            
+            try jsonData.write(to: fileURL)
+            print("✅ DEBUG: Favorites JSON file written successfully (list only)")
+            print("📏 DEBUG: JSON data length: \(jsonData.count) bytes")
+            DispatchQueue.main.async {
+                completion(fileURL)
+            }
+        } catch {
+            print("❌ DEBUG: Failed to export favorites list: \(error)")
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+        }
+    }
+    
+    /// Export favorite stations with images (metadata + custom images)
+    func exportFavoritesWithImages(completion: @escaping (URL?) -> Void) {
+        print("🚀 DEBUG: exportFavoritesWithImages called")
+        
+        let favoriteStations = self.stations.filter { $0.isFavorite }
+                                           .map { ExportStation(from: $0, includeImages: true) }
+
+        print("📋 DEBUG: Filtered favorite stations for image export: \(favoriteStations.count)")
+        
+        if favoriteStations.isEmpty {
+            print("⚠️ DEBUG: No favorite stations to export")
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+            return
+        }
+        
+        // Count favorites with custom images
+        let favoritesWithImages = favoriteStations.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+        print("🖼️ DEBUG: Favorite stations with custom images: \(favoritesWithImages.count)")
+        
+        let fileName = "favorites_with_images_export.json"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        print("📁 DEBUG: Export favorites file path: \(fileURL.path)")
+
+        do {
+            let jsonEncoder = JSONEncoder()
+            jsonEncoder.outputFormatting = .prettyPrinted
+            let jsonData = try jsonEncoder.encode(favoriteStations)
+            
+            try jsonData.write(to: fileURL)
+            print("✅ DEBUG: Favorites JSON file written successfully (with images)")
+            print("📏 DEBUG: JSON data length: \(jsonData.count) bytes")
+            DispatchQueue.main.async {
+                completion(fileURL)
+            }
+        } catch {
+            print("❌ DEBUG: Failed to export favorites with images: \(error)")
+            DispatchQueue.main.async {
+                completion(nil)
+            }
+        }
+    }
+    
+    /// Import favorite stations as list (metadata only) with smart country assignment
+    func importFavoritesAsList(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+        print("🚀 DEBUG: importFavoritesAsList called")
+        
+        // Set import flag to prevent sync interference
+        DispatchQueue.main.async {
+            self.isImportInProgress = true
+        }
+        
+        // Ensure notification permissions are granted
+        NotificationManager.shared.requestAuthorization()
+        
+        // Notify user that import has started
+        NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing favorite stations list from file (metadata only)")
+        
+        do {
+            let data = try Data(contentsOf: url)
+            print("📄 Import: Read \(data.count) bytes from file")
+            
+            let jsonDecoder = JSONDecoder()
+            let exportStationsFromJson = try jsonDecoder.decode([ExportStation].self, from: data)
+            print("✅ Import: Successfully decoded \(exportStationsFromJson.count) ExportStation objects")
+            
+            // Convert ExportStation to RadioStation with proper defaults (no images, all as favorites)
+            let favoritesFromJson = exportStationsFromJson.map { exportStation in
+                RadioStation(
+                    id: exportStation.id,
+                    name: exportStation.name,
+                    url: exportStation.url,
+                    iconData: nil,                    // Explicitly ignore any image data
+                    iTunesArtworkData: nil,           // Explicitly ignore any image data
+                    country: exportStation.country,
+                    isFavorite: true,                 // Force all imported stations to be favorites
+                    favoritedAt: Date(),              // Set current time for all favorites
+                    favoriteOrder: nil,               // Will be set when organizing favorites
+                    order: 0,                         // Will be set based on position
+                    lastPlayed: nil,                  // New stations haven't been played
+                    isRecent: false                   // New stations aren't recent
+                )
+            }
+
+            // Get existing URLs to check for duplicates
+            let existingURLs = Set(stations.map { $0.url })
+            
+            // Filter out stations that already exist by URL
+            let newFavorites = favoritesFromJson.filter { !existingURLs.contains($0.url) }
+            
+            let totalNewFavorites = Double(newFavorites.count)
+            var importedFavorites = 0.0
+
+            DispatchQueue.main.async {
+                // Group favorites by country for smart assignment
+                let favoritesByCountry = Dictionary(grouping: newFavorites) { $0.country }
+                
+                // Add favorites to their respective countries
+                for (country, countryFavorites) in favoritesByCountry {
+                    for favorite in countryFavorites {
+                        self.stations.append(favorite)
+                        importedFavorites += 1
+                        progressHandler(importedFavorites / max(totalNewFavorites, 1))
+                    }
+                    print("📍 Added \(countryFavorites.count) favorite stations to \(country)")
+                }
+
+                print("Imported \(newFavorites.count) new favorite stations (list only) across \(favoritesByCountry.keys.count) countries. Skipped \(favoritesFromJson.count - newFavorites.count) duplicates.")
+
+                // Save these to CoreData first
+                self.saveStationsToCoreData()
+
+                // Wait a bit to ensure Core Data save is complete, then save only new favorites to CloudKit
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // Only save the newly imported favorites to CloudKit (with URL duplicate checking)
+                    DataStore.shared.saveImportedStationsToCloudKit(stations: newFavorites) { success, recordIDs in
+                        DispatchQueue.main.async {
+                            if success {
+                                print("Successfully saved \(newFavorites.count) new favorite stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed", message: "Successfully imported \(newFavorites.count) favorite stations (list only) across \(favoritesByCountry.keys.count) countries.")
+                            } else {
+                                print("Failed to save some or all new favorite stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newFavorites.count) favorite stations locally. Some stations may not have synced to iCloud.")
+                            }
+                            
+                            // Clear import flag and notify completion
+                            self.isImportInProgress = false
+                            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                            completion()
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("❌ Import: Failed to import favorites list: \(error)")
+            DispatchQueue.main.async {
+                self.isImportInProgress = false
+                NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import favorites list: \(error.localizedDescription)")
+                completion()
+            }
+        }
+    }
+    
+    /// Import favorite stations with images (metadata + custom images) with smart country assignment
+    func importFavoritesWithImages(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+        print("🚀 DEBUG: importFavoritesWithImages called")
+        
+        // Set import flag to prevent sync interference
+        DispatchQueue.main.async {
+            self.isImportInProgress = true
+        }
+        
+        // Ensure notification permissions are granted
+        NotificationManager.shared.requestAuthorization()
+        
+        // Notify user that import has started
+        NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing favorite stations with images from file")
+        
+        do {
+            let data = try Data(contentsOf: url)
+            print("📄 Import: Read \(data.count) bytes from file")
+            
+            let jsonDecoder = JSONDecoder()
+            let exportStationsFromJson = try jsonDecoder.decode([ExportStation].self, from: data)
+            print("✅ Import: Successfully decoded \(exportStationsFromJson.count) ExportStation objects")
+            
+            // Count favorites with images
+            let favoritesWithImages = exportStationsFromJson.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+            print("🖼️ Import: Favorite stations with custom images: \(favoritesWithImages.count)")
+            
+            // Convert ExportStation to RadioStation preserving image data (all as favorites)
+            let favoritesFromJson = exportStationsFromJson.map { exportStation in
+                RadioStation(
+                    id: exportStation.id,
+                    name: exportStation.name,
+                    url: exportStation.url,
+                    iconData: exportStation.iconData,           // Preserve custom image data
+                    iTunesArtworkData: exportStation.iTunesArtworkData, // Preserve custom image data
+                    country: exportStation.country,
+                    isFavorite: true,                           // Force all imported stations to be favorites
+                    favoritedAt: Date(),                        // Set current time for all favorites
+                    favoriteOrder: nil,                         // Will be set when organizing favorites
+                    order: 0,                                   // Will be set based on position
+                    lastPlayed: nil,                            // New stations haven't been played
+                    isRecent: false                             // New stations aren't recent
+                )
+            }
+
+            // Get existing URLs to check for duplicates
+            let existingURLs = Set(stations.map { $0.url })
+            
+            // Filter out stations that already exist by URL
+            let newFavorites = favoritesFromJson.filter { !existingURLs.contains($0.url) }
+            
+            let totalNewFavorites = Double(newFavorites.count)
+            var importedFavorites = 0.0
+
+            DispatchQueue.main.async {
+                // Group favorites by country for smart assignment
+                let favoritesByCountry = Dictionary(grouping: newFavorites) { $0.country }
+                
+                // Add favorites to their respective countries
+                for (country, countryFavorites) in favoritesByCountry {
+                    for favorite in countryFavorites {
+                        self.stations.append(favorite)
+                        importedFavorites += 1
+                        progressHandler(importedFavorites / max(totalNewFavorites, 1))
+                    }
+                    print("📍 Added \(countryFavorites.count) favorite stations to \(country)")
+                }
+
+                let newFavoritesWithImages = newFavorites.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+                print("Imported \(newFavorites.count) new favorite stations with \(newFavoritesWithImages.count) custom images across \(favoritesByCountry.keys.count) countries. Skipped \(favoritesFromJson.count - newFavorites.count) duplicates.")
+
+                // Save these to CoreData first
+                self.saveStationsToCoreData()
+
+                // Wait a bit to ensure Core Data save is complete, then save only new favorites to CloudKit
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // Only save the newly imported favorites to CloudKit (with URL duplicate checking)
+                    DataStore.shared.saveImportedStationsToCloudKit(stations: newFavorites) { success, recordIDs in
+                        DispatchQueue.main.async {
+                            if success {
+                                print("Successfully saved \(newFavorites.count) new favorite stations with images to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed", message: "Successfully imported \(newFavorites.count) favorite stations with \(newFavoritesWithImages.count) custom images across \(favoritesByCountry.keys.count) countries.")
+                            } else {
+                                print("Failed to save some or all new favorite stations to CloudKit.")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newFavorites.count) favorite stations locally. Some stations may not have synced to iCloud.")
+                            }
+                            
+                            // Clear import flag and notify completion
+                            self.isImportInProgress = false
+                            NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                            completion()
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("❌ Import: Failed to import favorites with images: \(error)")
+            DispatchQueue.main.async {
+                self.isImportInProgress = false
+                NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import favorites with images: \(error.localizedDescription)")
+                completion()
             }
         }
     }

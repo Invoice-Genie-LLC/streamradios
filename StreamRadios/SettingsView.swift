@@ -2274,23 +2274,201 @@ struct InternalDataManagementView: View {
                        }
                     }
                     
-                    ActionButton(
-                        title: "Export Stations",
-                        subtitle: "Save stations to a file",
-                        icon: "square.and.arrow.up",
-                        action: exportAction
-                    )
+                    // Export Stations Dropdown
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.body)
+                                .foregroundColor(.blue)
+                                .frame(width: 20)
+                            
+                            Text("Export Country Stations")
+                                .font(.body)
+                                .foregroundColor(colorScheme == .dark ? .white : .primary)
+                            
+                            Spacer()
+                        }
+                        
+                        Menu {
+                            Button {
+                                exportAsListAction()
+                            } label: {
+                                Label("Export as List", systemImage: "list.bullet")
+                                Text("Metadata only (smaller file)")
+                            }
+                            
+                            Button {
+                                exportWithImagesAction()
+                            } label: {
+                                Label("Export with Logo", systemImage: "photo.on.rectangle")
+                                Text("With station logos (larger file)")
+                            }
+                        } label: {
+                            HStack {
+                                Text("Choose Export Type")
+                                    .font(.body)
+                                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.down")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                    }
                     
-                    ActionButton(
-                        title: "Import Stations",
-                        subtitle: "Load stations from a file",
-                        icon: "square.and.arrow.down",
-                        action: importAction
-                    )
+                    // Import Stations Dropdown
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.body)
+                                .foregroundColor(.green)
+                                .frame(width: 20)
+                            
+                            Text("Import Country Stations")
+                                .font(.body)
+                                .foregroundColor(colorScheme == .dark ? .white : .primary)
+                            
+                            Spacer()
+                        }
+                        
+                        Menu {
+                            Button {
+                                importAsListAction()
+                            } label: {
+                                Label("Import as List", systemImage: "list.bullet")
+                                Text("Metadata only (ignores images)")
+                            }
+                            
+                            Button {
+                                importWithImagesAction()
+                            } label: {
+                                Label("Import with Logo", systemImage: "photo.on.rectangle")
+                                Text("With station logos preserved")
+                            }
+                        } label: {
+                            HStack {
+                                Text("Choose Import Type")
+                                    .font(.body)
+                                    .foregroundColor(colorScheme == .dark ? .white : .primary)
+                                
+                                Spacer()
+                                
+                                Image(systemName: "chevron.down")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                    }
+                    
+                    // Favorites Export/Import Section (Standalone)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "heart.fill")
+                                .font(.body)
+                                .foregroundColor(.pink)
+                                .frame(width: 20)
+                            
+                            Text("Favorites Management")
+                                .font(.body)
+                                .foregroundColor(colorScheme == .dark ? .white : .primary)
+                            
+                            Spacer()
+                        }
+                        
+                        Text("No country selection required - favorites are auto-assigned to their respective countries")
+                            .font(.caption)
+                            .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                        
+                        VStack(spacing: 8) {
+                            // Export Favorites Dropdown
+                            Menu {
+                                Button {
+                                    exportFavoritesAsListAction()
+                                } label: {
+                                    Label("Export Favorites as List", systemImage: "heart.text.square")
+                                    Text("Metadata only (smaller file)")
+                                }
+                                
+                                Button {
+                                    exportFavoritesWithImagesAction()
+                                } label: {
+                                    Label("Export Favorites with Logo", systemImage: "heart.square.fill")
+                                    Text("With logos (larger file)")
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.body)
+                                        .foregroundColor(.pink)
+                                    
+                                    Text("Export Favorites")
+                                        .font(.body)
+                                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                .background(Color.pink.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                            
+                            // Import Favorites Dropdown
+                            Menu {
+                                Button {
+                                    importFavoritesAsListAction()
+                                } label: {
+                                    Label("Import Favorites as List", systemImage: "heart.text.square")
+                                    Text("Metadata only, auto-assign to countries")
+                                }
+                                
+                                Button {
+                                    importFavoritesWithImagesAction()
+                                } label: {
+                                    Label("Import Favorites with Logo", systemImage: "heart.square.fill")
+                                    Text("With logos, auto-assign to countries")
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "square.and.arrow.down")
+                                        .font(.body)
+                                        .foregroundColor(.pink)
+                                    
+                                    Text("Import Favorites")
+                                        .font(.body)
+                                        .foregroundColor(colorScheme == .dark ? .white : .primary)
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                .background(Color.pink.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                        }
+                    }
                     
                     if isImporting {
                         ExportProgressView(
-                            title: "Importing stations...",
+                            title: getImportProgressTitle(),
                             progress: importProgress
                         )
                     }
@@ -2429,36 +2607,172 @@ struct InternalDataManagementView: View {
     
     // MARK: - Import/Export Methods
     
-    private func exportAction() {
-        print("🔄 DEBUG: Export action started")
+    // MARK: - Enhanced Export Actions
+    
+    private func exportAsListAction() {
+        print("🔄 DEBUG: Export as list action started")
         if viewModel.selectedCountry == "Select Country" {
             print("⚠️ DEBUG: No country selected, showing alert")
             showAlert(for: .exportWithoutCountry)
         } else {
-            print("✅ DEBUG: Country selected: \(viewModel.selectedCountry), starting export")
-            viewModel.exportStationsToFile { fileURL in
-                print("📁 DEBUG: Export callback received")
+            print("✅ DEBUG: Country selected: \(viewModel.selectedCountry), starting list export")
+            viewModel.exportStationsAsList { fileURL in
+                print("📁 DEBUG: Export as list callback received")
                 guard let fileURL = fileURL else { 
-                    print("❌ DEBUG: Export failed - no file URL returned")
+                    print("❌ DEBUG: Export as list failed - no file URL returned")
                     return 
                 }
-                print("✅ DEBUG: Export file created at: \(fileURL.path)")
+                print("✅ DEBUG: Export list file created at: \(fileURL.path)")
                 DispatchQueue.main.async {
-                    print("🎯 DEBUG: Setting exportURL and showing sheet")
+                    print("🎯 DEBUG: Setting exportURL and showing sheet for list export")
                     self.exportURL = fileURL
                     self.showExportSheet = true
-                    print("📊 DEBUG: exportURL set to: \(String(describing: self.exportURL))")
-                    print("📊 DEBUG: showExportSheet set to: \(self.showExportSheet)")
                 }
             }
         }
     }
     
-    private func importAction() {
+    private func exportWithImagesAction() {
+        print("🔄 DEBUG: Export with images action started")
+        if viewModel.selectedCountry == "Select Country" {
+            print("⚠️ DEBUG: No country selected, showing alert")
+            showAlert(for: .exportWithoutCountry)
+        } else {
+            print("✅ DEBUG: Country selected: \(viewModel.selectedCountry), starting images export")
+            viewModel.exportStationsWithImages { fileURL in
+                print("📁 DEBUG: Export with images callback received")
+                guard let fileURL = fileURL else { 
+                    print("❌ DEBUG: Export with images failed - no file URL returned")
+                    return 
+                }
+                print("✅ DEBUG: Export images file created at: \(fileURL.path)")
+                DispatchQueue.main.async {
+                    print("🎯 DEBUG: Setting exportURL and showing sheet for images export")
+                    self.exportURL = fileURL
+                    self.showExportSheet = true
+                }
+            }
+        }
+    }
+    
+    // MARK: - Enhanced Import Actions
+    
+    @State private var importType: ImportType = .list
+    @State private var showExportDropdown = false
+    @State private var showImportDropdown = false
+    
+    private enum ImportType {
+        case list
+        case withImages
+        case favoritesList
+        case favoritesWithImages
+    }
+    
+    private func importAsListAction() {
         if viewModel.selectedCountry == "Select Country" {
             showAlert(for: .importWithoutCountry)
         } else {
+            importType = .list
             showDocumentPicker = true
+        }
+    }
+    
+    private func importWithImagesAction() {
+        if viewModel.selectedCountry == "Select Country" {
+            showAlert(for: .importWithoutCountry)
+        } else {
+            importType = .withImages
+            showDocumentPicker = true
+        }
+    }
+    
+    // MARK: - Favorites Export Actions
+    
+    private func exportFavoritesAsListAction() {
+        print("🔄 DEBUG: Export favorites as list action started")
+        let favoriteCount = viewModel.stations.filter { $0.isFavorite }.count
+        
+        if favoriteCount == 0 {
+            // Show alert for no favorites - use a simple approach
+            print("⚠️ DEBUG: No favorite stations to export")
+            return
+        } else {
+            print("✅ DEBUG: Found \(favoriteCount) favorite stations, starting favorites list export")
+            viewModel.exportFavoritesAsList { fileURL in
+                print("📁 DEBUG: Export favorites as list callback received")
+                guard let fileURL = fileURL else { 
+                    print("❌ DEBUG: Export favorites as list failed - no file URL returned")
+                    return 
+                }
+                print("✅ DEBUG: Export favorites list file created at: \(fileURL.path)")
+                DispatchQueue.main.async {
+                    print("🎯 DEBUG: Setting exportURL and showing sheet for favorites list export")
+                    self.exportURL = fileURL
+                    self.showExportSheet = true
+                }
+            }
+        }
+    }
+    
+    private func exportFavoritesWithImagesAction() {
+        print("🔄 DEBUG: Export favorites with images action started")
+        let favoriteCount = viewModel.stations.filter { $0.isFavorite }.count
+        
+        if favoriteCount == 0 {
+            // Show alert for no favorites - use a simple approach
+            print("⚠️ DEBUG: No favorite stations to export")
+            return
+        } else {
+            print("✅ DEBUG: Found \(favoriteCount) favorite stations, starting favorites images export")
+            viewModel.exportFavoritesWithImages { fileURL in
+                print("📁 DEBUG: Export favorites with images callback received")
+                guard let fileURL = fileURL else { 
+                    print("❌ DEBUG: Export favorites with images failed - no file URL returned")
+                    return 
+                }
+                print("✅ DEBUG: Export favorites images file created at: \(fileURL.path)")
+                DispatchQueue.main.async {
+                    print("🎯 DEBUG: Setting exportURL and showing sheet for favorites images export")
+                    self.exportURL = fileURL
+                    self.showExportSheet = true
+                }
+            }
+        }
+    }
+    
+    // MARK: - Favorites Import Actions (No Country Selection Required)
+    
+    private func importFavoritesAsListAction() {
+        importType = .favoritesList
+        showDocumentPicker = true
+    }
+    
+    private func importFavoritesWithImagesAction() {
+        importType = .favoritesWithImages
+        showDocumentPicker = true
+    }
+    
+    // Legacy methods for backward compatibility
+    private func exportAction() {
+        exportAsListAction() // Default to list export for backward compatibility
+    }
+    
+    private func importAction() {
+        importAsListAction() // Default to list import for backward compatibility
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func getImportProgressTitle() -> String {
+        switch importType {
+        case .list:
+            return "Importing stations as list..."
+        case .withImages:
+            return "Importing stations with logos..."
+        case .favoritesList:
+            return "Importing favorites as list..."
+        case .favoritesWithImages:
+            return "Importing favorites with logos..."
         }
     }
     
@@ -2466,16 +2780,55 @@ struct InternalDataManagementView: View {
         isImporting = true
         importProgress = 0.0
         
-        // Directly proceed with import (appending to existing stations)
-        viewModel.importStationsFromFile(url: url) { progress in
-            DispatchQueue.main.async {
-                importProgress = progress
+        // Use the appropriate import method based on the selected import type
+        switch importType {
+        case .list:
+            viewModel.importStationsAsList(url: url) { progress in
+                DispatchQueue.main.async {
+                    importProgress = progress
+                }
+            } completion: {
+                DispatchQueue.main.async {
+                    isImporting = false
+                    importURL = nil
+                    onImportComplete?(viewModel.selectedCountry)
+                }
             }
-        } completion: {
-            DispatchQueue.main.async {
-                isImporting = false
-                importURL = nil
-                onImportComplete?(viewModel.selectedCountry)
+        case .withImages:
+            viewModel.importStationsWithImages(url: url) { progress in
+                DispatchQueue.main.async {
+                    importProgress = progress
+                }
+            } completion: {
+                DispatchQueue.main.async {
+                    isImporting = false
+                    importURL = nil
+                    onImportComplete?(viewModel.selectedCountry)
+                }
+            }
+        case .favoritesList:
+            viewModel.importFavoritesAsList(url: url) { progress in
+                DispatchQueue.main.async {
+                    importProgress = progress
+                }
+            } completion: {
+                DispatchQueue.main.async {
+                    isImporting = false
+                    importURL = nil
+                    onImportComplete?(viewModel.selectedCountry)
+                }
+            }
+        case .favoritesWithImages:
+            viewModel.importFavoritesWithImages(url: url) { progress in
+                DispatchQueue.main.async {
+                    importProgress = progress
+                }
+            } completion: {
+                DispatchQueue.main.async {
+                    isImporting = false
+                    importURL = nil
+                    onImportComplete?(viewModel.selectedCountry)
+                }
             }
         }
     }
