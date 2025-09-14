@@ -125,6 +125,7 @@ struct SettingsView: View {
                         subscriptionSettings
                         playbackSettings
                         displaySettings
+                        countrySettings
                         alarmSettings
                         dataManagementLink
                         stationSubmissionSettings
@@ -248,14 +249,15 @@ struct SettingsView: View {
     @ViewBuilder
     private var subscriptionSettings: some View {
         SettingsCard(
-            title: "StreamRadios Pro",
+            title: "",
             icon: ""
         ) {
             VStack(spacing: 16) {
-                HStack {
+                HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "crown.fill")
                         .foregroundColor(.yellow)
                         .font(.title2)
+                        .padding(.top, 2)
                     
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Subscription Status")
@@ -309,7 +311,7 @@ struct SettingsView: View {
                         
                         HStack(spacing: 16) {
                             FeatureBadge(icon: "antenna.radiowaves.left.and.right", text: "Unlimited Stations")
-                            FeatureBadge(icon: "podcasts.fill", text: "Offline Downloads")
+                            FeatureBadge(icon: "microphone.circle.fill", text: "Offline Downloads")
                             FeatureBadge(icon: "icloud.fill", text: "Cloud Sync")
                         }
                         .font(.caption)
@@ -430,6 +432,43 @@ extension SettingsView {
                  isOn: $isDarkMode,
                  icon: "paintbrush.fill"
              )
+         }
+     }
+     
+     @ViewBuilder
+     private var countrySettings: some View {
+         SettingsCard(
+             title: "Country Settings",
+             icon: ""
+         ) {
+             NavigationLink(destination: HiddenCountriesSettingsView()) {
+                 VStack(alignment: .leading, spacing: 8) {
+                     HStack(spacing: 8) {
+                         Image(systemName: "eye.slash.fill")
+                             .font(.headline)
+                             .foregroundColor(.blue)
+                             .frame(width: 20)
+                         
+                         Text("Hidden Countries")
+                             .font(.body)
+                             .foregroundColor(colorScheme == .dark ? .white : .primary)
+                         
+                         Spacer()
+                         
+                         Image(systemName: "chevron.right")
+                             .font(.subheadline)
+                             .foregroundColor(.gray)
+                     }
+                     
+                     Text("Manage which countries appear in the country picker")
+                         .font(.caption)
+                         .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                 }
+                 .padding(.vertical, 8)
+                 .padding(.horizontal, 4)
+                 .contentShape(Rectangle())
+             }
+             .buttonStyle(PlainButtonStyle())
          }
      }
      
@@ -1853,21 +1892,23 @@ struct SettingsCard<Content: View>: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            HStack(spacing: 12) {
-                if !icon.isEmpty {
-                    Image(systemName: icon)
-                        .font(.title3)
-                        .foregroundColor(isDestructive ? .red : .blue)
-                        .frame(width: 24, height: 24)
+        VStack(alignment: .leading, spacing: title.isEmpty ? 0 : 16) {
+            // Header - only show if title is not empty
+            if !title.isEmpty {
+                HStack(spacing: 12) {
+                    if !icon.isEmpty {
+                        Image(systemName: icon)
+                            .font(.title3)
+                            .foregroundColor(isDestructive ? .red : .blue)
+                            .frame(width: 24, height: 24)
+                    }
+                    
+                    Text(title)
+                        .font(.headline)
+                        .foregroundColor(titleColor)
+                    
+                    Spacer()
                 }
-                
-                Text(title)
-                    .font(.headline)
-                    .foregroundColor(titleColor)
-                
-                Spacer()
             }
             
             // Content

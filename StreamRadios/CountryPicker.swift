@@ -118,11 +118,13 @@ struct CountryPicker: View {
     @State private var countryToDelete: Country? = nil
     @State private var showingProgressView = false
     @StateObject private var progressViewModel = CountryDeletionProgressViewModel()
+    @AppStorage("hiddenCountries") private var hiddenCountriesData: Data = Data()
+    @State private var hiddenCountries: Set<String> = []
     
     // Group countries by regions
     private var groupedCountries: [CountryRegion: [Country]] {
-        let filtered = searchText.isEmpty ? countries.filter { $0.name != "Select Country" } :
-            countries.filter { $0.name.localizedCaseInsensitiveContains(searchText) && $0.name != "Select Country" }
+        let filtered = searchText.isEmpty ? countries.filter { $0.name != "Select Country" && !hiddenCountries.contains($0.name) } :
+            countries.filter { $0.name.localizedCaseInsensitiveContains(searchText) && $0.name != "Select Country" && !hiddenCountries.contains($0.name) }
         
         return Dictionary(grouping: filtered) { country in
             CountryRegion.region(for: country.name)
@@ -131,7 +133,7 @@ struct CountryPicker: View {
     
     private var filteredRecentCountries: [Country] {
         let validRecent = recentCountries.filter { recent in
-            countries.contains { $0.name == recent && recent != "Select Country" }
+            countries.contains { $0.name == recent && recent != "Select Country" && !hiddenCountries.contains($0.name) }
         }
         return validRecent.compactMap { recentName in
             countries.first { $0.name == recentName }
@@ -341,6 +343,7 @@ struct CountryPicker: View {
         .background(Color.adaptiveBackground)
         .onAppear {
             loadRecentCountries()
+            loadHiddenCountries()
         }
         .alert("Delete All Stations", isPresented: $showingDeleteAlert, presenting: countryToDelete) { country in
             Button("Cancel", role: .cancel) {}
@@ -364,7 +367,7 @@ struct CountryPicker: View {
     private var popularCountries: [Country] {
         let popularNames = ["United States", "Canada", "United Kingdom", "Germany", "France", "Australia", "Japan", "Brazil"]
         return popularNames.compactMap { name in
-            countries.first { $0.name == name }
+            countries.first { $0.name == name && !hiddenCountries.contains($0.name) }
         }
     }
     
@@ -393,6 +396,12 @@ struct CountryPicker: View {
         
         UserDefaults.standard.set(recent, forKey: "recentCountries")
         recentCountries = recent
+    }
+    
+    private func loadHiddenCountries() {
+        if let decodedCountries = try? JSONDecoder().decode(Set<String>.self, from: hiddenCountriesData) {
+            hiddenCountries = decodedCountries
+        }
     }
     
     private func deleteStationsForCountry(_ country: Country) {

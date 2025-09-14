@@ -53,6 +53,7 @@
 		774FED5F2E199D520084FA72 /* RadioBrowserAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 774FED5E2E199D520084FA72 /* RadioBrowserAPI.swift */; };
 		7750B1F42C165E6100374957 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7750B1F32C165E6100374957 /* SettingsView.swift */; };
 		7751A1A12C17290300F442B4 /* SubscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7751A1A02C17290300F442B4 /* SubscriptionView.swift */; };
+		775806662E773F6C006CF77D /* HiddenCountriesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775806652E773F6C006CF77D /* HiddenCountriesSettingsView.swift */; };
 		775B55572C30E8C100ECDBF0 /* Tabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775B55562C30E8C100ECDBF0 /* Tabs.swift */; };
 		775D04292C287AF700E99061 /* ShazamViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04282C287AF700E99061 /* ShazamViewModel.swift */; };
 		775D04382C28E89300E99061 /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775D04372C28E89300E99061 /* LyricsView.swift */; };
@@ -182,6 +183,7 @@
 		774FED5E2E199D520084FA72 /* RadioBrowserAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioBrowserAPI.swift; sourceTree = "<group>"; };
 		7750B1F32C165E6100374957 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7751A1A02C17290300F442B4 /* SubscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionView.swift; sourceTree = "<group>"; };
+		775806652E773F6C006CF77D /* HiddenCountriesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenCountriesSettingsView.swift; sourceTree = "<group>"; };
 		775B55562C30E8C100ECDBF0 /* Tabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tabs.swift; sourceTree = "<group>"; };
 		775D04282C287AF700E99061 /* ShazamViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShazamViewModel.swift; sourceTree = "<group>"; };
 		775D04372C28E89300E99061 /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
@@ -319,6 +321,7 @@
 				7746A4922C6BE2130025C215 /* ManagedPodcastEpisode.swift */,
 				7750B1F32C165E6100374957 /* SettingsView.swift */,
 				77F6689E2C7A56CF00E2618C /* BannerAlert.swift */,
+				775806652E773F6C006CF77D /* HiddenCountriesSettingsView.swift */,
 				7715BD992C4CA97300FA7CB1 /* ExportSheet.swift */,
 				77322EEB2C45609E00C5D449 /* NotificationManager.swift */,
 				77DD9D172C96698000C7BA3C /* NotificationCenterProtocol.swift */,
@@ -607,6 +610,7 @@
 				77B4E0F12E086FEF0034F886 /* PodcastCoreDataManager.swift in Sources */,
 				77B4E0F22E086FEF0034F886 /* PodcastFeedManager.swift in Sources */,
 				77B4E0F32E086FEF0034F886 /* PodcastEpisodeManager.swift in Sources */,
+				775806662E773F6C006CF77D /* HiddenCountriesSettingsView.swift in Sources */,
 				77B4E0F42E086FEF0034F886 /* StreamRadiosModel.xcdatamodeld in Sources */,
 				7709599F2E0A592700478E7C /* DataSyncManager.swift in Sources */,
 				778610662E50A8A700108721 /* PodcastPreviewView.swift in Sources */,

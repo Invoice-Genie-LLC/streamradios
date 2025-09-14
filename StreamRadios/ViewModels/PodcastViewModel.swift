@@ -4586,21 +4586,26 @@ class PodcastViewModel: ObservableObject {
                         
                         self.currentEpisodes = filteredEpisodes
                         print("⚡ INSTANT UI: Updated with \(filteredEpisodes.count) episodes including \(newEpisodes.count) new ones")
+                        
+                        // IMMEDIATE SNAPSHOT UPDATE: Update snapshot immediately to persist new episodes
+                        if let existingSnapshot = self.getEpisodeSnapshot(for: feedId) {
+                            let updatedSnapshot = newEpisodes + existingSnapshot
+                            self.updateEpisodeSnapshot(for: feedId, episodes: updatedSnapshot)
+                            print("📸 IMMEDIATE: Updated snapshot with \(newEpisodes.count) new episodes for navigation persistence")
+                        } else {
+                            // Create new snapshot if none exists
+                            self.updateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
+                            print("📸 IMMEDIATE: Created new snapshot with \(updatedEpisodes.count) episodes")
+                        }
                     }
                 }
                 
-                // BACKGROUND: Update Core Data and snapshot asynchronously
+                // BACKGROUND: Update Core Data asynchronously
                 Task.detached(priority: .background) {
                     do {
                         // Add new episodes to Core Data
                         try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
-                        
-                        // Update snapshot in background
-                        if let existingSnapshot = await self.getEpisodeSnapshot(for: feedId) {
-                            let updatedSnapshot = newEpisodes + existingSnapshot
-                            await self.updateEpisodeSnapshot(for: feedId, episodes: updatedSnapshot)
-                            print("📸 BACKGROUND: Updated snapshot with \(newEpisodes.count) new episodes")
-                        }
+                        print("💾 BACKGROUND: Added \(newEpisodes.count) new episodes to Core Data")
                     } catch {
                         print("❌ BACKGROUND UPDATE ERROR: \(error.localizedDescription)")
                     }

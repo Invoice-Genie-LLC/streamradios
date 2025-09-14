@@ -180,6 +180,22 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Always start with Recent tab (no persistence)
             selectedSubTab = .recent
             
+            // Listen for hidden countries changes
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleHiddenCountriesChanged(_:)),
+                name: .hiddenCountriesChanged,
+                object: nil
+            )
+            
+            // Listen for selected country cleared
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleSelectedCountryCleared),
+                name: .selectedCountryCleared,
+                object: nil
+            )
+            
             // Load sorting preferences
             loadSortingPreferences()
         
@@ -2381,21 +2397,36 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     func favoriteStations() -> [RadioStation] {
-        // Always respect favoriteOrder if present to match CloudKit ordering across devices.
-        // Fallback to favoritedAt only when no favoriteOrder exists for either station.
-        return stations.filter { $0.isFavorite }
-            .sorted { station1, station2 in
+        // Get hidden countries
+        let hiddenCountriesData = UserDefaults.standard.data(forKey: "hiddenCountries") ?? Data()
+        let hiddenCountries = (try? JSONDecoder().decode(Set<String>.self, from: hiddenCountriesData)) ?? Set<String>()
+        
+        // Filter out favorites from hidden countries
+        return stations.filter { $0.isFavorite && !hiddenCountries.contains($0.country) }
+            .sorted { (station1, station2) in
+                // First, check if both stations have favoriteOrder values
                 if let order1 = station1.favoriteOrder, let order2 = station2.favoriteOrder {
                     return order1 < order2
                 }
-                if station1.favoriteOrder != nil { return true }
-                if station2.favoriteOrder != nil { return false }
-                let date1 = station1.favoritedAt ?? Date.distantPast
-                let date2 = station2.favoritedAt ?? Date.distantPast
-                return date1 > date2
+                
+                // If only one has favoriteOrder, prioritize it
+                if station1.favoriteOrder != nil && station2.favoriteOrder == nil {
+                    return true
+                }
+                if station1.favoriteOrder == nil && station2.favoriteOrder != nil {
+                    return false
+                }
+                
+                // If neither has favoriteOrder, fall back to favoritedAt timestamp
+                if let date1 = station1.favoritedAt, let date2 = station2.favoritedAt {
+                    return date1 < date2
+                }
+                
+                // Final fallback: alphabetical by name
+                return station1.name.localizedCaseInsensitiveCompare(station2.name) == .orderedAscending
             }
     }
-    
+
     private func migrateFavoriteTimestamps() {
         // Prevent infinite loop by checking if migration is already in progress
         guard !isMigrationInProgress else { return }
@@ -5774,7 +5805,36 @@ extension Notification.Name {
     static let countrySelected = Notification.Name("countrySelected")
     static let stationsUpdated = Notification.Name("stationsUpdated")
     static let countryChanged = Notification.Name("countryChanged")
+    static let hiddenCountriesChanged = Notification.Name("hiddenCountriesChanged")
+    static let selectedCountryCleared = Notification.Name("selectedCountryCleared")
     static let navigateToPodcastFeed = Notification.Name("navigateToPodcastFeed")
+}
+
+// MARK: - Hidden Countries Notification Handlers
+extension RadioStationViewModel {
+    @objc private func handleHiddenCountriesChanged(_ notification: Notification) {
+        guard let countryName = notification.object as? String,
+              let userInfo = notification.userInfo,
+              let isHidden = userInfo["isHidden"] as? Bool else { return }
+        
+        if isHidden {
+            print("🙈 Country '\(countryName)' was hidden - refreshing favorites list")
+        } else {
+            print("👁️ Country '\(countryName)' was shown - refreshing favorites list")
+        }
+        
+        // Trigger UI refresh for favorites
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+        }
+    }
+    
+    @objc private func handleSelectedCountryCleared() {
+        DispatchQueue.main.async {
+            self.selectedCountry = "Select Country"
+            print("🌍 Selected country cleared due to being hidden")
+        }
+    }
 }
 
 // Conform to UIDocumentPickerDelegate to handle document picker events
