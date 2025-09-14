@@ -27,6 +27,8 @@ class PlaybackManager: ObservableObject {
     
     // PHONE CALL FIX: Prevent concurrent audio session activations causing OSStatus -50
     private var isActivatingAudioSession = false
+    private var audioSessionRetryCount = 0
+    private let maxAudioSessionRetries = 3
     
     // Interruption state tracking
     // PHONE CALL FIX: Made internal so individual players can coordinate state
@@ -116,6 +118,14 @@ class PlaybackManager: ObservableObject {
             return
         }
         
+        // CRITICAL: Prevent concurrent audio session activations
+        guard !isActivatingAudioSession else {
+            print("🔒 PlaybackManager: Audio session activation already in progress, skipping duplicate request for \(player)")
+            return
+        }
+        
+        isActivatingAudioSession = true
+        
         // Rate limit audio session activation logging - only log once per 3 seconds per player
         let now = Date()
         let shouldLog = lastAudioSessionActivation == nil || 
@@ -125,14 +135,58 @@ class PlaybackManager: ObservableObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             
-            // MAIN THREAD FIX: Always set category to avoid IPC delays from category check
-            // Checking audioSession.category on main thread causes non-deterministic delays
-            try audioSession.setCategory(.playback, 
-                                       mode: .default, 
-                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+            // For CarPlay scenarios, implement a more robust waiting mechanism
+            if CarPlayManager.shared.isCarPlayConnected {
+                print("🚗 PlaybackManager: CarPlay detected - implementing careful audio session handover")
+                
+                // Reset activation flag and defer to async approach
+                isActivatingAudioSession = false
+                
+                // Use a more patient approach with multiple attempts
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self.attemptCarPlayAudioSessionActivation(for: player, attempt: 1)
+                }
+                return // Exit early to avoid immediate configuration
+            } else {
+                // Configure audio session for playback
+                try audioSession.setCategory(.playback, 
+                                           mode: .default, 
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+            }
             
-            // Always activate with notifyOthersOnDeactivation to ensure proper handoff
-            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            // For CarPlay, use a more cautious activation approach
+            if CarPlayManager.shared.isCarPlayConnected {
+                print("🚗 PlaybackManager: Attempting CarPlay-aware audio session activation")
+                // Try activation with a brief pause to allow CarPlay handover
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    do {
+                        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                        print("🚗 PlaybackManager: CarPlay audio session activation successful")
+                    } catch {
+                        print("🚗 PlaybackManager: CarPlay audio session activation failed, will retry: \(error)")
+                        // Let the retry logic handle this
+                        self.isActivatingAudioSession = false
+                        if let nsError = error as NSError?, nsError.code == -50 {
+                            self.audioSessionRetryCount += 1
+                            if self.audioSessionRetryCount <= self.maxAudioSessionRetries {
+                                let baseDelay = 0.5
+                                let retryDelay = baseDelay * Double(self.audioSessionRetryCount)
+                                DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                                    self.activateAudioSessionForPlayer(player)
+                                }
+                            }
+                        }
+                    }
+                }
+                return // Exit early for CarPlay to avoid immediate activation
+            } else {
+                // Always activate with notifyOthersOnDeactivation to ensure proper handoff
+                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            }
+            
+            // Reset retry count on successful activation
+            audioSessionRetryCount = 0
+            isActivatingAudioSession = false
             
             // Only log if enough time has passed or player changed
             if shouldLog {
@@ -162,12 +216,34 @@ class PlaybackManager: ObservableObject {
         } catch {
             print("❌ PlaybackManager: Failed to activate audio session for \(player): \(error)")
             
-            // Retry with a brief delay if the error is related to conflicts
+            // Always reset the activation flag on error
+            isActivatingAudioSession = false
+            
+            // Retry with a brief delay if the error is related to conflicts, but limit retries
             if let nsError = error as NSError?, nsError.code == -50 {
-                print("🔄 PlaybackManager: Retrying audio session activation after conflict...")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    self.activateAudioSessionForPlayer(player)
+                audioSessionRetryCount += 1
+                if audioSessionRetryCount <= maxAudioSessionRetries {
+                    print("🔄 PlaybackManager: Retrying audio session activation after conflict... (attempt \(audioSessionRetryCount)/\(maxAudioSessionRetries))")
+                    
+                    // Use longer delays for CarPlay scenarios to allow proper audio session handover
+                    let isCarPlayActive = CarPlayManager.shared.isCarPlayConnected
+                    let baseDelay = isCarPlayActive ? 0.5 : 0.2
+                    let retryDelay = baseDelay * Double(audioSessionRetryCount)
+                    
+                    if isCarPlayActive {
+                        print("🚗 PlaybackManager: Using extended CarPlay retry delay: \(retryDelay)s")
+                    }
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                        self.activateAudioSessionForPlayer(player)
+                    }
+                } else {
+                    print("❌ PlaybackManager: Max audio session retry attempts reached (\(maxAudioSessionRetries)). Stopping retries to prevent infinite loop.")
+                    audioSessionRetryCount = 0 // Reset for next time
                 }
+            } else {
+                // For non -50 errors, also reset retry count
+                audioSessionRetryCount = 0
             }
         }
     }
@@ -1063,6 +1139,49 @@ class PlaybackManager: ObservableObject {
         } catch {
             print("🛰️ PlaybackManager: Single gentle resume failed: \(error) - manual resume required")
             UserDefaults.standard.set(true, forKey: "NetworkInterruptionActive")
+        }
+    }
+    
+    /// CarPlay-specific audio session activation with careful handover detection
+    private func attemptCarPlayAudioSessionActivation(for player: ActivePlayer, attempt: Int) {
+        let maxAttempts = 5
+        
+        guard attempt <= maxAttempts else {
+            print("🚗 PlaybackManager: Max CarPlay audio session attempts reached (\(maxAttempts))")
+            return
+        }
+        
+        print("🚗 PlaybackManager: CarPlay audio session attempt \(attempt)/\(maxAttempts)")
+        
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            
+            // Test if we can configure the audio session
+            try audioSession.setCategory(.playback, 
+                                       mode: .default, 
+                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+            
+            print("🚗 PlaybackManager: CarPlay audio session category configured successfully")
+            
+            // Now try to activate
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            
+            print("✅ PlaybackManager: CarPlay audio session activated successfully for \(player)")
+            
+            // Reset retry count and update state
+            audioSessionRetryCount = 0
+            isActivatingAudioSession = false
+            lastAudioSessionActivation = (player, Date())
+            
+        } catch {
+            print("🚗 PlaybackManager: CarPlay audio session attempt \(attempt) failed: \(error)")
+            
+            // Calculate progressive delay: 0.3s, 0.6s, 1.0s, 1.5s, 2.0s
+            let delay = 0.3 + (0.3 * Double(attempt - 1))
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                self.attemptCarPlayAudioSessionActivation(for: player, attempt: attempt + 1)
+            }
         }
     }
     
