@@ -956,6 +956,7 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let downloadsTab = self.createDownloadsTab()
         
         print("🚗 CarPlay: Creating tab bar template with \([recentsTab, stationsTab, podcastsTab, downloadsTab].count) tabs")
+        print("🚗 CarPlay: Tab order - Index 0: \(recentsTab.tabTitle ?? "nil"), Index 1: \(stationsTab.tabTitle ?? "nil"), Index 2: \(podcastsTab.tabTitle ?? "nil"), Index 3: \(downloadsTab.tabTitle ?? "nil")")
         
         // Create tab bar template - Order: Recent, Radio, Podcast, Downloads
         let tabBarTemplate = CPTabBarTemplate(templates: [recentsTab, stationsTab, podcastsTab, downloadsTab])
@@ -1277,8 +1278,8 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let recentEpisodesSection = CPListSection(items: recentEpisodeItems, header: "Recently Played Episodes", sectionIndexTitle: nil)
         sections.append(recentEpisodesSection)
         
-        let listTemplate = CPListTemplate(title: "Recents", sections: sections)
-        listTemplate.tabTitle = "Recents"
+        let listTemplate = CPListTemplate(title: "Recent", sections: sections)
+        listTemplate.tabTitle = "Recent"
         listTemplate.tabImage = UIImage(systemName: "clock")
         
         return listTemplate
@@ -1287,10 +1288,15 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func createPodcastsTab() -> CPListTemplate {
         var sections: [CPListSection] = []
         
+        print("🚗 CarPlay: Creating Podcast tab - DEBUG START")
+        
         // Get podcasts from CarPlayManager and order them the same as PodcastListView
         let carPlayManager = CarPlayManager.shared
         let allPodcastFeeds = carPlayManager.getPodcastFeeds()
         let podcastViewModel = PodcastViewModel.shared
+        
+        print("🚗 CarPlay: Found \(allPodcastFeeds.count) podcast feeds from CarPlayManager")
+        print("🚗 CarPlay: PodcastViewModel has \(podcastViewModel.podcastFeedOrder.count) ordered feeds")
         
         // Order feeds the same way as PodcastListView using podcastFeedOrder
         let orderedFeedIds = podcastViewModel.podcastFeedOrder
@@ -1334,6 +1340,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         let listTemplate = CPListTemplate(title: "Podcast", sections: sections)
         listTemplate.tabTitle = "Podcast"
         listTemplate.tabImage = UIImage(systemName: "microphone")
+        
+        print("🚗 CarPlay: Podcast tab created with \(sections.count) sections and \(podcastItems.count) items")
+        print("🚗 CarPlay: Podcast tab title: '\(listTemplate.title ?? "nil")', tabTitle: '\(listTemplate.tabTitle ?? "nil")'")
         
         return listTemplate
     }
