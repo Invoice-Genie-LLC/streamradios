@@ -590,8 +590,8 @@ class RadioPlayer: NSObject, ObservableObject {
                     self.currentlyPlayingStation = lastStation
                     if let url = URL(string: lastStation.url) {
                         self.setStationURL(url)
-                        // Use a small delay to ensure player is set up
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // Ensure audio session is activated before playing
+                        self.ensureAudioSessionActivatedThenPlay {
                             self.play()
                             // Manually update lastPlayed for Recent tab
                             self.updateLastPlayed(lastStation)
@@ -626,13 +626,58 @@ class RadioPlayer: NSObject, ObservableObject {
                 print("🔄 Auto-play (ultimate fallback): Manual URL setup")
                 self.setStationURL(lastStationURL)
                 self.currentStationIndex = storedIndex
-                // Use a small delay to ensure player is set up
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                // Ensure audio session is activated before playing
+                self.ensureAudioSessionActivatedThenPlay {
                     self.play()
                 }
             }
         } else {
             print("❌ Auto-play: No lastStationURL found in UserDefaults")
+        }
+    }
+    
+    /// Ensures audio session is properly activated before executing playback
+    private func ensureAudioSessionActivatedThenPlay(completion: @escaping () -> Void) {
+        print("🔊 Auto-play: Ensuring audio session is activated before playback")
+        
+        // Explicitly activate audio session for auto-play
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                
+                // Set category and activate in one go for auto-play
+                try audioSession.setCategory(.playback, 
+                                           mode: .default, 
+                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                
+                try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+                
+                print("✅ Auto-play: Audio session explicitly activated")
+                
+                // Set radio as active player after audio session is confirmed active
+                DispatchQueue.main.async {
+                    PlaybackManager.shared.setActivePlayer(.radio)
+                    
+                    // Small delay to ensure everything is ready
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        print("✅ Auto-play: Proceeding with playback after explicit activation")
+                        completion()
+                    }
+                }
+                
+            } catch {
+                print("❌ Auto-play: Failed to explicitly activate audio session: \(error)")
+                
+                // Fallback to original approach
+                DispatchQueue.main.async {
+                    PlaybackManager.shared.setActivePlayer(.radio)
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        print("⚠️ Auto-play: Using fallback activation approach")
+                        completion()
+                    }
+                }
+            }
         }
     }
     
@@ -733,18 +778,25 @@ class RadioPlayer: NSObject, ObservableObject {
             DebugLogger.setUserAction("Radio Background Transition")
             
             // CRITICAL FIX: Don't create competing background tasks - let AppDelegate handle this centrally
-            // Just ensure the audio session category is correct for background playback
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                // Quick, non-blocking check to ensure category is correct
-                if audioSession.category != .playback {
-                    DebugLogger.logWarning("Audio session category not set for background playback - may need adjustment", category: "BackgroundAudio")
+            // Move audio session configuration to background queue to avoid main thread IPC delays
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    // MAIN THREAD FIX: Configure audio session on background queue to avoid IPC delays
+                    try audioSession.setCategory(.playback, 
+                                               mode: .default, 
+                                               options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                    
+                    DispatchQueue.main.async {
+                        print("✅ RadioPlayer: Background transition handled - audio session category set")
+                        DebugLogger.logInfo("Radio background transition completed - centralized task management active", category: "BackgroundAudio")
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        print("❌ RadioPlayer: Audio session check failed: \(error)")
+                        DebugLogger.logError("Audio session verification failed during background transition: \(error.localizedDescription)", category: "BackgroundAudio")
+                    }
                 }
-                print("✅ RadioPlayer: Background transition handled - audio session category verified")
-                DebugLogger.logInfo("Radio background transition completed - centralized task management active", category: "BackgroundAudio")
-            } catch {
-                print("❌ RadioPlayer: Audio session check failed: \(error)")
-                DebugLogger.logError("Audio session verification failed during background transition: \(error.localizedDescription)", category: "BackgroundAudio")
             }
         } else {
             DebugLogger.logInfo("App entering background with no active radio playback - no background maintenance needed", category: "BackgroundAudio")

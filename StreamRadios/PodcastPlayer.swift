@@ -143,18 +143,25 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             DebugLogger.logInfo("Background transition context - Episode: \(episodeTitle), Progress: \(currentProgress)%, Duration: \(duration)s", category: "BackgroundAudio")
             
             // Don't create competing background tasks - let AppDelegate handle this centrally
-            // Just ensure the audio session category is correct for background playback
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                // Quick, non-blocking check to ensure category is correct
-                if audioSession.category != .playback {
-                    DebugLogger.logWarning("Audio session category not set for background podcast playback - may need adjustment", category: "BackgroundAudio")
+            // Move audio session configuration to background queue to avoid main thread IPC delays
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let audioSession = AVAudioSession.sharedInstance()
+                    // MAIN THREAD FIX: Configure audio session on background queue to avoid IPC delays
+                    try audioSession.setCategory(.playback, 
+                                               mode: .default, 
+                                               options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
+                    
+                    DispatchQueue.main.async {
+                        print("✅ PodcastPlayer: Background transition handled - audio session category set")
+                        DebugLogger.logInfo("Podcast background transition completed - centralized task management active", category: "BackgroundAudio")
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        print("❌ PodcastPlayer: Audio session check failed: \(error)")
+                        DebugLogger.logError("Audio session verification failed during podcast background transition: \(error.localizedDescription)", category: "BackgroundAudio")
+                    }
                 }
-                print("✅ PodcastPlayer: Background transition handled - audio session category verified")
-                DebugLogger.logInfo("Podcast background transition completed - centralized task management active", category: "BackgroundAudio")
-            } catch {
-                print("❌ PodcastPlayer: Audio session check failed: \(error)")
-                DebugLogger.logError("Audio session verification failed during podcast background transition: \(error.localizedDescription)", category: "BackgroundAudio")
             }
         } else {
             DebugLogger.logInfo("App entering background with no active podcast playback - no background maintenance needed", category: "BackgroundAudio")

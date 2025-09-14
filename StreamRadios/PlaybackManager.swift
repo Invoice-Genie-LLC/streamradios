@@ -125,14 +125,11 @@ class PlaybackManager: ObservableObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             
-            // Ensure the category is correct for our use case
-            if audioSession.category != .playback {
-                // PHONE CALL FIX: Ensure no mixing options that could interfere with phone calls
-                try audioSession.setCategory(.playback, 
-                                           mode: .default, 
-                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-                print("🔄 PlaybackManager: Corrected audio session category to playback")
-            }
+            // MAIN THREAD FIX: Always set category to avoid IPC delays from category check
+            // Checking audioSession.category on main thread causes non-deterministic delays
+            try audioSession.setCategory(.playback, 
+                                       mode: .default, 
+                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
             
             // Always activate with notifyOthersOnDeactivation to ensure proper handoff
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
@@ -730,13 +727,11 @@ class PlaybackManager: ObservableObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             
-            // Ensure the category is correct for our use case
-            if audioSession.category != .playback {
-                try audioSession.setCategory(.playback, 
-                                           mode: .default, 
-                                           options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
-                print("🔄 PlaybackManager: Corrected audio session category to playback")
-            }
+            // MAIN THREAD FIX: Always set category to avoid IPC delays from category check
+            // Checking audioSession.category on main thread causes non-deterministic delays
+            try audioSession.setCategory(.playback, 
+                                       mode: .default, 
+                                       options: [.allowBluetooth, .allowAirPlay, .allowBluetoothA2DP])
             
             // Reactivate without clearing Now Playing info during CarPlay transitions
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
