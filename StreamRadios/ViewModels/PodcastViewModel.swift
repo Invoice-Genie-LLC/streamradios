@@ -3033,19 +3033,12 @@ class PodcastViewModel: ObservableObject {
                 print("📸 SNAPSHOT SUCCESS: Displayed \(filteredEpisodes.count) episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
             }
             
-            // CRITICAL: Skip all expensive operations - we have everything we need
-            // Only start background check for new episodes if snapshot is old enough
-            // This prevents defeating the entire purpose of the snapshot system
-            let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
-            if snapshotAge > 1800 { // 30 minutes - much more conservative
-                Task.detached(priority: .background) {
-                    try? await Task.sleep(nanoseconds: 30_000_000_000) // Wait 30 seconds to avoid interfering with UI
-                    await self.checkForNewEpisodesInBackground(feedId: feedId)
-                }
-                print("⏰ SNAPSHOT: Scheduling background check in 30 seconds (snapshot is \(Int(snapshotAge/60)) min old)")
-            } else {
-                print("⚡ SNAPSHOT: Skipping background check - snapshot is fresh (\(Int(snapshotAge/60)) min old)")
+            // IMMEDIATE NEW EPISODE CHECK: Always check for new episodes when feed is opened
+            // This ensures users see the latest content without waiting for background timers
+            Task.detached(priority: .userInitiated) {
+                await self.checkForNewEpisodesImmediately(feedId: feedId)
             }
+            print("🚀 IMMEDIATE CHECK: Starting immediate new episode check for feed \(feedId)")
             
             return // CRITICAL: Return immediately, bypass all expensive operations below
         }
@@ -3160,6 +3153,12 @@ class PodcastViewModel: ObservableObject {
         if hasSnapshot {
             print("⚡ PERFORMANCE: Skipping background RSS check - recent snapshot available (0 min old)")
         } else {
+            // IMMEDIATE NEW EPISODE CHECK: Always check for new episodes when feed is opened (no snapshot available)
+            Task.detached(priority: .userInitiated) {
+                await self.checkForNewEpisodesImmediately(feedId: feedId)
+            }
+            print("🚀 IMMEDIATE CHECK: Starting immediate new episode check for feed without snapshot \(feedId)")
+            
             // AUTO-REFRESH: Check if feed needs RSS refresh for new episodes
             let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
             if shouldAutoRefresh {
@@ -4529,6 +4528,238 @@ class PodcastViewModel: ObservableObject {
             episodeSnapshotCache.removeValue(forKey: feedId)
             snapshotTimestamps.removeValue(forKey: feedId)
             print("📸 SNAPSHOT EXPIRED: Removed stale cache for feed \(feedId)")
+            return nil
+        }
+    }
+    
+    /// Ultra-fast check for new episodes - pulls ALL new episodes and updates UI instantly
+    private func checkForNewEpisodesImmediately(feedId: String) async {
+        print("⚡ ULTRA-FAST CHECK: Starting instant new episode check for feed \(feedId)")
+        
+        do {
+            guard let feed = podcastFeeds.first(where: { $0.id == feedId }),
+                  let url = URL(string: feed.url) else { 
+                print("❌ ULTRA-FAST: Could not find feed or URL for \(feedId)")
+                return 
+            }
+            
+            // ULTRA-FAST: Parse ALL new episodes from RSS for complete update
+            let latestEpisodes = try await parseAllNewEpisodesOptimized(from: url, feedId: feedId)
+            
+            // Get existing episodes from snapshot or current episodes for comparison
+            let existingEpisodes = getEpisodeSnapshot(for: feedId) ?? currentEpisodes
+            let existingIds = Set(existingEpisodes.map { $0.id })
+            
+            // Find truly new episodes
+            let newEpisodes = latestEpisodes.filter { !existingIds.contains($0.id) }
+            
+            if !newEpisodes.isEmpty {
+                print("🆕 ULTRA-FAST: Found \(newEpisodes.count) new episodes - updating UI instantly")
+                
+                // INSTANT UI UPDATE: Add new episodes to the front of current list
+                await MainActor.run {
+                    if self.selectedFeedId == feedId {
+                        // Prepend new episodes to existing list (newest first)
+                        var updatedEpisodes = newEpisodes + self.currentEpisodes
+                        
+                        // Remove duplicates while preserving order
+                        var seenIds = Set<String>()
+                        updatedEpisodes = updatedEpisodes.filter { episode in
+                            if seenIds.contains(episode.id) {
+                                return false
+                            }
+                            seenIds.insert(episode.id)
+                            return true
+                        }
+                        
+                        // Apply current filter
+                        let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+                        let filteredEpisodes: [PodcastEpisode]
+                        switch filter {
+                        case .all:
+                            filteredEpisodes = updatedEpisodes
+                        case .favorites:
+                            filteredEpisodes = updatedEpisodes.filter { $0.state.isFavorite }
+                        case .downloads:
+                            filteredEpisodes = updatedEpisodes.filter { $0.state.isDownloaded }
+                        }
+                        
+                        self.currentEpisodes = filteredEpisodes
+                        print("⚡ INSTANT UI: Updated with \(filteredEpisodes.count) episodes including \(newEpisodes.count) new ones")
+                    }
+                }
+                
+                // BACKGROUND: Update Core Data and snapshot asynchronously
+                Task.detached(priority: .background) {
+                    do {
+                        // Add new episodes to Core Data
+                        try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
+                        
+                        // Update snapshot in background
+                        if let existingSnapshot = await self.getEpisodeSnapshot(for: feedId) {
+                            let updatedSnapshot = newEpisodes + existingSnapshot
+                            await self.updateEpisodeSnapshot(for: feedId, episodes: updatedSnapshot)
+                            print("📸 BACKGROUND: Updated snapshot with \(newEpisodes.count) new episodes")
+                        }
+                    } catch {
+                        print("❌ BACKGROUND UPDATE ERROR: \(error.localizedDescription)")
+                    }
+                }
+            } else {
+                print("✅ ULTRA-FAST: No new episodes found in latest 3 episodes for feed \(feedId)")
+            }
+        } catch {
+            print("❌ ULTRA-FAST CHECK ERROR: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Ultra-fast RSS parsing that finds ALL new episodes by stopping at first known episode
+    private func parseAllNewEpisodesOptimized(from url: URL, feedId: String) async throws -> [PodcastEpisode] {
+        print("⚡ ULTRA-FAST PARSE: Fetching ALL new episodes from \(url)")
+        
+        let startTime = Date()
+        
+        // Get existing episode IDs for comparison
+        let existingEpisodes = getEpisodeSnapshot(for: feedId) ?? currentEpisodes
+        let existingIds = Set(existingEpisodes.map { $0.id })
+        
+        // Create a fast URLSession with minimal timeout
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 5.0 // 5 second timeout
+        config.timeoutIntervalForResource = 10.0 // 10 second total timeout
+        let session = URLSession(configuration: config)
+        
+        let (data, _) = try await session.data(from: url)
+        
+        let parser = XMLParser(data: data)
+        let delegate = SmartRSSParserDelegate(feedId: feedId, existingIds: existingIds)
+        parser.delegate = delegate
+        
+        let parseSuccess = parser.parse()
+        
+        let parseTime = Date().timeIntervalSince(startTime)
+        print("⚡ ULTRA-FAST PARSE: Completed in \(String(format: "%.2f", parseTime))s, found \(delegate.newEpisodes.count) new episodes")
+        
+        guard parseSuccess else {
+            throw NSError(domain: "SmartRSSParser", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to parse RSS feed"])
+        }
+        
+        return delegate.newEpisodes
+    }
+    
+    /// Smart RSS parser delegate that stops at first known episode to get ALL new episodes
+    private class SmartRSSParserDelegate: NSObject, XMLParserDelegate {
+        let feedId: String
+        let existingIds: Set<String>
+        var newEpisodes: [PodcastEpisode] = []
+        
+        private var currentElement = ""
+        private var currentTitle = ""
+        private var currentDescription = ""
+        private var currentAudioUrl = ""
+        private var currentPubDate = ""
+        private var currentGuid = ""
+        private var insideItem = false
+        
+        init(feedId: String, existingIds: Set<String>) {
+            self.feedId = feedId
+            self.existingIds = existingIds
+        }
+        
+        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
+            currentElement = elementName.lowercased()
+            
+            if currentElement == "item" {
+                insideItem = true
+                // Reset episode data
+                currentTitle = ""
+                currentDescription = ""
+                currentAudioUrl = ""
+                currentPubDate = ""
+                currentGuid = ""
+            } else if currentElement == "enclosure" && insideItem {
+                if let url = attributeDict["url"], url.contains("mp3") || url.contains("m4a") || url.contains("wav") {
+                    currentAudioUrl = url
+                }
+            }
+        }
+        
+        func parser(_ parser: XMLParser, foundCharacters string: String) {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty && insideItem else { return }
+            
+            switch currentElement {
+            case "title":
+                currentTitle += trimmed
+            case "description", "itunes:summary":
+                currentDescription += trimmed
+            case "pubdate":
+                currentPubDate += trimmed
+            case "guid":
+                currentGuid += trimmed
+            default:
+                break
+            }
+        }
+        
+        func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+            if elementName.lowercased() == "item" && insideItem {
+                insideItem = false
+                
+                // Create episode if we have minimum required data
+                guard !currentTitle.isEmpty && !currentAudioUrl.isEmpty else { return }
+                
+                let pubDate = parseDate(from: currentPubDate) ?? Date()
+                let episodeId = !currentGuid.isEmpty ? currentGuid : PodcastEpisode.generateDeterministicID(
+                    title: currentTitle,
+                    audioUrl: currentAudioUrl,
+                    publicationDate: pubDate,
+                    feedUrl: ""
+                )
+                
+                // SMART OPTIMIZATION: Stop parsing if we hit a known episode (all new episodes found)
+                if existingIds.contains(episodeId) {
+                    print("⚡ SMART PARSE: Hit known episode '\(currentTitle)' - stopping (found \(newEpisodes.count) new episodes)")
+                    parser.abortParsing()
+                    return
+                }
+                
+                let episode = PodcastEpisode(
+                    id: episodeId,
+                    title: currentTitle,
+                    descriptionText: currentDescription.isEmpty ? currentTitle : currentDescription,
+                    audioUrl: currentAudioUrl,
+                    publicationDate: pubDate,
+                    duration: 0,
+                    state: EpisodeState(
+                        isPlayed: false,
+                        isFavorite: false,
+                        progress: 0.0,
+                        isDownloaded: false
+                    ),
+                    feedId: feedId
+                )
+                
+                newEpisodes.append(episode)
+            }
+        }
+        
+        private func parseDate(from string: String) -> Date? {
+            let formatters = [
+                "EEE, dd MMM yyyy HH:mm:ss Z",
+                "yyyy-MM-dd'T'HH:mm:ssZ",
+                "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+                "yyyy-MM-dd HH:mm:ss"
+            ]
+            
+            for format in formatters {
+                let formatter = DateFormatter()
+                formatter.dateFormat = format
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                if let date = formatter.date(from: string) {
+                    return date
+                }
+            }
             return nil
         }
     }
