@@ -1287,12 +1287,30 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func createPodcastsTab() -> CPListTemplate {
         var sections: [CPListSection] = []
         
-        // Get podcasts from CarPlayManager
+        // Get podcasts from CarPlayManager and order them the same as PodcastListView
         let carPlayManager = CarPlayManager.shared
-        let podcastFeeds = carPlayManager.getPodcastFeeds()
+        let allPodcastFeeds = carPlayManager.getPodcastFeeds()
+        let podcastViewModel = PodcastViewModel.shared
+        
+        // Order feeds the same way as PodcastListView using podcastFeedOrder
+        let orderedFeedIds = podcastViewModel.podcastFeedOrder
+        let feedsById = Dictionary(uniqueKeysWithValues: allPodcastFeeds.map { ($0.id, $0) })
+        
+        // First add feeds in the user's custom order
+        var orderedFeeds: [PodcastFeed] = []
+        for feedId in orderedFeedIds {
+            if let feed = feedsById[feedId] {
+                orderedFeeds.append(feed)
+            }
+        }
+        
+        // Then add any remaining feeds that aren't in the custom order (shouldn't happen normally)
+        let orderedFeedIds_set = Set(orderedFeedIds)
+        let remainingFeeds = allPodcastFeeds.filter { !orderedFeedIds_set.contains($0.id) }
+        orderedFeeds.append(contentsOf: remainingFeeds)
         
         var podcastItems: [CPListItem] = []
-        for podcast in podcastFeeds {
+        for podcast in orderedFeeds {
             // Get episode count synchronously
             let episodeCount = getEpisodeCountSync(for: podcast)
             
