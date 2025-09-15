@@ -3033,12 +3033,9 @@ class PodcastViewModel: ObservableObject {
                 print("📸 SNAPSHOT SUCCESS: Displayed \(filteredEpisodes.count) episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
             }
             
-            // IMMEDIATE NEW EPISODE CHECK: Always check for new episodes when feed is opened
-            // This ensures users see the latest content without waiting for background timers
-            Task.detached(priority: .userInitiated) {
-                await self.checkForNewEpisodesImmediately(feedId: feedId)
-            }
-            print("🚀 IMMEDIATE CHECK: Starting immediate new episode check for feed \(feedId)")
+            // PERFORMANCE: Skip expensive new episode check when using snapshots
+            // Snapshots already contain the most recent episodes from the last refresh
+            print("⚡ PERFORMANCE: Skipping expensive new episode check - using snapshot data")
             
             return // CRITICAL: Return immediately, bypass all expensive operations below
         }
@@ -3153,11 +3150,13 @@ class PodcastViewModel: ObservableObject {
         if hasSnapshot {
             print("⚡ PERFORMANCE: Skipping background RSS check - recent snapshot available (0 min old)")
         } else {
-            // IMMEDIATE NEW EPISODE CHECK: Always check for new episodes when feed is opened (no snapshot available)
-            Task.detached(priority: .userInitiated) {
-                await self.checkForNewEpisodesImmediately(feedId: feedId)
+            // PERFORMANCE: Only check for new episodes if no recent episodes are available
+            // This prevents expensive RSS parsing when episodes are already loaded
+            if currentEpisodes.isEmpty {
+                print("🔄 FALLBACK: No episodes available - will check for new episodes after loading from Core Data")
+            } else {
+                print("⚡ PERFORMANCE: Episodes already available - skipping expensive new episode check")
             }
-            print("🚀 IMMEDIATE CHECK: Starting immediate new episode check for feed without snapshot \(feedId)")
             
             // AUTO-REFRESH: Check if feed needs RSS refresh for new episodes
             let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)

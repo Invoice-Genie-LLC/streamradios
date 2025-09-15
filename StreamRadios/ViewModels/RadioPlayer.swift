@@ -1103,33 +1103,16 @@ class RadioPlayer: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
             
-            do {
-                
-                print("✅ RadioPlayer: Successfully resumed playback after interruption")
-                DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
-                
-            } catch {
-                print("❌ RadioPlayer: Failed to resume playback: \(error)")
-                DebugLogger.logError("Failed to resume radio playback after interruption: \(error.localizedDescription)", category: "AudioInterruption")
-                
-                // Retry with more aggressive approach and longer delay for stubborn cases (other apps holding audio)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self = self else { return }
-                    
-                    do {
-                        let audioSession = AVAudioSession.sharedInstance()
-                        // Force reactivation without notifying others to aggressively reclaim audio
-                        try audioSession.setActive(false)
-                        try audioSession.setActive(true, options: [])
-                        player.play()
-                        self.isPlaying = true
-                        self.wasPlayingBeforeInterruption = false
-                        print("✅ RadioPlayer: Successfully resumed playback after aggressive retry")
-                    } catch {
-                        print("❌ RadioPlayer: Final aggressive retry failed: \(error)")
-                    }
-                }
-            }
+            // Resume playback
+            player.play()
+            self.isPlaying = true
+            self.wasPlayingBeforeInterruption = false // Reset the flag
+            
+            // Update Now Playing info
+            self.updateNowPlayingInfo()
+            
+            print("✅ RadioPlayer: Successfully resumed playback after interruption")
+            DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
         }
     }
 

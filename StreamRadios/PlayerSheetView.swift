@@ -640,9 +640,9 @@ struct StationImage: View {
         GeometryReader { geometry in
             let artworkSize = min(geometry.size.width * 0.65, 240)
             
-            // Priority: When playing (iTunes artwork > station artwork), When paused (station artwork > iTunes artwork)
+            // Priority: iTunes artwork when playing > station artwork when playing > station icon > default
             if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
-                // When playing, prioritize song artwork
+                // Priority 1: iTunes artwork when playing
                 let _ = print("🎨 UI DEBUG: Showing iTunes artwork (playing=\(radioPlayer.isPlaying))")
                 HStack {
                     Spacer()
@@ -656,6 +656,7 @@ struct StationImage: View {
                 }
                 .frame(maxWidth: .infinity)
             } else if radioPlayer.isPlaying, let albumArt = radioPlayer.albumArt {
+                // Priority 2: Station artwork when playing
                 let _ = print("🎨 UI DEBUG: Showing station artwork (playing=\(radioPlayer.isPlaying))")
                 HStack {
                     Spacer()
@@ -669,6 +670,7 @@ struct StationImage: View {
                 }
                 .frame(maxWidth: .infinity)
             } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
+                // Priority 3: Station icon when not playing or no artwork available
                 HStack {
                     Spacer()
                     Image(uiImage: image)

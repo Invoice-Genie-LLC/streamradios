@@ -906,24 +906,33 @@ struct RadioStationListView: View {
     
     @ViewBuilder
     private func imageForStation(_ station: RadioStation) -> some View {
-        // Show iTunes artwork for currently playing station if available
-        // Use more stable condition to prevent flickering during brief isPlaying state changes
+        // For currently playing station, match player artwork logic exactly
         if isCurrentStation(station: station) {
-            // When playing: show iTunes artwork if available
-            // When paused/stopped: only show custom icon or default
+            // Priority 1: iTunes artwork when playing
             if radioPlayer.isPlaying, let iTunesArt = radioPlayer.iTunesAlbumArt {
                 Image(uiImage: iTunesArt)
                     .resizable()
                     .scaledToFill()
                     .clipped()
-            } else if let iconData = station.iconData,
+            }
+            // Priority 2: Station artwork from radioPlayer.albumArt when playing
+            else if radioPlayer.isPlaying, let albumArt = radioPlayer.albumArt {
+                Image(uiImage: albumArt)
+                    .resizable()
+                    .scaledToFill()
+                    .clipped()
+            }
+            // Priority 3: Station icon data when not playing or no artwork available
+            else if let iconData = station.iconData,
                       let imageData = Data(base64Encoded: iconData),
                       let image = UIImage(data: imageData) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
                     .background(Color.white.opacity(0.1))
-            } else {
+            }
+            // Priority 4: Default station image
+            else {
                 defaultStationImage(station)
             }
         }
@@ -1185,7 +1194,18 @@ struct RadioStationListView: View {
     }
     
     private func isCurrentStation(station: RadioStation) -> Bool {
-        return radioPlayer.currentStationIndex != nil && viewModel.stations.indices.contains(radioPlayer.currentStationIndex!) && viewModel.stations[radioPlayer.currentStationIndex!] == station
+        // Primary check: Use currentlyPlayingStation for most reliable matching
+        if let currentStation = radioPlayer.currentlyPlayingStation {
+            return currentStation.id == station.id
+        }
+        
+        // Fallback check: Use currentStationIndex if currentlyPlayingStation is nil
+        if let currentIndex = radioPlayer.currentStationIndex,
+           viewModel.stations.indices.contains(currentIndex) {
+            return viewModel.stations[currentIndex].id == station.id
+        }
+        
+        return false
     }
     
     private func deleteStation(_ station: RadioStation) {
