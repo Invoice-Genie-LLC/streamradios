@@ -39,9 +39,8 @@ struct PlayerView: View {
                                 .scaleEffect(1.2)
                                 .tint(.white)
                         } else {
-                            // Show pause if user wants to play (regardless of actual playback state)
-                            // Show play if user doesn't want to play
-                            Image(systemName: radioPlayer.userWantsToPlay ? "pause.fill" : "play.fill")
+                            // Show pause when playing, play when paused
+                            Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.largeTitle)
                                 .foregroundColor(.white)
                         }

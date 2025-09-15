@@ -87,6 +87,11 @@ class RadioPlayer: NSObject, ObservableObject {
     // Cache for storing last iTunes artwork per station
     private var stationArtworkCache: [String: (artwork: UIImage, metadata: String)] = [:]
     
+    // Persistent artwork storage to prevent loss during state changes
+    private var persistentArtworkCache: [String: UIImage] = [:]
+    private var lastKnownGoodArtwork: UIImage?
+    private var lastKnownGoodMetadata: String?
+    
     // Buffering timeout spam prevention
     private var bufferingAttempts: Int = 0
     private var lastBufferingLog: Date?
@@ -310,25 +315,37 @@ class RadioPlayer: NSObject, ObservableObject {
             let commonWords = metadataWords.intersection(lastSearchedWords)
             let similarity = metadataWords.isEmpty ? 0.0 : Double(commonWords.count) / Double(metadataWords.count)
             
-            if similarity < 0.5 {
+            if similarity < 0.3 { // Reduced threshold for more conservative clearing
+                // Store current artwork as fallback before clearing
+                if let currentArtwork = iTunesAlbumArt {
+                    lastKnownGoodArtwork = currentArtwork
+                    lastKnownGoodMetadata = lastMetadataSearched
+                    
+                    // Cache artwork with station ID for persistence
+                    if let stationIndex = currentStationIndex, let viewModel = viewModel,
+                       stationIndex < viewModel.stations.count {
+                        let stationId = viewModel.stations[stationIndex].id
+                        persistentArtworkCache[stationId] = currentArtwork
+                    }
+                }
+                
                 // Only clear artwork if it's genuinely old artwork from a different song
-                // Don't clear if we just got fresh iTunes artwork for the current metadata
+                // AND we don't have fresh iTunes artwork for the current metadata
                 let shouldClearArtwork = (iTunesAlbumArt != nil && !iTunesArtworkJustSet)
                 
                 if shouldClearArtwork {
                     iTunesAlbumArt = nil
                     print("🔄 New song detected: '\(currentMetadata)' - clearing previous artwork (similarity: \(String(format: "%.2f", similarity)))")
-                    // Only reset the flag when we actually clear artwork
                     iTunesArtworkJustSet = false
                 } else {
                     print("🔄 New song detected: '\(currentMetadata)' - keeping fresh iTunes artwork (similarity: \(String(format: "%.2f", similarity)))")
-                    // CRITICAL FIX: Don't reset the flag if we're keeping the artwork
-                    // This prevents the artwork from being cleared on the next metadata update
                 }
             } else {
                 print("🔄 Similar song metadata: '\(currentMetadata)' - keeping existing artwork (similarity: \(String(format: "%.2f", similarity)))")
-                // CRITICAL FIX: Don't reset the flag for similar metadata
-                // This protects iTunes artwork from being cleared by repeated similar metadata
+                // Extend artwork protection for similar metadata
+                if iTunesAlbumArt != nil {
+                    startArtworkProtectionTimer()
+                }
             }
             
             updateNowPlayingInfo()
@@ -917,8 +934,16 @@ class RadioPlayer: NSObject, ObservableObject {
         // Clear non-essential data to free memory
         clearNonEssentialData()
         
-        // If not playing, we can be more aggressive with cleanup
+        // If not playing, preserve iTunes artwork in persistent cache before cleanup
         if !isPlaying {
+            // Store current iTunes artwork in persistent cache before clearing
+            if let currentArtwork = iTunesAlbumArt, let stationIndex = currentStationIndex,
+               let viewModel = viewModel, stationIndex < viewModel.stations.count {
+                let stationId = viewModel.stations[stationIndex].id
+                persistentArtworkCache[stationId] = currentArtwork
+                print("💾 Preserved iTunes artwork in persistent cache during memory pressure")
+            }
+            
             albumArt = nil
             iTunesAlbumArt = nil
             print("🧹 RadioPlayer: Cleared artwork cache due to memory pressure")
@@ -1079,20 +1104,6 @@ class RadioPlayer: NSObject, ObservableObject {
             guard let self = self else { return }
             
             do {
-                // Resume playback
-                player.play()
-                self.isPlaying = true
-                self.wasPlayingBeforeInterruption = false // Reset the flag
-                
-                // STATION ARTWORK FIX: Ensure station artwork is loaded when resuming
-                if self.albumArt == nil && self.iTunesAlbumArt == nil {
-                    self.loadStationArtwork()
-                }
-                
-                // CRITICAL FIX: Update Now Playing info after resume to restore metadata and artwork on lock screen
-                self.updateNowPlayingInfo()
-                self.updateWidget()
-                print("🔄 RadioPlayer: Updated Now Playing info after interruption resume")
                 
                 print("✅ RadioPlayer: Successfully resumed playback after interruption")
                 DebugLogger.logInfo("Radio playback successfully resumed after interruption", category: "AudioInterruption")
@@ -1466,10 +1477,10 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("▶️ Play: Player started with seamless quality management")
         
-        // STATION ARTWORK FIX: Reload artwork when resuming playback to prioritize song artwork over station artwork
+        // STATION ARTWORK FIX: Restore cached iTunes artwork or load station artwork
         print("🔍 STATION ARTWORK DEBUG: albumArt=\(albumArt != nil), iTunesAlbumArt=\(iTunesAlbumArt != nil)")
-        loadStationArtwork()
-        print("🎨 Play: Reloaded station artwork (prioritizes song artwork when playing)")
+        restoreArtworkFromCache()
+        print("🎨 Play: Restored artwork from cache or loaded station artwork")
         
         // Update Now Playing immediately since audio session is already activated
         updateNowPlayingInfo()
@@ -1528,15 +1539,37 @@ class RadioPlayer: NSObject, ObservableObject {
         
         print("⏸️ User explicitly paused - cleared all reconnection state")
         
-        // Clear all song metadata and iTunes artwork when pausing
-        // This immediately removes song info while keeping the station active
+        // Store current iTunes artwork before clearing for potential restoration
+        if let currentArtwork = iTunesAlbumArt, let currentMeta = metadata {
+            lastKnownGoodArtwork = currentArtwork
+            lastKnownGoodMetadata = currentMeta
+            
+            // Cache artwork with station ID for persistence
+            if let stationIndex = currentStationIndex, let viewModel = viewModel,
+               stationIndex < viewModel.stations.count {
+                let stationId = viewModel.stations[stationIndex].id
+                persistentArtworkCache[stationId] = currentArtwork
+                print("💾 Cached iTunes artwork for station \(stationId) before pause")
+            }
+        }
+        
+        // Clear song metadata but preserve artwork cache
         metadata = nil
-        iTunesAlbumArt = nil
         songTitle = ""
         artistName = ""
-        lastMetadataSearched = ""
+        // Don't clear lastMetadataSearched to prevent duplicate searches
         
-        print("🎨 DEBUG: Cleared iTunesAlbumArt - now nil: \(iTunesAlbumArt == nil)")
+        // Only clear iTunes artwork if we have station artwork to fall back to
+        if let stationIndex = currentStationIndex, let viewModel = viewModel,
+           stationIndex < viewModel.stations.count {
+            let station = viewModel.stations[stationIndex]
+            if station.iconData != nil {
+                iTunesAlbumArt = nil
+                print("🎨 DEBUG: Cleared iTunesAlbumArt - station has fallback artwork")
+            } else {
+                print("🎨 DEBUG: Keeping iTunesAlbumArt - no station fallback available")
+            }
+        }
         
         // Load station's default artwork when paused (instead of clearing all artwork)
         loadStationArtwork()
@@ -1690,6 +1723,20 @@ class RadioPlayer: NSObject, ObservableObject {
         currentStationIndex = index
         currentlyPlayingStation = station
         
+        // Store current iTunes artwork before clearing metadata
+        if let currentArtwork = iTunesAlbumArt, let currentMeta = metadata {
+            lastKnownGoodArtwork = currentArtwork
+            lastKnownGoodMetadata = currentMeta
+            
+            // Cache artwork with previous station ID for persistence
+            if let stationIndex = currentStationIndex, let viewModel = viewModel,
+               stationIndex < viewModel.stations.count {
+                let stationId = viewModel.stations[stationIndex].id
+                persistentArtworkCache[stationId] = currentArtwork
+                print("💾 Cached iTunes artwork for station \(stationId) before switch")
+            }
+        }
+        
         // Clear all metadata and iTunes artwork when switching stations
         // This ensures old song artwork doesn't carry over to the new station
         metadata = nil
@@ -1697,6 +1744,7 @@ class RadioPlayer: NSObject, ObservableObject {
         lastKnownArtist = nil
         lastKnownTitle = nil
         lastMetadataUpdate = nil
+        
         // Clear Shazam-verified metadata to prevent previous station's song info from persisting
         displayTitle = nil
         displayArtist = nil
@@ -2406,8 +2454,18 @@ class RadioPlayer: NSObject, ObservableObject {
                         self.iTunesArtworkJustSet = true
                         self.startArtworkProtectionTimer()
                         
-                        // Save iTunes artwork to current station if image was found
+                        // Store as last known good artwork for fallback
                         if let image = image {
+                            self.lastKnownGoodArtwork = image
+                            self.lastKnownGoodMetadata = metadata
+                            
+                            // Cache with current station for persistence
+                            if let stationIndex = self.currentStationIndex, let viewModel = self.viewModel,
+                               stationIndex < viewModel.stations.count {
+                                let stationId = viewModel.stations[stationIndex].id
+                                self.persistentArtworkCache[stationId] = image
+                            }
+                            
                             self.saveITunesArtworkToCurrentStation(image)
                             
                             // INSTANT CARPLAY SYNC: Zero-delay immediate artwork synchronization
@@ -3255,6 +3313,56 @@ class RadioPlayer: NSObject, ObservableObject {
             let oldestKey = cacheOrder.removeFirst()
             artworkCache.removeValue(forKey: oldestKey)
         }
+    }
+    
+    // MARK: - Artwork Restoration and Fallback System
+    
+    /// Restore iTunes artwork from cache or load station artwork as fallback
+    func restoreArtworkFromCache() {
+        // First try to restore cached iTunes artwork for current station
+        if let stationIndex = currentStationIndex, let viewModel = viewModel,
+           stationIndex < viewModel.stations.count {
+            let stationId = viewModel.stations[stationIndex].id
+            
+            // Check persistent cache first
+            if let cachedArtwork = persistentArtworkCache[stationId] {
+                iTunesAlbumArt = cachedArtwork
+                iTunesArtworkJustSet = true
+                startArtworkProtectionTimer()
+                print("🔄 Restored iTunes artwork from persistent cache for station \(stationId)")
+                updateNowPlayingInfo()
+                updateWidget()
+                return
+            }
+            
+            // Check if we have last known good artwork that might apply
+            if let lastGoodArtwork = lastKnownGoodArtwork,
+               let lastGoodMeta = lastKnownGoodMetadata,
+               let currentMeta = metadata,
+               artworkMatchesMetadata(lastGoodMeta, currentMeta) {
+                iTunesAlbumArt = lastGoodArtwork
+                iTunesArtworkJustSet = true
+                startArtworkProtectionTimer()
+                print("🔄 Restored last known good iTunes artwork for similar metadata")
+                updateNowPlayingInfo()
+                updateWidget()
+                return
+            }
+        }
+        
+        // Fallback to station artwork
+        loadStationArtwork()
+    }
+    
+    /// Check if artwork should apply to current metadata
+    private func artworkMatchesMetadata(_ cachedMetadata: String, _ currentMetadata: String) -> Bool {
+        let cachedWords = Set(cachedMetadata.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+        let currentWords = Set(currentMetadata.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty })
+        
+        let commonWords = cachedWords.intersection(currentWords)
+        let similarity = currentWords.isEmpty ? 0.0 : Double(commonWords.count) / Double(currentWords.count)
+        
+        return similarity > 0.6 // 60% similarity threshold
     }
     
     // STATION ARTWORK FIX: Load station artwork into albumArt property for UI display
