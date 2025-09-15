@@ -54,9 +54,10 @@ struct GlobalPlayerView: View {
                     }
                 }
             } else if shouldShowRadioPlayer {
-                // Show radio player when appropriate
-                if let currentStation = viewModel.currentlyPlayingStation {
-                    // Show current station (playing or paused)
+                // STABILITY FIX: Show radio player with stable station display
+                if let currentStation = radioPlayer.currentlyPlayingStation {
+                    // CRITICAL: Use radioPlayer.currentlyPlayingStation as the source of truth for display
+                    // This ensures station info remains consistent regardless of country switching or auto-play
                     CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
                         .environmentObject(radioPlayer)
                         .environmentObject(viewModel)

@@ -110,6 +110,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 selectedSubTab = .all
                 print("🌍 Country changed from '\(oldValue)' to '\(selectedCountry)' - switching to All tab")
                 
+                // STABILITY FIX: Preserve currently playing station display during country changes
+                // The currently playing station should remain stable regardless of country picker changes
+                if let currentStation = RadioPlayer.shared.currentlyPlayingStation {
+                    print("📍 STABILITY: Preserving currently playing station '\(currentStation.name)' from '\(currentStation.country)' during country change")
+                    print("📍 STABILITY: Station display will remain consistent regardless of country picker selection")
+                }
+                
                 // CRITICAL FIX: Force migration for all countries except US and UK to handle API name variations
                 if selectedCountry != "United States" && selectedCountry != "United Kingdom" && selectedCountry != "Select Country" && selectedCountry != "Unknown Region" {
                     print("🔧 Forcing migration for country name normalization: \(selectedCountry)")

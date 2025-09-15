@@ -136,6 +136,20 @@ struct RadioStationListView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
+            // Handle country changes without affecting currently playing station
+            print("🌍 Received countryChanged notification - updating UI for country selection")
+            
+            DispatchQueue.main.async {
+                viewModel.objectWillChange.send()
+                
+                // If current tab filter hides results but country has stations, show All tab
+                let countryCount = viewModel.stations.filter { $0.country == viewModel.selectedCountry }.count
+                if countryCount > 0 && selectedSubTab != .all {
+                    viewModel.selectedSubTab = .all
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("StationArtworkUpdated"))) { notification in
             if let userInfo = notification.userInfo,
                let stationId = userInfo["stationId"] as? String {
@@ -1202,12 +1216,19 @@ struct RadioStationListView: View {
     }
     
     private func isCurrentStation(station: RadioStation) -> Bool {
-        // Primary check: Use currentlyPlayingStation for most reliable matching
+        // STABILITY FIX: Always prioritize currentlyPlayingStation for reliable station identification
+        // This ensures station highlighting remains consistent regardless of country switching or auto-play
         if let currentStation = radioPlayer.currentlyPlayingStation {
-            return currentStation.id == station.id
+            let isMatch = currentStation.id == station.id
+            if isMatch {
+                // Additional validation: ensure the station data is consistent
+                return currentStation.name == station.name && currentStation.url == station.url
+            }
+            return false
         }
         
-        // Fallback check: Use currentStationIndex if currentlyPlayingStation is nil
+        // DEPRECATED FALLBACK: Only use currentStationIndex as absolute last resort
+        // This fallback should rarely be needed with stable currentlyPlayingStation management
         if let currentIndex = radioPlayer.currentStationIndex,
            viewModel.stations.indices.contains(currentIndex) {
             return viewModel.stations[currentIndex].id == station.id

@@ -595,25 +595,40 @@ class RadioPlayer: NSObject, ObservableObject {
             if let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
                 print("✅ Auto-play: Found matching station: \(lastStation.name)")
                 print("🌍 Auto-play: Station from \(lastStation.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
-                print("📍 Auto-play: Country picker will remain unchanged")
+                
+                // STABILITY FIX: Preserve station info regardless of country picker state
+                // This ensures the currently playing station display remains stable
+                print("📍 Auto-play: Preserving station display stability - country picker unchanged")
             
-                // Play the last played station using the proper playStation method
-                if let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
-                    print("🎵 Auto-play: Playing last station using playStation method to ensure Recent tab update")
-                    self.playStation(at: index, from: self.viewModel?.stations ?? [])
+                // RACE CONDITION FIX: Use station object directly instead of relying on potentially stale index
+                // This prevents issues where CloudKit sync modifies the stations array during auto-play restoration
+                print("🎵 Auto-play: Playing last station using station object to avoid race conditions")
+                
+                // CRITICAL: Set the current station directly to maintain display stability
+                // This ensures station info remains consistent regardless of country picker changes
+                self.currentlyPlayingStation = lastStation
+                
+                // STABILITY FIX: Find the current index for UI consistency but don't rely on it for station identity
+                // The station object (currentlyPlayingStation) is the source of truth for display
+                if let currentIndex = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+                    self.currentStationIndex = currentIndex
+                    print("🎵 Auto-play: Set currentStationIndex to \(currentIndex) for station '\(lastStation.name)'")
                 } else {
-                    // Fallback to manual setup if index not found
-                    print("⚠️ Auto-play: Station index not found, using fallback method")
-                    self.currentlyPlayingStation = lastStation
-                    if let url = URL(string: lastStation.url) {
-                        self.setStationURL(url)
-                        // Ensure audio session is activated before playing
-                        self.ensureAudioSessionActivatedThenPlay {
-                            self.play()
-                            // Manually update lastPlayed for Recent tab
-                            self.updateLastPlayed(lastStation)
-                        }
+                    // IMPORTANT: Even if index is nil, station display remains stable via currentlyPlayingStation
+                    self.currentStationIndex = nil
+                    print("⚠️ Auto-play: Could not find index for station '\(lastStation.name)' - index set to nil but station display preserved")
+                }
+                
+                if let url = URL(string: lastStation.url) {
+                    self.setStationURL(url)
+                    // Ensure audio session is activated before playing
+                    self.ensureAudioSessionActivatedThenPlay {
+                        self.play()
+                        // Manually update lastPlayed for Recent tab
+                        self.updateLastPlayed(lastStation)
                     }
+                } else {
+                    print("❌ Auto-play: Invalid URL for station '\(lastStation.name)': \(lastStation.url)")
                 }
                 return // Exit early if we found the station by ID
             } else {
@@ -643,20 +658,24 @@ class RadioPlayer: NSObject, ObservableObject {
                 print("🔄 Auto-play (ultimate fallback): Manual URL setup")
                 self.setStationURL(lastStationURL)
                 
-                // CRITICAL FIX: Do NOT set currentStationIndex to stored index without validation
-                // The stored index may not correspond to the correct station anymore
-                // Instead, find the correct station by URL and set the proper index
+                // STABILITY FIX: Maintain station display consistency even during fallback scenarios
+                // Find the correct station by URL and preserve station identity
                 if let stations = self.viewModel?.stations,
                    let matchingStation = stations.first(where: { $0.url == lastStationURL.absoluteString }),
                    let correctIndex = stations.firstIndex(where: { $0.id == matchingStation.id }) {
                     self.currentStationIndex = correctIndex
                     self.currentlyPlayingStation = matchingStation
                     print("🔍 Auto-play (ultimate fallback): Found correct station at index \(correctIndex): \(matchingStation.name)")
+                    print("📍 Auto-play (ultimate fallback): Station display preserved regardless of country picker")
                 } else {
-                    // If we can't find the station, don't set an index to avoid contamination
+                    // IMPORTANT: Clear indices but preserve any existing station display until new station is selected
                     self.currentStationIndex = nil
-                    self.currentlyPlayingStation = nil
-                    print("⚠️ Auto-play (ultimate fallback): Could not find matching station for URL, clearing indices")
+                    // Only clear currentlyPlayingStation if we're certain there's no valid station to display
+                    if self.currentlyPlayingStation == nil {
+                        print("⚠️ Auto-play (ultimate fallback): No station to display, clearing station info")
+                    } else {
+                        print("⚠️ Auto-play (ultimate fallback): Could not find matching station for URL, but preserving existing station display")
+                    }
                 }
                 
                 // Ensure audio session is activated before playing
@@ -719,13 +738,25 @@ class RadioPlayer: NSObject, ObservableObject {
         if let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID") {
             print("🔍 Restore UI: Found LastPlayedStationID: \(lastStationID)")
             
-            if let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }),
-               let index = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+            if let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) {
                 print("✅ Restore UI: Found matching station: \(lastStation.name)")
+                print("🌍 Restore UI: Station from \(lastStation.country), current country picker: \(self.viewModel?.selectedCountry ?? "unknown")")
                 
-                // Set up the UI state without playing
-                self.currentStationIndex = index
+                // STABILITY FIX: Set station object first to maintain display consistency
+                // This ensures station info remains stable regardless of country picker state
                 self.currentlyPlayingStation = lastStation
+                print("📍 Restore UI: Station display preserved regardless of country picker changes")
+                
+                // STABILITY FIX: Find the current index for UI consistency but don't rely on it for station identity
+                // The station object (currentlyPlayingStation) is the source of truth for display
+                if let currentIndex = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+                    self.currentStationIndex = currentIndex
+                    print("🔄 Restore UI: Set currentStationIndex to \(currentIndex) for station '\(lastStation.name)'")
+                } else {
+                    // IMPORTANT: Even if index is nil, station display remains stable via currentlyPlayingStation
+                    self.currentStationIndex = nil
+                    print("⚠️ Restore UI: Could not find index for station '\(lastStation.name)' - index set to nil but station display preserved")
+                }
                 
                 // Set up the player URL so play button will work
                 if let url = URL(string: lastStation.url) {
@@ -1732,9 +1763,13 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         }
         
-        // Set the current station index and station AFTER caching previous station's artwork
+        // STABILITY FIX: Set the current station index and station AFTER caching previous station's artwork
+        // This ensures station display remains consistent and stable
         currentStationIndex = index
         currentlyPlayingStation = station
+        
+        print("📍 STABILITY: Set currentlyPlayingStation to '\(station.name)' from '\(station.country)'")
+        print("📍 STABILITY: Station display will remain stable regardless of future country picker changes")
         
         // Clear all metadata and iTunes artwork when switching stations
         // This ensures old song artwork doesn't carry over to the new station
@@ -1895,7 +1930,20 @@ class RadioPlayer: NSObject, ObservableObject {
     
     func nextStation(from stations: [RadioStation]) {
         print("⏭️ Switching to next station")
-        guard let currentIndex = currentStationIndex else { return }
+        
+        // COUNTRY CONTAMINATION FIX: Validate currentStationIndex against currentlyPlayingStation
+        var validCurrentIndex: Int?
+        if let playingStation = currentlyPlayingStation {
+            validCurrentIndex = stations.firstIndex(where: { $0.id == playingStation.id })
+            if validCurrentIndex != currentStationIndex {
+                print("🔧 CONTAMINATION FIX: Correcting currentStationIndex for next station navigation")
+                currentStationIndex = validCurrentIndex
+            }
+        } else {
+            validCurrentIndex = currentStationIndex
+        }
+        
+        guard let currentIndex = validCurrentIndex else { return }
         let nextIndex = (currentIndex + 1) % stations.count
         playStation(at: nextIndex, from: stations)
         updateLastPlayed(stations[nextIndex])
@@ -1903,7 +1951,20 @@ class RadioPlayer: NSObject, ObservableObject {
     
     func previousStation(from stations: [RadioStation]) {
         print("⏮️ Switching to previous station")
-        guard let currentIndex = currentStationIndex else { return }
+        
+        // COUNTRY CONTAMINATION FIX: Validate currentStationIndex against currentlyPlayingStation
+        var validCurrentIndex: Int?
+        if let playingStation = currentlyPlayingStation {
+            validCurrentIndex = stations.firstIndex(where: { $0.id == playingStation.id })
+            if validCurrentIndex != currentStationIndex {
+                print("🔧 CONTAMINATION FIX: Correcting currentStationIndex for previous station navigation")
+                currentStationIndex = validCurrentIndex
+            }
+        } else {
+            validCurrentIndex = currentStationIndex
+        }
+        
+        guard let currentIndex = validCurrentIndex else { return }
         let previousIndex = (currentIndex - 1 + stations.count) % stations.count
         playStation(at: previousIndex, from: stations)
         updateLastPlayed(stations[previousIndex])
@@ -1975,6 +2036,15 @@ class RadioPlayer: NSObject, ObservableObject {
         } else if let playingStation = currentlyPlayingStation {
             // CRITICAL FIX: Use currentlyPlayingStation as the primary source of truth
             currentStation = playingStation
+            
+            // COUNTRY CONTAMINATION FIX: Validate and update currentStationIndex to match currentlyPlayingStation
+            // This prevents index contamination when country changes update the stations array
+            let correctIndex = viewModel.stations.firstIndex(where: { $0.id == playingStation.id })
+            if currentStationIndex != correctIndex {
+                print("🔧 CONTAMINATION FIX: Updating currentStationIndex from \(currentStationIndex?.description ?? "nil") to \(correctIndex?.description ?? "nil") to match currentlyPlayingStation '\(playingStation.name)'")
+                currentStationIndex = correctIndex
+            }
+            
             // Only log if station changed
             if let currentStationIndex = currentStationIndex,
                lastLoggedStationIndex != currentStationIndex {
@@ -1983,12 +2053,25 @@ class RadioPlayer: NSObject, ObservableObject {
             }
         } else if let currentStationIndex = currentStationIndex,
                   currentStationIndex < viewModel.stations.count {
-            // Fallback to index-based lookup only if currentlyPlayingStation is nil
-            currentStation = viewModel.stations[currentStationIndex]
-            // Only log if station changed
-            if lastLoggedStationIndex != currentStationIndex {
-                print("🎵 Now Playing: Using station at index \(currentStationIndex) (fallback)")
-                lastLoggedStationIndex = currentStationIndex
+            // CONTAMINATION PREVENTION: Only use index-based lookup if we're confident the index is valid
+            // Avoid using potentially stale currentStationIndex when currentlyPlayingStation is nil
+            // This prevents showing wrong station names during country changes
+            let station = viewModel.stations[currentStationIndex]
+            
+            // Additional validation: if we have a last played station URL, verify it matches
+            if let lastStationURL = UserDefaults.standard.url(forKey: "LastPlayedStationURL"),
+               station.url != lastStationURL.absoluteString {
+                print("🚨 CONTAMINATION PREVENTION: Index \(currentStationIndex) points to wrong station '\(station.name)' (URL mismatch)")
+                print("   Expected URL: \(lastStationURL.absoluteString)")
+                print("   Actual URL: \(station.url)")
+                currentStation = nil
+            } else {
+                currentStation = station
+                // Only log if station changed
+                if lastLoggedStationIndex != currentStationIndex {
+                    print("🎵 Now Playing: Using station at index \(currentStationIndex) (fallback)")
+                    lastLoggedStationIndex = currentStationIndex
+                }
             }
         } else {
             currentStation = nil

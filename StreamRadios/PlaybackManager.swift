@@ -124,7 +124,13 @@ class PlaybackManager: ObservableObject {
             return
         }
         
+        // CRITICAL: Use a more robust activation flag that persists through async operations
         isActivatingAudioSession = true
+        
+        // Ensure flag is reset after a maximum timeout to prevent permanent blocking
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.isActivatingAudioSession = false
+        }
         
         // Rate limit audio session activation logging - only log once per 3 seconds per player
         let now = Date()
@@ -139,8 +145,7 @@ class PlaybackManager: ObservableObject {
             if CarPlayManager.shared.isCarPlayConnected {
                 print("🚗 PlaybackManager: CarPlay detected - implementing careful audio session handover")
                 
-                // Reset activation flag and defer to async approach
-                isActivatingAudioSession = false
+                // Don't reset flag here - let the timeout handle it
                 
                 // Use a more patient approach with multiple attempts
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -164,8 +169,7 @@ class PlaybackManager: ObservableObject {
                         print("🚗 PlaybackManager: CarPlay audio session activation successful")
                     } catch {
                         print("🚗 PlaybackManager: CarPlay audio session activation failed, will retry: \(error)")
-                        // Let the retry logic handle this
-                        self.isActivatingAudioSession = false
+                        // Don't reset flag here - let the timeout handle it to prevent rapid retries
                         if let nsError = error as NSError?, nsError.code == -50 {
                             self.audioSessionRetryCount += 1
                             if self.audioSessionRetryCount <= self.maxAudioSessionRetries {
@@ -186,6 +190,7 @@ class PlaybackManager: ObservableObject {
             
             // Reset retry count on successful activation
             audioSessionRetryCount = 0
+            // Reset activation flag on success
             isActivatingAudioSession = false
             
             // Only log if enough time has passed or player changed
@@ -216,8 +221,7 @@ class PlaybackManager: ObservableObject {
         } catch {
             print("❌ PlaybackManager: Failed to activate audio session for \(player): \(error)")
             
-            // Always reset the activation flag on error
-            isActivatingAudioSession = false
+            // Don't reset the activation flag immediately - let the timeout handle it to prevent rapid retries
             
             // Retry with a brief delay if the error is related to conflicts, but limit retries
             if let nsError = error as NSError?, nsError.code == -50 {
@@ -227,7 +231,7 @@ class PlaybackManager: ObservableObject {
                     
                     // Use longer delays for CarPlay scenarios to allow proper audio session handover
                     let isCarPlayActive = CarPlayManager.shared.isCarPlayConnected
-                    let baseDelay = isCarPlayActive ? 0.5 : 0.2
+                    let baseDelay = isCarPlayActive ? 1.0 : 0.5  // Increased delays to prevent conflicts
                     let retryDelay = baseDelay * Double(audioSessionRetryCount)
                     
                     if isCarPlayActive {
@@ -235,15 +239,19 @@ class PlaybackManager: ObservableObject {
                     }
                     
                     DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                        // Reset the flag before retry to allow the retry attempt
+                        self.isActivatingAudioSession = false
                         self.activateAudioSessionForPlayer(player)
                     }
                 } else {
                     print("❌ PlaybackManager: Max audio session retry attempts reached (\(maxAudioSessionRetries)). Stopping retries to prevent infinite loop.")
                     audioSessionRetryCount = 0 // Reset for next time
+                    isActivatingAudioSession = false // Reset flag when giving up
                 }
             } else {
-                // For non -50 errors, also reset retry count
+                // For non -50 errors, also reset retry count and flag
                 audioSessionRetryCount = 0
+                isActivatingAudioSession = false
             }
         }
     }

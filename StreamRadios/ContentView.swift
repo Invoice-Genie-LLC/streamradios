@@ -447,6 +447,19 @@ struct ContentView: View {
                         viewModel.selectedSubTab = .all
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .countryChanged)) { _ in
+                    // Handle country changes without affecting currently playing station
+                    print("🌍 Received countryChanged notification - updating UI for country selection")
+                    
+                    // Force UI update without reloading from Core Data
+                    viewModel.objectWillChange.send()
+                    
+                    // If newly selected country has stations, ensure All tab is visible
+                    let countryCount = viewModel.stations.filter { $0.country == viewModel.selectedCountry }.count
+                    if countryCount > 0 && viewModel.selectedSubTab != .all {
+                        viewModel.selectedSubTab = .all
+                    }
+                }
                 
                 if alertManager.showCustomAlert {
                     CustomAlertContainer()

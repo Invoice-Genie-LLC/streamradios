@@ -728,8 +728,9 @@ struct CountryPickerButton: View {
         .sheet(isPresented: $showingPicker) {
             CountryPicker(selectedCountry: $selectedCountry, countries: countries, stationCount: stationCount, onSelect: { country in
                 onSelect?(country)
-                // Post to reload stations list if needed
-                NotificationCenter.default.post(name: .stationsUpdated, object: nil)
+                // FIXED: Use countryChanged notification instead of stationsUpdated to prevent contamination of currently playing station
+                // This allows UI updates without affecting the currently playing station state
+                NotificationCenter.default.post(name: .countryChanged, object: nil)
             })
         }
     }
