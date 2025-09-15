@@ -3238,8 +3238,24 @@ struct PodcastPlayerView: View {
             }
             }
             .refreshable {
-                // Pull to refresh - fetch new episodes from RSS
+                // Pull to refresh - fetch new episodes from RSS with enhanced feedback
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+                
                 await viewModel.refreshCurrentFeed()
+                
+                // Show success feedback after refresh
+                if !viewModel.currentEpisodes.isEmpty {
+                    showSuccessToast = true
+                    successMessage = "Episodes refreshed"
+                    
+                    // Auto-hide toast after 2 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            showSuccessToast = false
+                        }
+                    }
+                }
             }
             .background(Color.adaptiveBackground)
             .onAppear {
@@ -3300,7 +3316,7 @@ struct PodcastPlayerView: View {
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 25)
-                            .fill(Color.green)
+                            .fill(Color(red: 0.0, green: 0.6, blue: 0.0))
                             .shadow(color: Color.adaptiveBorder.opacity(0.3), radius: 8, x: 0, y: 4)
                     )
                     .transition(.move(edge: .top).combined(with: .opacity))

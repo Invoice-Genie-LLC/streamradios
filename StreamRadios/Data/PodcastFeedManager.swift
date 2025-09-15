@@ -232,6 +232,47 @@ class PodcastFeedManager {
         return result
     }
     
+    /// Quick refresh for pull-to-refresh - limits episodes to prevent UI freezing
+    func refreshFeedQuick(_ feedId: String, limit: Int = 50) async throws -> (PodcastFeed, [PodcastEpisode]) {
+        // Get existing feed
+        guard let existingFeed = try await getExistingFeed(feedId: feedId) else {
+            throw FeedError.feedNotFound
+        }
+        
+        os_log("⚡ Quick refreshing feed: %@ (limit: %d)", log: log, type: .info, existingFeed.title, limit)
+        
+        // Parse RSS feed with episode limit for performance
+        let (updatedFeed, allEpisodes) = try await withCheckedThrowingContinuation { continuation in
+            Task.detached(priority: .userInitiated) {
+                do {
+                    let feedData = try await self.fetchRSSDataWithRetry(url: URL(string: existingFeed.url)!, feedTitle: existingFeed.title)
+                    // Use parser without progress callback for quick refresh
+                    let parser = RSSFeedParser(data: feedData, feedUrl: existingFeed.url, progressCallback: nil)
+                    let result = try await parser.parseComplete()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+        
+        // Limit episodes to recent ones for performance
+        let recentEpisodes = Array(allEpisodes.prefix(limit))
+        
+        // Keep existing artwork to avoid download delays
+        var feedWithArtwork = updatedFeed
+        feedWithArtwork.imageData = existingFeed.imageData
+        
+        // Update feed metadata with limited episodes
+        let result = try await updateFeedWithNewEpisodes(
+            existingFeed: existingFeed,
+            updatedFeed: feedWithArtwork,
+            newEpisodes: recentEpisodes
+        )
+        
+        return result
+    }
+    
     // MARK: - Private Methods
     
     private func getExistingFeed(feedId: String) async throws -> PodcastFeed? {

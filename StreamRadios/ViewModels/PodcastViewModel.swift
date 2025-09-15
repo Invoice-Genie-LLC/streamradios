@@ -3557,95 +3557,60 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Refresh episodes for current feed by fetching from RSS
+    /// Optimized refresh for current feed - prevents UI freezing on large feeds
     func refreshCurrentFeed() async {
         guard let feedId = selectedFeedId else { return }
         
         refreshTask?.cancel()
         
         refreshTask = Task {
-            // Ensure manual refresh operations run on detached background task to prevent main thread blocking
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                Task.detached(priority: .userInitiated) {
-                    do {
-                        os_log("🔄 Manual refresh from RSS: %@", log: self.log, type: .info, feedId)
-                        print("🔄 MANUAL REFRESH: Force refreshing feed regardless of timing")
-                        
-                        await MainActor.run {
-                            // Only show loading if we don't have episodes to prevent UI jump
-                            if self.currentEpisodes.isEmpty {
-                                self.isLoadingEpisodes = true
-                            }
-                        }
-                        
-                        // FORCE REFRESH: Update the last refresh time to force RSS check
-                        let currentTime = Date().timeIntervalSince1970
-                        let lastRefreshKey = "LastRSSRefresh_\(feedId)"
-                        UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
-                        
-                        // CRITICAL FIX: Actually refresh from RSS feed to get new episodes
-                        let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
-                        print("✅ Manual RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
-                        
-                        // Reconcile Core Data with smart parsing (only new episodes)
-                        if let feed = await MainActor.run(body: { self.podcastFeeds.first(where: { $0.id == feedId }) }),
-                           let url = URL(string: feed.url) {
-                            // CRITICAL FIX: Always reconcile on manual refresh to fix accumulated episodes
-                            // Manual refresh should always get the most accurate episode count from RSS
-                            let allCurrentEpisodes = try await self.parseRSSEpisodesOnly(from: url)
-                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes)
-                            
-                            // PULL-TO-REFRESH FIX: Get reconciled episodes from Core Data after reconciliation
-                            // This ensures episodes have correct feedId values after reconciliation
-                            let reconciledEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
-                            
-                            // Update snapshot with reconciled episodes from Core Data (not raw RSS)
-                            await MainActor.run {
-                                self.updateEpisodeSnapshot(for: feedId, episodes: reconciledEpisodes)
-                                print("🔄 RECONCILE: Manual refresh updated snapshot with correct \(reconciledEpisodes.count) episodes from Core Data after reconciliation")
-                            }
-                            
-                            // CRITICAL PERFORMANCE: Skip expensive CloudKit sync for snapshot-based loads
-                            let hasSnapshotForSync = await self.getEpisodeSnapshot(for: feedId) != nil
-                            if !hasSnapshotForSync {
-                                // QUIET SYNC: Sync episode states for all episodes
-                                Task.detached(priority: .background) {
-                                    await self.quietSyncEpisodeStates(for: feedId)
-                                }
-                            } else {
-                                print("⚡ PERFORMANCE: Skipping expensive CloudKit sync - using snapshot states for feed \(feedId)")
-                            }
-                        } else {
-                            print("❌ Manual refresh reconcile failed: Missing feed URL for \(feedId)")
-                        }
-                        if !newEpisodes.isEmpty { print("💾 Snapshot reconciled with \(newEpisodes.count) new episodes") }
-                        
-                        continuation.resume()
-                    } catch {
-                        print("❌ Manual refresh error in detached task: \(error)")
-                        continuation.resume()
-                    }
-                }
-            }
-            
             do {
-                
-                // Reload episodes from Core Data to show updated list including new episodes
-                await loadEpisodesForFeed(feedId)
-                
-                // ENHANCED: Also refresh all episode states from EpisodeStateManager
-                // This ensures pull-to-refresh updates both episodes AND their states
-                await refreshAllEpisodeStates()
-                
-                // REAL-TIME SYNC: Broadcast current playing progress and fetch latest from all devices
-                await syncRealTimeProgressAcrossDevices()
+                os_log("🔄 Optimized refresh from RSS: %@", log: self.log, type: .info, feedId)
+                print("🔄 OPTIMIZED REFRESH: Quick refresh for better UX")
                 
                 await MainActor.run {
-                    self.isLoadingEpisodes = false
-                    self.operationInProgress = false
+                    self.isLoadingEpisodes = true
+                    self.operationInProgress = true
+                }
+                
+                // PERFORMANCE: Quick RSS check for new episodes only (limit to recent episodes)
+                let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeedQuick(feedId, limit: 50)
+                print("✅ Quick RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
+                
+                // FAST PATH: If no new episodes, just update UI and return
+                if newEpisodes.isEmpty {
+                    await MainActor.run {
+                        self.isLoadingEpisodes = false
+                        self.operationInProgress = false
+                        self.throttledUIUpdate()
+                    }
+                    return
+                }
+                
+                // OPTIMIZED: Only reconcile new episodes, not entire feed
+                if let feed = await MainActor.run(body: { self.podcastFeeds.first(where: { $0.id == feedId }) }) {
+                    // Quick reconcile: only process new episodes to prevent blocking
+                    try await PodcastCoreDataManager.shared.reconcileNewEpisodes(for: feedId, newEpisodes: newEpisodes)
                     
-                    // CRITICAL FIX: Force UI refresh after pull-to-refresh to ensure view updates
-                    self.throttledUIUpdate()
+                    // Update UI immediately with new episodes
+                    let updatedEpisodes = await PodcastCoreDataManager.shared.getRecentEpisodesForFeed(feedId, limit: 100)
+                    
+                    await MainActor.run {
+                        self.updateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
+                        self.isLoadingEpisodes = false
+                        self.operationInProgress = false
+                        self.throttledUIUpdate()
+                        print("⚡ FAST REFRESH: Updated UI with \(updatedEpisodes.count) episodes")
+                    }
+                    
+                    // BACKGROUND: Defer expensive operations to background
+                    Task.detached(priority: .background) {
+                        await self.quietSyncEpisodeStates(for: feedId)
+                        await self.syncRealTimeProgressAcrossDevices()
+                        print("🔄 BACKGROUND: Completed deferred sync operations for \(feedId)")
+                    }
+                } else {
+                    print("❌ Quick refresh failed: Missing feed for \(feedId)")
                 }
                 
             } catch {
@@ -3653,12 +3618,9 @@ class PodcastViewModel: ObservableObject {
                     self.error = "Failed to refresh feed: \(error.localizedDescription)"
                     self.isLoadingEpisodes = false
                     self.operationInProgress = false
-                    
-                    // UI refresh in error case to ensure loading states are cleared
                     self.throttledUIUpdate()
-                    
-                    os_log("❌ Failed to refresh feed: %@", log: self.log, type: .error, error.localizedDescription)
                 }
+                os_log("❌ Failed to refresh feed: %@", log: self.log, type: .error, error.localizedDescription)
             }
         }
         

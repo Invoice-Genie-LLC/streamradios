@@ -2270,7 +2270,7 @@ struct InternalDataManagementView: View {
     private var importExportSection: some View {
         VStack(spacing: 16) {
             SettingsCard(
-                title: "Import & Export",
+                title: "Radio Stations Import & Export",
                 icon: "externaldrive.fill"
             ) {
                 VStack(spacing: 12) {

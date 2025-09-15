@@ -542,6 +542,60 @@ class PodcastCoreDataManager {
             try backgroundContext.save()
         }
     }
+    
+    // MARK: - Quick Refresh Methods
+    
+    /// Reconcile only new episodes for quick refresh performance
+    func reconcileNewEpisodes(for feedId: String, newEpisodes: [PodcastEpisode]) async throws {
+        guard !newEpisodes.isEmpty else { return }
+        
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        try await backgroundContext.perform {
+            // Check which episodes are actually new
+            let episodeIds = newEpisodes.map { $0.id }
+            let existingEpisodeIds = try self.getExistingEpisodeIds(episodeIds: episodeIds, in: backgroundContext)
+            let trulyNewEpisodes = newEpisodes.filter { !existingEpisodeIds.contains($0.id) }
+            
+            guard !trulyNewEpisodes.isEmpty else {
+                os_log("📝 No new episodes to reconcile for feed %@", log: self.log, type: .debug, feedId)
+                return
+            }
+            
+            // Add new episodes efficiently
+            for episode in trulyNewEpisodes {
+                let managedEpisode = PodcastModel(context: backgroundContext)
+                managedEpisode.update(from: episode)
+                managedEpisode.feedId = feedId
+            }
+            
+            try backgroundContext.save()
+            os_log("⚡ Reconciled %d new episodes for feed %@", log: self.log, type: .info, trulyNewEpisodes.count, feedId)
+        }
+    }
+    
+    /// Get recent episodes for a feed (optimized for quick refresh UI updates)
+    func getRecentEpisodesForFeed(_ feedId: String, limit: Int = 100) async -> [PodcastEpisode] {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        return await backgroundContext.perform {
+            do {
+                let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                episodeRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+                episodeRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+                episodeRequest.fetchLimit = limit
+                episodeRequest.fetchBatchSize = min(limit, BatchSettings.episodeBatchSize)
+                
+                let managedEpisodes = try backgroundContext.fetch(episodeRequest)
+                return managedEpisodes.map { $0.toPodcastEpisode() }
+            } catch {
+                os_log("❌ Error loading recent episodes for feed %@: %@", 
+                       log: self.log, type: .error, feedId, error.localizedDescription)
+                return []
+            }
+        }
+    }
+    
 }
 
 // MARK: - Error Types
