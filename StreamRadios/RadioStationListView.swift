@@ -47,6 +47,8 @@ struct RadioStationListView: View {
     @Binding var searchText: String
 
     @StateObject private var alertManager = AlertManager()
+    @AppStorage("hiddenCountries") private var hiddenCountriesData: Data = Data()
+    @State private var hiddenCountries: Set<String> = []
 
     @State private var showFavoriteError = false
     
@@ -112,8 +114,12 @@ struct RadioStationListView: View {
         .onAppear {
             setup()
             playFavoriteStation()
+            loadHiddenCountries()
         }
         .onDisappear(perform: cleanup)
+        .onReceive(NotificationCenter.default.publisher(for: .hiddenCountriesChanged)) { _ in
+            loadHiddenCountries()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .stationsUpdated)) { _ in
             // CRITICAL FIX: Don't reload from Core Data if stations were just loaded via fetchStationsForSelectedCountry
             // This prevents manual stations from being wiped out after they're loaded
@@ -1096,7 +1102,9 @@ struct RadioStationListView: View {
                 let matchesSearch = station.name.localizedCaseInsensitiveContains(searchText) ||
                                   station.country.localizedCaseInsensitiveContains(searchText)
                 
-                return hasValidCountry && matchesSearch
+                let isNotHidden = !hiddenCountries.contains(station.country)
+                
+                return hasValidCountry && matchesSearch && isNotHidden
             }
             
             // GLOBAL SEARCH: All tabs now search globally across all countries and return all matching results
@@ -1399,9 +1407,16 @@ struct RadioStationListView: View {
     }
     
     private func cleanup() {
-        NotificationCenter.default.removeObserver(self, name: .NetworkReconnectNotification, object: nil)
+        // Remove observers
+        NotificationCenter.default.removeObserver(self)
     }
     
+    private func loadHiddenCountries() {
+        if let decodedCountries = try? JSONDecoder().decode(Set<String>.self, from: hiddenCountriesData) {
+            hiddenCountries = decodedCountries
+        }
+    }
+
     private func moveStations(from source: IndexSet, to destination: Int) {
         guard selectedTab == .radio else { return }
         
