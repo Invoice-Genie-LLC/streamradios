@@ -285,7 +285,7 @@ class PodcastCoreDataManager {
     /// - Ensures Core Data contains exactly the set of episodes from the latest RSS parse
     /// - Upserts parsed episodes and deletes any that are no longer present in the feed
     /// - Uses optimized processing to prevent duplicates and avoid main thread blocking
-    func reconcileEpisodes(for feedId: String, parsedEpisodes: [PodcastEpisode]) async throws {
+    func reconcileEpisodes(for feedId: String, parsedEpisodes: [PodcastEpisode], maxEpisodes: Int? = nil) async throws {
         // CRITICAL: Check for user scrolling and abort reconciliation if detected
         let isScrolling = UserDefaults.standard.bool(forKey: "isUserScrolling")
         if isScrolling {
@@ -303,7 +303,7 @@ class PodcastCoreDataManager {
         try await withCheckedThrowingContinuation { continuation in
             Task.detached(priority: .userInitiated) {
                 do {
-                    try await self.performBackgroundReconciliation(feedId: feedId, episodes: uniqueEpisodes)
+                    try await self.performBackgroundReconciliation(feedId: feedId, episodes: uniqueEpisodes, maxEpisodes: maxEpisodes)
                     continuation.resume()
                 } catch {
                     continuation.resume(throwing: error)
@@ -334,7 +334,7 @@ class PodcastCoreDataManager {
     }
     
     /// Perform the actual reconciliation on a background context with optimized processing
-    private func performBackgroundReconciliation(feedId: String, episodes: [PodcastEpisode]) async throws {
+    private func performBackgroundReconciliation(feedId: String, episodes: [PodcastEpisode], maxEpisodes: Int? = nil) async throws {
         let backgroundContext = coreDataStack.newBackgroundContext()
         
         try await withCheckedThrowingContinuation { continuation in
@@ -428,9 +428,14 @@ class PodcastCoreDataManager {
                 deletedCount += 1
             }
             
+            // EPISODE LIMIT ENFORCEMENT: Remove excess episodes if limit is set
+            if let maxEpisodes = maxEpisodes {
+                try self.enforceEpisodeLimit(for: feedId, maxEpisodes: maxEpisodes, in: backgroundContext)
+            }
+            
             // Final save
             try backgroundContext.save()
-            os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted %d, updated %d, deleted %d", log: self.log, type: .info, feedId, parsedIds.count, insertedCount, updatedCount, deletedCount + coreDataDuplicates.count)
+            os_log("🔄 Reconciled episodes for feed %@: kept %d, inserted %d, updated %d, deleted %d (limit: %@)", log: self.log, type: .info, feedId, parsedIds.count, insertedCount, updatedCount, deletedCount + coreDataDuplicates.count, maxEpisodes?.description ?? "unlimited")
                     
                     continuation.resume()
                 } catch {
@@ -545,8 +550,8 @@ class PodcastCoreDataManager {
     
     // MARK: - Quick Refresh Methods
     
-    /// Reconcile only new episodes for quick refresh performance
-    func reconcileNewEpisodes(for feedId: String, newEpisodes: [PodcastEpisode]) async throws {
+    /// Reconcile only new episodes for quick refresh performance with episode limit enforcement
+    func reconcileNewEpisodes(for feedId: String, newEpisodes: [PodcastEpisode], maxEpisodes: Int? = nil) async throws {
         guard !newEpisodes.isEmpty else { return }
         
         let backgroundContext = coreDataStack.newBackgroundContext()
@@ -569,8 +574,45 @@ class PodcastCoreDataManager {
                 managedEpisode.feedId = feedId
             }
             
+            // EPISODE LIMIT ENFORCEMENT: Remove excess episodes if limit is set
+            if let maxEpisodes = maxEpisodes {
+                try self.enforceEpisodeLimit(for: feedId, maxEpisodes: maxEpisodes, in: backgroundContext)
+            }
+            
             try backgroundContext.save()
-            os_log("⚡ Reconciled %d new episodes for feed %@", log: self.log, type: .info, trulyNewEpisodes.count, feedId)
+            os_log("⚡ Reconciled %d new episodes for feed %@ (limit: %@)", log: self.log, type: .info, trulyNewEpisodes.count, feedId, maxEpisodes?.description ?? "unlimited")
+        }
+    }
+    
+    /// Enforce episode limit for a feed by removing oldest episodes
+    private func enforceEpisodeLimit(for feedId: String, maxEpisodes: Int, in context: NSManagedObjectContext) throws {
+        // Get all episodes for this feed, sorted by publication date (newest first)
+        let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
+        fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+        
+        let allEpisodes = try context.fetch(fetchRequest)
+        
+        // If we have more episodes than the limit, delete the oldest ones
+        if allEpisodes.count > maxEpisodes {
+            let episodesToDelete = Array(allEpisodes.dropFirst(maxEpisodes))
+            
+            for episode in episodesToDelete {
+                context.delete(episode)
+            }
+            
+            os_log("🗑️ EPISODE LIMIT: Removed %d excess episodes for feed %@ (limit: %d)", 
+                   log: self.log, type: .info, episodesToDelete.count, feedId, maxEpisodes)
+        }
+    }
+    
+    /// Enforce episode limit for a specific feed (can be called independently)
+    func enforceEpisodeLimitForFeed(_ feedId: String, maxEpisodes: Int) async throws {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        try await backgroundContext.perform {
+            try self.enforceEpisodeLimit(for: feedId, maxEpisodes: maxEpisodes, in: backgroundContext)
+            try backgroundContext.save()
         }
     }
     

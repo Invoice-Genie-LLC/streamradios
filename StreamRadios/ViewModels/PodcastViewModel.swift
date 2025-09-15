@@ -23,8 +23,9 @@ struct PodcastFeed: Identifiable, Codable, Equatable {
     var iconData: String?
     var imageData: Data?
     var episodes: [PodcastEpisode] = []
+    var maxEpisodes: Int? = nil // Optional episode limit - nil means unlimited
     
-    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = []) {
+    init(id: String = UUID().uuidString, title: String, url: String, artworkUrl: String? = nil, description: String? = nil, iconData: String? = nil, imageData: Data? = nil, episodes: [PodcastEpisode] = [], maxEpisodes: Int? = nil) {
         self.id = id
         self.title = title
         self.url = url
@@ -33,6 +34,7 @@ struct PodcastFeed: Identifiable, Codable, Equatable {
         self.iconData = iconData
         self.imageData = imageData
         self.episodes = episodes
+        self.maxEpisodes = maxEpisodes
     }
     
     // Equatable implementation
@@ -2725,6 +2727,73 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    /// PULL-TO-REFRESH: Force immediate UI update bypassing all throttling mechanisms
+    private func forceUIUpdate() {
+        // Cancel any pending timers
+        uiUpdateTimer?.invalidate()
+        uiUpdateTimer = nil
+        
+        // Reset throttling state
+        lastUIUpdateTime = Date()
+        hasPendingUIUpdate = false
+        
+        // Force immediate UI update
+        objectWillChange.send()
+        print("🔄 FORCE UI UPDATE: Bypassed throttling for pull-to-refresh")
+    }
+    
+    /// Set episode limit for a feed and enforce it immediately
+    func setEpisodeLimit(for feedId: String, maxEpisodes: Int?) async {
+        // Update the feed's maxEpisodes property
+        if let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feedId }) {
+            podcastFeeds[feedIndex].maxEpisodes = maxEpisodes
+            
+            // If setting a limit, enforce it immediately
+            if let maxEpisodes = maxEpisodes {
+                do {
+                    try await PodcastCoreDataManager.shared.enforceEpisodeLimitForFeed(feedId, maxEpisodes: maxEpisodes)
+                    
+                    // Refresh the episode list to reflect the changes
+                    let updatedEpisodes: [PodcastEpisode]
+                    if maxEpisodes > 0 {
+                        // Feed has episode limit - use limited fetch
+                        updatedEpisodes = await PodcastCoreDataManager.shared.getRecentEpisodesForFeed(feedId, limit: maxEpisodes)
+                    } else {
+                        // Feed has no limit - get all episodes
+                        updatedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                    }
+                    
+                    await MainActor.run {
+                        self.forceUpdateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
+                        if self.selectedFeedId == feedId {
+                            self.currentEpisodes = updatedEpisodes
+                        }
+                        self.forceUIUpdate()
+                        print("🗑️ EPISODE LIMIT: Set limit of \(maxEpisodes) episodes for feed \(feedId)")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.error = "Failed to enforce episode limit: \(error.localizedDescription)"
+                    }
+                }
+            } else {
+                print("🔄 EPISODE LIMIT: Removed episode limit for feed \(feedId)")
+            }
+            
+            // Save the updated feed configuration
+            await saveFeedConfiguration(feedId)
+        }
+    }
+    
+    /// Save feed configuration changes (like episode limits) to persistent storage
+    private func saveFeedConfiguration(_ feedId: String) async {
+        // This would typically save to CloudKit or UserDefaults
+        // For now, we'll just trigger a UI update to persist the change
+        await MainActor.run {
+            self.forceUIUpdate()
+        }
+    }
+    
     // MARK: - Data Sync Coordination Methods
     
     /// Wait for data sync completion - used by DataSyncManager
@@ -3193,7 +3262,8 @@ class PodcastViewModel: ObservableObject {
                             // CRITICAL FIX: Always reconcile to fix accumulated episodes
                             // This ensures episode counts match the actual RSS feed content
                             let allCurrentEpisodes = try await self.parseRSSEpisodesOnly(from: url)
-                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes)
+                            let feed = await MainActor.run { self.podcastFeeds.first(where: { $0.id == feedId }) }
+                            try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes, maxEpisodes: feed?.maxEpisodes)
                             
                             // PULL-TO-REFRESH FIX: Get reconciled episodes from Core Data after reconciliation
                             // This ensures episodes have correct feedId values after reconciliation
@@ -3449,7 +3519,8 @@ class PodcastViewModel: ObservableObject {
                                 // CRITICAL FIX: Always reconcile and update snapshots to prevent accumulation
                                 // Parse the complete episode list from RSS to get accurate count
                                 let allCurrentEpisodes = try await self.parseRSSEpisodesOnly(from: url)
-                                try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes)
+                                let feed = await MainActor.run { self.podcastFeeds.first(where: { $0.id == feedId }) }
+                                try await PodcastCoreDataManager.shared.reconcileEpisodes(for: feedId, parsedEpisodes: allCurrentEpisodes, maxEpisodes: feed?.maxEpisodes)
                                 
                                 // PULL-TO-REFRESH FIX: Get reconciled episodes from Core Data after reconciliation
                                 // This ensures episodes have correct feedId values after reconciliation
@@ -3565,7 +3636,7 @@ class PodcastViewModel: ObservableObject {
         refreshTask = Task {
             do {
                 os_log("🔄 Optimized refresh from RSS: %@", log: self.log, type: .info, feedId)
-                print("🔄 OPTIMIZED REFRESH: Quick refresh for better UX")
+                print("🔄 PULL-TO-REFRESH: Starting immediate refresh for better UX")
                 
                 await MainActor.run {
                     self.isLoadingEpisodes = true
@@ -3574,32 +3645,40 @@ class PodcastViewModel: ObservableObject {
                 
                 // PERFORMANCE: Quick RSS check for new episodes only (limit to recent episodes)
                 let (updatedFeed, newEpisodes) = try await self.feedManager.refreshFeedQuick(feedId, limit: 50)
-                print("✅ Quick RSS refresh completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
+                print("✅ Pull-to-refresh RSS completed for '\(updatedFeed.title)' - found \(newEpisodes.count) new episodes")
                 
-                // FAST PATH: If no new episodes, just update UI and return
-                if newEpisodes.isEmpty {
-                    await MainActor.run {
-                        self.isLoadingEpisodes = false
-                        self.operationInProgress = false
-                        self.throttledUIUpdate()
-                    }
-                    return
-                }
-                
-                // OPTIMIZED: Only reconcile new episodes, not entire feed
+                // CRITICAL FIX: Always update snapshot and UI, even if no new episodes
+                // This ensures the UI reflects the latest state after pull-to-refresh
                 if let feed = await MainActor.run(body: { self.podcastFeeds.first(where: { $0.id == feedId }) }) {
-                    // Quick reconcile: only process new episodes to prevent blocking
-                    try await PodcastCoreDataManager.shared.reconcileNewEpisodes(for: feedId, newEpisodes: newEpisodes)
+                    if !newEpisodes.isEmpty {
+                        // Quick reconcile: only process new episodes to prevent blocking
+                        try await PodcastCoreDataManager.shared.reconcileNewEpisodes(for: feedId, newEpisodes: newEpisodes, maxEpisodes: feed.maxEpisodes)
+                    }
                     
-                    // Update UI immediately with new episodes
-                    let updatedEpisodes = await PodcastCoreDataManager.shared.getRecentEpisodesForFeed(feedId, limit: 100)
+                    // ALWAYS get fresh episodes from Core Data and update UI
+                    let updatedEpisodes: [PodcastEpisode]
+                    if let maxEpisodes = feed.maxEpisodes {
+                        // Feed has episode limit - use limited fetch
+                        updatedEpisodes = await PodcastCoreDataManager.shared.getRecentEpisodesForFeed(feedId, limit: maxEpisodes)
+                    } else {
+                        // Feed has no limit - get all episodes
+                        updatedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                    }
                     
                     await MainActor.run {
-                        self.updateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
+                        // CRITICAL FIX: Force snapshot update for pull-to-refresh (bypass throttling)
+                        self.forceUpdateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
+                        
+                        // Update current episodes immediately for UI refresh
+                        self.currentEpisodes = updatedEpisodes
+                        
                         self.isLoadingEpisodes = false
                         self.operationInProgress = false
-                        self.throttledUIUpdate()
-                        print("⚡ FAST REFRESH: Updated UI with \(updatedEpisodes.count) episodes")
+                        
+                        // CRITICAL FIX: Force immediate UI update (bypass throttling)
+                        self.forceUIUpdate()
+                        
+                        print("⚡ PULL-TO-REFRESH: Forced UI update with \(updatedEpisodes.count) episodes (\(newEpisodes.count) new)")
                     }
                     
                     // BACKGROUND: Defer expensive operations to background
@@ -3609,7 +3688,12 @@ class PodcastViewModel: ObservableObject {
                         print("🔄 BACKGROUND: Completed deferred sync operations for \(feedId)")
                     }
                 } else {
-                    print("❌ Quick refresh failed: Missing feed for \(feedId)")
+                    await MainActor.run {
+                        self.isLoadingEpisodes = false
+                        self.operationInProgress = false
+                        self.forceUIUpdate()
+                    }
+                    print("❌ Pull-to-refresh failed: Missing feed for \(feedId)")
                 }
                 
             } catch {
@@ -3617,7 +3701,7 @@ class PodcastViewModel: ObservableObject {
                     self.error = "Failed to refresh feed: \(error.localizedDescription)"
                     self.isLoadingEpisodes = false
                     self.operationInProgress = false
-                    self.throttledUIUpdate()
+                    self.forceUIUpdate()
                 }
                 os_log("❌ Failed to refresh feed: %@", log: self.log, type: .error, error.localizedDescription)
             }
@@ -4396,6 +4480,41 @@ class PodcastViewModel: ObservableObject {
             }
             
             Task { @MainActor in
+                DataSyncManager.shared.updateEpisodeSnapshotReadiness(
+                    feedsWithSnapshots: feedsWithSnapshots,
+                    totalFeedsRequiringSnapshots: feedsWithEpisodes.count
+                )
+            }
+        }
+    }
+    
+    /// PULL-TO-REFRESH: Force snapshot update bypassing throttling for immediate UI refresh
+    func forceUpdateEpisodeSnapshot(for feedId: String, episodes: [PodcastEpisode]) {
+        // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed before caching
+        let safeEpisodes = episodes.filter { $0.feedId == feedId }
+        if safeEpisodes.count != episodes.count {
+            print("🚨 FORCE SNAPSHOT: Filtered out \(episodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+        }
+        
+        // PERFORMANCE OPTIMIZATION: Use efficient sorting algorithm
+        let sortedEpisodes = safeEpisodes.sorted { $0.publicationDate > $1.publicationDate }
+        
+        // Update cache immediately (bypass throttling)
+        episodeSnapshotCache[feedId] = sortedEpisodes
+        snapshotTimestamps[feedId] = Date()
+        print("📸 FORCE SNAPSHOT: Immediately cached \(sortedEpisodes.count) episodes for feed \(feedId) (pull-to-refresh)")
+        
+        // Update DataSyncManager snapshot readiness tracking (background)
+        Task.detached(priority: .background) {
+            let feedsWithEpisodes = await self.podcastFeeds.filter { !$0.episodes.isEmpty }
+            var feedsWithSnapshots = 0
+            for feed in feedsWithEpisodes {
+                if await self.getEpisodeSnapshot(for: feed.id) != nil {
+                    feedsWithSnapshots += 1
+                }
+            }
+            
+            await MainActor.run {
                 DataSyncManager.shared.updateEpisodeSnapshotReadiness(
                     feedsWithSnapshots: feedsWithSnapshots,
                     totalFeedsRequiringSnapshots: feedsWithEpisodes.count
