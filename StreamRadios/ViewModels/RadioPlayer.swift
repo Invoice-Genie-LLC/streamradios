@@ -642,7 +642,23 @@ class RadioPlayer: NSObject, ObservableObject {
                 // Ultimate fallback - manual setup
                 print("🔄 Auto-play (ultimate fallback): Manual URL setup")
                 self.setStationURL(lastStationURL)
-                self.currentStationIndex = storedIndex
+                
+                // CRITICAL FIX: Do NOT set currentStationIndex to stored index without validation
+                // The stored index may not correspond to the correct station anymore
+                // Instead, find the correct station by URL and set the proper index
+                if let stations = self.viewModel?.stations,
+                   let matchingStation = stations.first(where: { $0.url == lastStationURL.absoluteString }),
+                   let correctIndex = stations.firstIndex(where: { $0.id == matchingStation.id }) {
+                    self.currentStationIndex = correctIndex
+                    self.currentlyPlayingStation = matchingStation
+                    print("🔍 Auto-play (ultimate fallback): Found correct station at index \(correctIndex): \(matchingStation.name)")
+                } else {
+                    // If we can't find the station, don't set an index to avoid contamination
+                    self.currentStationIndex = nil
+                    self.currentlyPlayingStation = nil
+                    print("⚠️ Auto-play (ultimate fallback): Could not find matching station for URL, clearing indices")
+                }
+                
                 // Ensure audio session is activated before playing
                 self.ensureAudioSessionActivatedThenPlay {
                     self.play()
@@ -1702,23 +1718,23 @@ class RadioPlayer: NSObject, ObservableObject {
         isPlaying = false
         connectionState = .connecting
         
-        // Set the current station index and station immediately
-        currentStationIndex = index
-        currentlyPlayingStation = station
-        
-        // Store current iTunes artwork before clearing metadata
+        // Store current iTunes artwork before clearing metadata (using PREVIOUS station index)
         if let currentArtwork = iTunesAlbumArt, let currentMeta = metadata {
             lastKnownGoodArtwork = currentArtwork
             lastKnownGoodMetadata = currentMeta
             
-            // Cache artwork with previous station ID for persistence
-            if let stationIndex = currentStationIndex, let viewModel = viewModel,
-               stationIndex < viewModel.stations.count {
-                let stationId = viewModel.stations[stationIndex].id
-                persistentArtworkCache[stationId] = currentArtwork
-                print("💾 Cached iTunes artwork for station \(stationId) before switch")
+            // Cache artwork with PREVIOUS station ID for persistence (before updating currentStationIndex)
+            if let previousStationIndex = currentStationIndex, let viewModel = viewModel,
+               previousStationIndex < viewModel.stations.count {
+                let previousStationId = viewModel.stations[previousStationIndex].id
+                persistentArtworkCache[previousStationId] = currentArtwork
+                print("💾 Cached iTunes artwork for PREVIOUS station \(previousStationId) before switch")
             }
         }
+        
+        // Set the current station index and station AFTER caching previous station's artwork
+        currentStationIndex = index
+        currentlyPlayingStation = station
         
         // Clear all metadata and iTunes artwork when switching stations
         // This ensures old song artwork doesn't carry over to the new station
@@ -1956,12 +1972,22 @@ class RadioPlayer: NSObject, ObservableObject {
                 print("🎵 Now Playing: Using alarm station")
                 lastLoggedStationIndex = -1
             }
+        } else if let playingStation = currentlyPlayingStation {
+            // CRITICAL FIX: Use currentlyPlayingStation as the primary source of truth
+            currentStation = playingStation
+            // Only log if station changed
+            if let currentStationIndex = currentStationIndex,
+               lastLoggedStationIndex != currentStationIndex {
+                print("🎵 Now Playing: Using station '\(playingStation.name)' at index \(currentStationIndex)")
+                lastLoggedStationIndex = currentStationIndex
+            }
         } else if let currentStationIndex = currentStationIndex,
                   currentStationIndex < viewModel.stations.count {
+            // Fallback to index-based lookup only if currentlyPlayingStation is nil
             currentStation = viewModel.stations[currentStationIndex]
             // Only log if station changed
             if lastLoggedStationIndex != currentStationIndex {
-                print("🎵 Now Playing: Using station at index \(currentStationIndex)")
+                print("🎵 Now Playing: Using station at index \(currentStationIndex) (fallback)")
                 lastLoggedStationIndex = currentStationIndex
             }
         } else {
@@ -2146,13 +2172,13 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func updateWidget() {
-        guard let currentStationIndex = currentStationIndex, let viewModel = viewModel else { return }
-        
-        guard currentStationIndex < viewModel.stations.count else {
-            return
+        guard let currentStation = currentlyPlayingStation else { 
+            print("🔧 Widget: No currentlyPlayingStation available")
+            return 
         }
         
-        let currentStation = viewModel.stations[currentStationIndex]
+        // CRITICAL FIX: Use currentlyPlayingStation directly instead of array lookup
+        // This prevents contamination when currentStationIndex becomes stale
         let metadata = self.metadata ?? "No song or album title available"
         
         // Only update widget if station or metadata actually changed
@@ -3466,20 +3492,35 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func saveITunesArtworkToCurrentStation(_ image: UIImage) {
-        guard let currentIndex = currentStationIndex, let viewModel = viewModel else {
-            print("🎨 ❌ Cannot save iTunes artwork: no current station (currentIndex=\(currentStationIndex), viewModel=\(viewModel != nil))")
+        guard let currentStation = currentlyPlayingStation, let viewModel = viewModel else {
+            print("🎨 ❌ Cannot save iTunes artwork: no current station (currentlyPlayingStation=\(currentlyPlayingStation?.name ?? "nil"), viewModel=\(viewModel != nil))")
             return
         }
+        
+        // CRITICAL FIX: Find the station by ID instead of relying on potentially stale currentStationIndex
+        guard let correctIndex = viewModel.stations.firstIndex(where: { $0.id == currentStation.id }) else {
+            print("🎨 ❌ Cannot find current station '\(currentStation.name)' (ID: \(currentStation.id)) in stations array")
+            return
+        }
+        
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             print("🎨 ❌ Failed to convert iTunes artwork to JPEG data")
             return
         }
         let base64String = imageData.base64EncodedString()
         
-        print("🎨 💾 SAVING iTunes artwork to station at index \(currentIndex)")
+        print("🎨 💾 SAVING iTunes artwork to station '\(currentStation.name)' at index \(correctIndex)")
+        print("🎨    - Station ID: \(currentStation.id)")
         print("🎨    - Image size: \(image.size)")
         print("🎨    - Data size: \(imageData.count) bytes")
         print("🎨    - Base64 preview: \(base64String.prefix(50))...")
+        
+        // Verify we're updating the correct station
+        let stationAtIndex = viewModel.stations[correctIndex]
+        if stationAtIndex.id != currentStation.id {
+            print("🎨 🚨 CONTAMINATION PREVENTED: Station at index \(correctIndex) has ID '\(stationAtIndex.id)' but expected '\(currentStation.id)'")
+            return
+        }
         
         // Store artwork for current track persistence
         currentTrackArtwork = image
@@ -3489,17 +3530,20 @@ class RadioPlayer: NSObject, ObservableObject {
         iTunesArtworkJustSet = true
         startArtworkProtectionTimer()
         
-        // Update the station
-        var updatedStation = viewModel.stations[currentIndex]
+        // Update the station using the correct index
+        var updatedStation = viewModel.stations[correctIndex]
         let oldArtworkData = updatedStation.iTunesArtworkData
         updatedStation.iTunesArtworkData = base64String
-        viewModel.stations[currentIndex] = updatedStation
+        viewModel.stations[correctIndex] = updatedStation
+        
+        // Update currentStationIndex to match the correct index
+        currentStationIndex = correctIndex
         
         // CRITICAL: Update currentlyPlayingStation to point to the updated station object
         currentlyPlayingStation = updatedStation
         print("🎨 🔄 Updated currentlyPlayingStation reference with new artwork data")
         
-        print("🎨 ✅ iTunes artwork assigned to station: '\(updatedStation.name)'")
+        print("🎨 ✅ iTunes artwork assigned to station: '\(updatedStation.name)' (ID: \(updatedStation.id))")
         print("🎨    - Had old artwork: \(oldArtworkData != nil)")
         print("🎨    - New artwork data: \(updatedStation.iTunesArtworkData != nil)")
         

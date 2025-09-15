@@ -162,14 +162,12 @@ struct RadioStreamApp: App {
 
 func updateWidget() {
     let radioPlayer = RadioPlayer.shared
-    guard let viewModel = radioPlayer.viewModel,
-          let currentStationIndex = radioPlayer.currentStationIndex,
-          currentStationIndex < viewModel.stations.count else {
-        print("No current station found or index out of bounds.")
+    guard let currentStation = radioPlayer.currentlyPlayingStation else {
+        print("No current station found.")
         return
     }
     
-    let currentStation = viewModel.stations[currentStationIndex]
+    // CRITICAL FIX: Use currentlyPlayingStation directly to prevent contamination
     let metadata = radioPlayer.metadata ?? "No metadata"
       
     let sharedDefaults = UserDefaults(suiteName: "group.streamradios")
