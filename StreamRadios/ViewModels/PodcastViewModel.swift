@@ -3665,6 +3665,24 @@ class PodcastViewModel: ObservableObject {
                         updatedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
                     }
                     
+                    // ENHANCEMENT: Fetch latest EpisodeState data during pull-to-refresh
+                    // This ensures episode progress, played status, and other states are up-to-date
+                    print("🔄 Pull-to-refresh: Syncing episode states for current feed")
+                    let episodeIds = updatedEpisodes.map { $0.id }
+                    if !episodeIds.isEmpty {
+                        // Perform quiet episode state sync without UI progress indicators
+                        let syncResult = await PodcastCloudKitManager.shared.syncEpisodeStatesFromCloudKit(
+                            for: episodeIds,
+                            isFreshInstall: false
+                        )
+                        
+                        if syncResult.success {
+                            print("✅ Pull-to-refresh: Episode states synced successfully for \(episodeIds.count) episodes")
+                        } else {
+                            print("⚠️ Pull-to-refresh: Episode state sync completed with some issues")
+                        }
+                    }
+                    
                     await MainActor.run {
                         // CRITICAL FIX: Force snapshot update for pull-to-refresh (bypass throttling)
                         self.forceUpdateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
