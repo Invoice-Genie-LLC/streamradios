@@ -1645,74 +1645,83 @@ class PodcastViewModel: ObservableObject {
                         // Schedule background refresh with delay to avoid immediate CPU spike
                         Task.detached(priority: .background) {
                             try await Task.sleep(nanoseconds: 5_000_000_000) // 5 second delay
-                            await self.backgroundRefreshWithThrottling(feedId: feedId)
+                            await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: false)
                         }
                     } else {
                         print("🪶 SAMPLING: Skipping background refresh - recently refreshed")
                     }
                 } else {
-                    print("🪶 SAMPLING: No episodes found in sample")
+                    print("🪪 SAMPLING: Skipping background refresh - recently refreshed")
                 }
+            } else {
+                print("🪪 BACKGROUND: No new episodes found")
             }
         } catch {
-            print("🪶 SAMPLING: Failed minimal sampling: \(error.localizedDescription)")
+            print("🪪 BACKGROUND: Background refresh failed: \(error.localizedDescription)")
         }
     }
     
-    /// BACKGROUND REFRESH: Throttled background refresh to avoid CPU spikes
-    private func backgroundRefreshWithThrottling(feedId: String) async {
-        print("🪶 BACKGROUND: Starting throttled background refresh")
+    /// Background refresh for new episodes without blocking UI
+    private func backgroundRefreshForNewEpisodes(feedId: String, isInitialLoad: Bool) async {
+        print("🔄 BACKGROUND REFRESH: Checking for new episodes for feed \(feedId)")
         
-        // Check if user is still on this feed
-        let isStillOnFeed = await MainActor.run {
-            self.selectedFeedId == feedId
-        }
-        
-        if !isStillOnFeed {
-            print("🪶 BACKGROUND: User navigated away - canceling background refresh")
+        // Check if feed needs RSS refresh for new episodes
+        let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
+        guard shouldAutoRefresh else {
+            print("⚡ BACKGROUND REFRESH: No refresh needed for feed \(feedId)")
             return
         }
         
-        // Use existing efficient refresh method but with background priority
         do {
-            let (_, newEpisodes) = try await self.feedManager.refreshFeed(feedId)
+            print("🔄 BACKGROUND REFRESH: Fetching new episodes from RSS for feed \(feedId)")
+            let (updatedFeed, newEpisodes) = try await feedManager.refreshFeed(feedId)
             
             if !newEpisodes.isEmpty {
-                print("🪶 BACKGROUND: Found \(newEpisodes.count) new episodes - updating snapshot")
+                print("🆕 BACKGROUND REFRESH: Found \(newEpisodes.count) new episodes")
                 
-                // Get updated episodes from Core Data after reconciliation
-                let updatedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                // Update cached episodes and refresh UI if this feed is currently selected
+                let refreshedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+                updateEpisodeSnapshot(for: feedId, episodes: refreshedEpisodes)
                 
                 await MainActor.run {
-                    // Update snapshot with new episodes
-                    self.updateEpisodeSnapshot(for: feedId, episodes: updatedEpisodes)
-                    
-                    // Only update UI if user is still on this feed
-                    if self.selectedFeedId == feedId {
-                        // CRITICAL FIX: Update currentEpisodes with new data, not just trigger UI refresh
-                        let filter = EpisodeFilter(rawValue: self.currentTab) ?? .all
+                    if selectedFeedId == feedId {
+                        // Apply current filter to refreshed episodes
+                        let filter = EpisodeFilter(rawValue: currentTab) ?? .all
                         let filteredEpisodes: [PodcastEpisode]
                         switch filter {
                         case .all:
-                            filteredEpisodes = updatedEpisodes
+                            filteredEpisodes = refreshedEpisodes
                         case .favorites:
-                            filteredEpisodes = updatedEpisodes.filter { $0.state.isFavorite }
+                            filteredEpisodes = refreshedEpisodes.filter { $0.state.isFavorite }
                         case .downloads:
-                            filteredEpisodes = updatedEpisodes.filter { $0.state.isDownloaded }
+                            filteredEpisodes = refreshedEpisodes.filter { $0.state.isDownloaded }
                         }
                         
-                        self.currentEpisodes = filteredEpisodes
-                        print("🪶 BACKGROUND: Updated UI with \(filteredEpisodes.count) episodes including \(newEpisodes.count) new ones")
+                        // Update UI with new episodes
+                        currentEpisodes = filteredEpisodes
                         
-                        // Trigger UI update
-                        self.throttledUIUpdate()
+                        // Update episode counts
+                        let allCount = refreshedEpisodes.count
+                        let favoritesCount = refreshedEpisodes.filter { $0.state.isFavorite }.count
+                        let downloadsCount = refreshedEpisodes.filter { $0.state.isDownloaded }.count
+                        episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
+                        
+                        print("🔄 BACKGROUND REFRESH: Updated UI with \(newEpisodes.count) new episodes")
                     }
                 }
             } else {
-                print("🪶 BACKGROUND: No new episodes found")
+                print("✅ BACKGROUND REFRESH: No new episodes found for feed \(feedId)")
             }
+            
+            // Update refresh timestamp
+            await MainActor.run {
+                let currentTime = Date().timeIntervalSince1970
+                let lastRefreshKey = "LastRSSRefresh_\(feedId)"
+                UserDefaults.standard.set(currentTime, forKey: lastRefreshKey)
+            }
+            
         } catch {
-            print("🪶 BACKGROUND: Background refresh failed: \(error.localizedDescription)")
+            print("❌ BACKGROUND REFRESH: Failed to refresh feed \(feedId): \(error)")
         }
     }
     
@@ -2988,7 +2997,57 @@ class PodcastViewModel: ObservableObject {
     func loadEpisodesForFeed(_ feedId: String, isInitialLoad: Bool = false) async {
         print("🔄 LOAD EPISODES: Starting load for feedId '\(feedId)' (isInitialLoad: \(isInitialLoad))")
         
-        // ULTRA PERFORMANCE: Check for snapshots FIRST to skip ALL expensive operations
+        // INSTANT DISPLAY: Load cached episodes from Core Data FIRST for immediate UI display
+        let cachedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
+        if !cachedEpisodes.isEmpty {
+            print("⚡ INSTANT DISPLAY: Found \(cachedEpisodes.count) cached episodes - displaying immediately")
+            
+            await MainActor.run {
+                // Apply current filter instantly (episodes already sorted newest first from Core Data)
+                let filter = EpisodeFilter(rawValue: currentTab) ?? .all
+                let filteredEpisodes: [PodcastEpisode]
+                switch filter {
+                case .all:
+                    filteredEpisodes = cachedEpisodes // Already sorted newest first
+                case .favorites:
+                    filteredEpisodes = cachedEpisodes.filter { $0.state.isFavorite }
+                case .downloads:
+                    filteredEpisodes = cachedEpisodes.filter { $0.state.isDownloaded }
+                }
+                
+                // CRITICAL: Clear any contaminated episodes from wrong feeds
+                if !currentEpisodes.isEmpty && currentEpisodes.first?.feedId != feedId {
+                    print("🧹 CONTAMINATION CLEANUP: Clearing \(currentEpisodes.count) episodes from wrong feed")
+                    currentEpisodes = []
+                }
+                
+                // Update UI instantly with cached episodes
+                currentEpisodes = filteredEpisodes
+                selectedFeedId = feedId
+                isLoadingEpisodes = false
+                operationInProgress = false
+                
+                // Update episode counts immediately
+                let allCount = cachedEpisodes.count
+                let favoritesCount = cachedEpisodes.filter { $0.state.isFavorite }.count
+                let downloadsCount = cachedEpisodes.filter { $0.state.isDownloaded }.count
+                episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
+                
+                print("⚡ INSTANT SUCCESS: Displaying \(filteredEpisodes.count) cached episodes immediately")
+            }
+            
+            // Update snapshot with cached episodes for future instant access
+            updateEpisodeSnapshot(for: feedId, episodes: cachedEpisodes)
+            
+            // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
+            Task.detached(priority: .background) {
+                await self.backgroundRefreshForNewEpisodes(feedId: feedId, isInitialLoad: isInitialLoad)
+            }
+            
+            return
+        }
+        
+        // ULTRA PERFORMANCE: Check for snapshots if no cached episodes
         if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
             print("⚡ ULTRA PERFORMANCE: Using snapshot for feed \(feedId) - SKIPPING ALL EXPENSIVE OPERATIONS (newest episodes first)")
             
@@ -3109,84 +3168,71 @@ class PodcastViewModel: ObservableObject {
             return // CRITICAL: Return immediately, bypass all expensive operations below
         }
         
-        // AUTO QUIET SYNC: Only sync episode states when NO snapshot is available
-        // This prevents unnecessary syncing when snapshots already contain all episode states
-        Task.detached(priority: .background) {
-            await self.quietSyncEpisodeStates(for: feedId)
-        }
-        
-        // FALLBACK: Check other cache sources if no snapshot available
-        let feed = podcastFeeds.first(where: { $0.id == feedId })
-        let hasEpisodesInMemory = feed?.episodes.isEmpty == false
-        let hasInstantCache = await episodeManager.hasInstantCache(feedId: feedId)
-        
-        await MainActor.run {
-            // PERFORMANCE: Only show loading if we have NO cached episodes anywhere
-            if !hasEpisodesInMemory && !hasInstantCache && self.currentEpisodes.isEmpty {
-                self.isLoadingEpisodes = true
-                self.operationInProgress = true
-                print("🔄 LOADING: No cached episodes found - showing loading state")
-            } else {
-                print("⚡ INSTANT LOAD: Using cached episodes (memory: \(hasEpisodesInMemory), persistent: \(hasInstantCache))")
-            }
-            // SMOOTH LOADING: Don't clear currentEpisodes to prevent UI jump
-        }
-        
-        // PERFORMANCE: Check for snapshots first to avoid expensive operations
-        let hasSnapshot = getEpisodeSnapshot(for: feedId) != nil
-        
-        // CRITICAL PERFORMANCE: Skip ALL expensive operations for snapshot-based loads
-        if hasSnapshot {
-            print("⚡ ULTRA PERFORMANCE: Using snapshot for feed \(feedId) - SKIPPING ALL EXPENSIVE OPERATIONS")
+        // ULTRA PERFORMANCE: Check for snapshots if no cached episodes
+        if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
+            print("⚡ ULTRA PERFORMANCE: Using snapshot for feed \(feedId) - SKIPPING ALL EXPENSIVE OPERATIONS (newest episodes first)")
             
-            // INSTANT SNAPSHOT: Use cached snapshot for immediate display
-            if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
-                print("📸 SNAPSHOT INSTANT LOAD: Displaying \(snapshotEpisodes.count) episodes instantly - NO EXPENSIVE OPERATIONS (newest episodes first)")
-                
-                // PERFORMANCE: Apply filtering on background queue to avoid main thread blocking
+            await MainActor.run {
+                // Apply current filter instantly (episodes already sorted newest first in snapshot)
                 let filter = EpisodeFilter(rawValue: currentTab) ?? .all
-                
-                Task.detached(priority: .userInitiated) {
-                    let filteredEpisodes: [PodcastEpisode]
-                    switch filter {
-                    case .all:
-                        filteredEpisodes = snapshotEpisodes // Already sorted newest first
-                    case .favorites:
-                        // Maintain newest first order when filtering
-                        filteredEpisodes = snapshotEpisodes.filter { $0.state.isFavorite }
-                    case .downloads:
-                        // Maintain newest first order when filtering
-                        filteredEpisodes = snapshotEpisodes.filter { $0.state.isDownloaded }
-                    }
-                    
-                    await MainActor.run {
-                        // Update UI instantly with newest episodes first
-                        self.currentEpisodes = filteredEpisodes
-                        self.isLoading = false
-                        self.isLoadingEpisodes = false
-                        self.operationInProgress = false
-                        self.selectedFeedId = feedId
-                        
-                        print("📸 SNAPSHOT SUCCESS: Displayed \(filteredEpisodes.count) episodes instantly with newest episodes first - ZERO EXPENSIVE OPERATIONS")
-                    }
-                    
-                    // Update episode counts on background thread
-                    Task {
-                        await self.updateEpisodeCounts(for: feedId, episodes: snapshotEpisodes)
-                    }
+                let filteredEpisodes: [PodcastEpisode]
+                switch filter {
+                case .all:
+                    filteredEpisodes = snapshotEpisodes // Already sorted newest first
+                case .favorites:
+                    // Maintain newest first order when filtering
+                    filteredEpisodes = snapshotEpisodes.filter { $0.state.isFavorite }
+                case .downloads:
+                    // Maintain newest first order when filtering
+                    filteredEpisodes = snapshotEpisodes.filter { $0.state.isDownloaded }
                 }
                 
-                return
+                // CRITICAL: Clear any contaminated episodes from wrong feeds
+                if !currentEpisodes.isEmpty && currentEpisodes.first?.feedId != feedId {
+                    print("🧹 CONTAMINATION CLEANUP: Clearing \(currentEpisodes.count) episodes from wrong feed")
+                    currentEpisodes = []
+                }
+                
+                // Update UI instantly with newest episodes first
+                currentEpisodes = filteredEpisodes
+                selectedFeedId = feedId
+                isLoadingEpisodes = false
+                operationInProgress = false
+                Task {
+                    await updateEpisodeCounts(for: feedId, episodes: snapshotEpisodes)
+                }
+                
+                print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
             }
+            
+            return
         }
         
         // CRITICAL PERFORMANCE: Skip CloudKit priority mode for snapshot-based loads
-        if !hasSnapshot {
+        if getEpisodeSnapshot(for: feedId) == nil {
             // CRITICAL: Enable CloudKit priority mode for episode list loading
             // This ensures CloudKit data immediately replaces Core Data progress
             EpisodeStateManager.shared.enableCloudKitPriorityMode()
             print("🔄 CLOUDKIT: Enabled priority mode for non-snapshot load")
         }
+        
+        // FALLBACK: This path should rarely execute since we check Core Data first
+        let feed = podcastFeeds.first(where: { $0.id == feedId })
+        let hasEpisodesInMemory = feed?.episodes.isEmpty == false
+        let hasInstantCache = await episodeManager.hasInstantCache(feedId: feedId)
+        
+        await MainActor.run {
+            // Show loading state since we have no cached data
+            isLoadingEpisodes = true
+            operationInProgress = true
+            print("🔄 FALLBACK LOADING: No cached episodes found - showing loading state")
+        }
+        
+        // PERFORMANCE: Check for snapshots first to avoid expensive operations
+        let hasSnapshot = getEpisodeSnapshot(for: feedId) != nil
+        
+        // FALLBACK PATH: Only execute expensive operations if no cached episodes available
+        print("🔄 FALLBACK: No cached episodes or snapshots - executing full load path")
         
         // PERFORMANCE: Skip expensive local state refresh if we have snapshots or recent refresh
         let hasRecentRefresh = await MainActor.run {
