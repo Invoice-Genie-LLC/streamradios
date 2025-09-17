@@ -72,10 +72,6 @@ struct GlobalPlayerView: View {
                 }
             }
         }
-        .background(
-            Color.adaptiveSecondaryBackground
-                .edgesIgnoringSafeArea(.all)
-        )
     }
     
     /// Determines if podcast player should be shown

@@ -815,13 +815,8 @@ struct CompactPlayerView: View {
     @Binding var isPlayerSheetPresented: Bool
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Safe space at top instead of blue line (matching podcast player)
-            Rectangle()
-                .fill(Color.clear)
-                .frame(height: 8)
-            
-            // Compact single-row layout (matching podcast player)
+        if #available(iOS 26.0, *) {
+            // Compact single-row layout with liquid glass effect
             HStack(spacing: 12) {
                 // Tappable artwork area for opening player sheet
                 Button(action: {
@@ -830,7 +825,99 @@ struct CompactPlayerView: View {
                 }) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.adaptiveBorder)
+                            .fill(Color.clear)
+                            .frame(width: 44, height: 44)
+                        
+                        albumArtworkView
+                            .frame(width: 44, height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Tappable text area for opening player sheet
+                Button(action: {
+                    print("📝 Text area tapped - OPENING player sheet")
+                    isPlayerSheetPresented.toggle()
+                }) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        // Station name
+                        Text(currentStation.name)
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        
+                        // Metadata with connection status
+                        HStack(spacing: 4) {
+                            if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
+                                Text("\(shazamTitle) — \(shazamArtist)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            } else if let meta = metadata, !meta.isEmpty {
+                                let split = radioPlayer.splitArtistTitle(from: meta, fallbackArtist: currentStation.name, fallbackTitle: meta)
+                                Text("\(split.title) — \(split.artist)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            } else {
+                                Text("Live Radio")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            
+                            // Connection status indicator
+                            connectionStatusView
+                        }
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                Spacer()
+                
+                // Essential controls only - just play/pause button
+                Button(action: {
+                    print("⏯️ Play/pause button action - NOT opening sheet")
+                    radioPlayer.playPause()
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(.tint)
+                            .frame(width: 36, height: 36)
+                        
+                        if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(.white)
+                        } else {
+                            // Show pause when actually playing; show play when paused or stopped
+                            Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+            .frame(minHeight: 60)
+        } else {
+            // Fallback for earlier iOS versions
+            HStack(spacing: 12) {
+                // Tappable artwork area for opening player sheet
+                Button(action: {
+                    print("🖼️ Artwork tapped - OPENING player sheet")
+                    isPlayerSheetPresented.toggle()
+                }) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.clear)
                             .frame(width: 44, height: 44)
                         
                         albumArtworkView
@@ -891,7 +978,7 @@ struct CompactPlayerView: View {
                 }) {
                     ZStack {
                         Circle()
-                            .fill(Color.blue)
+                            .fill(Color.blue.opacity(0.8))
                             .frame(width: 36, height: 36)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
@@ -909,10 +996,13 @@ struct CompactPlayerView: View {
                 .buttonStyle(PlainButtonStyle())
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.adaptiveSecondaryBackground)
+            )
+            .frame(minHeight: 60)
         }
-        .background(Color.adaptiveSecondaryBackground)
-        .frame(minHeight: 60) // Minimum height with ability to expand
     }
     
     @ViewBuilder
@@ -1002,11 +1092,11 @@ struct UnifiedPodcastPlayerView: View {
     
     // Responsive sizing that scales with Dynamic Type
     private var artworkSize: CGFloat {
-        sizeClass == .compact ? 50 : 60
+        sizeClass == .compact ? 40 : 48  // Reduced from 50/60 to 40/48 for more title space
     }
     
     private var buttonSize: CGFloat {
-        sizeClass == .compact ? 36 : 44
+        sizeClass == .compact ? 40 : 48  // Reduced from 44/52 to 40/48 for smaller rewind/fast forward buttons
     }
     
     private var playButtonSize: CGFloat {
@@ -1022,15 +1112,15 @@ struct UnifiedPodcastPlayerView: View {
     }
     
     private var skipButtonIconSize: CGFloat {
-        sizeClass == .compact ? 18 : 20  // Larger than regular iconSize for better usability
+        sizeClass == .compact ? 20 : 24  // Reduced from 22/26 to 20/24 for smaller button appearance
     }
     
     private var horizontalPadding: CGFloat {
-        sizeClass == .compact ? 12 : 16
+        sizeClass == .compact ? 6 : 10  // Reduced from 8/12 to 6/10 for maximum title space
     }
     
     private var buttonSpacing: CGFloat {
-        sizeClass == .compact ? 0 : 1
+        sizeClass == .compact ? -6 : -5  // Further increased negative spacing to bring buttons very close to play button
     }
     
     // PERFORMANCE: Robust navigation throttling to prevent CPU spikes from repeated calls
@@ -1077,151 +1167,324 @@ struct UnifiedPodcastPlayerView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Safe space at top instead of blue line
-            Rectangle()
-                .fill(Color.clear)
-                .frame(height: 1)
-            
+        if #available(iOS 26.0, *) {
             // Compact single-row layout with center alignment for Dynamic Type support
-            HStack(alignment: .center, spacing: 10) {
-                // Tappable artwork area - opens chapters/notes sheet
-                Button(action: {
-                    showChaptersNotes = true
-                }) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.adaptiveBorder)
-                            .frame(width: artworkSize, height: artworkSize)
-                        
-                        feedArtworkView
-                            .frame(width: artworkSize, height: artworkSize)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                // Tappable text area - limit episode title to 3 lines with vertical scrolling
-                Button(action: navigateToCurrentEpisode) {
-                    ScrollableEpisodeTitle(title: currentEpisode.title)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, -4) // Increase display width by reducing padding
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                // Player controls with timer aligned under play button
-                VStack(spacing: 4) {
-                    // Essential controls only - using responsive sizing
-                    HStack(spacing: buttonSpacing) {
-                        // Skip backward 15s - larger size for better usability
-                        Button(action: podcastPlayer.skipBackward) {
-                            Image(systemName: "gobackward.15")
-                                .font(.system(size: skipButtonIconSize))
-                                .foregroundColor(.adaptivePrimaryText)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // CRITICAL FIX: Completely isolate play button from timer - use ZStack for independent positioning
+                HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
+                    // Tappable artwork area - opens chapters/notes sheet
+                    Button(action: {
+                        showChaptersNotes = true
+                    }) {
                         ZStack {
-                            // Play button only - completely isolated
-                            VStack(spacing: 4) {
-                                Button(action: {
-                                    podcastPlayer.togglePlayPause()
-                                }) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.blue)
-                                            .frame(width: playButtonSize, height: playButtonSize)
-                                        
-                                        if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
-                                            // Show loading spinner when episode is loading
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                .scaleEffect(0.8)
-                                        } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
-                                            // Show spinning indicator when reconnecting or buffering
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                .scaleEffect(0.8)
-                                        } else {
-                                            Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                                .font(.system(size: playIconSize))
-                                                .foregroundColor(.white)
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.adaptiveBorder)
+                                .frame(width: artworkSize, height: artworkSize)
+                            
+                            feedArtworkView
+                                .frame(width: artworkSize, height: artworkSize)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Tappable text area - limit episode title to 3 lines with vertical scrolling
+                    Button(action: navigateToCurrentEpisode) {
+                        ScrollableEpisodeTitle(title: currentEpisode.title)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 4)  // Add left padding for better text positioning
+                            .padding(.trailing, -8) // Negative right padding for maximum width
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Player controls with timer aligned under play button
+                    VStack(spacing: 1) {
+                        // Essential controls only - using responsive sizing
+                        HStack(spacing: buttonSpacing) {
+                            // Rewind 15s - scrub backward through episode timeline
+                            Button(action: {
+                                print("🔴 DEBUG: Rewind button pressed - calling skipBackward")
+                                podcastPlayer.skipBackward()
+                            }) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.adaptiveSecondaryBackground.opacity(0.3))
+                                        .frame(width: buttonSize, height: buttonSize)
+                                    
+                                    Image(systemName: "gobackward.15")
+                                        .font(.system(size: skipButtonIconSize))
+                                        .foregroundColor(.adaptivePrimaryText)
+                                }
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // CRITICAL FIX: Completely isolate play button from timer - use ZStack for independent positioning
+                            ZStack {
+                                // Play button only - completely isolated
+                                VStack(spacing: 4) {
+                                    Button(action: {
+                                        podcastPlayer.togglePlayPause()
+                                    }) {
+                                        ZStack {
+                                            Circle()
+                                                .fill(Color.blue)
+                                                .frame(width: playButtonSize, height: playButtonSize)
+                                            
+                                            if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
+                                                // Show loading spinner when episode is loading
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                    .scaleEffect(0.8)
+                                            } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                                // Show spinning indicator when reconnecting or buffering
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                    .scaleEffect(0.8)
+                                            } else {
+                                                Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                                    .font(.system(size: playIconSize))
+                                                    .foregroundColor(.white)
+                                            }
                                         }
                                     }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .offset(y: 8) // Move play button more noticeably down
+                                    
+                                    // Spacer to maintain same height as original layout
+                                    Spacer()
+                                        .frame(height: 16) // Approximate height of timer text + spacing
                                 }
-                                .buttonStyle(PlainButtonStyle())
                                 
-                                // Spacer to maintain same height as original layout
-                                Spacer()
-                                    .frame(height: 16) // Approximate height of timer text + spacing
+                                // Timer completely overlaid and isolated from ALL touch events
+                                VStack {
+                                    Spacer()
+                                        .frame(height: playButtonSize + 14) // Position below button (adjusted for button offset)
+                                    
+                                    Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
+                                        .font(.caption2)
+                                        .foregroundColor(.adaptiveSecondaryText)
+                                        .lineLimit(1)
+                                        .frame(width: 80, alignment: .center)
+                                        .minimumScaleFactor(0.8)
+                                        .allowsHitTesting(false) // Disable touch interaction on text
+                                        .background(Color.clear)
+                                }
+                                .allowsHitTesting(false) // Completely disable ALL touch interaction
+                                
                             }
                             
-                            // Timer completely overlaid and isolated from ALL touch events
-                            VStack {
-                                Spacer()
-                                    .frame(height: playButtonSize + 4) // Position below button
-                                
-                                Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                                    .font(.caption2)
-                                    .foregroundColor(.adaptiveSecondaryText)
-                                    .lineLimit(1)
-                                    .frame(width: 80, alignment: .center)
-                                    .minimumScaleFactor(0.8)
-                                    .allowsHitTesting(false) // Disable touch interaction on text
-                                    .background(Color.clear)
+                            // Fast forward 30s - scrub forward through episode timeline
+                            Button(action: {
+                                print("🔴 DEBUG: Fast forward button pressed - calling skipForward")
+                                podcastPlayer.skipForward()
+                            }) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.adaptiveSecondaryBackground.opacity(0.3))
+                                        .frame(width: buttonSize, height: buttonSize)
+                                    
+                                    Image(systemName: "goforward.30")
+                                        .font(.system(size: skipButtonIconSize))
+                                        .foregroundColor(.adaptivePrimaryText)
+                                }
                             }
-                            .allowsHitTesting(false) // Completely disable ALL touch interaction
-
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Proper spacing to give speed button its own space
+                            Spacer()
+                                .frame(width: 8)  // Increased from 1 to 8 to separate speed button from controls
+                            
+                            // Playback speed button - shows current speed and opens audio settings
+                            Button(action: {
+                                showAudioSettings = true
+                            }) {
+                                Text(String(format: "%.1fx", podcastPlayer.playbackSpeed))
+                                    .font(.system(size: iconSize - 2, weight: .medium))
+                                    .foregroundColor(.adaptivePrimaryText)
+                                    .frame(width: buttonSize + 8, height: buttonSize)  // Increased width from +4 to +8 for better speed button visibility
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
                         
-                        // Skip forward 30s - larger size for better usability
-                        Button(action: podcastPlayer.skipForward) {
-                            Image(systemName: "goforward.30")
-                                .font(.system(size: skipButtonIconSize))
-                                .foregroundColor(.adaptivePrimaryText)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        // Extra spacing between forward button and speed button to prevent accidental taps
-                        Spacer()
-                            .frame(width: 16)
-                        
-                        // Playback speed button - shows current speed and opens audio settings
-                        Button(action: {
-                            showAudioSettings = true
-                        }) {
-                            Text(String(format: "%.1fx", podcastPlayer.playbackSpeed))
-                                .font(.system(size: iconSize - 2, weight: .medium))
-                                .foregroundColor(.adaptivePrimaryText)
-                                .frame(width: buttonSize + 8, height: buttonSize + 8)
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                        // Connection status indicator for podcast player
+                        podcastConnectionStatusView
                     }
-                    
-                    // Connection status indicator for podcast player
-                    podcastConnectionStatusView
                 }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, 2)
+                .background(
+                    // Invisible background that blocks tap-through while allowing glass effect
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.clear)
+                        .contentShape(RoundedRectangle(cornerRadius: 16))
+                )
+            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+            .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
+            .sheet(isPresented: $showChaptersNotes) {
+                PodcastChaptersNotesView(
+                    episode: currentEpisode,
+                    feed: currentFeed,
+                    podcastPlayer: podcastPlayer,
+                    isPresented: $showChaptersNotes
+                )
             }
-            .padding(.horizontal, horizontalPadding)
-            .padding(.vertical, 12)
-        }
-        .background(
-            Color.adaptiveSecondaryBackground
-        )
-        .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
-        .sheet(isPresented: $showChaptersNotes) {
-            PodcastChaptersNotesView(
-                episode: currentEpisode,
-                feed: currentFeed,
-                podcastPlayer: podcastPlayer,
-                isPresented: $showChaptersNotes
+            .sheet(isPresented: $showAudioSettings) {
+                AudioSettingsSheet(podcastPlayer: podcastPlayer)
+                    .presentationDetents([.fraction(0.5), .large])
+                    .presentationDragIndicator(.visible)
+            }
+        } else {
+            // Fallback for earlier iOS versions
+            // Compact single-row layout with center alignment for Dynamic Type support
+                HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
+                    // Tappable artwork area - opens chapters/notes sheet
+                    Button(action: {
+                        showChaptersNotes = true
+                    }) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.adaptiveBorder)
+                                .frame(width: artworkSize, height: artworkSize)
+                            
+                            feedArtworkView
+                                .frame(width: artworkSize, height: artworkSize)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Tappable text area - limit episode title to 3 lines with vertical scrolling
+                    Button(action: navigateToCurrentEpisode) {
+                        ScrollableEpisodeTitle(title: currentEpisode.title)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 4)  // Add left padding for better text positioning
+                            .padding(.trailing, -8) // Negative right padding for maximum width
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Player controls with timer aligned under play button
+                    VStack(spacing: 1) {
+                        // Essential controls only - using responsive sizing
+                        HStack(spacing: buttonSpacing) {
+                            // Skip backward 15s - larger size for better usability
+                            Button(action: podcastPlayer.skipBackward) {
+                                Image(systemName: "gobackward.15")
+                                    .font(.system(size: skipButtonIconSize))
+                                    .foregroundColor(.adaptivePrimaryText)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // CRITICAL FIX: Completely isolate play button from timer - use ZStack for independent positioning
+                            ZStack {
+                                // Play button only - completely isolated
+                                VStack(spacing: 4) {
+                                    Button(action: {
+                                        podcastPlayer.togglePlayPause()
+                                    }) {
+                                        ZStack {
+                                            Circle()
+                                                .fill(Color.blue)
+                                                .frame(width: playButtonSize, height: playButtonSize)
+                                            
+                                            if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
+                                                // Show loading spinner when episode is loading
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                    .scaleEffect(0.8)
+                                            } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                                // Show spinning indicator when reconnecting or buffering
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                    .scaleEffect(0.8)
+                                            } else {
+                                                Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                                    .font(.system(size: playIconSize))
+                                                    .foregroundColor(.white)
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .offset(y: 8) // Move play button more noticeably down
+                                    
+                                    // Spacer to maintain same height as original layout
+                                    Spacer()
+                                        .frame(height: 16) // Approximate height of timer text + spacing
+                                }
+                                
+                                // Timer completely overlaid and isolated from ALL touch events
+                                VStack {
+                                    Spacer()
+                                        .frame(height: playButtonSize + 14) // Position below button (adjusted for button offset)
+                                    
+                                    Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
+                                        .font(.caption2)
+                                        .foregroundColor(.adaptiveSecondaryText)
+                                        .lineLimit(1)
+                                        .frame(width: 80, alignment: .center)
+                                        .minimumScaleFactor(0.8)
+                                        .allowsHitTesting(false) // Disable touch interaction on text
+                                        .background(Color.clear)
+                                }
+                                .allowsHitTesting(false) // Completely disable ALL touch interaction
+                                
+                            }
+                            
+                            // Fast forward 30s - scrub forward through episode timeline
+                            Button(action: {
+                                print("🔴 DEBUG: Fast forward button pressed - calling skipForward")
+                                podcastPlayer.skipForward()
+                            }) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.adaptiveSecondaryBackground.opacity(0.3))
+                                        .frame(width: buttonSize, height: buttonSize)
+                                    
+                                    Image(systemName: "goforward.30")
+                                        .font(.system(size: skipButtonIconSize))
+                                        .foregroundColor(.adaptivePrimaryText)
+                                }
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Proper spacing to give speed button its own space
+                            Spacer()
+                                .frame(width: 8)  // Increased from 1 to 8 to separate speed button from controls
+                            
+                            // Playback speed button - shows current speed and opens audio settings
+                            Button(action: {
+                                showAudioSettings = true
+                            }) {
+                                Text(String(format: "%.1fx", podcastPlayer.playbackSpeed))
+                                    .font(.system(size: iconSize - 2, weight: .medium))
+                                    .foregroundColor(.adaptivePrimaryText)
+                                    .frame(width: buttonSize + 8, height: buttonSize)  // Increased width from +4 to +8 for better speed button visibility
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                        
+                        // Connection status indicator for podcast player
+                        podcastConnectionStatusView
+                    }
+                }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.adaptiveSecondaryBackground)
+                    .contentShape(RoundedRectangle(cornerRadius: 16))
             )
-        }
-        .sheet(isPresented: $showAudioSettings) {
-            AudioSettingsSheet(podcastPlayer: podcastPlayer)
-                .presentationDetents([.fraction(0.5), .large])
-                .presentationDragIndicator(.visible)
+            .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
+            .sheet(isPresented: $showChaptersNotes) {
+                PodcastChaptersNotesView(
+                    episode: currentEpisode,
+                    feed: currentFeed,
+                    podcastPlayer: podcastPlayer,
+                    isPresented: $showChaptersNotes
+                )
+            }
+            .sheet(isPresented: $showAudioSettings) {
+                AudioSettingsSheet(podcastPlayer: podcastPlayer)
+                    .presentationDetents([.fraction(0.5), .large])
+                    .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -1352,17 +1615,33 @@ struct CompactPodcastPlayerView: View {
     var onCloseButtonTap: (() -> Void)?
     
     var body: some View {
-        UnifiedPodcastPlayerView(
-            currentEpisode: currentEpisode,
-            currentFeed: currentFeed,
-            podcastPlayer: podcastPlayer,
-            viewModel: viewModel,
-            selectedPodcast: $selectedPodcast,
-            onListButtonTap: onListButtonTap,
-            onCloseButtonTap: onCloseButtonTap
-        )
+        if #available(iOS 26.0, *) {
+            UnifiedPodcastPlayerView(
+                currentEpisode: currentEpisode,
+                currentFeed: currentFeed,
+                podcastPlayer: podcastPlayer,
+                viewModel: viewModel,
+                selectedPodcast: $selectedPodcast,
+                onListButtonTap: onListButtonTap,
+                onCloseButtonTap: onCloseButtonTap
+            )
+        } else {
+            // Fallback for earlier iOS versions
+            UnifiedPodcastPlayerView(
+                currentEpisode: currentEpisode,
+                currentFeed: currentFeed,
+                podcastPlayer: podcastPlayer,
+                viewModel: viewModel,
+                selectedPodcast: $selectedPodcast,
+                onListButtonTap: onListButtonTap,
+                onCloseButtonTap: onCloseButtonTap
+            )
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.adaptiveSecondaryBackground)
+            )
+        }
     }
-
 }
 
 // MARK: - Currently Playing View
@@ -2791,7 +3070,7 @@ struct ScrollableEpisodeTitle: View {
     var body: some View {
         HStack(spacing: 0) {
             ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
+                ScrollView(.vertical, showsIndicators: true) {
                     Text(title)
                         .font(.caption)
                         .foregroundColor(.adaptivePrimaryText)
@@ -2827,48 +3106,6 @@ struct ScrollableEpisodeTitle: View {
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
                     scrollOffset = value
                 }
-            }
-            
-            // Spacing before vertical scroll indicator
-            if isScrollable {
-                Spacer()
-                    .frame(width: 8)
-            }
-            
-            // Vertical scroll indicator line with arrows
-            if isScrollable {
-                VStack(spacing: 0) {
-                    // Top arrow
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 8))
-                        .foregroundColor(.adaptiveSecondaryText.opacity(0.6))
-                        .frame(height: 10)
-                    
-                    // Scroll line with indicator
-                    Rectangle()
-                        .fill(Color.adaptiveSecondaryText.opacity(0.3))
-                        .frame(width: 2, height: calculateHeight() - 20) // Reduce height for arrows
-                        .overlay(
-                            // Scroll position indicator (white part)
-                            Rectangle()
-                                .fill(Color.adaptiveSecondaryText)
-                                .frame(width: 2, height: calculateScrollIndicatorHeight())
-                                .offset(y: calculateScrollIndicatorOffset()),
-                            alignment: .top
-                        )
-                    
-                    // Bottom arrow
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8))
-                        .foregroundColor(.adaptiveSecondaryText.opacity(0.6))
-                        .frame(height: 10)
-                }
-            }
-            
-            // Spacing after vertical scroll indicator  
-            if isScrollable {
-                Spacer()
-                    .frame(width: 8)
             }
         }
         .frame(height: calculateHeight())

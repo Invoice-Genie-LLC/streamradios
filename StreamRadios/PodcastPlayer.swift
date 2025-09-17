@@ -844,23 +844,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             return .commandFailed
         }
         
-        commandCenter.nextTrackCommand.isEnabled = true
-        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
-            if PlaybackManager.shared.activePlayer == .podcast {
-                self?.skipToNextEpisode()
-                return .success
-            }
-            return .commandFailed
-        }
-        
-        commandCenter.previousTrackCommand.isEnabled = true
-        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
-            if PlaybackManager.shared.activePlayer == .podcast {
-                self?.skipToPreviousEpisode()
-                return .success
-            }
-            return .commandFailed
-        }
+        // REMOVED: Episode skip functionality - only time scrubbing allowed
+        commandCenter.nextTrackCommand.isEnabled = false
+        commandCenter.previousTrackCommand.isEnabled = false
         
         // Enable skip forward command (for seeking within episodes)
         commandCenter.skipForwardCommand.isEnabled = true
@@ -1013,46 +999,15 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         }
     }
     
+    // REMOVED: Episode skip functionality - users can only scrub through current episode
     func skipToNextEpisode() {
-            os_log("Attempting to skip to next episode", log: log, type: .info)
-            guard let currentIndex = currentEpisodeIndex else {
-                os_log("Current episode index is nil", log: log, type: .error)
-                return
-            }
-            
-            os_log("Current episode index: %d", log: log, type: .info, currentIndex)
-            os_log("Total episodes in feed: %d", log: log, type: .info, allEpisodesInFeed.count)
-            
-            let nextIndex = currentIndex + 1
-            guard nextIndex < allEpisodesInFeed.count else {
-                os_log("Already at the last episode", log: log, type: .info)
-                return
-            }
-            
-            let nextEpisode = allEpisodesInFeed[nextIndex]
-            os_log("Skipping to next episode: %{public}@", log: log, type: .info, nextEpisode.title)
-            playEpisode(nextEpisode, feed: currentFeed!)
-        }
+        os_log("⚠️ Episode skip disabled - use episode list to change episodes", log: log, type: .info)
+        // No-op: Episode skipping removed for better UX
+    }
     
     func skipToPreviousEpisode() {
-            os_log("Attempting to skip to previous episode", log: log, type: .info)
-            guard let currentIndex = currentEpisodeIndex else {
-                os_log("Current episode index is nil", log: log, type: .error)
-                return
-            }
-            
-            os_log("Current episode index: %d", log: log, type: .info, currentIndex)
-            os_log("Total episodes in feed: %d", log: log, type: .info, allEpisodesInFeed.count)
-            
-            let previousIndex = currentIndex - 1
-            guard previousIndex >= 0 else {
-                os_log("Already at the first episode", log: log, type: .info)
-                return
-            }
-            
-            let previousEpisode = allEpisodesInFeed[previousIndex]
-            os_log("Skipping to previous episode: %{public}@", log: log, type: .info, previousEpisode.title)
-            playEpisode(previousEpisode, feed: currentFeed!)
+        os_log("⚠️ Episode skip disabled - use episode list to change episodes", log: log, type: .info)
+        // No-op: Episode skipping removed for better UX
         }
     
     private func changeToEpisode(_ episode: PodcastEpisode, in feed: PodcastFeed) {
@@ -2707,28 +2662,70 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     func skipForward() {
-        os_log("⏭️ SKIP FORWARD: Lock screen skip forward command received", log: log, type: .info)
+        os_log("⏭️ SKIP FORWARD: Button pressed - seeking 30s forward", log: log, type: .info)
+        
+        guard let player = player else {
+            os_log("⚠️ SKIP FORWARD: No player available", log: log, type: .error)
+            return
+        }
+        
+        guard let currentEpisode = currentEpisode else {
+            os_log("⚠️ SKIP FORWARD: No current episode", log: log, type: .error)
+            return
+        }
+        
+        let currentTime = player.currentTime().seconds
+        os_log("⏭️ SKIP FORWARD: Current time %.1fs, duration %.1fs", log: log, type: .info, currentTime, duration)
+        
         seek(by: 30)
-        // REMOVED: Redundant progress saving - seek(to:) already handles all progress saving with chapter protection
-        os_log("⏭️ SEEK FORWARD: 30s forward seek completed with chapter protection", log: log, type: .info)
+        os_log("⏭️ SKIP FORWARD: 30s forward seek command completed", log: log, type: .info)
     }
     
     func skipBackward() {
-        os_log("⏪ SKIP BACKWARD: Lock screen skip backward command received", log: log, type: .info)
+        os_log("⏪ SKIP BACKWARD: Button pressed - seeking 15s backward", log: log, type: .info)
+        
+        guard let player = player else {
+            os_log("⚠️ SKIP BACKWARD: No player available", log: log, type: .error)
+            return
+        }
+        
+        guard let currentEpisode = currentEpisode else {
+            os_log("⚠️ SKIP BACKWARD: No current episode", log: log, type: .error)
+            return
+        }
+        
+        let currentTime = player.currentTime().seconds
+        os_log("⏪ SKIP BACKWARD: Current time %.1fs, duration %.1fs", log: log, type: .info, currentTime, duration)
+        
         seek(by: -15)
-        // REMOVED: Redundant progress saving - seek(to:) already handles all progress saving with chapter protection
-        os_log("⏪ SEEK BACKWARD: 15s backward seek completed with chapter protection", log: log, type: .info)
+        os_log("⏪ SKIP BACKWARD: 15s backward seek command completed", log: log, type: .info)
     }
     
     private func seek(by seconds: Double) {
         // CRITICAL FIX: Get actual current time from player for accurate skip operations
         // Don't rely on cached currentTime which might be stale or protected
-        guard let player = player else { return }
+        guard let player = player else {
+            os_log("⚠️ SEEK BY: No player available", log: log, type: .error)
+            return
+        }
+        
+        guard duration > 0 else {
+            os_log("⚠️ SEEK BY: Invalid duration %.1fs", log: log, type: .error, duration)
+            return
+        }
+        
         let actualCurrentTime = max(0, player.currentTime().seconds)
         let newTime = min(max(actualCurrentTime + seconds, 0), duration)
         
-        os_log("🎯 SKIP SEEK: From actual time %.1fs %@ %.1fs to %.1fs", 
-               log: log, type: .info, actualCurrentTime, seconds > 0 ? "+" : "", seconds, newTime)
+        os_log("🎯 SKIP SEEK: From actual time %.1fs %@ %.1fs to %.1fs (duration: %.1fs)", 
+               log: log, type: .info, actualCurrentTime, seconds > 0 ? "+" : "", seconds, newTime, duration)
+        
+        // Ensure we're actually seeking to a different time
+        if abs(newTime - actualCurrentTime) < 0.1 {
+            os_log("⚠️ SKIP SEEK: New time %.1fs too close to current time %.1fs, skipping", 
+                   log: log, type: .info, newTime, actualCurrentTime)
+            return
+        }
         
         seek(to: newTime)
     }
