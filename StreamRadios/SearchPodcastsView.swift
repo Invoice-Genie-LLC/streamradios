@@ -382,7 +382,6 @@ struct SearchPodcastsView: View {
                                     }
                                 }
                                 .padding(.horizontal, 4)
-                                .scrollContentBackground(.hidden) // Reduce scroll interference
                             }
                         }
                     }
@@ -696,27 +695,14 @@ struct PopularPodcastItem: View {
             impactFeedback.impactOccurred()
             onTap()
         }
-        .onLongPressGesture(minimumDuration: 0, maximumDistance: 30) { isPressing in
-            // Only trigger visual feedback, not the action
-            // Reduced maximum distance to be more scroll-friendly
+        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity) { isPressing in
+            // Simple press feedback without interfering with scroll
             withAnimation(.easeInOut(duration: 0.1)) {
                 isPressed = isPressing
             }
         } perform: {
-            // This will be called for long press, but we handle tap separately
+            // Long press action - currently unused
         }
-        .simultaneousGesture(
-            // Add a drag gesture to better handle scroll vs tap distinction
-            DragGesture(minimumDistance: 10)
-                .onChanged { _ in
-                    // Cancel press state when dragging starts
-                    if isPressed {
-                        withAnimation(.easeInOut(duration: 0.1)) {
-                            isPressed = false
-                        }
-                    }
-                }
-        )
         .background(Color.clear)
     }
 }

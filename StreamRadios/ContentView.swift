@@ -261,7 +261,7 @@ struct ContentView: View {
                         .environmentObject(viewModel)
                         .environmentObject(podcastPlayer)
                         .environmentObject(podcastViewModel)
-                        .padding(.bottom, 45)
+                        .padding(.bottom, 55)
                     }
                 }
                 .allowsHitTesting(true) // Allow interaction with player
