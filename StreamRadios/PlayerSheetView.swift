@@ -86,59 +86,135 @@ struct PlayerSheetView: View {
     @State private var showingConfirmationDialog = false
     @State private var showAlert = false
     @State private var alertMessage = ""
-
-
+    @State private var selectedTab = 0 // 0: Now Playing, 1: Shazam
     @State private var activeSheet: ActiveSheetPlayer?
     @State private var forceTokenRefresh = false
     @State private var debugLog = ""
-
     @State private var debugMessage = ""
     
     var body: some View {
         NavigationView {
-            GeometryReader { geometry in
-                ZStack {
-                    backgroundView
-                        .edgesIgnoringSafeArea(.all)
-                    
-                    VStack(spacing: 0) {
-                        // Back button with minimal padding
-                        backButton
-                            .padding(.top, geometry.safeAreaInsets.top + 5)
-                        
-                        // Content view in ScrollView to prevent cutoff
-                        ScrollView {
-                            contentView
-                                .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 
-                                         max(geometry.size.height * 0.01, 5) : 10)
-                                .padding(.horizontal, 16)
+            VStack(spacing: 0) {
+                // Top navigation bar with custom segmented control
+                HStack(spacing: 16) {
+                    // Back button (downward arrow)
+                    Button(action: {
+                        presentationMode.wrappedValue.dismiss()
+                        if isShazaming {
+                            shazamViewModel.stopListening()
+                            isShazaming = false
                         }
-                        .scrollIndicators(.hidden)
-                        
-                        // Bottom controls with proper spacing
-                        VStack(spacing: 8) {
-                            PlayerView()
-                                .environmentObject(radioPlayer)
-                                .environmentObject(viewModel)
-                            
-                            AirPlayButtonView()
-                                .frame(width: 44, height: 44)
-                        }
-                        .padding(.bottom, UIDevice.current.userInterfaceIdiom == .pad ? 
-                                 max(geometry.size.height * 0.01, 4) : 
-                                 geometry.safeAreaInsets.bottom + 8)
+                    }) {
+                        Image(systemName: "chevron.down")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
                     }
-                    .navigationBarHidden(true)
+                    
+                    // Custom segmented control - full width
+                    HStack(spacing: 2) {
+                        // Now Playing button
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedTab = 0
+                                if isShazaming {
+                                    shazamViewModel.stopListening()
+                                    isShazaming = false
+                                }
+                            }
+                        }) {
+                            Text("Now Playing")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(selectedTab == 0 ? .black : .white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(selectedTab == 0 ? Color.white : Color.clear)
+                                )
+                        }
+                        
+                        // Shazam button
+                        if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    selectedTab = 1
+                                    if !isShazaming {
+                                        permissionManager.checkMicrophonePermission { granted in
+                                            DispatchQueue.main.async {
+                                                if granted {
+                                                    shazamViewModel.startOrEndListening()
+                                                    isShazaming = true
+                                                } else {
+                                                    self.alertMessage = "Microphone access is required for Shazam. Please go to Settings > Privacy & Security > Microphone and enable access for this app, then try again."
+                                                    self.showAlert = true
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }) {
+                                Text("Shazam")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(selectedTab == 1 ? .black : .white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .fill(selectedTab == 1 ? Color.white : Color.clear)
+                                    )
+                            }
+                        }
+                    }
+                    .padding(4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 24)
+                            .fill(Color.black.opacity(0.8))
+                    )
+                    .conditionalGlassEffect(cornerRadius: 24)
+                    
+                    // Spacer to balance layout
+                    Spacer()
+                        .frame(width: 44)
                 }
-            }
-            .onAppear {
-                startPulsing()
-            }
-            .onDisappear {
-                if isShazaming {
-                    shazamViewModel.stopListening()
-                    isShazaming = false
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(Color.black.opacity(0.8))
+                )
+                .conditionalGlassEffect(cornerRadius: 24)
+                
+                // Swipeable content container
+                TabView(selection: $selectedTab) {
+                    nowPlayingContentView
+                        .tag(0)
+                    
+                    if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
+                        shazamContentView
+                            .tag(1)
+                    }
                 }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .animation(.easeInOut(duration: 0.3), value: selectedTab)
+                
+                // Bottom controls
+                bottomControlsView
+            }
+            .background(Color.adaptiveBackground)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
+        }
+        .onAppear {
+            startPulsing()
+        }
+        .onDisappear {
+            if isShazaming {
+                shazamViewModel.stopListening()
+                isShazaming = false
             }
         }
         .alert(isPresented: $permissionManager.isPermissionAlertPresented) {
@@ -178,153 +254,225 @@ struct PlayerSheetView: View {
 
     }
     
-    private func startPulsing() {
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 1.0)) {
-                pulse.toggle()
-            }
-        }
-    }
-    
-    private var backButton: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                    if isShazaming {
-                        shazamViewModel.stopListening()
-                        isShazaming = false
-                    }
-                }) {
-                    Text("Cancel")
-                        .foregroundColor(.blue)
-                        .font(.body)
-                }
-                
-                Spacer()
-                
-                Text(isShazaming ? "Shazam" : "Now Playing")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-                
-                Spacer()
-                
-                // Empty space to balance the layout (matching Cancel button width)
-                Text("Cancel")
-                    .foregroundColor(.clear)
-                    .font(.body)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                Group {
-                    if colorScheme == .light {
-                        Color(.systemGray5)
-                    } else {
-                        Color(.systemGray6)
-                    }
-                }
-            )
+    // MARK: - Content Views
+    @ViewBuilder
+    private var nowPlayingContentView: some View {
+        VStack(spacing: hasChapters ? 8 : 10) {
+            // Conditional top spacing - more space when no Shazam tab
+            Spacer(minLength: ShazamFeatureSwitch.isHideTapToShazamEnabled ? 40 : 0)
             
-            // Divider only for dark theme
-            if colorScheme == .dark {
-                Divider()
-                    .background(Color(.systemGray4))
+            // Station artwork - larger when no Shazam for better visual balance
+            StationArtworkView
+                .frame(height: ShazamFeatureSwitch.isHideTapToShazamEnabled ? 280 : 240)
+            
+            // Station title and metadata
+            VStack(spacing: 8) {
+                if let currentStationIndex = radioPlayer.currentStationIndex,
+                   let currentStation = viewModel.stations[safe: currentStationIndex] {
+                    Text(currentStation.name)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.adaptivePrimaryText)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    
+                    if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
+                        Text("\(shazamTitle) — \(shazamArtist)")
+                            .font(.subheadline)
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                    } else if let metadata = radioPlayer.metadata, !metadata.isEmpty {
+                        let split = radioPlayer.splitArtistTitle(from: metadata, fallbackArtist: currentStation.name, fallbackTitle: metadata)
+                        Text("\(split.title) — \(split.artist)")
+                            .font(.subheadline)
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                    } else {
+                        Text("No song information available")
+                            .font(.subheadline)
+                            .foregroundColor(.adaptiveSecondaryText)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+    }
+    
+    @ViewBuilder
+    private var shazamContentView: some View {
+        VStack(spacing: hasChapters ? 8 : 10) {
+            // Conditional top spacing
+            Spacer(minLength: 0)
+            
+            // Shazam artwork
+            ShazamArtworkView
+                .frame(height: 240)
+            
+            // Song information
+            VStack(spacing: 8) {
+                Text(shazamViewModel.shazamMedia.title ?? "Listening...")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.adaptivePrimaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                
+                Text(shazamViewModel.shazamMedia.artistName ?? "Tap to identify music")
+                    .font(.subheadline)
+                    .foregroundColor(.adaptiveSecondaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 20)
+            
+            // Shazam action button
+            if shazamViewModel.shazamMedia.title != nil {
+                Button(action: {
+                    requestMusicAuthorization()
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "apple.logo")
+                            .font(.title2)
+                            .fontWeight(.medium)
+                        Text("Save to Apple Music")
+                            .font(.headline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 25)
+                            .fill(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                    )
+                    .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+    }
+    
+    @ViewBuilder
+    private var bottomControlsView: some View {
+        VStack(spacing: 8) {
+            PlayerView()
+                .environmentObject(radioPlayer)
+                .environmentObject(viewModel)
+            
+            AirPlayButtonView()
+                .frame(width: 44, height: 44)
+        }
+        .padding(.bottom, 8)
+    }
+    
+    private var hasChapters: Bool {
+        return false // Radio doesn't have chapters
+    }
+    
+    // MARK: - Artwork Views
+    @ViewBuilder
+    private var StationArtworkView: some View {
+        GeometryReader { geometry in
+            let artworkSize = min(geometry.size.width * 0.65, 240)
+            
+            // Priority: iTunes artwork when playing > station artwork when playing > station icon > default
+            if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
+                HStack {
+                    Spacer()
+                    Image(uiImage: iTunesAlbumArt)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else if radioPlayer.isPlaying, let albumArt = radioPlayer.albumArt {
+                HStack {
+                    Spacer()
+                    Image(uiImage: albumArt)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else if let currentStationIndex = radioPlayer.currentStationIndex,
+                      let currentStation = viewModel.stations[safe: currentStationIndex],
+                      let iconData = currentStation.iconData,
+                      let imageData = Data(base64Encoded: iconData),
+                      let image = UIImage(data: imageData) {
+                HStack {
+                    Spacer()
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                HStack {
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.4)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: artworkSize, height: artworkSize)
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                        .overlay(
+                            Image(systemName: "radio")
+                                .font(.largeTitle)
+                                .foregroundColor(.white.opacity(0.8))
+                        )
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
             }
         }
     }
     
     @ViewBuilder
-    private var backgroundView: some View {
-        if colorScheme == .light {
-            Color.white
-        } else {
-            Color.clear
-        }
-    }
-    
-    @ViewBuilder
-    private var contentView: some View {
-        if isShazaming {
-            shazamContent
-        } else {
-            stationContent
-        }
-    }
-    
-    private var shazamContent: some View {
+    private var ShazamArtworkView: some View {
         GeometryReader { geometry in
-            VStack {
-                Spacer()
-                
-                VStack(spacing: UIDevice.current.userInterfaceIdiom == .pad ? 
-                       max(geometry.size.height * 0.015, 8) : 20) {
-                    // Current station info at top - now centered
-                    if let currentStationIndex = radioPlayer.currentStationIndex,
-                       let currentStation = viewModel.stations[safe: currentStationIndex] {
-                        HStack(spacing: 12) {
-                            if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .frame(width: 32, height: 32)
-                                    .cornerRadius(6)
-                            } else {
-                                Image(systemName: "radio")
-                                    .resizable()
-                                    .frame(width: 32, height: 32)
-                                    .aspectRatio(contentMode: .fit)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            Text(currentStation.name)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 20)
-                    }
-                    
-                    // Shazam artwork - now properly centered
-                    if let url = shazamViewModel.shazamMedia.albumArtURL {
-                        HStack {
-                            Spacer()
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: min(geometry.size.width * 0.65, 240), height: min(geometry.size.width * 0.65, 240))
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                                default:
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: min(geometry.size.width * 0.65, 240), height: min(geometry.size.width * 0.65, 240))
-                                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                                        .overlay(
-                                            Image(systemName: "music.note")
-                                                .font(.largeTitle)
-                                                .foregroundColor(.white.opacity(0.8))
-                                        )
-                                }
-                            }
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        // Default artwork when no URL is available
-                        HStack {
-                            Spacer()
+            let artworkSize = min(geometry.size.width * 0.65, 240)
+            
+            if let url = shazamViewModel.shazamMedia.albumArtURL {
+                HStack {
+                    Spacer()
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: artworkSize, height: artworkSize)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                        default:
                             RoundedRectangle(cornerRadius: 16)
                                 .fill(
                                     LinearGradient(
@@ -333,83 +481,50 @@ struct PlayerSheetView: View {
                                         endPoint: .bottomTrailing
                                     )
                                 )
-                                .frame(width: min(geometry.size.width * 0.65, 240), height: min(geometry.size.width * 0.65, 240))
+                                .frame(width: artworkSize, height: artworkSize)
                                 .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
                                 .overlay(
                                     Image(systemName: "music.note")
                                         .font(.largeTitle)
                                         .foregroundColor(.white.opacity(0.8))
                                 )
-                            Spacer()
                         }
-                        .frame(maxWidth: .infinity)
                     }
-                    
-                    // Song information - centered
-                    VStack(spacing: 6) {
-                        Text(shazamViewModel.shazamMedia.title ?? "Unknown Title")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .padding(.horizontal, 20)
-                    
-                        Text(shazamViewModel.shazamMedia.artistName ?? "Unknown Artist")
-                            .font(.title3)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(1)
-                            .padding(.horizontal, 20)
-                    }
-                    
-                    // Action button
-                    Button(action: {
-                        requestMusicAuthorization()
-                    }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "apple.logo")
-                                .font(.title2)
-                                .fontWeight(.medium)
-                            Text("Save to Apple Music")
-                                .font(.headline)
-                                .fontWeight(.medium)
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 25)
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                        )
-                        .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
-                    }
-                    .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 5 : 10)
+                    Spacer()
                 }
                 .frame(maxWidth: .infinity)
-                
-                Spacer()
+            } else {
+                HStack {
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.4)]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: artworkSize, height: artworkSize)
+                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.largeTitle)
+                                .foregroundColor(.white.opacity(0.8))
+                        )
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
             }
         }
     }
     
-
-    
-
-    
-
-    
-
-    
-
-    
-
+    private func startPulsing() {
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 1.0)) {
+                pulse.toggle()
+            }
+        }
+    }
     
     private func requestMusicAuthorization() {
         Task {
@@ -497,13 +612,6 @@ struct PlayerSheetView: View {
                     let response = try await request.response()
                     DispatchQueue.main.async {
                         self.shazamViewModel.userPlaylists = response.items
-                        print("Fetched \(response.items.count) total playlists from MusicLibraryRequest")
-                        
-                        // Debug: Print playlist details to understand curator information
-                        for playlist in response.items.prefix(5) { // Show first 5 for debugging
-                            print("Playlist: '\(playlist.name)', Curator: '\(playlist.curatorName ?? "nil")'")
-                        }
-                        
                         self.activeSheet = .playlistPicker
                     }
                 } else {
@@ -513,203 +621,13 @@ struct PlayerSheetView: View {
                 DispatchQueue.main.async {
                     self.alertMessage = "Error: \(error.localizedDescription)"
                     self.showAlert = true
-                    print("Error in addToPlaylist: \(error)")
-                }
-            }
-        }
-    }
-    
-    private var stationContent: some View {
-        GeometryReader { geometry in
-            VStack {
-                Spacer()
-                
-                VStack(spacing: 20) {
-                    StationDetails()
-                    
-                    if !ShazamFeatureSwitch.isHideTapToShazamEnabled {
-                        Button(action: {
-                            permissionManager.checkMicrophonePermission { granted in
-                                DispatchQueue.main.async {
-                                    if granted {
-                                        shazamViewModel.startOrEndListening()
-                                        isShazaming.toggle()
-                                        print("Microphone permission granted.")
-                                    } else {
-                                        self.alertMessage = "Microphone access is required for Shazam. Please go to Settings > Privacy & Security > Microphone and enable access for this app, then try again."
-                                        self.showAlert = true
-                                        print("Microphone permission denied or restricted.")
-                                    }
-                                }
-                            }
-                        }) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "shazam.logo")
-                                    .font(.title2)
-                                    .fontWeight(.medium)
-                                Text("Tap to Shazam")
-                                    .font(.headline)
-                                    .fontWeight(.medium)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 28)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 25)
-                                    .fill(
-                                        LinearGradient(
-                                            gradient: Gradient(colors: [Color.blue, Color.blue.opacity(0.8)]),
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                            )
-                            .scaleEffect(pulse ? 1.1 : 1.0)
-                            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
-                            .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
-                        }
-                        .onAppear {
-                            pulse = true
-                        }
-                        .onDisappear {
-                            pulse = false
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                
-                Spacer()
-            }
-        }
-    }
-}
-
-struct StationDetails: View {
-    @EnvironmentObject var radioPlayer: RadioPlayer
-    @EnvironmentObject var viewModel: RadioStationViewModel
-    
-    var body: some View {
-        if let currentStationIndex = radioPlayer.currentStationIndex,
-           let currentStation = viewModel.stations[safe: currentStationIndex] {
-            VStack(spacing: 16) {
-                StationImage(currentStation: currentStation)
-                
-                VStack(spacing: 8) {
-                    Text(currentStation.name)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .padding(.horizontal, 16)
-                    
-                    if let shazamTitle = radioPlayer.displayTitle, let shazamArtist = radioPlayer.displayArtist {
-                        Text("\(shazamTitle) — \(shazamArtist)")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                    } else if let metadata = radioPlayer.metadata, !metadata.isEmpty {
-                        let split = radioPlayer.splitArtistTitle(from: metadata, fallbackArtist: currentStation.name, fallbackTitle: metadata)
-                        Text("\(split.title) — \(split.artist)")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 16)
-                    } else {
-                        Text("No song information available")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16)
-                    }
                 }
             }
         }
     }
 }
 
-struct StationImage: View {
-    let currentStation: RadioStation
-    @EnvironmentObject var radioPlayer: RadioPlayer
-    
-    var body: some View {
-        GeometryReader { geometry in
-            let artworkSize = min(geometry.size.width * 0.65, 240)
-            
-            // Priority: iTunes artwork when playing > station artwork when playing > station icon > default
-            if radioPlayer.isPlaying, let iTunesAlbumArt = radioPlayer.iTunesAlbumArt {
-                // Priority 1: iTunes artwork when playing
-                let _ = print("🎨 UI DEBUG: Showing iTunes artwork (playing=\(radioPlayer.isPlaying))")
-                HStack {
-                    Spacer()
-                    Image(uiImage: iTunesAlbumArt)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: artworkSize, height: artworkSize)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else if radioPlayer.isPlaying, let albumArt = radioPlayer.albumArt {
-                // Priority 2: Station artwork when playing
-                let _ = print("🎨 UI DEBUG: Showing station artwork (playing=\(radioPlayer.isPlaying))")
-                HStack {
-                    Spacer()
-                    Image(uiImage: albumArt)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: artworkSize, height: artworkSize)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else if let iconData = currentStation.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
-                // Priority 3: Station icon when not playing or no artwork available
-                HStack {
-                    Spacer()
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: artworkSize, height: artworkSize)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                let _ = print("🎨 UI DEBUG: No artwork available (playing=\(radioPlayer.isPlaying), iTunesAlbumArt=\(radioPlayer.iTunesAlbumArt != nil), albumArt=\(radioPlayer.albumArt != nil))")
-                HStack {
-                    Spacer()
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.blue.opacity(0.6), Color.purple.opacity(0.4)]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: artworkSize, height: artworkSize)
-                        .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-                        .overlay(
-                            Image(systemName: "radio")
-                                .font(.largeTitle)
-                                .foregroundColor(.white.opacity(0.8))
-                        )
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .frame(height: min(UIScreen.main.bounds.width * 0.65, 240))
-    }
-}
-
+// MARK: - Supporting Views
 struct AirPlayButtonView: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
@@ -723,50 +641,24 @@ struct AirPlayButtonView: UIViewRepresentable {
     }
 }
 
-struct PlayerSheetView_Previews: PreviewProvider {
-    static var previews: some View {
-        PlayerSheetView()
-            .environmentObject(RadioPlayer.shared)
-            .environmentObject(RadioStationViewModel())
-    }
-}
-
-struct PlaylistPickerView: View {
+// MARK: - Enhanced Playlist Picker
+struct EnhancedPlaylistPickerView: View {
     @ObservedObject var shazamViewModel: ShazamViewModel
     @Environment(\.presentationMode) var presentationMode
-    @Environment(\.colorScheme) var colorScheme
     @State private var alertMessage = ""
     @State private var showAlert = false
     @State private var searchText = ""
     @State private var addedPlaylistIDs: Set<String> = []
     
     var filteredPlaylists: [Playlist] {
-        // Filter for active (user-created) playlists only
         let activePlaylists = Array(shazamViewModel.userPlaylists).filter { playlist in
-            // Filter out system playlists and Apple-curated content
-            
-            // Check if it has a curator name (Apple-curated playlists usually have this)
             if let curatorName = playlist.curatorName, !curatorName.isEmpty {
-                // Exclude playlists curated by Apple Music or other services
                 let excludedCurators = ["Apple Music", "Apple", "apple music", "apple"]
                 return !excludedCurators.contains { curatorName.localizedCaseInsensitiveContains($0) }
             }
-            
-            // Additional filtering criteria for user-created playlists
-            // User-created playlists typically:
-            // 1. Don't have a curator name (or it's the user's name)
-            // 2. Are in the user's library (which these already are)
-            // 3. Are not system-generated
-            
-            // For now, if there's no curator name, it's likely user-created
             return playlist.curatorName == nil || playlist.curatorName?.isEmpty == true
         }
         
-        // Debug logging
-        let totalPlaylists = Array(shazamViewModel.userPlaylists).count
-        print("Filtered \(totalPlaylists) total playlists down to \(activePlaylists.count) active playlists")
-        
-        // Apply search filtering
         if searchText.isEmpty {
             return activePlaylists
         } else {
@@ -778,658 +670,129 @@ struct PlaylistPickerView: View {
     
     var body: some View {
         NavigationView {
-            ZStack {
-                // Background gradient
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(.systemBackground),
-                        Color(.systemBackground).opacity(0.8)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Header section with song info and album artwork
-                    if let songTitle = shazamViewModel.shazamMedia.title,
-                       let artistName = shazamViewModel.shazamMedia.artistName {
-                        VStack(spacing: 8) {
-                            HStack(spacing: 16) {
-                                // Album artwork
-                                if let artworkURL = shazamViewModel.shazamMedia.albumArtURL {
-                                    AsyncImage(url: artworkURL) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                                .frame(width: 60, height: 60)
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        case .failure(_):
-                                            Image(systemName: "music.note")
-                                                .font(.title)
-                                                .foregroundColor(.blue)
-                                                .frame(width: 60, height: 60)
-                                                .background(Color(.systemGray5))
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        case .empty:
-                                            ProgressView()
-                                                .frame(width: 60, height: 60)
-                                                .background(Color(.systemGray6))
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        @unknown default:
-                                            Image(systemName: "music.note")
-                                                .font(.title)
-                                                .foregroundColor(.blue)
-                                                .frame(width: 60, height: 60)
-                                                .background(Color(.systemGray5))
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        }
+            VStack(spacing: 0) {
+                // Header with song info
+                if let songTitle = shazamViewModel.shazamMedia.title,
+                   let artistName = shazamViewModel.shazamMedia.artistName {
+                    VStack(spacing: 8) {
+                        HStack(spacing: 16) {
+                            if let artworkURL = shazamViewModel.shazamMedia.albumArtURL {
+                                AsyncImage(url: artworkURL) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 60, height: 60)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    default:
+                                        Image(systemName: "music.note")
+                                            .font(.title)
+                                            .foregroundColor(.blue)
+                                            .frame(width: 60, height: 60)
+                                            .background(Color(.systemGray5))
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
                                     }
-                                } else {
-                                    Image(systemName: "music.note")
-                                        .font(.title)
-                                        .foregroundColor(.blue)
-                                        .frame(width: 60, height: 60)
-                                        .background(Color(.systemGray5))
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
-                                
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Adding to Playlist")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(songTitle)
-                                        .font(.headline)
-                                        .fontWeight(.semibold)
-                                        .lineLimit(2)
-                                    Text("by \(artistName)")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .fill(Color(.secondarySystemBackground))
-                                    .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
-                            )
-                            .padding(.horizontal, 16)
-                        }
-                        .padding(.top, 8)
-                        .padding(.bottom, 16)
-                    }
-                    
-                    // Search bar
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                        TextField("Search playlists", text: $searchText)
-                            .textFieldStyle(PlainTextFieldStyle())
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.tertiarySystemBackground))
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-                    
-                    // Playlists list
-                    if filteredPlaylists.isEmpty {
-                        VStack(spacing: 16) {
-                            Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
-                                .font(.largeTitle)
-                                .foregroundColor(.secondary)
-                            Text(searchText.isEmpty ? "No active playlists found" : "No active playlists match your search")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            if searchText.isEmpty {
-                                Text("Create your own playlists in Apple Music to get started")
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Adding to Playlist")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(songTitle)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Text("by \(artistName)")
                                     .font(.subheadline)
-                                    .foregroundColor(Color.secondary)
-                                    .multilineTextAlignment(.center)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
                             }
+                            Spacer()
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding()
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 12) {
-                                ForEach(filteredPlaylists, id: \.id) { playlist in
-                                    PlaylistRowView(
-                                        playlist: playlist,
-                                        isAdded: addedPlaylistIDs.contains(playlist.id.rawValue),
-                                        onSelect: {
-                    addToSelectedPlaylist(playlist)
-                                        }
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 16)
-                        }
+                        .background(Color(.systemGray6))
                     }
-                }
-            }
-            .navigationTitle("Add to Playlist")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                presentationMode.wrappedValue.dismiss()
-                    }
-                    .font(.headline)
-                    .foregroundColor(.blue)
-                }
-            }
-        }
-        .onAppear {
-            print("PlaylistPickerView appeared with \(shazamViewModel.userPlaylists.count) playlists")
-        }
-        .alert(isPresented: $showAlert) {
-            Alert(
-                title: Text(alertMessage.contains("successfully") ? "Success" : "Error"),
-                message: Text(alertMessage),
-                dismissButton: .default(Text("OK")) {
-                    if alertMessage.contains("successfully") {
-                presentationMode.wrappedValue.dismiss()
-                    }
-                }
-            )
-        }
-    }
-    
-    private func addToSelectedPlaylist(_ playlist: Playlist) {
-        // Prevent adding to the same playlist multiple times
-        if addedPlaylistIDs.contains(playlist.id.rawValue) {
-            return
-        }
-        
-        Task {
-            do {
-                try await shazamViewModel.addToPlaylist(playlist)
-                DispatchQueue.main.async {
-                    self.addedPlaylistIDs.insert(playlist.id.rawValue)
-                    self.alertMessage = "Song added to \"\(playlist.name)\" successfully"
-                    self.showAlert = true
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.alertMessage = "Error adding song to playlist: \(error.localizedDescription)"
-                    self.showAlert = true
-                    print("Error in addToSelectedPlaylist: \(error)")
-                }
-            }
-        }
-    }
-}
-
-struct PlaylistRowView: View {
-    let playlist: Playlist
-    let isAdded: Bool
-    let onSelect: () -> Void
-    @State private var isPressed = false
-    @State private var isLoading = false
-    
-    var body: some View {
-        Button(action: {
-            if !isAdded && !isLoading {
-                isLoading = true
-                onSelect()
-            }
-        }) {
-            HStack(spacing: 16) {
-                // Playlist icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.6)]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 52, height: 52)
-                    
-                    Image(systemName: "music.note.list")
-                        .font(.title2)
-                        .foregroundColor(.white)
                 }
                 
-                // Playlist info
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(playlist.name)
-                        .font(.headline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    
-                    // Show track count if available - removed as trackCount is not available
-                    // Note: Track count not available in current Playlist implementation
-                    Text("Your Playlist")
-                        .font(.subheadline)
+                // Search bar
+                HStack {
+                    Image(systemName: "magnifyingglass")
                         .foregroundColor(.secondary)
+                    TextField("Search playlists", text: $searchText)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
                 }
+                .padding()
                 
-                Spacer()
-                
-                // Add/Check/Loading indicator
-                if isAdded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.green)
-                        .scaleEffect(1.1)
-                } else if isLoading {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                } else {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .opacity(isPressed ? 0.6 : 1.0)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.secondarySystemBackground))
-                    .shadow(color: Color.black.opacity(isPressed ? 0.15 : 0.08), radius: isPressed ? 12 : 8, x: 0, y: isPressed ? 4 : 2)
-                    .scaleEffect(isPressed ? 0.98 : 1.0)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(isAdded || isLoading)
-        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-            if !isAdded && !isLoading {
-                withAnimation(.easeInOut(duration: 0.1)) {
-                    isPressed = pressing
-                }
-            }
-        }, perform: {})
-        .onChange(of: isAdded) { _, newValue in
-            if newValue {
-                isLoading = false
-            }
-        }
-    }
-}
-
-
-// MARK: - Enhanced Playlist Picker for truly editable playlists
-struct EnhancedPlaylistPickerView: View {
-    @ObservedObject var shazamViewModel: ShazamViewModel
-    @Environment(\.presentationMode) var presentationMode
-    @Environment(\.colorScheme) var colorScheme
-    @State private var alertMessage = ""
-    @State private var showAlert = false
-    @State private var searchText = ""
-    @State private var addedPlaylistIDs: Set<String> = []
-    @State private var libraryPlaylists: [LibraryPlaylist] = []
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    
-    var filteredPlaylists: [LibraryPlaylist] {
-        // Only show playlists that can actually be edited
-        let editablePlaylists = libraryPlaylists.filter { $0.attributes.canEdit }
-        
-        // Debug logging
-        print("Filtered \(libraryPlaylists.count) total playlists down to \(editablePlaylists.count) truly editable playlists")
-        
-        // Apply search filtering
-        if searchText.isEmpty {
-            return editablePlaylists
-        } else {
-            return editablePlaylists.filter { playlist in
-                playlist.attributes.name.localizedCaseInsensitiveContains(searchText)
-            }
-        }
-    }
-    
-    var body: some View {
-        NavigationView {
-            ZStack {
-                // Background gradient
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(.systemBackground),
-                        Color(.systemBackground).opacity(0.8)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Header with song info and album artwork
-                    Group {
-                        if let songTitle = shazamViewModel.shazamMedia.title,
-                           let artistName = shazamViewModel.shazamMedia.artistName {
-                            HStack {
-                                // Album artwork
-                                if let artworkURL = shazamViewModel.shazamMedia.albumArtURL {
-                                    AsyncImage(url: artworkURL) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                                .frame(width: 60, height: 60)
-                                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        case .failure(_):
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(Color.secondary.opacity(0.3))
-                                                .frame(width: 60, height: 60)
-                                                .overlay(
-                                                    Image(systemName: "music.note")
-                                                        .foregroundColor(.secondary)
-                                                )
-                                        case .empty:
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(Color.secondary.opacity(0.2))
-                                                .frame(width: 60, height: 60)
-                                                .overlay(
-                                                    ProgressView()
-                                                        .scaleEffect(0.8)
-                                                )
-                                        @unknown default:
-                                            EmptyView()
-                                        }
-                                    }
-                                } else {
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.secondary.opacity(0.3))
-                                        .frame(width: 60, height: 60)
-                                        .overlay(
-                                            Image(systemName: "music.note")
-                                                .foregroundColor(.secondary)
-                                        )
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Adding to Playlist")
+                // Playlist list
+                List(filteredPlaylists, id: \.id) { playlist in
+                    Button(action: {
+                        addToPlaylist(playlist)
+                    }) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(playlist.name)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                if addedPlaylistIDs.contains(playlist.id.rawValue) {
+                                    Text("Added ✓")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(songTitle)
-                                        .font(.headline)
-                                        .fontWeight(.semibold)
-                                        .lineLimit(2)
-                                    Text("by \(artistName)")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                        }
-                    }
-                    
-                    Divider()
-                        .background(Color.secondary.opacity(0.3))
-                    
-                    // Search bar
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.secondary)
-                        TextField("Search playlists", text: $searchText)
-                            .textFieldStyle(PlainTextFieldStyle())
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(Color(.systemGray6).opacity(0.8))
-                    .cornerRadius(10)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    
-                    // Content
-                    if isLoading {
-                        Spacer()
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            Text("Loading your playlists...")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                    } else if let errorMessage = errorMessage {
-                        Spacer()
-                        VStack(spacing: 16) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.largeTitle)
-                                .foregroundColor(.orange)
-                            Text("Error Loading Playlists")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            Text(errorMessage)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                            Button("Try Again") {
-                                loadEditablePlaylists()
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                        .padding(.horizontal, 40)
-                        Spacer()
-                    } else if filteredPlaylists.isEmpty {
-                        Spacer()
-                        VStack(spacing: 16) {
-                            Image(systemName: searchText.isEmpty ? "music.note.list" : "magnifyingglass")
-                                .font(.largeTitle)
-                                .foregroundColor(.secondary)
-                            Text(searchText.isEmpty ? "No editable playlists found" : "No editable playlists match your search")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            if searchText.isEmpty {
-                                Text("Create your own playlists in Apple Music to get started")
-                                    .font(.subheadline)
-                                    .foregroundColor(Color.secondary)
-                                    .multilineTextAlignment(.center)
-                            }
-                        }
-                        .padding(.horizontal, 40)
-                        Spacer()
-                    } else {
-                        // Playlist list
-                        ScrollView {
-                            LazyVStack(spacing: 12) {
-                                ForEach(filteredPlaylists, id: \.id) { playlist in
-                                    EnhancedPlaylistRowView(
-                                        playlist: playlist,
-                                        isAdded: addedPlaylistIDs.contains(playlist.id.rawValue),
-                                        onSelect: {
-                                            addToSelectedPlaylist(playlist)
-                                        }
-                                    )
+                                        .foregroundColor(.green)
                                 }
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
+                            Spacer()
+                            if addedPlaylistIDs.contains(playlist.id.rawValue) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            } else {
+                                Image(systemName: "plus.circle")
+                                    .foregroundColor(.blue)
+                            }
                         }
+                        .contentShape(Rectangle())
                     }
+                    .disabled(addedPlaylistIDs.contains(playlist.id.rawValue))
                 }
             }
-            .navigationTitle("Add to Playlist")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("Choose Playlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button("Done") {
                         presentationMode.wrappedValue.dismiss()
                     }
-                    .font(.headline)
-                    .foregroundColor(.blue)
                 }
             }
-        }
-        .onAppear {
-            loadEditablePlaylists()
         }
         .alert(isPresented: $showAlert) {
             Alert(title: Text("Message"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
         }
     }
     
-    private func loadEditablePlaylists() {
-        isLoading = true
-        errorMessage = nil
-        
+    private func addToPlaylist(_ playlist: Playlist) {
         Task {
             do {
-                let libraryPlaylistsURL = URL(string: "https://api.music.apple.com/v1/me/library/playlists")!
-                let request = MusicDataRequest(urlRequest: URLRequest(url: libraryPlaylistsURL))
-                let response = try await request.response()
-                let playlists = try JSONDecoder().decode(MusicItemCollection<LibraryPlaylist>.self, from: response.data)
-                
+                try await shazamViewModel.addToPlaylist(playlist)
                 DispatchQueue.main.async {
-                    self.libraryPlaylists = Array(playlists)
-                    self.isLoading = false
-                    print("Loaded \(self.libraryPlaylists.count) total playlists from Apple Music API")
-                    
-                    // Debug: Print playlist details to understand canEdit property
-                    for playlist in self.libraryPlaylists.prefix(5) {
-                        print("Playlist: '\(playlist.attributes.name)', canEdit: \(playlist.attributes.canEdit)")
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.errorMessage = "Failed to load playlists: \(error.localizedDescription)"
-                    self.isLoading = false
-                    print("Error loading playlists: \(error)")
-                }
-            }
-        }
-    }
-    
-    private func addToSelectedPlaylist(_ playlist: LibraryPlaylist) {
-        // Prevent adding to the same playlist multiple times
-        if addedPlaylistIDs.contains(playlist.id.rawValue) {
-            return
-        }
-        
-        Task {
-            do {
-                // Convert LibraryPlaylist back to regular Playlist for the existing addToPlaylist method
-                if let regularPlaylist = shazamViewModel.userPlaylists.first(where: { $0.id.rawValue == playlist.id.rawValue }) {
-                    try await shazamViewModel.addToPlaylist(regularPlaylist)
-                    DispatchQueue.main.async {
-                        self.addedPlaylistIDs.insert(playlist.id.rawValue)
-                        self.alertMessage = "Song added to \"\(playlist.attributes.name)\" successfully"
-                        self.showAlert = true
-                    }
-                } else {
-                    throw NSError(domain: "PlaylistError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not find matching playlist for editing"])
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.alertMessage = "Error adding song to playlist: \(error.localizedDescription)"
+                    self.addedPlaylistIDs.insert(playlist.id.rawValue)
+                    self.alertMessage = "Song added to '\(playlist.name)'"
                     self.showAlert = true
-                    print("Error in addToSelectedPlaylist: \(error)")
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.alertMessage = "Error adding to playlist: \(error.localizedDescription)"
+                    self.showAlert = true
                 }
             }
         }
     }
 }
 
-struct EnhancedPlaylistRowView: View {
-    let playlist: LibraryPlaylist
-    let isAdded: Bool
-    let onSelect: () -> Void
-    @State private var isPressed = false
-    @State private var isLoading = false
-    
-    var body: some View {
-        Button(action: {
-            if !isAdded && !isLoading {
-                isLoading = true
-                onSelect()
-            }
-        }) {
-            HStack(spacing: 16) {
-                // Playlist icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                gradient: Gradient(colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.6)]),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 50, height: 50)
-                    
-                    Image(systemName: "music.note.list")
-                        .font(.title2)
-                        .foregroundColor(.white)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(playlist.attributes.name)
-                        .font(.headline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    
-                    Text("Editable Playlist")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                // Add/Check/Loading indicator
-                if isAdded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.green)
-                        .scaleEffect(1.1)
-                } else if isLoading {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                } else {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .opacity(isPressed ? 0.6 : 1.0)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(.systemGray6))
-                    .scaleEffect(isPressed ? 0.95 : 1.0)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color(.systemGray4), lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(isAdded || isLoading)
-        .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-            if !isAdded && !isLoading {
-                withAnimation(.easeInOut(duration: 0.1)) {
-                    isPressed = pressing
-                }
-            }
-        }, perform: {})
-        .onChange(of: isAdded) { _, newValue in
-            if newValue {
-                isLoading = false
-            }
-        }
+struct PlayerSheetView_Previews: PreviewProvider {
+    static var previews: some View {
+        PlayerSheetView()
+            .environmentObject(RadioPlayer.shared)
+            .environmentObject(RadioStationViewModel())
     }
 }

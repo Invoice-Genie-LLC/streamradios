@@ -23,6 +23,7 @@ struct DetailedPodcastPlayerView: View {
     @State private var selectedTab = 0 // 0: Now Playing, 1: Details, 2: Chapters
     @State private var fallbackChapters: [PodcastChapter] = []
     @State private var showDeleteDownloadAlert = false
+    @State private var refreshTrigger = false // Force view refresh after download operations
     @Environment(\.colorScheme) var colorScheme
     
     init(episode: PodcastEpisode, feed: PodcastFeed, podcastPlayer: PodcastPlayer, viewModel: PodcastViewModel, isPresented: Binding<Bool>) {
@@ -673,6 +674,7 @@ struct DetailedPodcastPlayerView: View {
             }
             .frame(maxWidth: .infinity)
             .disabled(isDownloading)
+            .id("download-button-\(episode.id)-\(refreshTrigger)") // Force refresh when trigger changes
             
             // Favorite button
             Button(action: {
@@ -751,8 +753,23 @@ struct DetailedPodcastPlayerView: View {
     
     private func deleteDownload() {
         print("🗑️ Deleting download for episode: \(episode.title)")
+        
+        // Clear any download progress state first
+        DispatchQueue.main.async {
+            self.viewModel.downloadProgress.removeValue(forKey: self.episode.id)
+        }
+        
+        // Delete the download
         viewModel.toggleDownload(for: episode)
+        
         print("🗑️ Download deleted, isDownloaded should now be: \(EpisodeStateManager.shared.isDownloaded(episode.id))")
+        
+        // Force view refresh by toggling the refresh trigger
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // This small delay ensures the EpisodeStateManager has updated
+            self.refreshTrigger.toggle()
+            print("🔄 Forcing view refresh after download deletion")
+        }
     }
     
     private func toggleFavorite() {
