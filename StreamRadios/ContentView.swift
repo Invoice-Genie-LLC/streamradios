@@ -43,6 +43,10 @@ struct ContentView: View {
     
     // Add state to force UI refresh when sync completes
     @State private var syncCompletionRefreshID = UUID()
+    
+    // State for home button and footer menu visibility
+    @State private var isFooterMenuHidden = false // Start with menu visible
+    @State private var isScrolling = false
 
     init() {
         // Always start on the radio tab regardless of previous state
@@ -198,87 +202,95 @@ struct ContentView: View {
     // MARK: - Body
     
     var body: some View {
-        ZStack {
-            TabView(selection: $selectedTab) {
-                // Radio Tab - Contains the original full interface
-                radioTabContent
-                .tabItem {
-                    Image(systemName: Tab.radio.icon)
-                    Text(Tab.radio.title)
-                }
-                .tag(Tab.radio)
-                
-                // Podcast Tab
-                PodcastListView(selectedPodcast: $selectedPodcast)
-                .id("podcast-\(syncCompletionRefreshID)") // Force PodcastListView to recreate when sync completes
-                .environmentObject(podcastPlayer)
-                .environmentObject(podcastViewModel)
-                .tabItem {
-                    Image(systemName: Tab.podcast.icon)
-                    Text(Tab.podcast.title)
-                }
-                .tag(Tab.podcast)
-                
-
-                // Settings Tab
-                SettingsView()
-                .environmentObject(radioPlayer)
-                .environmentObject(viewModel)
-                .environmentObject(podcastPlayer)
-                .environmentObject(podcastViewModel)
-                .tabItem {
-                    Image(systemName: Tab.settings.icon)
-                    Text(Tab.settings.title)
-                }
-                .tag(Tab.settings)
-            }
-            .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
-            .environment(\.horizontalSizeClass, .compact)
-            .accentColor(.blue)
-            .onAppear {
-                setupTabView()
-                checkAndStartDataSync()
-                checkSubscriptionStatus()
-            }
-            .onChange(of: selectedTab) { oldValue, newValue in
-                // Do NOT clear iTunes artwork when navigating between views
-                // iTunes artwork should only be cleared when actually stopping the radio player
-                // This preserves the song artwork during view navigation while radio is playing
-            }
-            // Removed tab state persistence - app always starts on radio tab
-            .overlay(
-                // Global Player positioned above tab bar, never covering it
-                VStack {
-                    Spacer()
-                    
-                    if shouldShowGlobalPlayer {
-                        GlobalPlayerView(
-                            selectedPodcast: $selectedPodcast,
-                            isPlayerSheetPresented: $isPlayerSheetPresented,
-                            selectedTab: $selectedTab
-                        )
-                        .environmentObject(radioPlayer)
-                        .environmentObject(viewModel)
-                        .environmentObject(podcastPlayer)
-                        .environmentObject(podcastViewModel)
-                        .padding(.bottom, 55)
+        Group {
+            if !isFooterMenuHidden {
+                // Show full TabView with proper styling
+                TabView(selection: $selectedTab) {
+                    // Radio Tab - Contains the original full interface
+                    radioTabContent
+                    .tabItem {
+                        Image(systemName: Tab.radio.icon)
+                        Text(Tab.radio.title)
                     }
-                }
-                .allowsHitTesting(true) // Allow interaction with player
-                .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
-            )
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
-                // App is closing: dismiss the player UI overlay
-                isPlayerSheetPresented = false
-                // Clear intent so overlay condition reevaluates to false when next launched
-                podcastPlayer.userWantsToPlay = false
-                radioPlayer.userWantsToPlay = false
-            }
-            
-            // Full-screen data sync progress overlay for fresh installs
-            DataSyncProgressView()
+                    .tag(Tab.radio)
+                    
+                    // Podcast Tab
+                    PodcastListView(selectedPodcast: $selectedPodcast)
+                    .id("podcast-\(syncCompletionRefreshID)") // Force PodcastListView to recreate when sync completes
+                    .environmentObject(podcastPlayer)
+                    .environmentObject(podcastViewModel)
+                    .tabItem {
+                        Image(systemName: Tab.podcast.icon)
+                        Text(Tab.podcast.title)
+                    }
+                    .tag(Tab.podcast)
+                    
 
+                    // Settings Tab
+                    SettingsView()
+                    .environmentObject(radioPlayer)
+                    .environmentObject(viewModel)
+                    .environmentObject(podcastPlayer)
+                    .environmentObject(podcastViewModel)
+                    .tabItem {
+                        Image(systemName: Tab.settings.icon)
+                        Text(Tab.settings.title)
+                    }
+                    .tag(Tab.settings)
+                }
+                .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
+                .environment(\.horizontalSizeClass, .compact)
+                .accentColor(.blue)
+            } else {
+                // Show current tab content without TabView when hidden
+                currentTabContentView
+            }
         }
+        .id(isFooterMenuHidden ? "content-only" : "full-tabview")
+        .onAppear {
+            setupTabView()
+            checkAndStartDataSync()
+            checkSubscriptionStatus()
+        }
+        .onChange(of: selectedTab) { oldValue, newValue in
+            // Do NOT clear iTunes artwork when navigating between views
+            // iTunes artwork should only be cleared when actually stopping the radio player
+            // This preserves the song artwork during view navigation while radio is playing
+        }
+        // Removed tab state persistence - app always starts on radio tab
+        .overlay(
+            // Global Player positioned above tab bar, never covering it
+            VStack {
+                Spacer()
+                
+                if shouldShowGlobalPlayer {
+                    GlobalPlayerView(
+                        selectedPodcast: $selectedPodcast,
+                        isPlayerSheetPresented: $isPlayerSheetPresented,
+                        selectedTab: $selectedTab,
+                        isFooterMenuHidden: $isFooterMenuHidden,
+                        isScrolling: $isScrolling
+                    )
+                    .environmentObject(radioPlayer)
+                    .environmentObject(viewModel)
+                    .environmentObject(podcastPlayer)
+                    .environmentObject(podcastViewModel)
+                    .padding(.bottom, shouldHideFooterMenu ? 16 : 55)
+                }
+            }
+            .allowsHitTesting(true) // Allow interaction with player
+            .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
+        )
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+            // App is closing: dismiss the player UI overlay
+            isPlayerSheetPresented = false
+            // Clear intent so overlay condition reevaluates to false when next launched
+            podcastPlayer.userWantsToPlay = false
+            radioPlayer.userWantsToPlay = false
+        }
+        
+        // Full-screen data sync progress overlay for fresh installs
+        DataSyncProgressView()
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("FreshInstallDataAvailable"))) { _ in
             // Force UI refresh when sync completes
             print("📢 ContentView: Received FreshInstallDataAvailable - forcing complete UI refresh")
@@ -313,6 +325,39 @@ struct ContentView: View {
             return true
         }
         return false
+    }
+    
+    /// Determines if footer menu should be hidden
+    /// Hides when scrolling or when manually hidden via home button
+    private var shouldHideFooterMenu: Bool {
+        // Always show menu if no content is playing
+        guard shouldShowGlobalPlayer else { return false }
+        
+        // Hide menu when scrolling
+        if isScrolling { return true }
+        
+        // Show/hide menu based on home button state
+        return isFooterMenuHidden
+    }
+    
+    /// Shows current tab content without TabView wrapper
+    @ViewBuilder
+    private var currentTabContentView: some View {
+        switch selectedTab {
+        case .radio:
+            radioTabContent
+        case .podcast:
+            PodcastListView(selectedPodcast: $selectedPodcast)
+                .id("podcast-\(syncCompletionRefreshID)")
+                .environmentObject(podcastPlayer)
+                .environmentObject(podcastViewModel)
+        case .settings:
+            SettingsView()
+                .environmentObject(radioPlayer)
+                .environmentObject(viewModel)
+                .environmentObject(podcastPlayer)
+                .environmentObject(podcastViewModel)
+        }
     }
     
     // MARK: - Radio Tab Content with Full Original Functionality
@@ -417,7 +462,9 @@ struct ContentView: View {
                                          selectedSubTab: $viewModel.selectedSubTab,
                                          activeSheet: $activeSheet,
                                          isPlayerSheetPresented: $isPlayerSheetPresented,
-                                         searchText: $searchText)
+                                         searchText: $searchText,
+                                         isScrolling: $isScrolling,
+                                         isFooterMenuHidden: $isFooterMenuHidden)
                         .environmentObject(viewModel)
                         .environmentObject(radioPlayer)
                     
@@ -906,8 +953,10 @@ struct CompactPlayerView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(
+                // Invisible background that blocks tap-through while allowing glass effect
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.adaptiveSecondaryBackground)
+                    .fill(Color.clear)
+                    .contentShape(RoundedRectangle(cornerRadius: 16))
             )
             .glassEffect(in: RoundedRectangle(cornerRadius: 16))
             .frame(minHeight: 60)
@@ -3176,6 +3225,20 @@ struct ContentView_Previews: PreviewProvider {
             .preferredColorScheme(.dark)
             .environmentObject(AlertManager())
             .environmentObject(RadioStationViewModel())
+    }
+}
+
+// MARK: - Glass Effect Modifier
+
+struct GlassEffectModifier<S: Shape>: ViewModifier {
+    let shape: S
+    
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(in: shape)
+        } else {
+            content
+        }
     }
 }
 

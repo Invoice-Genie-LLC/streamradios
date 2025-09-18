@@ -45,6 +45,8 @@ struct RadioStationListView: View {
     @Binding var activeSheet: ActiveSheet?
     @Binding var isPlayerSheetPresented: Bool
     @Binding var searchText: String
+    @Binding var isScrolling: Bool
+    @Binding var isFooterMenuHidden: Bool
 
     @StateObject private var alertManager = AlertManager()
     @AppStorage("hiddenCountries") private var hiddenCountriesData: Data = Data()
@@ -487,6 +489,24 @@ struct RadioStationListView: View {
         .background(Color.adaptiveBackground)
         .scrollContentBackground(.hidden)
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { _ in
+                    // Only update state once when scrolling starts
+                    if !isScrolling {
+                        isScrolling = true
+                        // Hide TabView when scrolling starts and keep it hidden
+                        isFooterMenuHidden = true
+                    }
+                }
+                .onEnded { _ in
+                    // Debounce the scroll end to prevent rapid state changes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        isScrolling = false
+                        // Note: Don't reset isFooterMenuHidden here - let home button control it
+                    }
+                }
+        )
         .onReceive(radioPlayer.$currentStationIndex) { _ in
             if !isEditing { scrollToCurrentStation(proxy: proxy) }
         }
@@ -1617,13 +1637,17 @@ struct RadioStationListView_Previews: PreviewProvider {
     @State static var activeSheet: ActiveSheet? = nil
     @State static var isPlayerSheetPresented = false
     @State static var searchText = ""
+    @State static var isScrolling = false
+    @State static var isFooterMenuHidden = false
     
     static var previews: some View {
         RadioStationListView(isEditing: .constant(false),
                              selectedStationForEdit: .constant(nil), selectedTab: .constant(.radio),
                              selectedSubTab: .constant(.all), activeSheet: $activeSheet,
                              isPlayerSheetPresented: $isPlayerSheetPresented,
-                             searchText: $searchText)
+                             searchText: $searchText,
+                             isScrolling: $isScrolling,
+                             isFooterMenuHidden: $isFooterMenuHidden)
         .environmentObject(viewModel)
         .environmentObject(radioPlayer)
         .preferredColorScheme(.dark)

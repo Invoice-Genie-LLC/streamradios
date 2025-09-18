@@ -20,56 +20,79 @@ struct GlobalPlayerView: View {
     @Binding var selectedPodcast: PodcastFeed?
     @Binding var isPlayerSheetPresented: Bool
     @Binding var selectedTab: Tab
+    @Binding var isFooterMenuHidden: Bool
+    @Binding var isScrolling: Bool
     
     @State private var scrollToEpisodeID: String?
     
     var body: some View {
         VStack(spacing: 0) {
-            // Player area - prioritize the actively playing player over just loaded content
+            // Player area with home button - prioritize the actively playing player over just loaded content
             if shouldShowPodcastPlayer && (podcastPlayer.isPlaying || podcastPlayer.userWantsToPlay), 
                let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                // Podcast is actively playing or user wants to play - show podcast compact player
-                CompactPodcastPlayerView(
-                    currentEpisode: currentEpisode,
-                    currentFeed: currentFeed,
-                    podcastPlayer: podcastPlayer,
-                    viewModel: podcastViewModel,
-                    selectedPodcast: $selectedPodcast,
-                    onListButtonTap: {
-                        // Switch to podcast tab and set the current feed
-                        selectedPodcast = currentFeed
-                        podcastViewModel.requestFeedRefresh(currentFeed.id)
-                        selectedTab = .podcast
-                    },
-                    onCloseButtonTap: {
-                        // Do not dismiss the player when closing; just pause and keep it visible
-                        podcastPlayer.pause()
-                    }
-                )
-                .onTapGesture {
-                    if let currentFeed = podcastPlayer.currentFeed {
-                        // Switch to podcast tab and set the current feed
-                        selectedPodcast = currentFeed
-                        podcastViewModel.requestFeedRefresh(currentFeed.id)
-                        selectedTab = .podcast
+                // Podcast is actively playing or user wants to play - show podcast compact player with home button
+                HStack(spacing: 8) {
+                    // Home button on the left (only shows when scrolling)
+                    HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
+                    
+                    // Podcast player
+                    CompactPodcastPlayerView(
+                        currentEpisode: currentEpisode,
+                        currentFeed: currentFeed,
+                        podcastPlayer: podcastPlayer,
+                        viewModel: podcastViewModel,
+                        selectedPodcast: $selectedPodcast,
+                        onListButtonTap: {
+                            // Switch to podcast tab and set the current feed
+                            selectedPodcast = currentFeed
+                            podcastViewModel.requestFeedRefresh(currentFeed.id)
+                            selectedTab = .podcast
+                        },
+                        onCloseButtonTap: {
+                            // Do not dismiss the player when closing; just pause and keep it visible
+                            podcastPlayer.pause()
+                        }
+                    )
+                    .onTapGesture {
+                        if let currentFeed = podcastPlayer.currentFeed {
+                            // Switch to podcast tab and set the current feed
+                            selectedPodcast = currentFeed
+                            podcastViewModel.requestFeedRefresh(currentFeed.id)
+                            selectedTab = .podcast
+                        }
                     }
                 }
+                .padding(.horizontal, 16)
             } else if shouldShowRadioPlayer && (radioPlayer.isPlaying || radioPlayer.userWantsToPlay || !shouldShowPodcastPlayer) {
-                // STABILITY FIX: Show radio player with stable station display
+                // STABILITY FIX: Show radio player with stable station display and home button
                 if let currentStation = radioPlayer.currentlyPlayingStation {
                     // CRITICAL: Use radioPlayer.currentlyPlayingStation as the source of truth for display
                     // This ensures station info remains consistent regardless of country switching or auto-play
-                    CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
-                        .environmentObject(radioPlayer)
-                        .environmentObject(viewModel)
-                        .padding(.bottom, 0)
+                    HStack(spacing: 8) {
+                        // Home button on the left (only shows when scrolling)
+                        HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
+                        
+                        // Radio player
+                        CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
+                            .environmentObject(radioPlayer)
+                            .environmentObject(viewModel)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 0)
                 } else if !viewModel.stations.isEmpty && selectedTab == .radio {
                     // Show first available station as default when no station is set (only on radio tab)
                     let defaultStation = viewModel.stations.first!
-                    CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
-                        .environmentObject(radioPlayer)
-                        .environmentObject(viewModel)
-                        .padding(.bottom, 0)
+                    HStack(spacing: 8) {
+                        // Home button on the left (only shows when scrolling)
+                        HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
+                        
+                        // Radio player
+                        CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
+                            .environmentObject(radioPlayer)
+                            .environmentObject(viewModel)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 0)
                 }
             }
         }
@@ -91,6 +114,40 @@ struct GlobalPlayerView: View {
         // Show player whenever there's a current station
         // This keeps the player visible even when paused
         return radioPlayer.currentlyPlayingStation != nil
+    }
+}
+
+// MARK: - Home Button Component
+
+struct HomeButton: View {
+    @Binding var isFooterMenuHidden: Bool
+    @Binding var isScrolling: Bool
+    
+    var body: some View {
+        if isScrolling {
+            Button(action: {
+                // Use transaction to disable all animations and prevent refreshes
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    isFooterMenuHidden = false // Show TabView when tapped
+                    isScrolling = false // Stop scrolling state immediately
+                }
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.8))
+                        .frame(width: 48, height: 48)
+                    
+                    Image(systemName: "house.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                .modifier(GlassEffectModifier(shape: Circle()))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .transition(.scale.combined(with: .opacity))
+        }
     }
 }
 

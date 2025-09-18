@@ -97,6 +97,7 @@ struct PodcastListView: View {
     @State private var podcastToDelete: PodcastFeed?
     @State private var expandedFeedId: String?
     @State private var isEditing = false
+    @State private var isScrolling = false
     
     // FORCE UI REFRESH: Observe uiRefreshTrigger to force SwiftUI re-evaluation
     private var uiRefreshObserver: UUID {
@@ -311,6 +312,12 @@ struct PodcastListView: View {
     // Initializer with binding
     init(selectedPodcast: Binding<PodcastFeed?>) {
         self._selectedPodcast = selectedPodcast
+    }
+    
+    // Initializer with scroll detection binding
+    init(selectedPodcast: Binding<PodcastFeed?>, isScrolling: Binding<Bool>) {
+        self._selectedPodcast = selectedPodcast
+        self._isScrolling = State(initialValue: isScrolling.wrappedValue)
     }
     
     var body: some View {
