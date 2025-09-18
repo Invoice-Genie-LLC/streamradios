@@ -2326,33 +2326,10 @@ class RadioPlayer: NSObject, ObservableObject {
             return .commandFailed
         }
         
-        // Enable and configure next track command for station navigation
-        commandCenter.nextTrackCommand.isEnabled = true
-        commandCenter.nextTrackCommand.addTarget { [weak self] event in
-            guard let self = self else { return .commandFailed }
-            if PlaybackManager.shared.activePlayer == .radio {
-                if let viewModel = self.viewModel {
-                    self.nextStation(from: viewModel.stations)
-                    print("🎮 Remote Command: Next station executed")
-                    return .success
-                }
-            }
-            return .commandFailed
-        }
-        
-        // Enable and configure previous track command for station navigation
-        commandCenter.previousTrackCommand.isEnabled = true
-        commandCenter.previousTrackCommand.addTarget { [weak self] event in
-            guard let self = self else { return .commandFailed }
-            if PlaybackManager.shared.activePlayer == .radio {
-                if let viewModel = self.viewModel {
-                    self.previousStation(from: viewModel.stations)
-                    print("🎮 Remote Command: Previous station executed")
-                    return .success
-                }
-            }
-            return .commandFailed
-        }
+        // Disable next/previous track commands for radio to prevent accidental station skipping
+        // Radio stations should only be changed intentionally by the user in the UI
+        commandCenter.nextTrackCommand.isEnabled = false
+        commandCenter.previousTrackCommand.isEnabled = false
         
         // CRITICAL: Enable toggle play/pause command for Now Playing display
         commandCenter.togglePlayPauseCommand.isEnabled = true

@@ -1464,7 +1464,10 @@ class EpisodeStateManager: ObservableObject {
                     print("🔄 UPDATE REWIND PROTECTION: Allowing backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress)) - rewind override")
                 }
                 shouldUpdateProgress = true
-                episodeProgress[episodeId] = progress
+                // Ensure UI updates happen on main thread
+                DispatchQueue.main.async {
+                    self.episodeProgress[episodeId] = progress
+                }
             } else {
                 print("🛡️ UPDATE PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress))")
                 shouldUpdateProgress = false
@@ -1472,12 +1475,18 @@ class EpisodeStateManager: ObservableObject {
         } else if existingProgress == 0.0 {
             // Update to 0.0 only if there's no existing progress
             shouldUpdateProgress = true
-            episodeProgress[episodeId] = progress
+            // Ensure UI updates happen on main thread
+            DispatchQueue.main.async {
+                self.episodeProgress[episodeId] = progress
+            }
         } else if currentTime != nil {
             // Update if we have explicit currentTime (from episode switch) - but still protect against backwards progress
             if progress >= existingProgress || progress == 0.0 {
                 shouldUpdateProgress = true
-                episodeProgress[episodeId] = progress
+                // Ensure UI updates happen on main thread
+                DispatchQueue.main.async {
+                    self.episodeProgress[episodeId] = progress
+                }
             } else {
                 print("🛡️ SWITCH PROGRESS PROTECTION: Blocked backward progress for \(episodeId): \(String(format: "%.4f", progress)) < \(String(format: "%.4f", existingProgress))")
                 shouldUpdateProgress = false
@@ -1556,7 +1565,10 @@ class EpisodeStateManager: ObservableObject {
         }
         
         if episodeStates[episodeId] != newState || shouldUpdateProgress || currentTime != nil {
-            episodeStates[episodeId] = newState
+            // Ensure UI updates happen on main thread
+            DispatchQueue.main.async {
+                self.episodeStates[episodeId] = newState
+            }
             saveCurrentStates()
             sendThrottledUpdate()
             
@@ -1613,7 +1625,10 @@ class EpisodeStateManager: ObservableObject {
             finalProgress = progress // Allow forward progress, same value, chapter backward progress, or intentional rewind
         }
         
-        episodeProgress[episodeId] = finalProgress
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async {
+            self.episodeProgress[episodeId] = finalProgress
+        }
         
         // Update state based on final progress
         let newState: EpisodePlaybackState
@@ -1625,7 +1640,10 @@ class EpisodeStateManager: ObservableObject {
             newState = .new
         }
         
-        episodeStates[episodeId] = newState
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async {
+            self.episodeStates[episodeId] = newState
+        }
         saveCurrentStates()
         
         // CRITICAL FIX: Force synchronize UserDefaults immediately for CloudKit synced progress to prevent loss
@@ -1708,7 +1726,10 @@ class EpisodeStateManager: ObservableObject {
             )
         }
         
-        episodeFavorites[episodeId] = isFavorite
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async {
+            self.episodeFavorites[episodeId] = isFavorite
+        }
         saveCurrentStates()
         userDefaults.synchronize() // Force immediate sync
         sendImmediateUpdate() // Use immediate update for real-time UI
@@ -1877,7 +1898,10 @@ class EpisodeStateManager: ObservableObject {
             )
         }
         
-        episodeDownloads[episodeId] = isDownloaded
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async {
+            self.episodeDownloads[episodeId] = isDownloaded
+        }
         saveCurrentStates()
         userDefaults.synchronize() // Force immediate sync
         sendImmediateUpdate() // Use immediate update for real-time UI
@@ -2318,7 +2342,10 @@ extension EpisodeStateManager {
     
     /// Set favorite state silently without triggering CloudKit sync
     func setFavoriteSilently(_ episodeId: String, isFavorite: Bool) {
-        episodeFavorites[episodeId] = isFavorite
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async {
+            self.episodeFavorites[episodeId] = isFavorite
+        }
         saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
         userDefaults.synchronize()
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates
@@ -2338,7 +2365,10 @@ extension EpisodeStateManager {
     
     /// Set download state silently without triggering CloudKit sync
     func setDownloadedSilently(_ episodeId: String, isDownloaded: Bool) {
-        episodeDownloads[episodeId] = isDownloaded
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async {
+            self.episodeDownloads[episodeId] = isDownloaded
+        }
         saveCurrentStatesSilently() // Use silent save to prevent CloudKit sync loop
         userDefaults.synchronize()
         sendImmediateUpdate() // Use immediate update for real-time cross-device UI updates

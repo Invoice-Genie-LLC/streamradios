@@ -905,8 +905,14 @@ struct CompactPlayerView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.adaptiveSecondaryBackground)
+            )
             .glassEffect(in: RoundedRectangle(cornerRadius: 16))
             .frame(minHeight: 60)
+            .contentShape(Rectangle())
+            .allowsHitTesting(true)
         } else {
             // Fallback for earlier iOS versions
             HStack(spacing: 12) {
@@ -1002,6 +1008,8 @@ struct CompactPlayerView: View {
                     .fill(Color.adaptiveSecondaryBackground)
             )
             .frame(minHeight: 60)
+            .contentShape(Rectangle())
+            .allowsHitTesting(true)
         }
     }
     
@@ -1089,6 +1097,7 @@ struct UnifiedPodcastPlayerView: View {
     
     @State private var showChaptersNotes = false
     @State private var showAudioSettings = false
+    @State private var showDetailedPlayer = false
     
     // Responsive sizing that scales with Dynamic Type
     private var artworkSize: CGFloat {
@@ -1170,9 +1179,9 @@ struct UnifiedPodcastPlayerView: View {
         if #available(iOS 26.0, *) {
             // Compact single-row layout with center alignment for Dynamic Type support
                 HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
-                    // Tappable artwork area - opens chapters/notes sheet
+                    // Tappable artwork area - opens detailed player sheet
                     Button(action: {
-                        showChaptersNotes = true
+                        showDetailedPlayer = true
                     }) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 6)
@@ -1316,6 +1325,9 @@ struct UnifiedPodcastPlayerView: View {
                         .fill(Color.clear)
                         .contentShape(RoundedRectangle(cornerRadius: 16))
                 )
+                .onTapGesture {
+                    showDetailedPlayer = true
+                }
             .glassEffect(in: RoundedRectangle(cornerRadius: 16))
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
             .sheet(isPresented: $showChaptersNotes) {
@@ -1331,13 +1343,22 @@ struct UnifiedPodcastPlayerView: View {
                     .presentationDetents([.fraction(0.5), .large])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showDetailedPlayer) {
+                DetailedPodcastPlayerView(
+                    episode: currentEpisode,
+                    feed: currentFeed,
+                    podcastPlayer: podcastPlayer,
+                    viewModel: viewModel,
+                    isPresented: $showDetailedPlayer
+                )
+            }
         } else {
             // Fallback for earlier iOS versions
             // Compact single-row layout with center alignment for Dynamic Type support
                 HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
-                    // Tappable artwork area - opens chapters/notes sheet
+                    // Tappable artwork area - opens detailed player sheet
                     Button(action: {
-                        showChaptersNotes = true
+                        showDetailedPlayer = true
                     }) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 6)
@@ -1471,6 +1492,9 @@ struct UnifiedPodcastPlayerView: View {
                     .fill(Color.adaptiveSecondaryBackground)
                     .contentShape(RoundedRectangle(cornerRadius: 16))
             )
+            .onTapGesture {
+                showDetailedPlayer = true
+            }
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
             .sheet(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
@@ -1484,6 +1508,15 @@ struct UnifiedPodcastPlayerView: View {
                 AudioSettingsSheet(podcastPlayer: podcastPlayer)
                     .presentationDetents([.fraction(0.5), .large])
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showDetailedPlayer) {
+                DetailedPodcastPlayerView(
+                    episode: currentEpisode,
+                    feed: currentFeed,
+                    podcastPlayer: podcastPlayer,
+                    viewModel: viewModel,
+                    isPresented: $showDetailedPlayer
+                )
             }
         }
     }

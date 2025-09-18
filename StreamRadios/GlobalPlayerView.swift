@@ -25,9 +25,10 @@ struct GlobalPlayerView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Player area - show podcast players when user wants podcast or playing, radio players when user wants radio or playing
-            if shouldShowPodcastPlayer, let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                // Podcast is playing - show podcast compact player
+            // Player area - prioritize the actively playing player over just loaded content
+            if shouldShowPodcastPlayer && (podcastPlayer.isPlaying || podcastPlayer.userWantsToPlay), 
+               let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
+                // Podcast is actively playing or user wants to play - show podcast compact player
                 CompactPodcastPlayerView(
                     currentEpisode: currentEpisode,
                     currentFeed: currentFeed,
@@ -53,7 +54,7 @@ struct GlobalPlayerView: View {
                         selectedTab = .podcast
                     }
                 }
-            } else if shouldShowRadioPlayer {
+            } else if shouldShowRadioPlayer && (radioPlayer.isPlaying || radioPlayer.userWantsToPlay || !shouldShowPodcastPlayer) {
                 // STABILITY FIX: Show radio player with stable station display
                 if let currentStation = radioPlayer.currentlyPlayingStation {
                     // CRITICAL: Use radioPlayer.currentlyPlayingStation as the source of truth for display

@@ -67,6 +67,7 @@
 		7780E96F2C3E2C05009CCF6F /* Country.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E96E2C3E2C05009CCF6F /* Country.swift */; };
 		7780E9712C3F2110009CCF6F /* CustomAlertView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7780E9702C3F2110009CCF6F /* CustomAlertView.swift */; };
 		778610622E50263D00108721 /* PodcastChaptersNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610612E50263D00108721 /* PodcastChaptersNotesView.swift */; };
+		778610672E50263E00108721 /* DetailedPodcastPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610682E50263E00108721 /* DetailedPodcastPlayerView.swift */; };
 		778610642E50A5F600108721 /* SearchPodcastsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610632E50A5F600108721 /* SearchPodcastsView.swift */; };
 		778610662E50A8A700108721 /* PodcastPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778610652E50A8A700108721 /* PodcastPreviewView.swift */; };
 		778F74702C2F13CE00AB81CD /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778F746F2C2F13CE00AB81CD /* PlayerView.swift */; };
@@ -197,6 +198,7 @@
 		7780E96E2C3E2C05009CCF6F /* Country.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Country.swift; sourceTree = "<group>"; };
 		7780E9702C3F2110009CCF6F /* CustomAlertView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomAlertView.swift; sourceTree = "<group>"; };
 		778610612E50263D00108721 /* PodcastChaptersNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastChaptersNotesView.swift; sourceTree = "<group>"; };
+		778610682E50263E00108721 /* DetailedPodcastPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailedPodcastPlayerView.swift; sourceTree = "<group>"; };
 		778610632E50A5F600108721 /* SearchPodcastsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPodcastsView.swift; sourceTree = "<group>"; };
 		778610652E50A8A700108721 /* PodcastPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastPreviewView.swift; sourceTree = "<group>"; };
 		778F68482E282B72009AE6FD /* StreamRadios.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StreamRadios.entitlements; sourceTree = "<group>"; };
@@ -329,6 +331,7 @@
 				77AAED692CE2873C009B2A00 /* EpisodeStateManager.swift */,
 				7778807B2CAF31320013AA62 /* ScrollOffsetTracker.swift */,
 				778610612E50263D00108721 /* PodcastChaptersNotesView.swift */,
+				778610682E50263E00108721 /* DetailedPodcastPlayerView.swift */,
 				77BC0EB92C337CF6002FDD8E /* PermissionManager.swift */,
 				7727D7E72C616A6A004549C9 /* MusicAuthorizationManager.swift */,
 				77322EE92C442C8700C5D449 /* BackgroundTaskManager.swift */,
@@ -653,6 +656,7 @@
 				7715BD9E2C4E66DA00FA7CB1 /* ActiveSheet.swift in Sources */,
 				771D408E2C2C6E92005D4FF5 /* NeumorphicShadow.swift in Sources */,
 				778610622E50263D00108721 /* PodcastChaptersNotesView.swift in Sources */,
+				778610672E50263E00108721 /* DetailedPodcastPlayerView.swift in Sources */,
 				77B327A12E27F9D000ABDD89 /* SubscriptionManager.swift in Sources */,
 				7746A49D2C6D07C10025C215 /* ReachabilityCheck.swift in Sources */,
 				7778807C2CAF31320013AA62 /* ScrollOffsetTracker.swift in Sources */,
