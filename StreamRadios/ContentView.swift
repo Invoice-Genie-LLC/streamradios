@@ -215,7 +215,7 @@ struct ContentView: View {
                     .tag(Tab.radio)
                     
                     // Podcast Tab
-                    PodcastListView(selectedPodcast: $selectedPodcast)
+                    PodcastListView(selectedPodcast: $selectedPodcast, isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)
                     .id("podcast-\(syncCompletionRefreshID)") // Force PodcastListView to recreate when sync completes
                     .environmentObject(podcastPlayer)
                     .environmentObject(podcastViewModel)
@@ -347,7 +347,7 @@ struct ContentView: View {
         case .radio:
             radioTabContent
         case .podcast:
-            PodcastListView(selectedPodcast: $selectedPodcast)
+            PodcastListView(selectedPodcast: $selectedPodcast, isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)
                 .id("podcast-\(syncCompletionRefreshID)")
                 .environmentObject(podcastPlayer)
                 .environmentObject(podcastViewModel)

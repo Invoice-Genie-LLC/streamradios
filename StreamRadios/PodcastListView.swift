@@ -10,6 +10,12 @@ import Combine
 import os
 import AVKit
 
+// MARK: - Notification Names
+extension Notification.Name {
+    static let episodeListScrolling = Notification.Name("episodeListScrolling")
+    static let episodeListScrollingStopped = Notification.Name("episodeListScrollingStopped")
+}
+
 // MARK: - Feed Deletion Progress View
 struct FeedDeletionProgressView: View {
     @ObservedObject var viewModel: PodcastViewModel
@@ -97,7 +103,8 @@ struct PodcastListView: View {
     @State private var podcastToDelete: PodcastFeed?
     @State private var expandedFeedId: String?
     @State private var isEditing = false
-    @State private var isScrolling = false
+    var isScrolling: Binding<Bool>
+    var isFooterMenuHidden: Binding<Bool>
     
     // FORCE UI REFRESH: Observe uiRefreshTrigger to force SwiftUI re-evaluation
     private var uiRefreshObserver: UUID {
@@ -144,6 +151,8 @@ struct PodcastListView: View {
     // Default initializer for backward compatibility
     init() {
         self._selectedPodcast = .constant(nil)
+        self.isScrolling = .constant(false)
+        self.isFooterMenuHidden = .constant(false)
     }
     
     // Episode results list shown while typing in search
@@ -312,12 +321,22 @@ struct PodcastListView: View {
     // Initializer with binding
     init(selectedPodcast: Binding<PodcastFeed?>) {
         self._selectedPodcast = selectedPodcast
+        self.isScrolling = .constant(false)
+        self.isFooterMenuHidden = .constant(false)
     }
     
     // Initializer with scroll detection binding
     init(selectedPodcast: Binding<PodcastFeed?>, isScrolling: Binding<Bool>) {
         self._selectedPodcast = selectedPodcast
-        self._isScrolling = State(initialValue: isScrolling.wrappedValue)
+        self.isScrolling = isScrolling
+        self.isFooterMenuHidden = .constant(false)
+    }
+    
+    // Main initializer with all parameters
+    init(selectedPodcast: Binding<PodcastFeed?>, isScrolling: Binding<Bool>, isFooterMenuHidden: Binding<Bool>) {
+        self._selectedPodcast = selectedPodcast
+        self.isScrolling = isScrolling
+        self.isFooterMenuHidden = isFooterMenuHidden
     }
     
     var body: some View {
@@ -538,6 +557,20 @@ struct PodcastListView: View {
                    }
                }
            )
+           .onReceive(NotificationCenter.default.publisher(for: .episodeListScrolling)) { _ in
+               // Episode list is scrolling - hide TabView and show home button
+               if !isScrolling.wrappedValue {
+                   isScrolling.wrappedValue = true
+                   isFooterMenuHidden.wrappedValue = true
+               }
+           }
+           .onReceive(NotificationCenter.default.publisher(for: .episodeListScrollingStopped)) { _ in
+               // Episode list stopped scrolling - hide home button after delay
+               DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                   isScrolling.wrappedValue = false
+                   // Note: Don't reset isFooterMenuHidden here - let home button control it
+               }
+           }
        }
     
     private var instructionText: some View {
@@ -815,11 +848,20 @@ struct PodcastListView: View {
             .simultaneousGesture(
                 DragGesture()
                     .onChanged { _ in
+                        if !isScrolling.wrappedValue {
+                            isScrolling.wrappedValue = true
+                            // Hide TabView when scrolling starts and keep it hidden
+                            isFooterMenuHidden.wrappedValue = true
+                        }
                         UserDefaults.standard.set(true, forKey: "isUserScrolling")
                         // Post notification for PodcastPlayer scroll detection
                         NotificationCenter.default.post(name: .userIsScrolling, object: nil)
                     }
                     .onEnded { _ in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            isScrolling.wrappedValue = false
+                            // Note: Don't reset isFooterMenuHidden here - let home button control it
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             UserDefaults.standard.set(false, forKey: "isUserScrolling")
                             // Post notification for PodcastPlayer scroll detection
@@ -3306,6 +3348,17 @@ struct PodcastPlayerView: View {
                 }
             }
         }
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { _ in
+                    // Post notification that episode list is scrolling
+                    NotificationCenter.default.post(name: .episodeListScrolling, object: nil)
+                }
+                .onEnded { _ in
+                    // Post notification that episode list stopped scrolling
+                    NotificationCenter.default.post(name: .episodeListScrollingStopped, object: nil)
+                }
+        )
         .overlay(
             // Success toast notification
             VStack {
