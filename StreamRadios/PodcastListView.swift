@@ -569,13 +569,15 @@ struct PodcastListView: View {
                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                    isScrolling.wrappedValue = false
                    // Note: Don't reset isFooterMenuHidden here - let home button control it
+                   
+                   // Post notification for episode title scrolling
+                   NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
                }
            }
-       }
+    }
     
     private var instructionText: some View {
-        Text("Tap on a podcast image to explore its episodes and discover more content.")
-            .font(.subheadline)
+        Text("Add podcasts to get started")
             .foregroundColor(.secondary)
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -3357,6 +3359,11 @@ struct PodcastPlayerView: View {
                 .onEnded { _ in
                     // Post notification that episode list stopped scrolling
                     NotificationCenter.default.post(name: .episodeListScrollingStopped, object: nil)
+                    
+                    // Also post notification for episode title scrolling
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        NotificationCenter.default.post(name: .userStoppedScrolling, object: nil)
+                    }
                 }
         )
         .overlay(

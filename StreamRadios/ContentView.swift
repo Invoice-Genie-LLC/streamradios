@@ -1228,106 +1228,62 @@ struct UnifiedPodcastPlayerView: View {
         if #available(iOS 26.0, *) {
             // Compact single-row layout with center alignment for Dynamic Type support
                 HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
-                    // Tappable artwork area - opens detailed player sheet
+                    // Tappable area that includes artwork and episode info - opens detailed player
                     Button(action: {
                         showDetailedPlayer = true
                     }) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.adaptiveBorder)
-                                .frame(width: artworkSize, height: artworkSize)
+                        HStack(alignment: .center, spacing: 4) {
+                            // Artwork
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.adaptiveBorder)
+                                    .frame(width: artworkSize, height: artworkSize)
+                                
+                                feedArtworkView
+                                    .frame(width: artworkSize, height: artworkSize)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
                             
-                            feedArtworkView
-                                .frame(width: artworkSize, height: artworkSize)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            // Episode info with title and date
+                            EpisodeInfoView(episode: currentEpisode)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.leading, 4)  // Add left padding for better text positioning
+                                .padding(.trailing, 8) // Add right padding to extend tap area closer to buttons
                         }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Tappable text area - limit episode title to 3 lines with vertical scrolling
-                    Button(action: navigateToCurrentEpisode) {
-                        ScrollableEpisodeTitle(title: currentEpisode.title)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 4)  // Add left padding for better text positioning
-                            .padding(.trailing, -8) // Negative right padding for maximum width
                     }
                     .buttonStyle(PlainButtonStyle())
                     
                     // Player controls with timer aligned under play button
                     VStack(spacing: 1) {
-                        // Essential controls only - using responsive sizing
-                        HStack(spacing: buttonSpacing) {
-                            // Rewind 15s - scrub backward through episode timeline
+                        // Simplified controls - only play/pause and 30s fast forward
+                        HStack(spacing: 12) {
+                            // Play/Pause button - centered
                             Button(action: {
-                                print("🔴 DEBUG: Rewind button pressed - calling skipBackward")
-                                podcastPlayer.skipBackward()
+                                podcastPlayer.togglePlayPause()
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.adaptiveSecondaryBackground.opacity(0.3))
-                                        .frame(width: buttonSize, height: buttonSize)
+                                        .fill(Color.blue)
+                                        .frame(width: playButtonSize, height: playButtonSize)
                                     
-                                    Image(systemName: "gobackward.15")
-                                        .font(.system(size: skipButtonIconSize))
-                                        .foregroundColor(.adaptivePrimaryText)
+                                    if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
+                                        // Show loading spinner when episode is loading
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                        // Show spinning indicator when reconnecting or buffering
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                            .font(.system(size: playIconSize))
+                                            .foregroundColor(.white)
+                                    }
                                 }
                             }
                             .buttonStyle(PlainButtonStyle())
-                            
-                            // CRITICAL FIX: Completely isolate play button from timer - use ZStack for independent positioning
-                            ZStack {
-                                // Play button only - completely isolated
-                                VStack(spacing: 4) {
-                                    Button(action: {
-                                        podcastPlayer.togglePlayPause()
-                                    }) {
-                                        ZStack {
-                                            Circle()
-                                                .fill(Color.blue)
-                                                .frame(width: playButtonSize, height: playButtonSize)
-                                            
-                                            if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
-                                                // Show loading spinner when episode is loading
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                    .scaleEffect(0.8)
-                                            } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
-                                                // Show spinning indicator when reconnecting or buffering
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                    .scaleEffect(0.8)
-                                            } else {
-                                                Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                                    .font(.system(size: playIconSize))
-                                                    .foregroundColor(.white)
-                                            }
-                                        }
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .offset(y: 8) // Move play button more noticeably down
-                                    
-                                    // Spacer to maintain same height as original layout
-                                    Spacer()
-                                        .frame(height: 16) // Approximate height of timer text + spacing
-                                }
-                                
-                                // Timer completely overlaid and isolated from ALL touch events
-                                VStack {
-                                    Spacer()
-                                        .frame(height: playButtonSize + 14) // Position below button (adjusted for button offset)
-                                    
-                                    Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                                        .font(.caption2)
-                                        .foregroundColor(.adaptiveSecondaryText)
-                                        .lineLimit(1)
-                                        .frame(width: 80, alignment: .center)
-                                        .minimumScaleFactor(0.8)
-                                        .allowsHitTesting(false) // Disable touch interaction on text
-                                        .background(Color.clear)
-                                }
-                                .allowsHitTesting(false) // Completely disable ALL touch interaction
-                                
-                            }
                             
                             // Fast forward 30s - scrub forward through episode timeline
                             Button(action: {
@@ -1341,23 +1297,8 @@ struct UnifiedPodcastPlayerView: View {
                                     
                                     Image(systemName: "goforward.30")
                                         .font(.system(size: skipButtonIconSize))
-                                        .foregroundColor(.adaptivePrimaryText)
+                                        .foregroundColor(.white)
                                 }
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            // Proper spacing to give speed button its own space
-                            Spacer()
-                                .frame(width: 8)  // Increased from 1 to 8 to separate speed button from controls
-                            
-                            // Playback speed button - shows current speed and opens audio settings
-                            Button(action: {
-                                showAudioSettings = true
-                            }) {
-                                Text(String(format: "%.1fx", podcastPlayer.playbackSpeed))
-                                    .font(.system(size: iconSize - 2, weight: .medium))
-                                    .foregroundColor(.adaptivePrimaryText)
-                                    .frame(width: buttonSize + 8, height: buttonSize)  // Increased width from +4 to +8 for better speed button visibility
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -1369,15 +1310,12 @@ struct UnifiedPodcastPlayerView: View {
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, 2)
                 .background(
-                    // Invisible background that blocks tap-through while allowing glass effect
+                    // Same background as radio player
                     RoundedRectangle(cornerRadius: 16)
                         .fill(Color.clear)
                         .contentShape(RoundedRectangle(cornerRadius: 16))
                 )
-                .onTapGesture {
-                    showDetailedPlayer = true
-                }
-            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+                .glassEffect(in: RoundedRectangle(cornerRadius: 16))
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
             .sheet(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
@@ -1405,97 +1343,62 @@ struct UnifiedPodcastPlayerView: View {
             // Fallback for earlier iOS versions
             // Compact single-row layout with center alignment for Dynamic Type support
                 HStack(alignment: .center, spacing: 4) {  // Reduced from 6 to 4 for maximum title space
-                    // Tappable artwork area - opens detailed player sheet
+                    // Tappable area that includes artwork and episode info - opens detailed player
                     Button(action: {
                         showDetailedPlayer = true
                     }) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.adaptiveBorder)
-                                .frame(width: artworkSize, height: artworkSize)
+                        HStack(alignment: .center, spacing: 4) {
+                            // Artwork
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.adaptiveBorder)
+                                    .frame(width: artworkSize, height: artworkSize)
+                                
+                                feedArtworkView
+                                    .frame(width: artworkSize, height: artworkSize)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
                             
-                            feedArtworkView
-                                .frame(width: artworkSize, height: artworkSize)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            // Episode info with title and date
+                            EpisodeInfoView(episode: currentEpisode)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.leading, 4)  // Add left padding for better text positioning
+                                .padding(.trailing, 8) // Add right padding to extend tap area closer to buttons
                         }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    
-                    // Tappable text area - limit episode title to 3 lines with vertical scrolling
-                    Button(action: navigateToCurrentEpisode) {
-                        ScrollableEpisodeTitle(title: currentEpisode.title)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 4)  // Add left padding for better text positioning
-                            .padding(.trailing, -8) // Negative right padding for maximum width
                     }
                     .buttonStyle(PlainButtonStyle())
                     
                     // Player controls with timer aligned under play button
                     VStack(spacing: 1) {
-                        // Essential controls only - using responsive sizing
-                        HStack(spacing: buttonSpacing) {
-                            // Skip backward 15s - larger size for better usability
-                            Button(action: podcastPlayer.skipBackward) {
-                                Image(systemName: "gobackward.15")
-                                    .font(.system(size: skipButtonIconSize))
-                                    .foregroundColor(.adaptivePrimaryText)
+                        // Simplified controls - only play/pause and 30s fast forward
+                        HStack(spacing: 12) {
+                            // Play/Pause button - centered
+                            Button(action: {
+                                podcastPlayer.togglePlayPause()
+                            }) {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.blue)
+                                        .frame(width: playButtonSize, height: playButtonSize)
+                                    
+                                    if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
+                                        // Show loading spinner when episode is loading
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
+                                        // Show spinning indicator when reconnecting or buffering
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    } else {
+                                        Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
+                                            .font(.system(size: playIconSize))
+                                            .foregroundColor(.white)
+                                    }
+                                }
                             }
                             .buttonStyle(PlainButtonStyle())
-                            
-                            // CRITICAL FIX: Completely isolate play button from timer - use ZStack for independent positioning
-                            ZStack {
-                                // Play button only - completely isolated
-                                VStack(spacing: 4) {
-                                    Button(action: {
-                                        podcastPlayer.togglePlayPause()
-                                    }) {
-                                        ZStack {
-                                            Circle()
-                                                .fill(Color.blue)
-                                                .frame(width: playButtonSize, height: playButtonSize)
-                                            
-                                            if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
-                                                // Show loading spinner when episode is loading
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                    .scaleEffect(0.8)
-                                            } else if podcastPlayer.isAttemptingReconnection || podcastPlayer.connectionState == .connecting || podcastPlayer.connectionState == .buffering {
-                                                // Show spinning indicator when reconnecting or buffering
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                    .scaleEffect(0.8)
-                                            } else {
-                                                Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                                    .font(.system(size: playIconSize))
-                                                    .foregroundColor(.white)
-                                            }
-                                        }
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .offset(y: 8) // Move play button more noticeably down
-                                    
-                                    // Spacer to maintain same height as original layout
-                                    Spacer()
-                                        .frame(height: 16) // Approximate height of timer text + spacing
-                                }
-                                
-                                // Timer completely overlaid and isolated from ALL touch events
-                                VStack {
-                                    Spacer()
-                                        .frame(height: playButtonSize + 14) // Position below button (adjusted for button offset)
-                                    
-                                    Text("\(formatTimeForDisplay(podcastPlayer.currentTime))/\(formatTimeForDisplay(podcastPlayer.duration))")
-                                        .font(.caption2)
-                                        .foregroundColor(.adaptiveSecondaryText)
-                                        .lineLimit(1)
-                                        .frame(width: 80, alignment: .center)
-                                        .minimumScaleFactor(0.8)
-                                        .allowsHitTesting(false) // Disable touch interaction on text
-                                        .background(Color.clear)
-                                }
-                                .allowsHitTesting(false) // Completely disable ALL touch interaction
-                                
-                            }
                             
                             // Fast forward 30s - scrub forward through episode timeline
                             Button(action: {
@@ -1509,23 +1412,8 @@ struct UnifiedPodcastPlayerView: View {
                                     
                                     Image(systemName: "goforward.30")
                                         .font(.system(size: skipButtonIconSize))
-                                        .foregroundColor(.adaptivePrimaryText)
+                                        .foregroundColor(.white)
                                 }
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            // Proper spacing to give speed button its own space
-                            Spacer()
-                                .frame(width: 8)  // Increased from 1 to 8 to separate speed button from controls
-                            
-                            // Playback speed button - shows current speed and opens audio settings
-                            Button(action: {
-                                showAudioSettings = true
-                            }) {
-                                Text(String(format: "%.1fx", podcastPlayer.playbackSpeed))
-                                    .font(.system(size: iconSize - 2, weight: .medium))
-                                    .foregroundColor(.adaptivePrimaryText)
-                                    .frame(width: buttonSize + 8, height: buttonSize)  // Increased width from +4 to +8 for better speed button visibility
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -1541,9 +1429,6 @@ struct UnifiedPodcastPlayerView: View {
                     .fill(Color.adaptiveSecondaryBackground)
                     .contentShape(RoundedRectangle(cornerRadius: 16))
             )
-            .onTapGesture {
-                showDetailedPlayer = true
-            }
             .fixedSize(horizontal: false, vertical: true) // Allow the entire player to expand vertically as needed
             .sheet(isPresented: $showChaptersNotes) {
                 PodcastChaptersNotesView(
@@ -3140,7 +3025,182 @@ struct MainPodcastListBanner: View {
     }
 }
 
-// MARK: - ScrollableEpisodeTitle Component
+// MARK: - Episode Info Component with Title and Date
+
+struct EpisodeInfoView: View {
+    let episode: PodcastEpisode
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            // Animated scrolling title
+            AnimatedScrollingEpisodeTitle(title: episode.title)
+            
+            // Episode release date
+            Text(formatEpisodeDate(episode.publicationDate))
+                .font(.system(size: 12, weight: .regular))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+        }
+    }
+    
+    private func formatEpisodeDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Animated Scrolling Episode Title Component
+
+struct AnimatedScrollingEpisodeTitle: View {
+    let title: String
+    @State private var textWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var animationOffset: CGFloat = 0
+    @State private var scrollCount: Int = 0
+    @State private var isAnimating: Bool = false
+    @State private var isInitialDelayComplete: Bool = false
+    @State private var scrollTriggerTimer: Timer?
+    
+    private let maxScrollRuns = 2 // Two complete scrolls then stop
+    private let initialDelay: TimeInterval = 4.0 // 4 second delay before first scroll
+    
+    var body: some View {
+        GeometryReader { geometry in
+            let containerW = geometry.size.width
+            
+            Group {
+                if isAnimating {
+                    // During animation: show full text that can extend beyond bounds
+                    Text(title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                } else {
+                    // When not animating: show abbreviated title with truncation
+                    Text(title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+                .background(
+                    GeometryReader { textGeometry in
+                        Color.clear
+                            .onAppear {
+                                textWidth = textGeometry.size.width
+                                containerWidth = containerW
+                                startInitialDelay()
+                            }
+                            .onChange(of: title) { _ in
+                                // Reset animation for new title
+                                resetAnimation()
+                                
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    textWidth = textGeometry.size.width
+                                    containerWidth = containerW
+                                    startInitialDelay()
+                                }
+                            }
+                    }
+                )
+                .offset(x: animationOffset)
+                .frame(maxWidth: .infinity, alignment: .leading) // Ensure text starts from beginning
+            .frame(width: containerW - 5) // Clip to prevent text under play button - extend to red mark
+            .clipped()
+            .onAppear {
+                containerWidth = containerW
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .userStoppedScrolling)) { _ in
+                // Trigger scrolling 4 seconds after user stops scrolling in any view
+                if isInitialDelayComplete && !isAnimating {
+                    scrollTriggerTimer?.invalidate()
+                    scrollTriggerTimer = Timer.scheduledTimer(withTimeInterval: initialDelay, repeats: false) { _ in
+                        // Force start animation after 4-second delay, regardless of conditions
+                        if textWidth > (containerWidth - 20) && scrollCount < maxScrollRuns {
+                            isAnimating = true
+                            animateScroll()
+                        }
+                    }
+                }
+            }
+        }
+        .frame(height: 20)
+    }
+    
+    private func startInitialDelay() {
+        // Cancel any existing timer
+        scrollTriggerTimer?.invalidate()
+        
+        // Mark as ready for scroll triggering (but don't start scrolling automatically)
+        isInitialDelayComplete = true
+    }
+    
+    private func resetAnimation() {
+        scrollTriggerTimer?.invalidate()
+        scrollCount = 0
+        isAnimating = false
+        animationOffset = 0  // Ensure text returns to start position
+        isInitialDelayComplete = false
+    }
+    
+    private func startAnimationIfNeeded() {
+        // Only proceed if initial delay is complete
+        guard isInitialDelayComplete else { return }
+        
+        // Start scrolling when text reaches the red mark position
+        // Reserve minimal space to prevent overlap with play button (approximately 20 points)
+        let availableTextWidth = containerWidth - 20
+        
+        // Only animate if text is wider than available space and haven't exceeded max runs
+        guard textWidth > availableTextWidth && scrollCount < maxScrollRuns else {
+            isAnimating = false
+            return
+        }
+        
+        isAnimating = true
+        animateScroll()
+    }
+    
+    private func animateScroll() {
+        // Scroll the ENTIRE episode title text from beginning to end
+        // This ensures the user sees the complete title, not just the visible portion
+        let scrollDistance = textWidth + containerWidth // Scroll full text width + container width to ensure complete visibility
+        
+        // Start from normal position (0) and animate to negative scroll distance
+        animationOffset = 0
+        
+        // Adaptive scroll speed: faster for very long titles, but not too fast to read
+        let scrollSpeed: Double = textWidth > 1000 ? 50 : 35 // Faster speed for very long titles
+        let animationDuration = Double(scrollDistance / scrollSpeed)
+        
+        withAnimation(.linear(duration: animationDuration)) {
+            animationOffset = -scrollDistance
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration) {
+
+            animationOffset = 0  // Always return to start position
+            scrollCount += 1
+            
+            // Continue if under max runs
+            if scrollCount < maxScrollRuns {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // Brief pause between runs
+                    animateScroll()
+                }
+            } else {
+                // End at normal position (left aligned at beginning)
+                animationOffset = 0
+                isAnimating = false
+            }
+        }
+    }
+}
+
+// MARK: - Legacy ScrollableEpisodeTitle Component (for fallback)
 
 struct ScrollableEpisodeTitle: View {
     let title: String
