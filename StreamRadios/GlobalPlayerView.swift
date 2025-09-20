@@ -140,7 +140,7 @@ struct HomeButton: View {
                 }) {
                     ZStack {
                         Circle()
-                            .fill(Color.blue.opacity(0.8))
+                            .fill(Color.black.opacity(0.6))
                             .frame(width: 48, height: 48)
                         
                         Image(systemName: "house.fill")

@@ -933,7 +933,7 @@ struct CompactPlayerView: View {
                 }) {
                     ZStack {
                         Circle()
-                            .fill(.tint)
+                            .fill(Color.black.opacity(0.6))
                             .frame(width: 36, height: 36)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
@@ -947,6 +947,7 @@ struct CompactPlayerView: View {
                                 .foregroundColor(.white)
                         }
                     }
+                    .modifier(GlassEffectModifier(shape: Circle()))
                 }
                 .buttonStyle(PlainButtonStyle())
             }
@@ -1033,7 +1034,7 @@ struct CompactPlayerView: View {
                 }) {
                     ZStack {
                         Circle()
-                            .fill(Color.blue.opacity(0.8))
+                            .fill(Color.black.opacity(0.6))
                             .frame(width: 36, height: 36)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
@@ -1047,6 +1048,11 @@ struct CompactPlayerView: View {
                                 .foregroundColor(.white)
                         }
                     }
+                    .background(
+                        Circle()
+                            .fill(Color.black.opacity(0.3))
+                            .blur(radius: 8)
+                    )
                 }
                 .buttonStyle(PlainButtonStyle())
             }
@@ -1255,6 +1261,7 @@ struct UnifiedPodcastPlayerView: View {
                     
                     // Player controls with timer aligned under play button
                     VStack(spacing: 1) {
+                        Spacer().frame(height: 4)
                         // Simplified controls - only play/pause and 30s fast forward
                         HStack(spacing: 12) {
                             // Play/Pause button - centered
@@ -1263,7 +1270,7 @@ struct UnifiedPodcastPlayerView: View {
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.blue)
+                                        .fill(Color.black.opacity(0.6))
                                         .frame(width: playButtonSize, height: playButtonSize)
                                     
                                     if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
@@ -1282,6 +1289,7 @@ struct UnifiedPodcastPlayerView: View {
                                             .foregroundColor(.white)
                                     }
                                 }
+                                .modifier(GlassEffectModifier(shape: Circle()))
                             }
                             .buttonStyle(PlainButtonStyle())
                             
@@ -1378,7 +1386,7 @@ struct UnifiedPodcastPlayerView: View {
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.blue)
+                                        .fill(Color.black.opacity(0.6))
                                         .frame(width: playButtonSize, height: playButtonSize)
                                     
                                     if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
@@ -1397,6 +1405,7 @@ struct UnifiedPodcastPlayerView: View {
                                             .foregroundColor(.white)
                                     }
                                 }
+                                .modifier(GlassEffectModifier(shape: Circle()))
                             }
                             .buttonStyle(PlainButtonStyle())
                             
