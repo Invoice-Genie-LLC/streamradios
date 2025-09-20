@@ -122,31 +122,52 @@ struct GlobalPlayerView: View {
 struct HomeButton: View {
     @Binding var isFooterMenuHidden: Bool
     @Binding var isScrolling: Bool
+    @State private var shouldShow = false
     
     var body: some View {
-        if isScrolling {
-            Button(action: {
-                // Use transaction to disable all animations and prevent refreshes
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    isFooterMenuHidden = false // Show TabView when tapped
-                    isScrolling = false // Stop scrolling state immediately
+        Group {
+            // Show button directly based on isScrolling OR shouldShow state
+            if isScrolling || shouldShow {
+                Button(action: {
+                    // Use transaction to disable all animations and prevent refreshes
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        isFooterMenuHidden = false // Show TabView when tapped
+                        isScrolling = false // Stop scrolling state immediately
+                        shouldShow = false // Hide Home button only when tapped
+                    }
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.8))
+                            .frame(width: 48, height: 48)
+                        
+                        Image(systemName: "house.fill")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .modifier(GlassEffectModifier(shape: Circle()))
                 }
-            }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.blue.opacity(0.8))
-                        .frame(width: 48, height: 48)
-                    
-                    Image(systemName: "house.fill")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(.white)
-                }
-                .modifier(GlassEffectModifier(shape: Circle()))
+                .buttonStyle(PlainButtonStyle())
+                .transition(.scale.combined(with: .opacity))
             }
-            .buttonStyle(PlainButtonStyle())
-            .transition(.scale.combined(with: .opacity))
+        }
+        // Monitor isScrolling changes and update shouldShow immediately
+        .onChange(of: isScrolling) { oldValue, newValue in
+            print("🏠 DEBUG: HomeButton onChange - oldValue: \(oldValue), newValue: \(newValue), shouldShow: \(shouldShow)")
+            if newValue {
+                // Show immediately when scrolling starts
+                shouldShow = true
+                print("🏠 DEBUG: HomeButton shouldShow set to true")
+            }
+            // Don't hide when scrolling stops - only when button is tapped
+        }
+        // Check current state on appear
+        .onAppear {
+            if isScrolling {
+                shouldShow = true
+            }
         }
     }
 }

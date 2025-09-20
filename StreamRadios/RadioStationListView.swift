@@ -490,18 +490,21 @@ struct RadioStationListView: View {
         .scrollContentBackground(.hidden)
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))
         .simultaneousGesture(
-            DragGesture()
+            DragGesture(minimumDistance: 0) // Set minimum distance to 0 for instant detection
                 .onChanged { _ in
-                    // Only update state once when scrolling starts
-                    if !isScrolling {
-                        isScrolling = true
-                        // Hide TabView when scrolling starts and keep it hidden
-                        isFooterMenuHidden = true
+                    // IMMEDIATE update - no conditions, just set it
+                    DispatchQueue.main.async {
+                        if !isScrolling {
+                            print("🏠 DEBUG: Setting isScrolling = true in RadioStationListView")
+                            isScrolling = true
+                            isFooterMenuHidden = true
+                        }
                     }
                 }
                 .onEnded { _ in
                     // Debounce the scroll end to prevent rapid state changes
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        print("🏠 DEBUG: Setting isScrolling = false in RadioStationListView")
                         isScrolling = false
                         // Note: Don't reset isFooterMenuHidden here - let home button control it
                     }

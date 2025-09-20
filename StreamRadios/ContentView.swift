@@ -3072,21 +3072,23 @@ struct AnimatedScrollingEpisodeTitle: View {
             
             Group {
                 if isAnimating {
-                    // During animation: show full text that can extend beyond bounds
-                    Text(title)
+                    // During animation: show repeated title for seamless marquee effect
+                    Text("\(title)  \(title)  \(title)")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 } else {
-                    // When not animating: show abbreviated title with truncation
+                    // When not animating: show single title
                     Text(title)
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading) // Force text to start from left edge
+            .offset(x: isAnimating ? animationOffset : 0) // Only apply offset during animation
                 .background(
                     GeometryReader { textGeometry in
                         Color.clear
@@ -3107,9 +3109,8 @@ struct AnimatedScrollingEpisodeTitle: View {
                             }
                     }
                 )
-                .offset(x: animationOffset)
                 .frame(maxWidth: .infinity, alignment: .leading) // Ensure text starts from beginning
-            .frame(width: containerW - 5) // Clip to prevent text under play button - extend to red mark
+            .frame(width: containerW, alignment: .leading) // Full width for proper text positioning
             .clipped()
             .onAppear {
                 containerWidth = containerW
@@ -3161,46 +3162,82 @@ struct AnimatedScrollingEpisodeTitle: View {
             return
         }
         
+        // Ensure we always start from the beginning of the title
+        animationOffset = 0
         isAnimating = true
-        animateScroll()
+        
+        // Small delay to ensure text is properly positioned before animation starts
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            animateScroll()
+        }
     }
     
     private func animateScroll() {
-        // Scroll the ENTIRE episode title text from beginning to end
-        // This ensures the user sees the complete title, not just the visible portion
-        let scrollDistance = textWidth + containerWidth // Scroll full text width + container width to ensure complete visibility
+        // Create seamless marquee effect: scroll just the text width to create continuous loop
+        // This makes it appear like "Title Title Title..." without gaps
+        let scrollDistance = textWidth // Only scroll the width of the text for seamless looping
         
-        // Start from normal position (0) and animate to negative scroll distance
+        // Start continuous marquee animation immediately
+        startScrollAnimation(scrollDistance: scrollDistance)
+    }
+    
+    private func startScrollAnimation(scrollDistance: CGFloat) {
+        // Ensure animation always starts from the beginning position
         animationOffset = 0
         
-        // Adaptive scroll speed: faster for very long titles, but not too fast to read
-        let scrollSpeed: Double = textWidth > 1000 ? 50 : 35 // Faster speed for very long titles
+        // Adaptive scroll speed: moderate speed for better readability
+        let scrollSpeed: Double = textWidth > 1000 ? 80 : textWidth > 500 ? 60 : 40 // Slower for better readability
         let animationDuration = Double(scrollDistance / scrollSpeed)
+        
+        // Check if this will be the final scroll before starting animation
+        let willBeFinalScroll = (scrollCount + 1) >= maxScrollRuns
+        
+        // Log when second scroll starts
+        if willBeFinalScroll {
+            print("📱 EPISODE TITLE: Second (final) scroll starting at \(Date()) - Duration: \(animationDuration)s")
+        }
         
         withAnimation(.linear(duration: animationDuration)) {
             animationOffset = -scrollDistance
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration) {
-
-            animationOffset = 0  // Always return to start position
-            scrollCount += 1
-            
-            // Continue if under max runs
-            if scrollCount < maxScrollRuns {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // Brief pause between runs
+        // Handle final scroll completion - rewind back to beginning then stop
+        if willBeFinalScroll {
+            DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration) {
+                print("📱 EPISODE TITLE: Second scroll ended at \(Date()) - Starting fade-in-place")
+                
+                // Fade-in-place effect: instantly reset position, then fade in single title
+                withAnimation(.none) {
+                    animationOffset = 0  // Instantly reset to beginning
+                    isAnimating = false  // Switch to single title display
+                }
+                scrollCount += 1
+                
+                // Fade in the single title at the beginning position
+                let fadeInDuration = 0.3
+                withAnimation(.easeIn(duration: fadeInDuration)) {
+                    // The title is already visible, this creates a smooth transition effect
+                }
+                
+                print("📱 EPISODE TITLE: Fade-in-place completed at \(Date()) - Single title displayed from beginning")
+            }
+        } else {
+            // Handle continuous scroll without pause for seamless marquee effect
+            DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration) {
+                // Reset position to beginning instantly for seamless loop
+                withAnimation(.none) {
+                    animationOffset = 0  // Instant reset to start for seamless loop
+                }
+                scrollCount += 1
+                
+                // Continue immediately without pause for seamless marquee effect
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     animateScroll()
                 }
-            } else {
-                // End at normal position (left aligned at beginning)
-                animationOffset = 0
-                isAnimating = false
             }
         }
     }
 }
-
-// MARK: - Legacy ScrollableEpisodeTitle Component (for fallback)
 
 struct ScrollableEpisodeTitle: View {
     let title: String

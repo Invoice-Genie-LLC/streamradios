@@ -848,8 +848,9 @@ struct PodcastListView: View {
                 Color.clear.frame(height: 100)  // Add extra space at the bottom
             }
             .simultaneousGesture(
-                DragGesture()
+                DragGesture(minimumDistance: 0) // Set minimum distance to 0 for instant detection
                     .onChanged { _ in
+                        // Instant update - triggers immediately when touch begins
                         if !isScrolling.wrappedValue {
                             isScrolling.wrappedValue = true
                             // Hide TabView when scrolling starts and keep it hidden
