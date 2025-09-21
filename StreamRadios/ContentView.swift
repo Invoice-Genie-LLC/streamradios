@@ -860,6 +860,7 @@ struct CompactPlayerView: View {
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Binding var isPlayerSheetPresented: Bool
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         if #available(iOS 26.0, *) {
@@ -933,7 +934,7 @@ struct CompactPlayerView: View {
                 }) {
                     ZStack {
                         Circle()
-                            .fill(Color.black.opacity(0.6))
+                            .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
                             .frame(width: 36, height: 36)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
@@ -1034,7 +1035,7 @@ struct CompactPlayerView: View {
                 }) {
                     ZStack {
                         Circle()
-                            .fill(Color.black.opacity(0.6))
+                            .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
                             .frame(width: 36, height: 36)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
@@ -1050,7 +1051,7 @@ struct CompactPlayerView: View {
                     }
                     .background(
                         Circle()
-                            .fill(Color.black.opacity(0.3))
+                            .fill(Color.primary.opacity(0.3))
                             .blur(radius: 8)
                     )
                 }
@@ -1270,7 +1271,7 @@ struct UnifiedPodcastPlayerView: View {
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.black.opacity(0.6))
+                                        .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
                                         .frame(width: playButtonSize, height: playButtonSize)
                                     
                                     if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
@@ -1300,13 +1301,14 @@ struct UnifiedPodcastPlayerView: View {
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.adaptiveSecondaryBackground.opacity(0.3))
+                                        .fill(colorScheme == .dark ? Color.adaptiveSecondaryBackground.opacity(0.3) : Color.primary.opacity(0.15))
                                         .frame(width: buttonSize, height: buttonSize)
                                     
                                     Image(systemName: "goforward.30")
                                         .font(.system(size: skipButtonIconSize))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(colorScheme == .dark ? .white : .primary)
                                 }
+                                .modifier(GlassEffectModifier(shape: Circle()))
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -1386,7 +1388,7 @@ struct UnifiedPodcastPlayerView: View {
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.black.opacity(0.6))
+                                        .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
                                         .frame(width: playButtonSize, height: playButtonSize)
                                     
                                     if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {
@@ -1416,13 +1418,14 @@ struct UnifiedPodcastPlayerView: View {
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.adaptiveSecondaryBackground.opacity(0.3))
+                                        .fill(colorScheme == .dark ? Color.adaptiveSecondaryBackground.opacity(0.3) : Color.primary.opacity(0.15))
                                         .frame(width: buttonSize, height: buttonSize)
                                     
                                     Image(systemName: "goforward.30")
                                         .font(.system(size: skipButtonIconSize))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(colorScheme == .dark ? .white : .primary)
                                 }
+                                .modifier(GlassEffectModifier(shape: Circle()))
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -1589,6 +1592,7 @@ struct CompactPodcastPlayerView: View {
     @Binding var selectedPodcast: PodcastFeed?
     var onListButtonTap: (() -> Void)?
     var onCloseButtonTap: (() -> Void)?
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         if #available(iOS 26.0, *) {
@@ -1626,6 +1630,7 @@ struct CurrentlyPlayingView: View {
     let currentStation: RadioStation
     let metadata: String?
     @EnvironmentObject var radioPlayer: RadioPlayer
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         HStack(spacing: 12) {
@@ -1681,7 +1686,7 @@ struct CurrentlyPlayingView: View {
                 }
             }
             .frame(width: 44, height: 44)
-            .background(Color.blue)
+            .background(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
             .clipShape(Circle())
             .buttonStyle(PlainButtonStyle())
         }
@@ -2032,7 +2037,7 @@ struct UnifiedRadioProgressBanner: View {
                         .font(.headline)
                         .foregroundColor(.white)
                         .padding()
-                        .background(Color.blue)
+                        .background(Color.primary.opacity(0.8))
                         .cornerRadius(10)
                         .padding(.horizontal)
                         .padding(.bottom)
@@ -3038,6 +3043,7 @@ struct MainPodcastListBanner: View {
 
 struct EpisodeInfoView: View {
     let episode: PodcastEpisode
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -3047,7 +3053,7 @@ struct EpisodeInfoView: View {
             // Episode release date
             Text(formatEpisodeDate(episode.publicationDate))
                 .font(.system(size: 12, weight: .regular))
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : .secondary)
                 .lineLimit(1)
         }
     }
@@ -3071,6 +3077,7 @@ struct AnimatedScrollingEpisodeTitle: View {
     @State private var isAnimating: Bool = false
     @State private var isInitialDelayComplete: Bool = false
     @State private var scrollTriggerTimer: Timer?
+    @Environment(\.colorScheme) var colorScheme
     
     private let maxScrollRuns = 2 // Two complete scrolls then stop
     private let initialDelay: TimeInterval = 4.0 // 4 second delay before first scroll
@@ -3084,14 +3091,14 @@ struct AnimatedScrollingEpisodeTitle: View {
                     // During animation: show repeated title for seamless marquee effect
                     Text("\(title)  \(title)  \(title)")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 } else {
                     // When not animating: show single title
                     Text(title)
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(colorScheme == .dark ? .white : .primary)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 }
