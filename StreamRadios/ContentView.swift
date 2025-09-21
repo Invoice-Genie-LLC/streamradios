@@ -49,7 +49,8 @@ struct ContentView: View {
     @State private var isScrolling = false
 
     init() {
-        // Always start on the radio tab regardless of previous state
+        // Always start on radio tab - player loading is independent of tab selection
+        // The GlobalPlayerView will show the correct player based on last active player
         let savedTab: Tab = .radio
         
         self._radioPlayer = StateObject(wrappedValue: RadioPlayer.shared)
@@ -241,6 +242,11 @@ struct ContentView: View {
                 .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
                 .environment(\.horizontalSizeClass, .compact)
                 .accentColor(.blue)
+                .onChange(of: selectedTab) { newTab in
+                    // Tab switching should NOT stop playback - players should continue playing
+                    // State clearing only happens when user actually starts playing a different service
+                    print("📱 Tab Switch: Switched to \(newTab) - players continue playing")
+                }
             } else {
                 // Show current tab content without TabView when hidden
                 currentTabContentView
@@ -319,11 +325,22 @@ struct ContentView: View {
             return true
         }
         
+        // ALWAYS SHOW PLAYER: Show if there's a current podcast episode and feed (ready to play)
+        if podcastPlayer.currentEpisode != nil && podcastPlayer.currentFeed != nil {
+            return true
+        }
+        
         // Show radio global player regardless of scene phase, based on user intent or active/paused playback
         if radioPlayer.userWantsToPlay { return true }
         if (radioPlayer.isPlaying || radioPlayer.connectionState == .paused) && radioPlayer.currentlyPlayingStation != nil, radioPlayer.userWantsToPlay {
             return true
         }
+        
+        // ALWAYS SHOW PLAYER: Show if there's a currently playing station (ready to play)
+        if radioPlayer.currentlyPlayingStation != nil {
+            return true
+        }
+        
         return false
     }
     

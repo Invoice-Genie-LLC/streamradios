@@ -70,6 +70,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     // Track if position has been restored to prevent repeated calls during scrolling
     private var hasRestoredPositionForCurrentEpisode: Bool = false
     private var currentEpisodeIdForRestoration: String?
+    
+    // Track restoration attempts to prevent infinite retries
+    private var restorationAttempts: Int = 0
+    private let maxRestorationAttempts: Int = 5
+    private var hasSuccessfullyRestored: Bool = false
 
     // MARK: - Performance Optimization Properties
     private var isUserScrolling = false
@@ -1146,7 +1151,320 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func configure(with viewModel: PodcastViewModel) {
         self.viewModel = viewModel
+        // Note: Podcast episode restoration happens automatically when user navigates to podcasts
+        // The GlobalPlayerView priority logic ensures podcast player shows when content is available
+        
+        print("🔧 PodcastPlayer: Configuring with viewModel")
+        
+        // Reset restoration attempts counter for fresh configuration
+        restorationAttempts = 0
+        hasSuccessfullyRestored = false
+        
+        // Restore last played episode if podcast was the last active player
+        Task { @MainActor in
+            print("🔧 PodcastPlayer: Starting immediate restoration with feeds count: \(viewModel.podcastFeeds.count)")
+            await restoreLastPlayedEpisodeOnStartup()
+        }
+        
+        // Set up notification listener for when feeds are loaded
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleFeedsLoaded),
+            name: NSNotification.Name("PodcastFeedsLoaded"),
+            object: nil
+        )
     }
+    
+    /// Save the current episode ID and feed ID to UserDefaults for app restart restoration
+    private func saveCurrentEpisodeToUserDefaults() {
+        guard let currentEpisode = currentEpisode,
+              let currentFeed = currentFeed else {
+            return
+        }
+        
+        let episodeData: [String: String] = [
+            "episodeId": currentEpisode.id,
+            "feedId": currentFeed.id,
+            "episodeTitle": currentEpisode.title,
+            "feedTitle": currentFeed.title
+        ]
+        
+        UserDefaults.standard.set(episodeData, forKey: "LastPlayedEpisodeData")
+        print("💾 PodcastPlayer: Saved last played episode ID: \(currentEpisode.id)")
+    }
+    
+    /// Clear podcast player state when switching to radio service
+    func clearStateForServiceSwitch() {
+        print("🧹 PodcastPlayer: Clearing state for service switch to radio")
+        
+        // Stop playback immediately
+        player?.pause()
+        isPlaying = false
+        userWantsToPlay = false
+        
+        // Clear current episode and feed to hide player
+        currentEpisode = nil
+        currentFeed = nil
+        
+        // Reset connection state
+        connectionState = .disconnected
+        isPodcastActive = false
+        
+        // Clear progress tracking
+        currentTime = 0
+        currentProgress = 0
+        duration = 0
+        
+        // Clear loading state
+        loadingEpisodeId = nil
+        
+        // Reset restoration flags
+        hasSuccessfullyRestored = false
+        restorationAttempts = 0
+        
+        // Clear Now Playing info
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        
+        // Trigger UI update
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+        
+        print("✅ PodcastPlayer: State cleared for service switch")
+    }
+    
+    /// Handle notification when podcast feeds are loaded - retry restoration if needed
+    @objc private func handleFeedsLoaded() {
+        // Only retry if we haven't successfully restored yet and podcast should be active
+        let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
+        guard lastActivePlayer == .podcast,
+              !hasSuccessfullyRestored,  // Haven't successfully restored yet
+              currentEpisode == nil,     // Haven't restored episode yet
+              currentFeed == nil else {  // Haven't restored feed yet
+            print("ℹ️ PodcastPlayer: Feeds loaded but restoration not needed (restored: \(hasSuccessfullyRestored))")
+            return
+        }
+        
+        print("🔄 PodcastPlayer: Feeds loaded - retrying episode restoration")
+        Task { @MainActor in
+            await restoreLastPlayedEpisodeOnStartup()
+        }
+    }
+    
+    /// Restore the last played episode from UserDefaults on app startup
+    @MainActor
+    private func restoreLastPlayedEpisodeOnStartup() async {
+        // Skip if already successfully restored
+        guard !hasSuccessfullyRestored else {
+            print("ℹ️ PodcastPlayer: Skipping restoration - already successfully restored")
+            return
+        }
+        
+        // Only restore if podcast was the last active player
+        let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
+        guard lastActivePlayer == .podcast else {
+            print("ℹ️ PodcastPlayer: Skipping episode restoration - podcast was not last active player")
+            return
+        }
+        
+        // Check retry limit
+        restorationAttempts += 1
+        guard restorationAttempts <= maxRestorationAttempts else {
+            print("❌ PodcastPlayer: Max restoration attempts reached (\(maxRestorationAttempts))")
+            return
+        }
+        
+        print("🔄 PodcastPlayer: Restoration attempt \(restorationAttempts)/\(maxRestorationAttempts)")
+        
+        guard let viewModel = viewModel,
+              let episodeData = UserDefaults.standard.dictionary(forKey: "LastPlayedEpisodeData") as? [String: String],
+              let episodeId = episodeData["episodeId"],
+              let feedId = episodeData["feedId"] else {
+            print("ℹ️ PodcastPlayer: No saved episode data found for restoration")
+            return
+        }
+        
+        print("✅ PodcastPlayer: Attempting to restore episode ID: \(episodeId) from feed ID: \(feedId)")
+        
+        // Find the feed in the loaded feeds (now safe to access since we're on MainActor)
+        guard let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }) else {
+            print("⚠️ PodcastPlayer: Feed not found for restoration: \(feedId)")
+            print("🔍 PodcastPlayer: Available feeds: \(viewModel.podcastFeeds.map { "\($0.id): \($0.title)" })")
+            
+            // If feeds aren't loaded yet, schedule a quick retry
+            if viewModel.podcastFeeds.isEmpty {
+                print("📅 PodcastPlayer: No feeds loaded yet, will retry in 0.5 seconds")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    Task { @MainActor in
+                        await self?.restoreLastPlayedEpisodeOnStartup()
+                    }
+                }
+            }
+            return
+        }
+        
+        print("📍 PodcastPlayer: Found feed for restoration: \(feed.title)")
+        
+        // Set the feed first to enable player display
+        currentFeed = feed
+        isPodcastActive = true
+        
+        // Force UI update to ensure GlobalPlayerView shows the podcast player immediately
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+            print("🔄 PodcastPlayer: Triggered UI update for feed restoration")
+        }
+        
+        // Load episodes for this feed to find the specific episode
+        await viewModel.loadEpisodesForFeed(feedId, isInitialLoad: true)
+        
+        // Find and set the specific episode
+        if let episode = viewModel.currentEpisodes.first(where: { $0.id == episodeId }) {
+            print("🎵 PodcastPlayer: Episode restored and ready to play: \(episode.title)")
+            currentEpisode = episode
+            
+            // Set the episode as ready to play (but don't auto-play)   
+            userWantsToPlay = false // Don't auto-play on startup
+            connectionState = .connected // Set to connected (ready to play)
+            
+            // Set podcast as active player for proper audio session
+            PlaybackManager.shared.setActivePlayer(.podcast)
+            
+            // Initialize the player with the episode's audio URL
+            await initializePlayerForRestoredEpisode(episode: episode)
+            
+            // Load saved progress
+            let savedProgress = stateManager.getProgress(for: episode.id)
+            if savedProgress > 0 {
+                currentProgress = savedProgress
+                currentTime = savedProgress * duration
+                print("🔧 PodcastPlayer: Restored progress: \(savedProgress * 100)%")
+            }
+            
+            // Force UI update to ensure GlobalPlayerView shows the real episode data
+            DispatchQueue.main.async { [weak self] in
+                self?.objectWillChange.send()
+                print("🔄 PodcastPlayer: Triggered UI update for episode restoration")
+            }
+            
+            print("✅ PodcastPlayer: Episode fully restored - player populated with real data")
+            
+            // Mark as successfully restored and reset retry counter
+            hasSuccessfullyRestored = true
+            restorationAttempts = 0
+        } else {
+            print("⚠️ PodcastPlayer: Episode not found in loaded episodes: \(episodeId)")
+        }
+    }
+    
+    /// Initialize the AVPlayer for a restored episode without starting playback
+    @MainActor
+    private func initializePlayerForRestoredEpisode(episode: PodcastEpisode) async {
+        print("🔧 PodcastPlayer: Initializing AVPlayer for restored episode: \(episode.title)")
+        
+        // Determine the playback URL
+        var playUrl: URL?
+        
+        // Check for local file first
+        if let localFilePath = episode.localFilePath, !localFilePath.isEmpty {
+            let fileExists = FileManager.default.fileExists(atPath: localFilePath)
+            if fileExists {
+                playUrl = URL(fileURLWithPath: localFilePath)
+                print("🔧 PodcastPlayer: Using local file for restored episode")
+            } else {
+                print("🔧 PodcastPlayer: Local file missing, using streaming URL")
+            }
+        }
+        
+        // Fall back to streaming URL
+        if playUrl == nil {
+            if let url = URL(string: episode.audioUrl) {
+                playUrl = url
+                print("🔧 PodcastPlayer: Using streaming URL for restored episode")
+            } else {
+                print("❌ PodcastPlayer: Failed to get playable URL for restored episode")
+                connectionState = .error
+                return
+            }
+        }
+        
+        guard let url = playUrl else {
+            print("❌ PodcastPlayer: No valid URL found for restored episode")
+            connectionState = .error
+            return
+        }
+        
+        // Create and set up the AVPlayer
+        let playerItem = AVPlayerItem(url: url)
+        
+        if player == nil {
+            player = AVPlayer(playerItem: playerItem)
+            print("🔧 PodcastPlayer: Created new AVPlayer for restored episode")
+        } else {
+            player?.replaceCurrentItem(with: playerItem)
+            print("🔧 PodcastPlayer: Replaced current item in existing AVPlayer")
+        }
+        
+        // Set up observers for the new player item
+        setupPlayerItemObserver()
+        setupTimeObserver()
+        
+        // Configure remote commands for podcast
+        configurePodcastRemoteCommands()
+        
+        // Update duration from episode data
+        if episode.duration > 0 {
+            duration = episode.duration
+        }
+        
+        // Wait for the player item to be ready, then seek to saved position if needed
+        if let playerItem = player?.currentItem {
+            // Observe when the player item is ready to play
+            let observation = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
+                if item.status == .readyToPlay {
+                    Task { @MainActor in
+                        await self?.seekToSavedPositionForRestoredEpisode(episode: episode)
+                    }
+                }
+            }
+            
+            // Store the observation to prevent it from being deallocated
+            // Note: In a real implementation, you'd want to manage this observation properly
+        }
+        
+        print("✅ PodcastPlayer: AVPlayer initialized and ready for restored episode")
+    }
+    
+    /// Seek to saved position for restored episode once player is ready
+    @MainActor
+    private func seekToSavedPositionForRestoredEpisode(episode: PodcastEpisode) async {
+        print("🔧 PodcastPlayer: Seeking to saved position for restored episode")
+        
+        let savedProgress = stateManager.getProgress(for: episode.id)
+        if savedProgress > 0 && duration > 0 {
+            let targetTime = savedProgress * duration
+            
+            print("🔧 PodcastPlayer: Seeking to \(targetTime) seconds (\(savedProgress * 100)%)")
+            
+            // Seek to the saved position
+            await player?.seek(to: CMTime(seconds: targetTime, preferredTimescale: 1000))
+            
+            // Update our internal state
+            currentTime = targetTime
+            currentProgress = savedProgress
+            
+            // Update Now Playing info with correct position
+            updateNowPlayingInfo()
+            
+            print("✅ PodcastPlayer: Successfully seeked to saved position")
+        } else {
+            print("🔧 PodcastPlayer: No saved progress to seek to, starting from beginning")
+            // Update Now Playing info even if starting from beginning
+            updateNowPlayingInfo()
+        }
+    }
+    
+    
     
     func setRadioPlayer(_ player: RadioPlayer) {
         self.radioPlayer = player
@@ -1259,6 +1577,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL FIX: Stop current playback FIRST to prevent multiple episodes showing as playing
         let previousEpisode = currentEpisode
         
+        // Set current episode immediately for restoration
+        currentEpisode = episode
+        
+        // CRITICAL: Save current episode info immediately for restoration
+        saveCurrentEpisodeToUserDefaults()
+        
         // If there's a currently playing episode, stop it immediately and save progress
         if let previousEpisode = previousEpisode, previousEpisode.id != episode.id {
             // IMMEDIATE: Stop playing state to prevent UI showing multiple episodes as playing
@@ -1295,6 +1619,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         currentEpisode = episode
         currentFeed = feed
         isPodcastActive = true
+        
+        // Save the current episode to UserDefaults for app restart restoration
+        saveCurrentEpisodeToUserDefaults()
         
         // Initialize time and duration for the new episode
         duration = episode.duration

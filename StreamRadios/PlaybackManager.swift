@@ -43,14 +43,28 @@ class PlaybackManager: ObservableObject {
     func setActivePlayer(_ player: ActivePlayer) {
         activePlayer = player
         
+        // Save the last active player to UserDefaults for app restart restoration
+        UserDefaults.standard.set(player.rawValue, forKey: "LastActivePlayer")
+        
         // Only log if the active player actually changed
         if lastLoggedActivePlayer != player {
-            print("🎵 PlaybackManager: Active player set to \(player)")
+            print("🎵 PlaybackManager: Active player set to \(player) (saved for restoration)")
             lastLoggedActivePlayer = player
         }
         
         // Ensure audio session is properly configured for the active player
         activateAudioSessionForPlayer(player)
+    }
+    
+    /// Get the last active player from UserDefaults for app startup restoration
+    func getLastActivePlayer() -> ActivePlayer? {
+        guard let rawValue = UserDefaults.standard.string(forKey: "LastActivePlayer"),
+              let player = ActivePlayer(rawValue: rawValue) else {
+            print("🎵 PlaybackManager: No last active player found")
+            return nil
+        }
+        print("🎵 PlaybackManager: Restored last active player: \(player)")
+        return player
     }
     
     

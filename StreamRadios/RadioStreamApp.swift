@@ -39,6 +39,7 @@ struct RadioStreamApp: App {
                 .preferredColorScheme(isDarkMode ? .dark : .light)
                 .onAppear {
                     setupApp()
+                    // Configure podcast player immediately - PodcastViewModel is already initialized
                     PodcastPlayer.shared.configure(with: podcastViewModel)
                     // CarPlay is now configured via CarPlaySceneDelegate
                     
@@ -52,6 +53,11 @@ struct RadioStreamApp: App {
                     
                     // Initialize comprehensive debug logging system
                     // DebugLogger.logInfo will be added when import is fixed
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                    // Reconfigure podcast player when app becomes active to ensure restoration works
+                    print("📱 App became active - reconfiguring podcast player")
+                    PodcastPlayer.shared.configure(with: podcastViewModel)
                 }
                 .onDisappear {
                             appDelegate.updatePodcastStateAndSave()

@@ -27,10 +27,11 @@ struct GlobalPlayerView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Player area with home button - prioritize the actively playing player over just loaded content
-            if shouldShowPodcastPlayer && (podcastPlayer.isPlaying || podcastPlayer.userWantsToPlay), 
-               let currentEpisode = podcastPlayer.currentEpisode, let currentFeed = podcastPlayer.currentFeed {
-                // Podcast is actively playing or user wants to play - show podcast compact player with home button
+            // Player area with home button - prioritize based on last active player
+            if shouldShowPodcastPlayerFirst,
+               let currentEpisode = podcastPlayer.currentEpisode,
+               let currentFeed = podcastPlayer.currentFeed {
+                // Show podcast player only when we have both episode and feed loaded
                 HStack(spacing: 8) {
                     // Home button on the left (only shows when scrolling)
                     HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
@@ -63,7 +64,7 @@ struct GlobalPlayerView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-            } else if shouldShowRadioPlayer && (radioPlayer.isPlaying || radioPlayer.userWantsToPlay || !shouldShowPodcastPlayer) {
+            } else if shouldShowRadioPlayerFirst {
                 // STABILITY FIX: Show radio player with stable station display and home button
                 if let currentStation = radioPlayer.currentlyPlayingStation {
                     // CRITICAL: Use radioPlayer.currentlyPlayingStation as the source of truth for display
@@ -79,8 +80,8 @@ struct GlobalPlayerView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 0)
-                } else if !viewModel.stations.isEmpty && selectedTab == .radio {
-                    // Show first available station as default when no station is set (only on radio tab)
+                } else if !viewModel.stations.isEmpty && shouldShowRadioPlayerFirst {
+                    // Show first available station as default when no station is set and radio should be prioritized
                     let defaultStation = viewModel.stations.first!
                     HStack(spacing: 8) {
                         // Home button on the left (only shows when scrolling)
@@ -115,6 +116,58 @@ struct GlobalPlayerView: View {
         // This keeps the player visible even when paused
         return radioPlayer.currentlyPlayingStation != nil
     }
+    
+    /// Determines if podcast player should be prioritized based on last active player
+    private var shouldShowPodcastPlayerFirst: Bool {
+        let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
+        
+        // If podcast was the last active player, prioritize it (even without content loaded yet)
+        if lastActivePlayer == .podcast {
+            return true
+        }
+        
+        // If only podcast has content, show it
+        if shouldShowPodcastPlayer && !shouldShowRadioPlayer {
+            return true
+        }
+        
+        // If both have content, check last active player
+        if shouldShowPodcastPlayer && shouldShowRadioPlayer {
+            return lastActivePlayer == .podcast
+        }
+        
+        // Default: don't show podcast first
+        return false
+    }
+    
+    /// Determines if radio player should be prioritized based on last active player
+    private var shouldShowRadioPlayerFirst: Bool {
+        let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
+        
+        // If radio was the last active player, prioritize it
+        if lastActivePlayer == .radio {
+            return true
+        }
+        
+        // If podcast was the last active player, don't show radio first
+        if lastActivePlayer == .podcast {
+            return false
+        }
+        
+        // If only radio has content, show it
+        if shouldShowRadioPlayer && !shouldShowPodcastPlayer {
+            return true
+        }
+        
+        // If both have content, check last active player
+        if shouldShowPodcastPlayer && shouldShowRadioPlayer {
+            return lastActivePlayer == .radio
+        }
+        
+        // Default: show radio if it has content and no last active player preference
+        return shouldShowRadioPlayer
+    }
+    
 }
 
 // MARK: - Home Button Component

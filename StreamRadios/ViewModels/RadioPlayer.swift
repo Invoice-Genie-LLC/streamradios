@@ -1703,6 +1703,59 @@ class RadioPlayer: NSObject, ObservableObject {
         iTunesArtworkJustSet = false
     }
     
+    /// Clear radio player state when switching to podcast service
+    func clearStateForServiceSwitch() {
+        print("🧹 RadioPlayer: Clearing state for service switch to podcast")
+        
+        // Stop playback immediately
+        player?.pause()
+        player = nil
+        isPlaying = false
+        userWantsToPlay = false
+        wasManuallyPaused = false
+        
+        // Clear current station to hide player
+        currentlyPlayingStation = nil
+        currentStationIndex = nil
+        
+        // Reset connection state
+        connectionState = .disconnected
+        
+        // Clear all metadata and artwork
+        metadata = nil
+        iTunesAlbumArt = nil
+        albumArt = nil
+        songTitle = ""
+        artistName = ""
+        lastMetadataSearched = ""
+        
+        // Cancel any pending operations
+        artworkSearchTimer?.invalidate()
+        artworkSearchTimer = nil
+        artworkProtectionTimer?.invalidate()
+        artworkProtectionTimer = nil
+        iTunesArtworkJustSet = false
+        
+        // Stop reconnection attempts
+        stopReconnectionAttempts()
+        
+        // Stop Shazam recognition
+        stopShazamTimer()
+        
+        // Clear elapsed time tracking
+        playbackStartTime = nil
+        pausedElapsedTime = 0
+        lastElapsedTimeUpdate = nil
+        
+        // Clear Now Playing info
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        
+        // Update UI
+        updateWidget()
+        
+        print("✅ RadioPlayer: State cleared for service switch")
+    }
+    
     /// Starts artwork protection timer to prevent indefinite protection
     private func startArtworkProtectionTimer() {
         // Cancel any existing timer
@@ -2004,13 +2057,14 @@ class RadioPlayer: NSObject, ObservableObject {
         if PlaybackManager.shared.activePlayer != .radio {
             // If radio is actually playing but not set as active player, force set it
             // BUT don't force it during pause operations to prevent station switching
-            if isPlaying && player?.timeControlStatus == .playing && !wasManuallyPaused {
+            // AND don't force it if userWantsToPlay is false (means radio was stopped)
+            if isPlaying && player?.timeControlStatus == .playing && !wasManuallyPaused && userWantsToPlay {
                 print("⚠️ Now Playing: Radio is playing but not active player - forcing active state")
-                PlaybackManager.shared.activePlayer = .radio
+                PlaybackManager.shared.setActivePlayer(.radio)
             } else {
                 // Rate limit this log message to prevent spam
                 if lastLoggedPlayingState != false {
-                    print("❌ Now Playing: Radio is not the active player and not playing")
+                    print("❌ Now Playing: Radio is not the active player and not playing (userWantsToPlay: \(userWantsToPlay))")
                     lastLoggedPlayingState = false
                 }
                 return
