@@ -1,5 +1,5 @@
 //
-//  
+//  PodcastPlayerSheetView.swift
 //  StreamRadios
 //
 //  Created by Kley Sulo on 1/17/25.
@@ -10,7 +10,7 @@ import AVFoundation
 import CoreData
 import AVKit
 
-struct DetailedPodcastPlayerView: View {
+struct PodcastPlayerSheetView: View {
     let episode: PodcastEpisode
     let feed: PodcastFeed
     @ObservedObject var podcastPlayer: PodcastPlayer
@@ -1156,7 +1156,7 @@ extension View {
 }
 
 // MARK: - Private Methods
-extension DetailedPodcastPlayerView {
+extension PodcastPlayerSheetView {
     private func persistFallbackChapters(_ chapters: [PodcastChapter]) {
         guard !chapters.isEmpty else { return }
         let context = CoreDataStack.shared.context

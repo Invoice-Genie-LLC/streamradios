@@ -604,19 +604,19 @@ struct ContentView: View {
                         }
                     }
                 case .playerSheet:
-                    PlayerSheetView()
+                    RadioPlayerSheetView()
                         .environmentObject(radioPlayer)
                         .environmentObject(viewModel)
                 }
             }
 
             .sheet(isPresented: UIDevice.current.userInterfaceIdiom == .phone ? $isPlayerSheetPresented : .constant(false)) {
-                PlayerSheetView()
+                RadioPlayerSheetView()
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
             .fullScreenCover(isPresented: UIDevice.current.userInterfaceIdiom == .pad ? $isPlayerSheetPresented : .constant(false)) {
-                PlayerSheetView()
+                RadioPlayerSheetView()
                     .environmentObject(radioPlayer)
                     .environmentObject(viewModel)
             }
@@ -1375,7 +1375,7 @@ struct UnifiedPodcastPlayerView: View {
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showDetailedPlayer) {
-                DetailedPodcastPlayerView(
+                PodcastPlayerSheetView(
                     episode: currentEpisode,
                     feed: currentFeed,
                     podcastPlayer: podcastPlayer,
@@ -1490,7 +1490,7 @@ struct UnifiedPodcastPlayerView: View {
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showDetailedPlayer) {
-                DetailedPodcastPlayerView(
+                PodcastPlayerSheetView(
                     episode: currentEpisode,
                     feed: currentFeed,
                     podcastPlayer: podcastPlayer,

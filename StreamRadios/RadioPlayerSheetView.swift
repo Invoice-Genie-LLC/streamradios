@@ -1,5 +1,5 @@
 //
-//  PlayerSheetView.swift
+//  RadioPlayerSheetView.swift
 //  StreamRadios
 //
 //  Created by Kley Sulo on 6/9/24.
@@ -74,7 +74,7 @@ public struct LibraryPlaylist: Codable, MusicItem {
     }
 }
 
-struct PlayerSheetView: View {
+struct RadioPlayerSheetView: View {
     @Environment(\.colorScheme) var colorScheme
     
     // Computed properties for adaptive colors
@@ -814,9 +814,9 @@ struct EnhancedPlaylistPickerView: View {
     }
 }
 
-struct PlayerSheetView_Previews: PreviewProvider {
+struct RadioPlayerSheetView_Previews: PreviewProvider {
     static var previews: some View {
-        PlayerSheetView()
+        RadioPlayerSheetView()
             .environmentObject(RadioPlayer.shared)
             .environmentObject(RadioStationViewModel())
     }
