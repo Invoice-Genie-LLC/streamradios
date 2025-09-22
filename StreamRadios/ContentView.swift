@@ -290,7 +290,7 @@ struct ContentView: View {
                     .environmentObject(viewModel)
                     .environmentObject(podcastPlayer)
                     .environmentObject(podcastViewModel)
-                    .padding(.bottom, 55)
+                    .padding(.bottom, isFooterMenuHidden ? 15 : 55)
                     // Add smooth sliding animation when TabView shows/hides
                     .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
                     // Add subtle scale and opacity animation for enhanced visual feedback

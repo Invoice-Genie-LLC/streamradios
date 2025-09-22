@@ -2882,7 +2882,6 @@ struct PodcastPlayerView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                playerHeader
                 episodeFilterTabs
                 
                 // Podcast progress banner - shows sync operations in real-time
@@ -2894,7 +2893,31 @@ struct PodcastPlayerView: View {
             // Global Player now handles all playback display
             // No individual mini player needed here
         }
-        .navigationBarHidden(true)
+        .navigationTitle(feed.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
+                    withAnimation(.none) {
+                        selectedPodcast = nil
+                    }
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.medium))
+                        .foregroundColor(.blue)
+                }
+            }
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                AirPlayButton()
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle()
+                            .fill(Color.adaptiveSectionBackground)
+                    )
+            }
+        }
                 .onAppear(perform: handleOnAppear)
                         .onDisappear {
             // Clean up timers to prevent memory leaks
@@ -2929,129 +2952,6 @@ struct PodcastPlayerView: View {
     }
     
     // MARK: - View Components
-    private var playerHeader: some View {
-        VStack(spacing: 0) {
-            // Enhanced Navigation Bar with gradient background
-            HStack {
-                Button(action: { 
-                    withAnimation(.none) {
-                        selectedPodcast = nil 
-                    }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                            .font(.body)
-                        Text("Back")
-                            .font(.body)
-                    }
-                    .foregroundColor(.blue)
-                }
-                .buttonStyle(PlainButtonStyle())
-                
-                Spacer()
-                
-                Text(feed.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .foregroundColor(.primary)
-                
-                Spacer()
-                
-                AirPlayButton()
-                    .frame(width: 30, height: 30)
-                    .background(
-                        Circle()
-                            .fill(Color.adaptiveSectionBackground)
-                    )
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 54)
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(UIColor.systemBackground),
-                        Color(UIColor.systemBackground).opacity(0.95)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .overlay(
-                Rectangle()
-                    .fill(Color.adaptiveSeparator)
-                    .frame(height: 1),
-                alignment: .bottom
-            )
-            
-            // Enhanced Feed Info Area with better hierarchy
-            GeometryReader { geometry in
-                VStack(spacing: 0) {
-                    HStack(alignment: .top, spacing: 16) {
-                        // Enhanced artwork with shadow and border using pre-downloaded data
-                        PodcastIconView(
-                            iconData: feed.iconData,
-                            imageData: feed.imageData,
-                            artworkUrl: feed.artworkUrl
-                        )
-                        .frame(width: min(120, geometry.size.width * 0.3))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(color: Color.adaptiveBorder.opacity(0.3), radius: 6, x: 0, y: 3)
-                        
-                                                    VStack(alignment: .leading, spacing: 12) {
-                                // Podcast description section
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack {
-                                        Text("ABOUT")
-                                            .font(.caption)
-                                            .foregroundColor(.adaptivePrimaryText)
-                                            .tracking(1.2)
-                                        
-                                        Spacer()
-                                        
-                                        // Scroll indicators - show arrows to indicate scrollable content
-                                        VStack(spacing: 2) {
-                                            Image(systemName: "chevron.up")
-                                                .font(.caption2)
-                                                .foregroundColor(.secondary)
-                                            Image(systemName: "chevron.down")
-                                                .font(.caption2)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        .opacity(0.6)
-                                    }
-                                    
-                                    ScrollView(.vertical, showsIndicators: true) {
-                                        Text(feed.descriptionText ?? "No description available")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .multilineTextAlignment(.leading)
-                                            .padding(.trailing, 8) // Add right padding to prevent text cutoff
-                                            .padding(.bottom, 4) // Add some bottom padding for better scrolling
-                                    }
-                                    .frame(maxHeight: 80) // Set a max height for the scroll view
-                                }
-
-                        }
-                        .frame(width: geometry.size.width - min(130, geometry.size.width * 0.35) - 40)
-                    }
-                    .padding(20)
-                }
-            }
-            .frame(height: 140)
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(UIColor.secondarySystemBackground).opacity(0.8),
-                        Color(UIColor.secondarySystemBackground)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            
-
-        }
-    }
     
     private var episodeFilterTabs: some View {
         VStack(spacing: 0) {
