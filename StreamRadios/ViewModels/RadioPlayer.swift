@@ -1862,6 +1862,9 @@ class RadioPlayer: NSObject, ObservableObject {
         let station = stations[index]
         print("🔄 Station Transition: Playing \(station.name) at index \(index)")
         
+        // Clear navigation cache when switching stations to ensure fresh list on next navigation
+        clearNavigationCache()
+        
         // Report station click to Radio Browser API if station was discovered from there
         viewModel?.reportStationClick(for: station)
         
@@ -2053,43 +2056,45 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func nextStation(from stations: [RadioStation]) {
-        print("⏭️ Switching to next station")
+        print("⏭️ Switching to next station from list of \(stations.count) stations")
         
-        // COUNTRY CONTAMINATION FIX: Validate currentStationIndex against currentlyPlayingStation
-        var validCurrentIndex: Int?
-        if let playingStation = currentlyPlayingStation {
-            validCurrentIndex = stations.firstIndex(where: { $0.id == playingStation.id })
-            if validCurrentIndex != currentStationIndex {
-                print("🔧 CONTAMINATION FIX: Correcting currentStationIndex for next station navigation")
-                currentStationIndex = validCurrentIndex
-            }
-        } else {
-            validCurrentIndex = currentStationIndex
+        // Always find current station by ID in the provided stations list
+        guard let playingStation = currentlyPlayingStation else {
+            print("❌ No currently playing station - cannot navigate")
+            return
         }
         
-        guard let currentIndex = validCurrentIndex else { return }
+        guard let currentIndex = stations.firstIndex(where: { $0.id == playingStation.id }) else {
+            print("❌ Current station '\(playingStation.name)' not found in provided stations list")
+            return
+        }
+        
+        print("🔍 Current station '\(playingStation.name)' found at index \(currentIndex) in filtered list")
         let nextIndex = (currentIndex + 1) % stations.count
+        print("⏭️ Moving to next station at index \(nextIndex): '\(stations[nextIndex].name)'")
+        
         playStation(at: nextIndex, from: stations)
         updateLastPlayed(stations[nextIndex])
     }
     
     func previousStation(from stations: [RadioStation]) {
-        print("⏮️ Switching to previous station")
+        print("⏮️ Switching to previous station from list of \(stations.count) stations")
         
-        // COUNTRY CONTAMINATION FIX: Validate currentStationIndex against currentlyPlayingStation
-        var validCurrentIndex: Int?
-        if let playingStation = currentlyPlayingStation {
-            validCurrentIndex = stations.firstIndex(where: { $0.id == playingStation.id })
-            if validCurrentIndex != currentStationIndex {
-                print("🔧 CONTAMINATION FIX: Correcting currentStationIndex for previous station navigation")
-                currentStationIndex = validCurrentIndex
-            }
-        } else {
-            validCurrentIndex = currentStationIndex
+        // Always find current station by ID in the provided stations list
+        guard let playingStation = currentlyPlayingStation else {
+            print("❌ No currently playing station - cannot navigate")
+            return
         }
         
-        guard let currentIndex = validCurrentIndex else { return }
+        guard let currentIndex = stations.firstIndex(where: { $0.id == playingStation.id }) else {
+            print("❌ Current station '\(playingStation.name)' not found in provided stations list")
+            return
+        }
+        
+        print("🔍 Current station '\(playingStation.name)' found at index \(currentIndex) in filtered list")
         let previousIndex = (currentIndex - 1 + stations.count) % stations.count
+        print("⏮️ Moving to previous station at index \(previousIndex): '\(stations[previousIndex].name)'")
+        
         playStation(at: previousIndex, from: stations)
         updateLastPlayed(stations[previousIndex])
     }
@@ -2451,10 +2456,35 @@ class RadioPlayer: NSObject, ObservableObject {
             return .commandFailed
         }
         
-        // Disable next/previous track commands for radio to prevent accidental station skipping
-        // Radio stations should only be changed intentionally by the user in the UI
-        commandCenter.nextTrackCommand.isEnabled = false
-        commandCenter.previousTrackCommand.isEnabled = false
+        // Enable next/previous track commands for radio station navigation
+        // This allows skip/previous buttons to work on lock screen and CarPlay
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.nextTrackCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
+            if PlaybackManager.shared.activePlayer == .radio {
+                // Get the appropriate station list based on current context
+                if let stations = self.getCurrentStationList() {
+                    self.nextStation(from: stations)
+                    print("🎮 Remote Command: Next Station executed")
+                    return .success
+                }
+            }
+            return .commandFailed
+        }
+        
+        commandCenter.previousTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.addTarget { [weak self] event in
+            guard let self = self else { return .commandFailed }
+            if PlaybackManager.shared.activePlayer == .radio {
+                // Get the appropriate station list based on current context
+                if let stations = self.getCurrentStationList() {
+                    self.previousStation(from: stations)
+                    print("🎮 Remote Command: Previous Station executed")
+                    return .success
+                }
+            }
+            return .commandFailed
+        }
         
         // CRITICAL: Enable toggle play/pause command for Now Playing display
         commandCenter.togglePlayPauseCommand.isEnabled = true
@@ -2483,6 +2513,85 @@ class RadioPlayer: NSObject, ObservableObject {
         commandCenter.seekBackwardCommand.isEnabled = false
         
         print("✅ Remote Command Center configured for Radio - Next/Previous Station enabled, Skip commands disabled")
+    }
+    
+    // Cache the station navigation list to prevent it from changing during skip operations
+    private var cachedNavigationStations: [RadioStation]?
+    private var cacheTimestamp: Date?
+    private let cacheValidDuration: TimeInterval = 30 // Cache valid for 30 seconds
+    
+    /// Gets the current station list based on the active tab context for skip/previous functionality
+    /// Uses caching to prevent the list from changing during navigation operations
+    private func getCurrentStationList() -> [RadioStation]? {
+        guard let viewModel = viewModel else {
+            print("❌ getCurrentStationList: No viewModel available")
+            return nil
+        }
+        
+        // Check if we have a valid cached list
+        if let cached = cachedNavigationStations,
+           let timestamp = cacheTimestamp,
+           Date().timeIntervalSince(timestamp) < cacheValidDuration {
+            print("🔍 getCurrentStationList: Using cached list with \(cached.count) stations")
+            return cached
+        }
+        
+        print("🔍 getCurrentStationList: Creating fresh station list - Current tab = \(viewModel.selectedSubTab), Country = '\(viewModel.selectedCountry)'")
+        
+        var freshStations: [RadioStation]?
+        
+        // Apply the same filtering logic as in RadioPlayerSheetView
+        switch viewModel.selectedSubTab {
+        case .all:
+            // All tab shows stations from the selected country only, sorted alphabetically
+            if viewModel.selectedCountry == "Select Country" {
+                print("🔍 getCurrentStationList: All tab - no country selected, returning empty list")
+                freshStations = []
+            } else {
+                var stations = viewModel.stations.filter { station in
+                    // Filter by selected country and ensure valid country information
+                    let hasValidCountry = !station.country.isEmpty &&
+                                        station.country != "Unknown Region" &&
+                                        station.country != "Select Country" &&
+                                        !station.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    
+                    let matches = station.country == viewModel.selectedCountry && hasValidCountry
+                    return matches
+                }
+                
+                // Sort alphabetically by name based on toggle setting
+                if viewModel.isAscendingSort {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                } else {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                }
+                print("🔍 getCurrentStationList: All tab returning \(stations.count) stations for country '\(viewModel.selectedCountry)'")
+                freshStations = stations
+            }
+        case .recent:
+            // Recent tab shows recent stations from ALL countries regardless of country selection
+            let recentStations = viewModel.recentStations()
+            print("🔍 getCurrentStationList: Recent tab returning \(recentStations.count) stations")
+            freshStations = recentStations
+        case .favorites:
+            // Favorites respects CloudKit-synced favoriteOrder
+            let favoriteStations = viewModel.favoriteStations()
+            print("🔍 getCurrentStationList: Favorites tab returning \(favoriteStations.count) stations")
+            freshStations = favoriteStations
+        }
+        
+        // Cache the fresh list
+        cachedNavigationStations = freshStations
+        cacheTimestamp = Date()
+        
+        return freshStations
+    }
+    
+    /// Clears the cached navigation station list to force a fresh fetch on next access
+    private func clearNavigationCache() {
+        cachedNavigationStations = nil
+        cacheTimestamp = nil
+        print("🔍 getCurrentStationList: Cache cleared")
     }
     
     private func scheduleAppRefresh() {

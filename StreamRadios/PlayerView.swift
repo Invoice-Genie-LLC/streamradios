@@ -12,22 +12,42 @@ struct PlayerView: View {
     @EnvironmentObject var viewModel: RadioStationViewModel
     @State private var bitrateMessage: String = "Playing at high bitrate: 256 kbps"
     
+    // Station list to use for skip/previous navigation - defaults to all stations if not provided
+    let stationsForNavigation: [RadioStation]?
+    
+    init(stationsForNavigation: [RadioStation]? = nil) {
+        self.stationsForNavigation = stationsForNavigation
+    }
+    
+    // Computed property to get the effective stations list
+    private var effectiveStations: [RadioStation] {
+        return stationsForNavigation ?? viewModel.stations
+    }
+    
+    // Check if skip/previous buttons should be enabled (need at least 1 station)
+    private var canSkipStations: Bool {
+        let stationCount = effectiveStations.count
+        // Enable buttons if there's at least one station (can skip to same station or next available)
+        return stationCount > 0
+    }
+    
     var body: some View {
         VStack(spacing: 16) {
             // Main control buttons
             HStack(spacing: 40) {
                 // Previous station button
                 Button(action: {
-                    radioPlayer.previousStation(from: viewModel.stations)
+                    radioPlayer.previousStation(from: effectiveStations)
                 }) {
                     Image(systemName: "backward.fill")
                         .font(.title2)
-                        .foregroundColor(.white)
+                        .foregroundColor(canSkipStations ? .white : .gray)
                 }
                 .frame(width: 44, height: 44)
-                .background(Color.gray.opacity(0.3))
+                .background(canSkipStations ? Color.gray.opacity(0.3) : Color.gray.opacity(0.1))
                 .clipShape(Circle())
                 .buttonStyle(PlainButtonStyle())
+                .disabled(!canSkipStations)
                 
                 // Main play/pause button - larger and more prominent
                 Button(action: {
@@ -54,16 +74,17 @@ struct PlayerView: View {
                 
                 // Next station button
                 Button(action: {
-                    radioPlayer.nextStation(from: viewModel.stations)
+                    radioPlayer.nextStation(from: effectiveStations)
                 }) {
                     Image(systemName: "forward.fill")
                         .font(.title2)
-                        .foregroundColor(.white)
+                        .foregroundColor(canSkipStations ? .white : .gray)
                 }
                 .frame(width: 44, height: 44)
-                .background(Color.gray.opacity(0.3))
+                .background(canSkipStations ? Color.gray.opacity(0.3) : Color.gray.opacity(0.1))
                 .clipShape(Circle())
                 .buttonStyle(PlainButtonStyle())
+                .disabled(!canSkipStations)
             }
             
             // Connection state indicator or bitrate information

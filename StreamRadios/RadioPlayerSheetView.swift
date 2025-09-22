@@ -391,10 +391,46 @@ struct RadioPlayerSheetView: View {
         .padding(.horizontal, 20)
     }
     
+    // Get filtered stations based on current tab for skip/previous navigation
+    private var filteredStationsForNavigation: [RadioStation] {
+        switch viewModel.selectedSubTab {
+        case .all:
+            // All tab shows stations from the selected country only, sorted alphabetically
+            if viewModel.selectedCountry == "Select Country" {
+                return []
+            } else {
+                var stations = viewModel.stations.filter { station in
+                    // Filter by selected country and ensure valid country information
+                    let hasValidCountry = !station.country.isEmpty &&
+                                        station.country != "Unknown Region" &&
+                                        station.country != "Select Country" &&
+                                        !station.country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    
+                    let matches = station.country == viewModel.selectedCountry && hasValidCountry
+                    return matches
+                }
+                
+                // Sort alphabetically by name based on toggle setting
+                if viewModel.isAscendingSort {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                } else {
+                    stations = stations.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+                }
+                return stations
+            }
+        case .recent:
+            // Recent tab shows recent stations from ALL countries regardless of country selection
+            return viewModel.recentStations()
+        case .favorites:
+            // Favorites respects CloudKit-synced favoriteOrder
+            return viewModel.favoriteStations()
+        }
+    }
+    
     @ViewBuilder
     private var bottomControlsView: some View {
         VStack(spacing: 8) {
-            PlayerView()
+            PlayerView(stationsForNavigation: filteredStationsForNavigation)
                 .environmentObject(radioPlayer)
                 .environmentObject(viewModel)
             
