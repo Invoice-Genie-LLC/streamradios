@@ -195,10 +195,10 @@ struct HomeButton: View {
                     ZStack {
                         Circle()
                             .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
-                            .frame(width: 48, height: 48)
+                            .frame(width: 55, height: 55)
                         
                         Image(systemName: "line.3.horizontal")
-                            .font(.system(size: 20, weight: .medium))
+                            .font(.system(size: 22, weight: .medium))
                             .foregroundColor(.white)
                     }
                     .modifier(GlassEffectModifier(shape: Circle()))
