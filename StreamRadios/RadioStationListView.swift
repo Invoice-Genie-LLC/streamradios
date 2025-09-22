@@ -490,7 +490,7 @@ struct RadioStationListView: View {
         .scrollContentBackground(.hidden)
         .environment(\.editMode, .constant(isEditing ? .active : .inactive))
         .simultaneousGesture(
-            DragGesture(minimumDistance: 0) // Set minimum distance to 0 for instant detection
+            DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
                 .onChanged { _ in
                     // IMMEDIATE update - no conditions, just set it
                     DispatchQueue.main.async {
