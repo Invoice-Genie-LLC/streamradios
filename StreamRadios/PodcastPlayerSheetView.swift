@@ -584,8 +584,40 @@ struct PodcastPlayerSheetView: View {
                     podcastPlayer.togglePlayPause()
                 }) {
                     ZStack {
+                        // Base glass layer
                         Circle()
-                            .fill(Color.blue)
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 80, height: 80)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 80, height: 80)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                             .frame(width: 80, height: 80)
                         
                         if podcastPlayer.loadingEpisodeId == episode.id && !podcastPlayer.isPlaying {
@@ -600,8 +632,10 @@ struct PodcastPlayerSheetView: View {
                             Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 32))
                                 .foregroundColor(.white)
+                                .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
+                    .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
                 }
                 
                 // Fast forward 30s

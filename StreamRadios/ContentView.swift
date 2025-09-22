@@ -280,7 +280,13 @@ struct ContentView: View {
                     .environmentObject(viewModel)
                     .environmentObject(podcastPlayer)
                     .environmentObject(podcastViewModel)
-                    .padding(.bottom, shouldHideFooterMenu ? 16 : 55)
+                    .padding(.bottom, shouldHideFooterMenu ? 16 : 65)
+                    // Add smooth sliding animation when TabView shows/hides
+                    .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
+                    // Add subtle scale and opacity animation for enhanced visual feedback
+                    .scaleEffect(shouldHideFooterMenu ? 1.02 : 1.0)
+                    .opacity(shouldShowGlobalPlayer ? 1.0 : 0.0)
+                    .animation(.easeInOut(duration: 0.3), value: shouldShowGlobalPlayer)
                 }
             }
             .allowsHitTesting(true) // Allow interaction with player
@@ -356,7 +362,7 @@ struct ContentView: View {
         return isFooterMenuHidden
     }
     
-    /// Updates tab bar visibility using UIKit
+    /// Updates tab bar visibility using UIKit with enhanced animations
     private func updateTabBarVisibility() {
         DispatchQueue.main.async {
             // Find the UITabBarController
@@ -368,9 +374,25 @@ struct ContentView: View {
             
             // Find the tab bar controller in the view hierarchy
             if let tabBarController = findTabBarController(in: rootViewController) {
-                UIView.animate(withDuration: 0.3) {
-                    tabBarController.tabBar.isHidden = isFooterMenuHidden
-                }
+                // Enhanced animation with spring effect for smoother feel
+                UIView.animate(
+                    withDuration: 0.4,
+                    delay: 0,
+                    usingSpringWithDamping: 0.8,
+                    initialSpringVelocity: 0.5,
+                    options: [.allowUserInteraction, .beginFromCurrentState],
+                    animations: {
+                        tabBarController.tabBar.isHidden = self.isFooterMenuHidden
+                        
+                        // Add subtle transform for extra visual feedback
+                        if self.isFooterMenuHidden {
+                            tabBarController.tabBar.transform = CGAffineTransform(translationX: 0, y: 10)
+                        } else {
+                            tabBarController.tabBar.transform = .identity
+                        }
+                    },
+                    completion: nil
+                )
             }
         }
     }
@@ -967,9 +989,41 @@ struct CompactPlayerView: View {
                     radioPlayer.playPause()
                 }) {
                     ZStack {
+                        // Base glass layer
                         Circle()
-                            .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
-                            .frame(width: 36, height: 36)
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .frame(width: 44, height: 44)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
@@ -980,9 +1034,10 @@ struct CompactPlayerView: View {
                             Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.headline)
                                 .foregroundColor(.white)
+                                .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
-                    .modifier(GlassEffectModifier(shape: Circle()))
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
@@ -1068,9 +1123,41 @@ struct CompactPlayerView: View {
                     radioPlayer.playPause()
                 }) {
                     ZStack {
+                        // Base glass layer
                         Circle()
-                            .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
-                            .frame(width: 36, height: 36)
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .frame(width: 44, height: 44)
                         
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
@@ -1081,13 +1168,10 @@ struct CompactPlayerView: View {
                             Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.headline)
                                 .foregroundColor(.white)
+                                .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
-                    .background(
-                        Circle()
-                            .fill(Color.primary.opacity(0.3))
-                            .blur(radius: 8)
-                    )
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
                 }
                 .buttonStyle(PlainButtonStyle())
             }
@@ -1304,8 +1388,40 @@ struct UnifiedPodcastPlayerView: View {
                                 podcastPlayer.togglePlayPause()
                             }) {
                                 ZStack {
+                                    // Base glass layer
                                     Circle()
-                                        .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
+                                        .fill(.ultraThinMaterial)
+                                        .frame(width: playButtonSize, height: playButtonSize)
+                                    
+                                    // Glass gradient overlay for depth
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [
+                                                    Color.white.opacity(0.25),
+                                                    Color.white.opacity(0.05),
+                                                    Color.white.opacity(0.15)
+                                                ],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: playButtonSize, height: playButtonSize)
+                                    
+                                    // Glass border with subtle glow
+                                    Circle()
+                                        .stroke(
+                                            LinearGradient(
+                                                colors: [
+                                                    Color.white.opacity(0.4),
+                                                    Color.white.opacity(0.1),
+                                                    Color.white.opacity(0.3)
+                                                ],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ),
+                                            lineWidth: 0.5
+                                        )
                                         .frame(width: playButtonSize, height: playButtonSize)
                                     
                                     if podcastPlayer.loadingEpisodeId == currentEpisode.id && !podcastPlayer.isPlaying {

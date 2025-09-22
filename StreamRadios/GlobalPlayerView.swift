@@ -36,7 +36,7 @@ struct GlobalPlayerView: View {
                     // Home button on the left (only shows when scrolling)
                     HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
                     
-                    // Podcast player
+                    // Podcast player with smooth animation
                     CompactPodcastPlayerView(
                         currentEpisode: currentEpisode,
                         currentFeed: currentFeed,
@@ -54,8 +54,10 @@ struct GlobalPlayerView: View {
                             podcastPlayer.pause()
                         }
                     )
+                    .allowsHitTesting(!isScrolling) // Disable podcast player taps when Home button is showing
                     .onTapGesture {
-                        if let currentFeed = podcastPlayer.currentFeed {
+                        // Only allow tap when Home button is not showing to prevent conflicts
+                        if !isScrolling, let currentFeed = podcastPlayer.currentFeed {
                             // Switch to podcast tab and set the current feed
                             selectedPodcast = currentFeed
                             podcastViewModel.requestFeedRefresh(currentFeed.id)
@@ -63,7 +65,7 @@ struct GlobalPlayerView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, playerHorizontalPadding)
             } else if shouldShowRadioPlayerFirst {
                 // STABILITY FIX: Show radio player with stable station display and home button
                 if let currentStation = radioPlayer.currentlyPlayingStation {
@@ -73,12 +75,13 @@ struct GlobalPlayerView: View {
                         // Home button on the left (only shows when scrolling)
                         HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
                         
-                        // Radio player
+                        // Radio player with smooth animation
                         CompactPlayerView(currentStation: currentStation, metadata: radioPlayer.metadata, isPlayerSheetPresented: $isPlayerSheetPresented)
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
+                            .allowsHitTesting(!isScrolling) // Disable radio player taps when Home button is showing
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, playerHorizontalPadding)
                     .padding(.bottom, 0)
                 } else if !viewModel.stations.isEmpty && shouldShowRadioPlayerFirst {
                     // Show first available station as default when no station is set and radio should be prioritized
@@ -87,16 +90,18 @@ struct GlobalPlayerView: View {
                         // Home button on the left (only shows when scrolling)
                         HomeButton(isFooterMenuHidden: $isFooterMenuHidden, isScrolling: $isScrolling)
                         
-                        // Radio player
+                        // Radio player with smooth animation
                         CompactPlayerView(currentStation: defaultStation, metadata: nil, isPlayerSheetPresented: $isPlayerSheetPresented)
                             .environmentObject(radioPlayer)
                             .environmentObject(viewModel)
+                            .allowsHitTesting(!isScrolling) // Disable radio player taps when Home button is showing
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, playerHorizontalPadding)
                     .padding(.bottom, 0)
                 }
             }
         }
+        // Remove background - clean transparent look
     }
     
     /// Determines if podcast player should be shown
@@ -138,6 +143,14 @@ struct GlobalPlayerView: View {
         
         // Default: don't show podcast first
         return false
+    }
+    
+    /// Consistent horizontal padding for the player
+    /// Player maintains the same size regardless of scrolling state and TabView visibility
+    /// Same padding whether TabView is visible or hidden for consistent appearance
+    private var playerHorizontalPadding: CGFloat {
+        // Consistent padding in all states to match screenshot spacing
+        return 24
     }
     
     /// Determines if radio player should be prioritized based on last active player
@@ -183,28 +196,63 @@ struct HomeButton: View {
             // Show button directly based on isScrolling OR shouldShow state
             if isScrolling || shouldShow {
                 Button(action: {
-                    // Use transaction to disable all animations and prevent refreshes
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
+                    // Use smooth animation for TabView restoration
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                         isFooterMenuHidden = false // Show TabView when tapped
                         isScrolling = false // Stop scrolling state immediately
                         shouldShow = false // Hide Home button only when tapped
                     }
                 }) {
                     ZStack {
+                        // Base glass layer
                         Circle()
-                            .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 55, height: 55)
+                        
+                        // Glass gradient overlay for more depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 55, height: 55)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                             .frame(width: 55, height: 55)
                         
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 22, weight: .medium))
                             .foregroundColor(.white)
+                            .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                     }
-                    .modifier(GlassEffectModifier(shape: Circle()))
+                    .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
                 }
                 .buttonStyle(PlainButtonStyle())
-                .transition(.scale.combined(with: .opacity))
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.3).combined(with: .opacity).combined(with: .move(edge: .leading)),
+                    removal: .scale(scale: 0.8).combined(with: .opacity).combined(with: .move(edge: .leading))
+                ))
+                .animation(.spring(response: 0.4, dampingFraction: 0.7), value: isScrolling)
             }
         }
         // Monitor isScrolling changes and update shouldShow immediately
