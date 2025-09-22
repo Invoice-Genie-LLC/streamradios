@@ -534,7 +534,12 @@ class RadioPlayer: NSObject, ObservableObject {
     }
     
     func autoPlayLastStationSetup() {
-        print("🔄 Auto-play setup initiated - autoPlayLastStation: \(autoPlayLastStation)")
+        // Debug: Check both @AppStorage and direct UserDefaults access
+        let directUserDefaultsValue = UserDefaults.standard.bool(forKey: "autoPlayLastStation")
+        print("🔄 Auto-play setup initiated")
+        print("📊 @AppStorage autoPlayLastStation: \(autoPlayLastStation)")
+        print("📊 Direct UserDefaults autoPlayLastStation: \(directUserDefaultsValue)")
+        print("📊 Values match: \(autoPlayLastStation == directUserDefaultsValue)")
         // If app requested suppression of global player on next launch, skip any UI/auto-restore once
         if UserDefaults.standard.bool(forKey: "SuppressGlobalPlayerOnNextLaunch") {
             print("🧹 SuppressGlobalPlayerOnNextLaunch active - skipping radio UI/auto-restore on launch")
@@ -549,7 +554,8 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
-        if autoPlayLastStation {
+        // Use direct UserDefaults access to ensure we get the most current value
+        if directUserDefaultsValue {
             // Wait a bit longer to ensure network monitoring and app state are ready
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 // Only auto-play if we're not currently handling an alarm and CarPlay isn't playing
@@ -795,15 +801,6 @@ class RadioPlayer: NSObject, ObservableObject {
         isHandlingAlarm = false
     }
     
-    func restoreStateAfterStationsLoaded() {
-        print("🔄 Restoring radio player state after stations loaded")
-        
-        if autoPlayLastStation {
-            restoreLastPlayedStation()
-        } else {
-            restoreLastPlayedStationUIOnly()
-        }
-    }
     
 
     

@@ -273,6 +273,16 @@ struct SettingsView: View {
                 isOn: $autoPlayLastStation,
                 icon: "play.circle.fill"
             )
+            .onChange(of: autoPlayLastStation) { _, newValue in
+                print("⚙️ SettingsView: Auto-Play Last Station changed to: \(newValue)")
+                
+                // Force immediate UserDefaults synchronization
+                UserDefaults.standard.set(newValue, forKey: "autoPlayLastStation")
+                UserDefaults.standard.synchronize()
+                
+                print("⚙️ SettingsView: Forced UserDefaults sync - value now: \(UserDefaults.standard.bool(forKey: "autoPlayLastStation"))")
+                print("⚙️ SettingsView: Setting change saved immediately to prevent auto-play on next launch")
+            }
 
             ToggleRow(
                 title: "Stop After Episode",

@@ -109,8 +109,8 @@ struct RadioStreamApp: App {
         } else {
             print("⚡ Skipping CloudKit radio station sync - stations already loaded by ViewModel for instant startup")
             // RadioStationViewModel already loaded stations in its init, no need to reload
-            // Restore radio player state immediately since stations are already available
-            radioPlayer.restoreStateAfterStationsLoaded()
+            // Setup auto-play functionality with proper setting checks
+            radioPlayer.autoPlayLastStationSetup()
         }
         
         // Initialize podcast system with CloudKit support
@@ -155,8 +155,8 @@ struct RadioStreamApp: App {
                     // Notify that stations have been updated
                     NotificationCenter.default.post(name: .stationsUpdated, object: nil)
                     
-                    // After loading stations from CloudKit, ensure radio player state is restored
-                    RadioPlayer.shared.restoreStateAfterStationsLoaded()
+                    // After loading stations from CloudKit, setup auto-play with proper setting checks
+                    RadioPlayer.shared.autoPlayLastStationSetup()
                 }
             } else if let error = error {
                 print("Failed to fetch stations from CloudKit: \(error.localizedDescription)")

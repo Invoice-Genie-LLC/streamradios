@@ -115,7 +115,7 @@ struct RadioStationListView: View {
         .onAppear(perform: setup)
         .onAppear {
             setup()
-            playFavoriteStation()
+            // Removed playFavoriteStation() - automatic playback should be controlled by Auto-Play Last Station setting
             loadHiddenCountries()
         }
         .onDisappear(perform: cleanup)
@@ -571,14 +571,6 @@ struct RadioStationListView: View {
         }
     }
     
-    private func playFavoriteStation() {
-        if let favoriteStation = viewModel.stations.first(where: { $0.name == "Favorite Station" }) {
-            if let index = viewModel.stations.firstIndex(where: { $0.id == favoriteStation.id }) {
-                viewModel.updateLastPlayed(for: viewModel.stations[index])
-                radioPlayer.playStation(at: index, from: viewModel.stations)
-            }
-        }
-    }
     
     @ViewBuilder
     private func stationRow(for station: RadioStation) -> some View {
