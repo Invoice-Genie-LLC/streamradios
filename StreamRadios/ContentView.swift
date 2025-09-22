@@ -241,10 +241,20 @@ struct ContentView: View {
         .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
         .environment(\.horizontalSizeClass, .compact)
         .accentColor(.blue)
+        // CONSISTENT SPACING FIX: Adjust TabView position to maintain visual consistency
+        // When footer menu is hidden (scrolling), move TabView up to compensate for fixed player spacing
+        .offset(y: shouldHideFooterMenu ? -10 : 0)
         .onChange(of: selectedTab) { newTab in
             // Tab switching should NOT stop playback - players should continue playing
             // State clearing only happens when user actually starts playing a different service
             print("📱 Tab Switch: Switched to \(newTab) - players continue playing")
+            
+            // CRITICAL FIX: Reset footer menu and scrolling state when switching tabs
+            // This prevents spacing issues caused by carrying over scroll state from previous tab
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                isFooterMenuHidden = false
+                isScrolling = false
+            }
         }
         .onAppear {
             // Configure initial tab bar visibility
@@ -280,7 +290,7 @@ struct ContentView: View {
                     .environmentObject(viewModel)
                     .environmentObject(podcastPlayer)
                     .environmentObject(podcastViewModel)
-                    .padding(.bottom, shouldHideFooterMenu ? 16 : 65)
+                    .padding(.bottom, 55)
                     // Add smooth sliding animation when TabView shows/hides
                     .animation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0), value: shouldHideFooterMenu)
                     // Add subtle scale and opacity animation for enhanced visual feedback
