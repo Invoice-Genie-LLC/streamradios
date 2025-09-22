@@ -400,7 +400,7 @@ struct PodcastListView: View {
                .navigationBarTitleDisplayMode(.inline)
                .toolbar {
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
-                       if !isEditing {
+                       if !isEditing && selectedPodcast == nil {
                            Button(action: { 
                                // Show confirmation alert for podcast sorting
                                alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: { 
@@ -1334,16 +1334,6 @@ struct ToolbarItems: ToolbarContent {
                 isEditing.toggle()
             }) {
                 Text(isEditing ? "Done" : "Edit")
-            }
-        }
-        ToolbarItemGroup(placement: .navigationBarTrailing) {
-            if !isEditing {
-                Button(action: onSortTapped) {
-                    Image(systemName: "arrow.up.arrow.down")
-                }
-                Button(action: onAddTapped) {
-                    Image(systemName: "plus")
-                }
             }
         }
     }
@@ -2882,6 +2872,9 @@ struct PodcastPlayerView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
+                // About section - displayed above episodes
+                aboutSection
+                
                 episodeFilterTabs
                 
                 // Podcast progress banner - shows sync operations in real-time
@@ -2899,23 +2892,13 @@ struct PodcastPlayerView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: {
-                    withAnimation(.none) {
-                        selectedPodcast = nil
-                    }
+                    selectedPodcast = nil
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.body.weight(.medium))
                         .foregroundColor(.blue)
                 }
-            }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                AirPlayButton()
-                    .frame(width: 30, height: 30)
-                    .background(
-                        Circle()
-                            .fill(Color.adaptiveSectionBackground)
-                    )
+                .buttonStyle(PlainButtonStyle())
             }
         }
                 .onAppear(perform: handleOnAppear)
@@ -3054,7 +3037,84 @@ struct PodcastPlayerView: View {
         }
     }
     
-
+    // MARK: - About Section
+    private var aboutSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("ABOUT")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .tracking(1.0)
+                
+                Spacer()
+                
+                // Scroll indicators - show arrows to indicate scrollable content
+                VStack(spacing: 2) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .opacity(0.6)
+            }
+            
+            HStack(alignment: .top, spacing: 16) {
+                // Feed artwork on the left - using cached imageData for instant loading
+                if let imageData = feed.imageData, let uiImage = UIImage(data: imageData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 120, height: 120)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    // Fallback to URL loading if no cached data
+                    AsyncImage(url: URL(string: feed.artworkUrl ?? "")) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        case .failure(_), .empty:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.gray.opacity(0.3))
+                                .overlay(
+                                    Image(systemName: "music.note")
+                                        .foregroundColor(.gray)
+                                        .font(.largeTitle)
+                                )
+                        @unknown default:
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.gray.opacity(0.3))
+                                .overlay(
+                                    Image(systemName: "music.note")
+                                        .foregroundColor(.gray)
+                                        .font(.largeTitle)
+                                )
+                        }
+                    }
+                    .frame(width: 120, height: 120)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                
+                // Description text on the right
+                ScrollView(.vertical, showsIndicators: true) {
+                    Text(feed.descriptionText ?? "No description available")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .textSelection(.enabled)
+                        .padding(.trailing, 8) // Add right padding to prevent text cutoff
+                        .padding(.bottom, 4) // Add some bottom padding for better scrolling
+                }
+                .frame(maxHeight: 120) // Match artwork height for better alignment
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
 
     private var episodeRows: some View {
         let episodes = viewModel.currentEpisodes

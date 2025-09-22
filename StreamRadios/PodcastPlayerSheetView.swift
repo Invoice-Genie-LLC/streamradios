@@ -574,20 +574,11 @@ struct PodcastPlayerSheetView: View {
                 Button(action: {
                     podcastPlayer.skipBackward()
                 }) {
-                    Image(systemName: "gobackward.15")
-                        .font(.system(size: 32))
-                        .foregroundColor(.adaptivePrimaryText)
-                }
-                
-                // Play/Pause
-                Button(action: {
-                    podcastPlayer.togglePlayPause()
-                }) {
                     ZStack {
                         // Base glass layer
                         Circle()
                             .fill(.ultraThinMaterial)
-                            .frame(width: 80, height: 80)
+                            .frame(width: 44, height: 44)
                         
                         // Glass gradient overlay for depth
                         Circle()
@@ -602,7 +593,57 @@ struct PodcastPlayerSheetView: View {
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 80, height: 80)
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        Image(systemName: "gobackward.15")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
+                    }
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                // Play/Pause
+                Button(action: {
+                    podcastPlayer.togglePlayPause()
+                }) {
+                    ZStack {
+                        // Base glass layer
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 64, height: 64)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 64, height: 64)
                         
                         // Glass border with subtle glow
                         Circle()
@@ -618,7 +659,7 @@ struct PodcastPlayerSheetView: View {
                                 ),
                                 lineWidth: 1
                             )
-                            .frame(width: 80, height: 80)
+                            .frame(width: 64, height: 64)
                         
                         if podcastPlayer.loadingEpisodeId == episode.id && !podcastPlayer.isPlaying {
                             ProgressView()
@@ -630,22 +671,64 @@ struct PodcastPlayerSheetView: View {
                                 .scaleEffect(1.2)
                         } else {
                             Image(systemName: podcastPlayer.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 32))
+                                .font(.largeTitle)
                                 .foregroundColor(.white)
                                 .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
-                    .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+                    .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
                 }
+                .buttonStyle(PlainButtonStyle())
                 
                 // Fast forward 30s
                 Button(action: {
                     podcastPlayer.skipForward()
                 }) {
-                    Image(systemName: "goforward.30")
-                        .font(.system(size: 32))
-                        .foregroundColor(.adaptivePrimaryText)
+                    ZStack {
+                        // Base glass layer
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        Image(systemName: "goforward.30")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
+                    }
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
                 }
+                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding(.horizontal, 20)

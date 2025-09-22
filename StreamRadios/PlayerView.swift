@@ -39,13 +39,50 @@ struct PlayerView: View {
                 Button(action: {
                     radioPlayer.previousStation(from: effectiveStations)
                 }) {
-                    Image(systemName: "backward.fill")
-                        .font(.title2)
-                        .foregroundColor(canSkipStations ? .white : .gray)
+                    ZStack {
+                        // Base glass layer
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        Image(systemName: "backward.fill")
+                            .font(.title2)
+                            .foregroundColor(canSkipStations ? .white : .gray)
+                            .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
+                    }
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
                 }
-                .frame(width: 44, height: 44)
-                .background(canSkipStations ? Color.gray.opacity(0.3) : Color.gray.opacity(0.1))
-                .clipShape(Circle())
                 .buttonStyle(PlainButtonStyle())
                 .disabled(!canSkipStations)
                 
@@ -54,6 +91,42 @@ struct PlayerView: View {
                     radioPlayer.playPause()
                 }) {
                     ZStack {
+                        // Base glass layer
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 64, height: 64)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 64, height: 64)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                            .frame(width: 64, height: 64)
+                        
                         if radioPlayer.isBuffering || radioPlayer.connectionState == .connecting {
                             ProgressView()
                                 .scaleEffect(1.2)
@@ -63,26 +136,61 @@ struct PlayerView: View {
                             Image(systemName: radioPlayer.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.largeTitle)
                                 .foregroundColor(.white)
+                                .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
                         }
                     }
+                    .shadow(color: Color.black.opacity(0.15), radius: 6, x: 0, y: 3)
                 }
-                .frame(width: 64, height: 64)
-                .background(Color.blue)
-                .clipShape(Circle())
                 .buttonStyle(PlainButtonStyle())
-                .shadow(color: Color.blue.opacity(0.3), radius: 8, x: 0, y: 4)
                 
                 // Next station button
                 Button(action: {
                     radioPlayer.nextStation(from: effectiveStations)
                 }) {
-                    Image(systemName: "forward.fill")
-                        .font(.title2)
-                        .foregroundColor(canSkipStations ? .white : .gray)
+                    ZStack {
+                        // Base glass layer
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass gradient overlay for depth
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.white.opacity(0.05),
+                                        Color.white.opacity(0.15)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        // Glass border with subtle glow
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.4),
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .frame(width: 44, height: 44)
+                        
+                        Image(systemName: "forward.fill")
+                            .font(.title2)
+                            .foregroundColor(canSkipStations ? .white : .gray)
+                            .shadow(color: Color.black.opacity(0.3), radius: 1, x: 0, y: 1)
+                    }
+                    .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
                 }
-                .frame(width: 44, height: 44)
-                .background(canSkipStations ? Color.gray.opacity(0.3) : Color.gray.opacity(0.1))
-                .clipShape(Circle())
                 .buttonStyle(PlainButtonStyle())
                 .disabled(!canSkipStations)
             }
