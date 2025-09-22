@@ -76,6 +76,31 @@ public struct LibraryPlaylist: Codable, MusicItem {
 
 struct PlayerSheetView: View {
     @Environment(\.colorScheme) var colorScheme
+    
+    // Computed properties for adaptive colors
+    private var backButtonColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var selectedTextColor: Color {
+        colorScheme == .dark ? .black : .white
+    }
+    
+    private var unselectedTextColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var selectedBackgroundColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var topBarBackgroundColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.8) : Color.white.opacity(0.9)
+    }
+    
+    private var segmentedControlBackgroundColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.8) : Color.white.opacity(0.9)
+    }
     @EnvironmentObject var radioPlayer: RadioPlayer
     @EnvironmentObject var viewModel: RadioStationViewModel
     @StateObject private var permissionManager = PermissionManager()
@@ -107,7 +132,7 @@ struct PlayerSheetView: View {
                     }) {
                         Image(systemName: "chevron.down")
                             .font(.title2)
-                            .foregroundColor(.white)
+                            .foregroundColor(backButtonColor)
                             .frame(width: 44, height: 44)
                     }
                     
@@ -125,13 +150,13 @@ struct PlayerSheetView: View {
                         }) {
                             Text("Now Playing")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(selectedTab == 0 ? .black : .white)
+                                .foregroundColor(selectedTab == 0 ? selectedTextColor : unselectedTextColor)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
                                 .frame(maxWidth: .infinity)
                                 .background(
                                     RoundedRectangle(cornerRadius: 20)
-                                        .fill(selectedTab == 0 ? Color.white : Color.clear)
+                                        .fill(selectedTab == 0 ? selectedBackgroundColor : Color.clear)
                                 )
                         }
                         
@@ -157,13 +182,13 @@ struct PlayerSheetView: View {
                             }) {
                                 Text("Shazam")
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(selectedTab == 1 ? .black : .white)
+                                    .foregroundColor(selectedTab == 1 ? selectedTextColor : unselectedTextColor)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 8)
                                     .frame(maxWidth: .infinity)
                                     .background(
                                         RoundedRectangle(cornerRadius: 20)
-                                            .fill(selectedTab == 1 ? Color.white : Color.clear)
+                                            .fill(selectedTab == 1 ? selectedBackgroundColor : Color.clear)
                                     )
                             }
                         }
@@ -171,7 +196,7 @@ struct PlayerSheetView: View {
                     .padding(4)
                     .background(
                         RoundedRectangle(cornerRadius: 24)
-                            .fill(Color.black.opacity(0.8))
+                            .fill(segmentedControlBackgroundColor)
                     )
                     .conditionalGlassEffect(cornerRadius: 24)
                     
@@ -183,7 +208,7 @@ struct PlayerSheetView: View {
                 .padding(.vertical, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 24)
-                        .fill(Color.black.opacity(0.8))
+                        .fill(topBarBackgroundColor)
                 )
                 .conditionalGlassEffect(cornerRadius: 24)
                 

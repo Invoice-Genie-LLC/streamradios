@@ -26,6 +26,31 @@ struct DetailedPodcastPlayerView: View {
     @State private var refreshTrigger = false // Force view refresh after download operations
     @Environment(\.colorScheme) var colorScheme
     
+    // Computed properties for adaptive colors
+    private var backButtonColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var selectedTextColor: Color {
+        colorScheme == .dark ? .black : .white
+    }
+    
+    private var unselectedTextColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var selectedBackgroundColor: Color {
+        colorScheme == .dark ? .white : .black
+    }
+    
+    private var topBarBackgroundColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.8) : Color.white.opacity(0.9)
+    }
+    
+    private var segmentedControlBackgroundColor: Color {
+        colorScheme == .dark ? Color.gray.opacity(0.3) : Color.gray.opacity(0.2)
+    }
+    
     init(episode: PodcastEpisode, feed: PodcastFeed, podcastPlayer: PodcastPlayer, viewModel: PodcastViewModel, isPresented: Binding<Bool>) {
         self.episode = episode
         self.feed = feed
@@ -102,7 +127,7 @@ struct DetailedPodcastPlayerView: View {
                     }) {
                         Image(systemName: "chevron.down")
                             .font(.title2)
-                            .foregroundColor(.white)
+                            .foregroundColor(backButtonColor)
                             .frame(width: 44, height: 44)
                     }
                     
@@ -116,7 +141,7 @@ struct DetailedPodcastPlayerView: View {
                         }) {
                             Text("Now Playing")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(selectedTab == 0 ? .black : .white)
+                                .foregroundColor(selectedTab == 0 ? selectedTextColor : unselectedTextColor)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 10)
                                 .frame(maxWidth: .infinity)
@@ -124,7 +149,7 @@ struct DetailedPodcastPlayerView: View {
                                 .minimumScaleFactor(0.8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 20)
-                                        .fill(selectedTab == 0 ? Color.white : Color.clear)
+                                        .fill(selectedTab == 0 ? selectedBackgroundColor : Color.clear)
                                 )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -137,7 +162,7 @@ struct DetailedPodcastPlayerView: View {
                         }) {
                             Text("Details")
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(selectedTab == 1 ? .black : .white)
+                                .foregroundColor(selectedTab == 1 ? selectedTextColor : unselectedTextColor)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 10)
                                 .frame(maxWidth: .infinity)
@@ -145,7 +170,7 @@ struct DetailedPodcastPlayerView: View {
                                 .minimumScaleFactor(0.8)
                                 .background(
                                     RoundedRectangle(cornerRadius: 20)
-                                        .fill(selectedTab == 1 ? Color.white : Color.clear)
+                                        .fill(selectedTab == 1 ? selectedBackgroundColor : Color.clear)
                                 )
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -159,7 +184,7 @@ struct DetailedPodcastPlayerView: View {
                             }) {
                                 Text("Chapters")
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(selectedTab == 2 ? .black : .white)
+                                    .foregroundColor(selectedTab == 2 ? selectedTextColor : unselectedTextColor)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 10)
                                     .frame(maxWidth: .infinity)
@@ -167,7 +192,7 @@ struct DetailedPodcastPlayerView: View {
                                     .minimumScaleFactor(0.8)
                                     .background(
                                         RoundedRectangle(cornerRadius: 20)
-                                            .fill(selectedTab == 2 ? Color.white : Color.clear)
+                                            .fill(selectedTab == 2 ? selectedBackgroundColor : Color.clear)
                                     )
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -176,14 +201,14 @@ struct DetailedPodcastPlayerView: View {
                     .padding(3)
                     .background(
                         RoundedRectangle(cornerRadius: 24)
-                            .fill(Color.gray.opacity(0.3))
+                            .fill(segmentedControlBackgroundColor)
                     )
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 24)
-                        .fill(Color.black.opacity(0.8))
+                        .fill(topBarBackgroundColor)
                 )
                 .conditionalGlassEffect(cornerRadius: 24)
                 

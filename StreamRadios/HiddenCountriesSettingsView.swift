@@ -122,6 +122,10 @@ struct HiddenCountriesSettingsView: View {
                 .listStyle(InsetGroupedListStyle())
                 .scrollContentBackground(.hidden)
                 .background(backgroundColor)
+                .safeAreaInset(edge: .bottom) {
+                    // Add space at bottom to prevent player obstruction
+                    Color.clear.frame(height: 100)
+                }
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
                         .onChanged { _ in
@@ -147,23 +151,7 @@ struct HiddenCountriesSettingsView: View {
             .background(backgroundColor)
             .navigationTitle("Hidden Countries")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "chevron.left")
-                                .font(.body)
-                                .fontWeight(.medium)
-                            Text("Settings")
-                                .font(.body)
-                        }
-                        .foregroundColor(.blue)
-                    }
-                }
-                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button("Hide All") {
@@ -184,9 +172,6 @@ struct HiddenCountriesSettingsView: View {
                     }
                 }
         }
-        .navigationTitle("Hidden Countries")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
         .onAppear {
             loadHiddenCountries()
         }

@@ -205,30 +205,7 @@ struct ContentSubmissionView: View {
             }
             .background(backgroundColor)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(true)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if !showingRoleSelection {
-                        Button("Back") {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                showingRoleSelection = true
-                                showingForm = false
-                            }
-                        }
-                        .foregroundColor(.blue)
-                    } else {
-                        Button(action: {
-                            dismiss()
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                    .font(.body)
-                                Text("Settings")
-                            }
-                        }
-                        .foregroundColor(.blue)
-                    }
-                }
                 
                 ToolbarItem(placement: .principal) {
                     Text("Content Submission")
@@ -318,6 +295,10 @@ struct ContentSubmissionView: View {
                 .padding(.top, 10)
             }
             .padding(.vertical, 20)
+            .safeAreaInset(edge: .bottom) {
+                // Add space at bottom to prevent player obstruction
+                Color.clear.frame(height: 100)
+            }
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
@@ -425,9 +406,38 @@ struct ContentSubmissionView: View {
                     // Terms agreement
                     termsAgreementSection
                     
-                    Spacer(minLength: 100)
+                    // Submit button integrated into form
+                    Button {
+                        submitForm()
+                    } label: {
+                        HStack(spacing: 12) {
+                            if isSubmitting {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            }
+                            Text(isSubmitting ? "Submitting..." : "Submit")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(canSubmit ? AnyView(accentGradient) : AnyView(Color.gray.opacity(0.5)))
+                        .foregroundColor(.white)
+                        .cornerRadius(16)
+                        .shadow(color: canSubmit ? shadowColor : Color.clear, radius: 8, x: 0, y: 4)
+                    }
+                    .disabled(!canSubmit || isSubmitting)
+                    .animation(.easeInOut(duration: 0.2), value: canSubmit)
+                    .padding(.top, 20)
+                    
+                    Spacer(minLength: 50)
                 }
                 .padding()
+                .safeAreaInset(edge: .bottom) {
+                    // Add extra space at bottom to prevent player obstruction
+                    Color.clear.frame(height: 120)
+                }
             }
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
@@ -450,38 +460,6 @@ struct ContentSubmissionView: View {
                         }
                     }
             )
-            
-            // Submit button with modern styling
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(height: 1)
-                
-                Button {
-                    submitForm()
-                } label: {
-                    HStack(spacing: 12) {
-                        if isSubmitting {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.8)
-                        }
-                        Text(isSubmitting ? "Submitting..." : "Submit")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(canSubmit ? AnyView(accentGradient) : AnyView(Color.gray.opacity(0.5)))
-                    .foregroundColor(.white)
-                    .cornerRadius(16)
-                    .shadow(color: canSubmit ? shadowColor : Color.clear, radius: 8, x: 0, y: 4)
-                }
-                .disabled(!canSubmit || isSubmitting)
-                .padding(20)
-                .animation(.easeInOut(duration: 0.2), value: canSubmit)
-            }
-            .background(cardBackgroundColor)
         }
         .background(backgroundColor)
     }
