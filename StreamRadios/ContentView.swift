@@ -203,60 +203,59 @@ struct ContentView: View {
     // MARK: - Body
     
     var body: some View {
-        Group {
-            if !isFooterMenuHidden {
-                // Show full TabView with proper styling
-                TabView(selection: $selectedTab) {
-                    // Radio Tab - Contains the original full interface
-                    radioTabContent
-                    .tabItem {
-                        Image(systemName: Tab.radio.icon)
-                        Text(Tab.radio.title)
-                    }
-                    .tag(Tab.radio)
-                    
-                    // Podcast Tab
-                    PodcastListView(selectedPodcast: $selectedPodcast, isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)
-                    .id("podcast-\(syncCompletionRefreshID)") // Force PodcastListView to recreate when sync completes
-                    .environmentObject(podcastPlayer)
-                    .environmentObject(podcastViewModel)
-                    .tabItem {
-                        Image(systemName: Tab.podcast.icon)
-                        Text(Tab.podcast.title)
-                    }
-                    .tag(Tab.podcast)
-                    
-
-                    // Settings Tab
-                    SettingsView()
-                    .environmentObject(radioPlayer)
-                    .environmentObject(viewModel)
-                    .environmentObject(podcastPlayer)
-                    .environmentObject(podcastViewModel)
-                    .tabItem {
-                        Image(systemName: Tab.settings.icon)
-                        Text(Tab.settings.title)
-                    }
-                    .tag(Tab.settings)
-                }
-                .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
-                .environment(\.horizontalSizeClass, .compact)
-                .accentColor(.blue)
-                .onChange(of: selectedTab) { newTab in
-                    // Tab switching should NOT stop playback - players should continue playing
-                    // State clearing only happens when user actually starts playing a different service
-                    print("📱 Tab Switch: Switched to \(newTab) - players continue playing")
-                }
-            } else {
-                // Show current tab content without TabView when hidden
-                currentTabContentView
+        // Always show TabView to preserve NavigationView stacks
+        // Use UIKit integration to hide/show tab bar dynamically
+        TabView(selection: $selectedTab) {
+            // Radio Tab - Contains the original full interface
+            radioTabContent
+            .tabItem {
+                Image(systemName: Tab.radio.icon)
+                Text(Tab.radio.title)
             }
+            .tag(Tab.radio)
+            
+            // Podcast Tab
+            PodcastListView(selectedPodcast: $selectedPodcast, isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)
+            .id("podcast-\(syncCompletionRefreshID)") // Force PodcastListView to recreate when sync completes
+            .environmentObject(podcastPlayer)
+            .environmentObject(podcastViewModel)
+            .tabItem {
+                Image(systemName: Tab.podcast.icon)
+                Text(Tab.podcast.title)
+            }
+            .tag(Tab.podcast)
+            
+
+            // Settings Tab
+            SettingsView(isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)
+            .environmentObject(radioPlayer)
+            .environmentObject(viewModel)
+            .environmentObject(podcastPlayer)
+            .environmentObject(podcastViewModel)
+            .tabItem {
+                Image(systemName: Tab.settings.icon)
+                Text(Tab.settings.title)
+            }
+            .tag(Tab.settings)
         }
-        .id(isFooterMenuHidden ? "content-only" : "full-tabview")
+        .id(syncCompletionRefreshID) // Force TabView refresh when sync completes
+        .environment(\.horizontalSizeClass, .compact)
+        .accentColor(.blue)
+        .onChange(of: selectedTab) { newTab in
+            // Tab switching should NOT stop playback - players should continue playing
+            // State clearing only happens when user actually starts playing a different service
+            print("📱 Tab Switch: Switched to \(newTab) - players continue playing")
+        }
         .onAppear {
+            // Configure initial tab bar visibility
+            updateTabBarVisibility()
             setupTabView()
             checkAndStartDataSync()
             checkSubscriptionStatus()
+        }
+        .onChange(of: isFooterMenuHidden) { _, newValue in
+            // Update tab bar visibility when scroll state changes
+            updateTabBarVisibility()
         }
         .onChange(of: selectedTab) { oldValue, newValue in
             // Do NOT clear iTunes artwork when navigating between views
@@ -357,26 +356,44 @@ struct ContentView: View {
         return isFooterMenuHidden
     }
     
-    /// Shows current tab content without TabView wrapper
-    @ViewBuilder
-    private var currentTabContentView: some View {
-        switch selectedTab {
-        case .radio:
-            radioTabContent
-        case .podcast:
-            PodcastListView(selectedPodcast: $selectedPodcast, isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)
-                .id("podcast-\(syncCompletionRefreshID)")
-                .environmentObject(podcastPlayer)
-                .environmentObject(podcastViewModel)
-        case .settings:
-            SettingsView()
-                .environmentObject(radioPlayer)
-                .environmentObject(viewModel)
-                .environmentObject(podcastPlayer)
-                .environmentObject(podcastViewModel)
+    /// Updates tab bar visibility using UIKit
+    private func updateTabBarVisibility() {
+        DispatchQueue.main.async {
+            // Find the UITabBarController
+            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let window = windowScene.windows.first,
+                  let rootViewController = window.rootViewController else {
+                return
+            }
+            
+            // Find the tab bar controller in the view hierarchy
+            if let tabBarController = findTabBarController(in: rootViewController) {
+                UIView.animate(withDuration: 0.3) {
+                    tabBarController.tabBar.isHidden = isFooterMenuHidden
+                }
+            }
         }
     }
     
+    /// Recursively finds UITabBarController in view hierarchy
+    private func findTabBarController(in viewController: UIViewController) -> UITabBarController? {
+        if let tabBarController = viewController as? UITabBarController {
+            return tabBarController
+        }
+        
+        for child in viewController.children {
+            if let found = findTabBarController(in: child) {
+                return found
+            }
+        }
+        
+        if let presented = viewController.presentedViewController {
+            return findTabBarController(in: presented)
+        }
+        
+        return nil
+    }
+
     // MARK: - Radio Tab Content with Full Original Functionality
     
     private var radioTabContent: some View {

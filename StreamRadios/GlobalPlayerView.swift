@@ -197,7 +197,7 @@ struct HomeButton: View {
                             .fill(colorScheme == .dark ? Color.black.opacity(0.6) : Color.primary.opacity(0.8))
                             .frame(width: 48, height: 48)
                         
-                        Image(systemName: "house.fill")
+                        Image(systemName: "line.3.horizontal")
                             .font(.system(size: 20, weight: .medium))
                             .foregroundColor(.white)
                     }

@@ -9,12 +9,28 @@ import SwiftUI
 import FlagKit
 
 struct HiddenCountriesSettingsView: View {
+    // Scroll detection bindings for TabView hide functionality
+    @Binding var isScrolling: Bool
+    @Binding var isFooterMenuHidden: Bool
+    
     @AppStorage("hiddenCountries") private var hiddenCountriesData: Data = Data()
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.colorScheme) var colorScheme
     
     @State private var hiddenCountries: Set<String> = []
     @State private var searchText = ""
+    
+    // Default initializer for backward compatibility
+    init() {
+        self._isScrolling = .constant(false)
+        self._isFooterMenuHidden = .constant(false)
+    }
+    
+    // Main initializer with scroll detection bindings
+    init(isScrolling: Binding<Bool>, isFooterMenuHidden: Binding<Bool>) {
+        self._isScrolling = isScrolling
+        self._isFooterMenuHidden = isFooterMenuHidden
+    }
     
     private let allCountries = Country.getAllCountriesWithAPICodes().filter { $0.name != "Select Country" }
     
@@ -106,6 +122,27 @@ struct HiddenCountriesSettingsView: View {
                 .listStyle(InsetGroupedListStyle())
                 .scrollContentBackground(.hidden)
                 .background(backgroundColor)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
+                        .onChanged { _ in
+                            // IMMEDIATE update - no conditions, just set it
+                            DispatchQueue.main.async {
+                                if !isScrolling {
+                                    print("🏠 DEBUG: Setting isScrolling = true in HiddenCountriesSettingsView")
+                                    isScrolling = true
+                                    isFooterMenuHidden = true
+                                }
+                            }
+                        }
+                        .onEnded { _ in
+                            // Debounce the scroll end to prevent rapid state changes
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                print("🏠 DEBUG: Setting isScrolling = false in HiddenCountriesSettingsView")
+                                isScrolling = false
+                                // Note: Don't reset isFooterMenuHidden here - let home button control it
+                            }
+                        }
+                )
             }
             .background(backgroundColor)
             .navigationTitle("Hidden Countries")

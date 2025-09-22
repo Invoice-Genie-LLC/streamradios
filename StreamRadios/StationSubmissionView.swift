@@ -138,6 +138,10 @@ struct ContentSubmissionData {
 
 // MARK: - Main Content Submission View
 struct ContentSubmissionView: View {
+    // Scroll detection bindings for TabView hide functionality
+    @Binding var isScrolling: Bool
+    @Binding var isFooterMenuHidden: Bool
+    
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
     @State private var showingRoleSelection = true
@@ -150,6 +154,18 @@ struct ContentSubmissionView: View {
     @State private var showingMailComposer = false
     @State private var mailComposerError: String? = nil
     @State private var showingSuccessScreen = false
+    
+    // Default initializer for backward compatibility
+    init() {
+        self._isScrolling = .constant(false)
+        self._isFooterMenuHidden = .constant(false)
+    }
+    
+    // Main initializer with scroll detection bindings
+    init(isScrolling: Binding<Bool>, isFooterMenuHidden: Binding<Bool>) {
+        self._isScrolling = isScrolling
+        self._isFooterMenuHidden = isFooterMenuHidden
+    }
     
     private var backgroundColor: some View {
         colorScheme == .dark ? 
@@ -303,6 +319,27 @@ struct ContentSubmissionView: View {
             }
             .padding(.vertical, 20)
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
+                .onChanged { _ in
+                    // IMMEDIATE update - no conditions, just set it
+                    DispatchQueue.main.async {
+                        if !isScrolling {
+                            print("🏠 DEBUG: Setting isScrolling = true in ContentSubmissionView (roleSelectionView)")
+                            isScrolling = true
+                            isFooterMenuHidden = true
+                        }
+                    }
+                }
+                .onEnded { _ in
+                    // Debounce the scroll end to prevent rapid state changes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        print("🏠 DEBUG: Setting isScrolling = false in ContentSubmissionView (roleSelectionView)")
+                        isScrolling = false
+                        // Note: Don't reset isFooterMenuHidden here - let home button control it
+                    }
+                }
+        )
     }
     
     private func roleOptionCard(role: SubmissionRole) -> some View {
@@ -392,6 +429,27 @@ struct ContentSubmissionView: View {
                 }
                 .padding()
             }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
+                    .onChanged { _ in
+                        // IMMEDIATE update - no conditions, just set it
+                        DispatchQueue.main.async {
+                            if !isScrolling {
+                                print("🏠 DEBUG: Setting isScrolling = true in ContentSubmissionView (submissionFormView)")
+                                isScrolling = true
+                                isFooterMenuHidden = true
+                            }
+                        }
+                    }
+                    .onEnded { _ in
+                        // Debounce the scroll end to prevent rapid state changes
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            print("🏠 DEBUG: Setting isScrolling = false in ContentSubmissionView (submissionFormView)")
+                            isScrolling = false
+                            // Note: Don't reset isFooterMenuHidden here - let home button control it
+                        }
+                    }
+            )
             
             // Submit button with modern styling
             VStack(spacing: 0) {

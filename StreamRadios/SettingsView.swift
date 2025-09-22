@@ -33,6 +33,10 @@ struct ExceptionInfo: Identifiable {
 }
 
 struct SettingsView: View {
+    // Scroll detection bindings for TabView hide functionality
+    @Binding var isScrolling: Bool
+    @Binding var isFooterMenuHidden: Bool
+    
     @AppStorage("autoPlayLastStation") private var autoPlayLastStation = false
     @AppStorage("stopAfterEpisode") private var stopAfterEpisode = false
     @AppStorage("isDarkMode") private var isDarkMode: Bool = UserDefaults.standard.bool(forKey: "isDarkModeSet") ? UserDefaults.standard.bool(forKey: "isDarkMode") : true
@@ -98,6 +102,18 @@ struct SettingsView: View {
     @State private var showingPrivacyConsentAlert = false
     @State private var showingDebugEnableAlert = false
     
+    // Default initializer for backward compatibility
+    init() {
+        self._isScrolling = .constant(false)
+        self._isFooterMenuHidden = .constant(false)
+    }
+    
+    // Main initializer with scroll detection bindings
+    init(isScrolling: Binding<Bool>, isFooterMenuHidden: Binding<Bool>) {
+        self._isScrolling = isScrolling
+        self._isFooterMenuHidden = isFooterMenuHidden
+    }
+    
     // Color system for adaptive theming
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
@@ -136,6 +152,27 @@ struct SettingsView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 140)
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
+                        .onChanged { _ in
+                            // IMMEDIATE update - no conditions, just set it
+                            DispatchQueue.main.async {
+                                if !isScrolling {
+                                    print("🏠 DEBUG: Setting isScrolling = true in SettingsView")
+                                    isScrolling = true
+                                    isFooterMenuHidden = true
+                                }
+                            }
+                        }
+                        .onEnded { _ in
+                            // Debounce the scroll end to prevent rapid state changes
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                print("🏠 DEBUG: Setting isScrolling = false in SettingsView")
+                                isScrolling = false
+                                // Note: Don't reset isFooterMenuHidden here - let home button control it
+                            }
+                        }
+                )
                 
                 // Global Player is now handled by ContentView overlay
                 // This ensures consistent player display across all tabs
@@ -441,7 +478,7 @@ extension SettingsView {
              title: "Country Settings",
              icon: ""
          ) {
-             NavigationLink(destination: HiddenCountriesSettingsView()) {
+             NavigationLink(destination: HiddenCountriesSettingsView(isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)) {
                  VStack(alignment: .leading, spacing: 8) {
                      HStack(spacing: 8) {
                          Image(systemName: "eye.slash.fill")
@@ -478,7 +515,7 @@ extension SettingsView {
              title: "Alarm Settings",
              icon: ""
          ) {
-                                     NavigationLink(destination: AlarmConfigurationView()) {
+                                     NavigationLink(destination: AlarmConfigurationView(isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         Image(systemName: "alarm.fill")
@@ -517,7 +554,9 @@ extension SettingsView {
         ) {
             NavigationLink(destination: InternalDataManagementView(
                 viewModel: viewModel,
-                onImportComplete: onImportComplete
+                onImportComplete: onImportComplete,
+                isScrolling: $isScrolling,
+                isFooterMenuHidden: $isFooterMenuHidden
             )) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
@@ -551,7 +590,7 @@ extension SettingsView {
     
     @ViewBuilder
     private var stationSubmissionSettings: some View {
-        NavigationLink(destination: ContentSubmissionView()) {
+        NavigationLink(destination: ContentSubmissionView(isScrolling: $isScrolling, isFooterMenuHidden: $isFooterMenuHidden)) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "antenna.radiowaves.left.and.right")
@@ -2145,6 +2184,10 @@ struct WarningText: View {
 // MARK: - Internal Data Management View
 
 struct InternalDataManagementView: View {
+    // Scroll detection bindings for TabView hide functionality
+    @Binding var isScrolling: Bool
+    @Binding var isFooterMenuHidden: Bool
+    
     @StateObject private var alertManager = AlertManager()
     @ObservedObject var viewModel: RadioStationViewModel
     @EnvironmentObject var podcastViewModel: PodcastViewModel
@@ -2181,6 +2224,22 @@ struct InternalDataManagementView: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.presentationMode) var presentationMode
     
+    // Default initializer for backward compatibility
+    init(viewModel: RadioStationViewModel, onImportComplete: ((String) -> Void)? = nil) {
+        self._isScrolling = .constant(false)
+        self._isFooterMenuHidden = .constant(false)
+        self.viewModel = viewModel
+        self.onImportComplete = onImportComplete
+    }
+    
+    // Main initializer with scroll detection bindings
+    init(viewModel: RadioStationViewModel, onImportComplete: ((String) -> Void)? = nil, isScrolling: Binding<Bool>, isFooterMenuHidden: Binding<Bool>) {
+        self._isScrolling = isScrolling
+        self._isFooterMenuHidden = isFooterMenuHidden
+        self.viewModel = viewModel
+        self.onImportComplete = onImportComplete
+    }
+    
     // Color system matching SettingsView
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGray6)
@@ -2203,6 +2262,27 @@ struct InternalDataManagementView: View {
             .padding(.top, 16)
             .padding(.bottom, 140)
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
+                .onChanged { _ in
+                    // IMMEDIATE update - no conditions, just set it
+                    DispatchQueue.main.async {
+                        if !isScrolling {
+                            print("🏠 DEBUG: Setting isScrolling = true in InternalDataManagementView")
+                            isScrolling = true
+                            isFooterMenuHidden = true
+                        }
+                    }
+                }
+                .onEnded { _ in
+                    // Debounce the scroll end to prevent rapid state changes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        print("🏠 DEBUG: Setting isScrolling = false in InternalDataManagementView")
+                        isScrolling = false
+                        // Note: Don't reset isFooterMenuHidden here - let home button control it
+                    }
+                }
+        )
         .background(backgroundColor)
         .navigationTitle("Data Management")
         .navigationBarTitleDisplayMode(.inline)

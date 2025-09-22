@@ -12,6 +12,10 @@ import UIKit
 import BackgroundTasks
 
 struct AlarmConfigurationView: View {
+    // Scroll detection bindings for TabView hide functionality
+    @Binding var isScrolling: Bool
+    @Binding var isFooterMenuHidden: Bool
+    
     @EnvironmentObject var viewModel: RadioStationViewModel
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.colorScheme) var colorScheme
@@ -58,7 +62,18 @@ struct AlarmConfigurationView: View {
         colorScheme == .dark ? .gray : .secondary
     }
     
+    // Default initializer for backward compatibility
     init() {
+        self._isScrolling = .constant(false)
+        self._isFooterMenuHidden = .constant(false)
+        _alarmTime = State(initialValue: Self.loadAlarmTime())
+        _selectedDays = State(initialValue: Self.loadSelectedDays())
+    }
+    
+    // Main initializer with scroll detection bindings
+    init(isScrolling: Binding<Bool>, isFooterMenuHidden: Binding<Bool>) {
+        self._isScrolling = isScrolling
+        self._isFooterMenuHidden = isFooterMenuHidden
         _alarmTime = State(initialValue: Self.loadAlarmTime())
         _selectedDays = State(initialValue: Self.loadSelectedDays())
     }
@@ -86,6 +101,27 @@ struct AlarmConfigurationView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 140)
                 }
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10) // Set minimum distance to 10 to avoid interfering with button taps
+                        .onChanged { _ in
+                            // IMMEDIATE update - no conditions, just set it
+                            DispatchQueue.main.async {
+                                if !isScrolling {
+                                    print("🏠 DEBUG: Setting isScrolling = true in AlarmConfigurationView")
+                                    isScrolling = true
+                                    isFooterMenuHidden = true
+                                }
+                            }
+                        }
+                        .onEnded { _ in
+                            // Debounce the scroll end to prevent rapid state changes
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                print("🏠 DEBUG: Setting isScrolling = false in AlarmConfigurationView")
+                                isScrolling = false
+                                // Note: Don't reset isFooterMenuHidden here - let home button control it
+                            }
+                        }
+                )
                 
                 // Global Player is now handled by ContentView overlay
                 // This ensures consistent player display across all tabs
