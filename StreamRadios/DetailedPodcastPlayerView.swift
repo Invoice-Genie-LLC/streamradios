@@ -733,7 +733,18 @@ struct DetailedPodcastPlayerView: View {
     
     // Computed property for checking download state
     private var isDownloading: Bool {
-        viewModel.downloadProgress[episode.id] != nil && viewModel.downloadProgress[episode.id]! > 0 && viewModel.downloadProgress[episode.id]! < 1
+        // Don't show downloading if already downloaded
+        if isDownloaded {
+            return false
+        }
+        
+        // Check if there's valid download progress
+        guard let progress = viewModel.downloadProgress[episode.id] else {
+            return false
+        }
+        
+        // Only consider it downloading if progress is between 0 and 1 (exclusive)
+        return progress > 0 && progress < 1
     }
     
     // Get download progress
@@ -762,14 +773,19 @@ struct DetailedPodcastPlayerView: View {
             showDeleteDownloadAlert = true
         } else {
             // If not downloaded, start the download process
+            print("⬇️ Starting download for episode: \(episode.title)")
             viewModel.downloadEpisode(episode) { result in
                 DispatchQueue.main.async {
                     switch result {
                     case .success(_):
                         print("✅ Episode downloaded successfully: \(self.episode.title)")
+                        // Force UI refresh after successful download
+                        self.refreshTrigger.toggle()
                     case .failure(let error):
                         print("❌ Failed to download episode: \(error.localizedDescription)")
-                        // You could show an alert here if needed
+                        // Clear any partial download state on failure
+                        self.viewModel.downloadProgress.removeValue(forKey: self.episode.id)
+                        self.refreshTrigger.toggle()
                     }
                 }
             }
@@ -777,23 +793,32 @@ struct DetailedPodcastPlayerView: View {
     }
     
     private func deleteDownload() {
-        print("🗑️ Deleting download for episode: \(episode.title)")
+        print("🗑️ Starting download deletion for episode: \(episode.title)")
         
-        // Clear any download progress state first
-        DispatchQueue.main.async {
-            self.viewModel.downloadProgress.removeValue(forKey: self.episode.id)
-        }
+        // Clear any download progress state immediately on main thread
+        viewModel.downloadProgress.removeValue(forKey: episode.id)
+        print("🔄 Cleared download progress for episode: \(episode.id)")
         
         // Delete the download
         viewModel.toggleDownload(for: episode)
         
-        print("🗑️ Download deleted, isDownloaded should now be: \(EpisodeStateManager.shared.isDownloaded(episode.id))")
+        // Force immediate UI refresh
+        refreshTrigger.toggle()
+        print("🔄 Immediate UI refresh triggered after download deletion")
         
-        // Force view refresh by toggling the refresh trigger
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // This small delay ensures the EpisodeStateManager has updated
-            self.refreshTrigger.toggle()
-            print("🔄 Forcing view refresh after download deletion")
+        // Verify state and do additional refresh if needed
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            let currentDownloadState = EpisodeStateManager.shared.isDownloaded(self.episode.id)
+            let hasProgress = self.viewModel.downloadProgress[self.episode.id] != nil
+            
+            print("🗑️ Download deletion verification - isDownloaded: \(currentDownloadState), hasProgress: \(hasProgress)")
+            
+            // If there's still inconsistent state, force another refresh
+            if currentDownloadState || hasProgress {
+                print("⚠️ Inconsistent state detected, forcing additional refresh")
+                self.viewModel.downloadProgress.removeValue(forKey: self.episode.id)
+                self.refreshTrigger.toggle()
+            }
         }
     }
     
