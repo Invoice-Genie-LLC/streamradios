@@ -838,6 +838,32 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Data Integrity Monitoring
+    
+    /// Monitor data integrity and report any contamination issues
+    private func monitorDataIntegrity() {
+        Task {
+            let result = await PodcastCoreDataManager.shared.validateDataIntegrity()
+            
+            await MainActor.run {
+                if !result.isValid {
+                    print("🚨 DATA INTEGRITY ISSUES DETECTED:")
+                    for issue in result.issues {
+                        print("   - \(issue)")
+                    }
+                    
+                    // CRITICAL: If severe contamination is detected, trigger a data cleanup
+                    if result.issues.count > 5 {
+                        print("🚨 SEVERE DATA INTEGRITY ISSUES - Consider data cleanup")
+                        // Could trigger automatic cleanup here if needed
+                    }
+                } else {
+                    print("✅ Data integrity validation passed - no contamination detected")
+                }
+            }
+        }
+    }
+    
     // MARK: - UI State Update Helper
     
     /// Update episode UI state immediately for automatic view refresh across tabs
@@ -3505,13 +3531,42 @@ class PodcastViewModel: ObservableObject {
             
             await MainActor.run {
                 // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed
-                let safeEpisodes = uniqueFilteredEpisodes.filter { $0.feedId == feedId }
+                let safeEpisodes = uniqueFilteredEpisodes.filter { episode in
+                    // Multiple validation checks
+                    guard episode.feedId == feedId else {
+                        print("🚨 FEEDID MISMATCH: Episode '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
+                        return false
+                    }
+                    
+                    guard !episode.feedId.isEmpty else {
+                        print("🚨 EMPTY FEEDID: Episode '\(episode.title)' has empty feedId")
+                        return false
+                    }
+                    
+                    guard !episode.id.isEmpty else {
+                        print("🚨 EMPTY EPISODE ID: Episode '\(episode.title)' has empty ID")
+                        return false
+                    }
+                    
+                    return true
+                }
+                
                 if safeEpisodes.count != uniqueFilteredEpisodes.count {
-                    print("🚨 CORE DATA ISOLATION: Filtered out \(uniqueFilteredEpisodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+                    let filteredCount = uniqueFilteredEpisodes.count - safeEpisodes.count
+                    print("🚨 CORE DATA ISOLATION: Filtered out \(filteredCount) contaminated/invalid episodes for feed \(feedId)")
+                    
                     // Log details about contaminated episodes for debugging
                     let contaminatedEpisodes = uniqueFilteredEpisodes.filter { $0.feedId != feedId }
-                    for episode in contaminatedEpisodes.prefix(3) {
+                    for episode in contaminatedEpisodes.prefix(5) {  // Show more details for debugging
                         print("🚨 CONTAMINATED EPISODE: '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
+                        print("   - Episode ID: \(episode.id)")
+                        print("   - Audio URL: \(episode.audioUrl)")
+                    }
+                    
+                    // CRITICAL: This should trigger investigation if it happens frequently
+                    if filteredCount > 10 {
+                        print("🚨 SEVERE CONTAMINATION: \(filteredCount) episodes filtered - investigate data integrity!")
+                        assertionFailure("Severe episode contamination detected")
                     }
                 }
                 print("📊 CORE DATA LOAD: Loading \(safeEpisodes.count) episodes for feed \(feedId)")

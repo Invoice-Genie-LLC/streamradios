@@ -545,6 +545,23 @@ class PodcastFeedManager {
             
             if insertIndex < trulyNewEpisodes.count {
                 let episode = trulyNewEpisodes[insertIndex]
+                
+                // CRITICAL CONTAMINATION PREVENTION: Validate episode belongs to correct feed
+                guard !feedId.isEmpty,
+                      !episode.id.isEmpty,
+                      !episode.title.isEmpty else {
+                    print("🚨 BATCH INSERT VALIDATION FAILED: feedId=\(feedId), episodeId=\(episode.id), title=\(episode.title)")
+                    insertIndex += 1
+                    return false
+                }
+                
+                // ADDITIONAL SAFETY: Ensure episode's feedId matches if it has one
+                if !episode.feedId.isEmpty && episode.feedId != feedId {
+                    print("🚨 EPISODE FEED MISMATCH: Episode feedId=\(episode.feedId) but inserting into feed=\(feedId)")
+                    insertIndex += 1
+                    return false
+                }
+                
                 episodeModel.id = episode.id
                 episodeModel.title = episode.title
                 episodeModel.audioUrl = episode.audioUrl
@@ -552,7 +569,7 @@ class PodcastFeedManager {
                 episodeModel.publicationDate = episode.publicationDate
                 episodeModel.duration = episode.duration
                 episodeModel.fileSize = episode.fileSize ?? 0
-                episodeModel.feedId = feedId
+                episodeModel.feedId = feedId  // CRITICAL: Always use the passed feedId, never episode.feedId
                 episodeModel.progress = 0.0
                 episodeModel.isPlayed = false
                 episodeModel.isFavorite = false
@@ -706,8 +723,20 @@ class PodcastFeedManager {
                         let preservedLocalFilePath = existingEpisode.localFilePath
                         let preservedFileSize = existingEpisode.fileSize
                         
+                        // CRITICAL CONTAMINATION PREVENTION: Validate feedId before update
+                        guard let feedId = feed.id, !feedId.isEmpty else {
+                            print("🚨 INVALID FEED ID during episode update: \(feed.id ?? "nil")")
+                            continue
+                        }
+                        
+                        // SAFETY CHECK: Ensure episode belongs to this feed
+                        if !episode.feedId.isEmpty && episode.feedId != feedId {
+                            print("🚨 EPISODE UPDATE CONTAMINATION: Episode feedId=\(episode.feedId) but updating for feed=\(feedId)")
+                            continue
+                        }
+                        
                         var episodeWithFeedId = episode
-                        episodeWithFeedId.feedId = feed.id ?? ""
+                        episodeWithFeedId.feedId = feedId  // CRITICAL: Always use the correct feedId
                         managedEpisode.update(from: episodeWithFeedId)
                         
                         // Restore preserved download data
@@ -720,8 +749,21 @@ class PodcastFeedManager {
                     } else {
                         // Create new episode
                         managedEpisode = PodcastModel(context: context)
+                        
+                        // CRITICAL CONTAMINATION PREVENTION: Validate feedId before creation
+                        guard let feedId = feed.id, !feedId.isEmpty else {
+                            print("🚨 INVALID FEED ID during episode creation: \(feed.id ?? "nil")")
+                            continue
+                        }
+                        
+                        // SAFETY CHECK: Ensure episode belongs to this feed
+                        if !episode.feedId.isEmpty && episode.feedId != feedId {
+                            print("🚨 EPISODE CREATION CONTAMINATION: Episode feedId=\(episode.feedId) but creating for feed=\(feedId)")
+                            continue
+                        }
+                        
                         var episodeWithFeedId = episode
-                        episodeWithFeedId.feedId = feed.id ?? ""
+                        episodeWithFeedId.feedId = feedId  // CRITICAL: Always use the correct feedId
                         managedEpisode.update(from: episodeWithFeedId)
                         managedEpisode.feed = feed
                     }

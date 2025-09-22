@@ -251,6 +251,77 @@ class PodcastCoreDataManager {
         }
     }
     
+    // MARK: - Data Integrity Validation
+    
+    /// Validate data integrity and detect any episode contamination across feeds
+    func validateDataIntegrity() async -> (isValid: Bool, issues: [String]) {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        var issues: [String] = []
+        
+        return await backgroundContext.perform {
+            do {
+                // Check for episodes with invalid feedIds
+                let invalidFeedIdRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                invalidFeedIdRequest.predicate = NSPredicate(format: "feedId == nil OR feedId == ''")
+                let invalidFeedIdEpisodes = try backgroundContext.fetch(invalidFeedIdRequest)
+                
+                if !invalidFeedIdEpisodes.isEmpty {
+                    issues.append("Found \(invalidFeedIdEpisodes.count) episodes with invalid/empty feedIds")
+                }
+                
+                // Check for episodes with mismatched feed relationships
+                let allEpisodesRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                let allEpisodes = try backgroundContext.fetch(allEpisodesRequest)
+                
+                var feedIdMismatches = 0
+                for episode in allEpisodes {
+                    if let feed = episode.feed,
+                       let episodeFeedId = episode.feedId,
+                       let feedId = feed.id,
+                       episodeFeedId != feedId {
+                        feedIdMismatches += 1
+                    }
+                }
+                
+                if feedIdMismatches > 0 {
+                    issues.append("Found \(feedIdMismatches) episodes with feedId/feed relationship mismatches")
+                }
+                
+                // Check for duplicate episode IDs across different feeds
+                let episodesByFeed = Dictionary(grouping: allEpisodes) { $0.feedId }
+                var duplicateIds: Set<String> = []
+                
+                for (feedId, episodes) in episodesByFeed {
+                    let episodeIds = episodes.compactMap { $0.id }
+                    let uniqueIds = Set(episodeIds)
+                    
+                    if episodeIds.count != uniqueIds.count {
+                        issues.append("Feed \(feedId ?? "unknown") has duplicate episode IDs")
+                    }
+                    
+                    // Check if any episode IDs appear in other feeds
+                    for otherId in episodesByFeed.keys {
+                        guard otherId != feedId else { continue }
+                        let otherEpisodes = episodesByFeed[otherId] ?? []
+                        let otherIds = Set(otherEpisodes.compactMap { $0.id })
+                        let intersection = uniqueIds.intersection(otherIds)
+                        
+                        if !intersection.isEmpty {
+                            issues.append("Episode IDs shared between feeds \(feedId ?? "unknown") and \(otherId ?? "unknown"): \(intersection.count) episodes")
+                        }
+                    }
+                }
+                
+                os_log("🔍 Data integrity check completed: %d issues found", log: self.log, type: .info, issues.count)
+                return (isValid: issues.isEmpty, issues: issues)
+                
+            } catch {
+                issues.append("Failed to validate data integrity: \(error.localizedDescription)")
+                return (isValid: false, issues: issues)
+            }
+        }
+    }
+    
     // MARK: - Incremental Updates
     
     /// Add new episodes to existing feed (for pull-to-refresh)
@@ -269,11 +340,27 @@ class PodcastCoreDataManager {
                 return
             }
             
-            // Add new episodes
+            // Add new episodes with contamination prevention
             for episode in newEpisodes {
+                // CRITICAL CONTAMINATION PREVENTION: Validate episode data
+                guard !episode.id.isEmpty,
+                      !episode.title.isEmpty,
+                      !feedId.isEmpty else {
+                    print("🚨 INVALID EPISODE DATA: Skipping episode with empty fields - ID=\(episode.id), Title=\(episode.title), FeedId=\(feedId)")
+                    continue
+                }
+                
+                // SAFETY CHECK: Ensure episode belongs to this feed if it has a feedId
+                if !episode.feedId.isEmpty && episode.feedId != feedId {
+                    print("🚨 EPISODE FEEDID MISMATCH: Episode feedId=\(episode.feedId) but adding to feed=\(feedId)")
+                    continue
+                }
+                
                 let managedEpisode = PodcastModel(context: backgroundContext)
-                managedEpisode.update(from: episode)
-                managedEpisode.feedId = feedId
+                var safeEpisode = episode
+                safeEpisode.feedId = feedId  // CRITICAL: Always use the correct feedId
+                managedEpisode.update(from: safeEpisode)
+                managedEpisode.feedId = feedId  // Double-ensure the feedId is correct
             }
             
             try backgroundContext.save()

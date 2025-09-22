@@ -165,7 +165,7 @@ class PodcastEpisodeManager {
                 request.relationshipKeyPathsForPrefetching = ["feed"]
 
                 let managed = try backgroundContext.fetch(request)
-                let episodes = self.convertToEpisodes(managed, feedId: "")
+                let episodes = self.convertToEpisodesAcrossFeeds(managed)
                 return episodes
             } catch {
                 os_log("❌ Global episode search failed: %@", log: self.log, type: .error, error.localizedDescription)
@@ -290,9 +290,14 @@ class PodcastEpisodeManager {
         
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         
-        // Only filter by feedId for fastest query
-        fetchRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
-        print("🔍 CORE DATA QUERY: Fetching episodes for feedId '\(feedId)'")
+        // CRITICAL CONTAMINATION PREVENTION: Multiple safety checks for feedId
+        let predicates = [
+            NSPredicate(format: "feedId == %@", feedId),
+            NSPredicate(format: "feedId != nil"),
+            NSPredicate(format: "feedId != ''")
+        ]
+        fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        print("🔍 CORE DATA QUERY (Prioritized): Fetching episodes for feedId '\(feedId)'")
         
         // Sort by publication date (newest first) - this is the key optimization
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
@@ -655,8 +660,12 @@ class PodcastEpisodeManager {
         
         let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         
-        // Build predicate (only feedId and search, no favorite/download filtering)
-        var predicates = [NSPredicate(format: "feedId == %@", feedId)]
+        // CRITICAL CONTAMINATION PREVENTION: Build strict predicate with multiple safety checks
+        var predicates = [
+            NSPredicate(format: "feedId == %@", feedId),
+            NSPredicate(format: "feedId != nil"),
+            NSPredicate(format: "feedId != ''")
+        ]
         
         if let query = searchQuery, !query.isEmpty {
             predicates.append(NSPredicate(
@@ -667,6 +676,9 @@ class PodcastEpisodeManager {
         
         fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: "publicationDate", ascending: false)]
+        
+        // CONTAMINATION PREVENTION: Log query details for debugging
+        print("🔍 CORE DATA QUERY (Base): feedId=\(feedId), searchQuery=\(searchQuery ?? "none")")
         
         // AGGRESSIVE PERFORMANCE OPTIMIZATIONS
         fetchRequest.fetchBatchSize = batchSize
@@ -684,6 +696,72 @@ class PodcastEpisodeManager {
         fetchRequest.relationshipKeyPathsForPrefetching = ["feed"]
         
         return fetchRequest
+    }
+    
+    private func convertToEpisodesAcrossFeeds(_ managedEpisodes: [PodcastModel]) -> [PodcastEpisode] {
+        // PERFORMANCE: Early exit for empty arrays
+        guard !managedEpisodes.isEmpty else { return [] }
+        
+        // BATCH OPTIMIZATION: Get all episode IDs at once for batch state lookup
+        let episodeIds = managedEpisodes.compactMap { $0.id }
+        
+        // BATCH STATE LOADING: Get all episode states in one operation
+        let episodeStatesData = EpisodeStateManager.shared.getBatchEpisodeData(for: episodeIds)
+        let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
+        
+        // PARALLEL PROCESSING: Use concurrent map for conversion
+        let convertedEpisodes: [PodcastEpisode] = managedEpisodes.compactMap { managedEpisode -> PodcastEpisode? in
+            guard let episodeId = managedEpisode.id else { return nil }
+            
+            var episode = managedEpisode.toPodcastEpisode()
+            
+            // CROSS-FEED SEARCH: No feedId validation since we're searching across all feeds
+            // Just validate episode has required fields
+            guard !episode.feedId.isEmpty,
+                  !episode.id.isEmpty,
+                  !episode.title.isEmpty else {
+                print("🚨 INVALID EPISODE DATA: Episode missing required fields - ID=\(episode.id), Title=\(episode.title), FeedId=\(episode.feedId)")
+                return nil
+            }
+            
+            // FAST STATE LOOKUP: Get pre-fetched state data
+            guard let stateData = episodeStatesData[episodeId] else {
+                // Episode not in state manager, use Core Data only
+                return episode
+            }
+            
+            let coreDataProgress = episode.state.progress
+            let finalProgress: Double
+            let finalState: EpisodePlaybackState
+            let finalFavorite: Bool
+            let finalDownloaded: Bool
+            
+            if isCloudKitPriorityMode {
+                // CloudKit data takes priority - use immediately
+                finalProgress = stateData.progress
+                finalState = stateData.state
+                finalFavorite = stateData.isFavorite
+                finalDownloaded = stateData.isDownloaded
+            } else {
+                // Use Core Data with EpisodeStateManager fallback
+                finalProgress = max(coreDataProgress, stateData.progress) // Always take highest progress
+                finalState = coreDataProgress > 0.01 ? (episode.state.isPlayed ? .played : .inProgress) : stateData.state
+                finalFavorite = episode.state.isFavorite || stateData.isFavorite
+                finalDownloaded = episode.state.isDownloaded || stateData.isDownloaded
+            }
+            
+            // Create optimized EpisodeState
+            episode.state = EpisodeState(
+                isPlayed: finalState == .played,
+                isFavorite: finalFavorite,
+                progress: finalProgress,
+                isDownloaded: finalDownloaded
+            )
+            
+            return episode
+        }
+        
+        return convertedEpisodes
     }
     
     private func convertToEpisodes(_ managedEpisodes: [PodcastModel], feedId: String) -> [PodcastEpisode] {
@@ -706,7 +784,20 @@ class PodcastEpisodeManager {
             // CRITICAL SAFETY CHECK: Validate feedId matches expected
             if episode.feedId != feedId {
                 print("🚨 CORE DATA CONTAMINATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but query was for '\(feedId)'")
+                print("🚨 CONTAMINATION DETAILS: EpisodeID=\(episode.id), AudioURL=\(episode.audioUrl)")
+                
+                // CRITICAL: Report contamination to crash reporting or analytics
+                // This should never happen if Core Data queries are working correctly
+                assertionFailure("Episode contamination detected - this indicates a critical data integrity issue")
                 return nil // Filter out contaminated episodes
+            }
+            
+            // ADDITIONAL SAFETY: Validate episode has required fields
+            guard !episode.feedId.isEmpty,
+                  !episode.id.isEmpty,
+                  !episode.title.isEmpty else {
+                print("🚨 INVALID EPISODE DATA: Episode missing required fields - ID=\(episode.id), Title=\(episode.title), FeedId=\(episode.feedId)")
+                return nil
             }
             
             // FAST STATE LOOKUP: Get pre-fetched state data
