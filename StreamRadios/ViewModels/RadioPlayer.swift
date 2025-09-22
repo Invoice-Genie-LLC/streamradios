@@ -554,17 +554,35 @@ class RadioPlayer: NSObject, ObservableObject {
             return
         }
         
+        // IMMEDIATE UI RESTORATION: Set up UI state immediately for instant player display
+        // This ensures the radio player shows up immediately like the podcast player
+        let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
+        if lastActivePlayer == .radio {
+            print("🚀 Radio: Radio was last active player - restoring UI and claiming active status")
+            restoreLastPlayedStationUIImmediately()
+            
+            // Only set as active player during app startup restoration, not during normal operation
+            if PlaybackManager.shared.activePlayer == .none {
+                print("🚀 Radio: Setting radio as active player (startup restoration)")
+                PlaybackManager.shared.setActivePlayer(.radio)
+            } else {
+                print("🚀 Radio: Skipping active player setting - another player already active (\(PlaybackManager.shared.activePlayer))")
+            }
+        } else {
+            print("🚀 Radio: Radio was not last active player (\(lastActivePlayer?.rawValue ?? "none")) - skipping restoration")
+        }
+        
         // Use direct UserDefaults access to ensure we get the most current value
         if directUserDefaultsValue {
-            // Wait a bit longer to ensure network monitoring and app state are ready
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            // Reduced delay since UI is already restored - just need to ensure network is ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 // Only auto-play if we're not currently handling an alarm and CarPlay isn't playing
                 if !self.isHandlingAlarm && !(CarPlayManager.shared.isCarPlayConnected && self.isPlaying) {
                     print("🎵 Auto-play: Starting last played station restoration")
                     print("🌐 Auto-play: Starting last played station restoration")
                     
                     // With seamless quality management, network availability is handled automatically
-                    self.restoreLastPlayedStation()
+                    self.startPlaybackForRestoredStation()
                 } else if CarPlayManager.shared.isCarPlayConnected && self.isPlaying {
                     print("🚗 CarPlay: Skipping auto-play - CarPlay is currently playing")
                     self.syncMainAppToCarPlayState()
@@ -573,16 +591,15 @@ class RadioPlayer: NSObject, ObservableObject {
                 }
             }
         } else {
-            // Even if auto-play is disabled, still restore the UI state for manual play
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                if !self.isHandlingAlarm {
-                    if CarPlayManager.shared.isCarPlayConnected && self.isPlaying {
-                        print("🚗 CarPlay: Syncing main app UI to active CarPlay playback")
-                        self.syncMainAppToCarPlayState()
-                    } else {
-                        print("🔄 Auto-play: Disabled, restoring UI only")
-                        self.restoreLastPlayedStationUIOnly()
-                    }
+            // If auto-play is disabled but radio was last active, ensure UI state is restored
+            if lastActivePlayer == .radio && currentlyPlayingStation == nil {
+                print("🔄 Auto-play: Disabled, but radio was last active - restoring UI state")
+                restoreLastPlayedStationUIImmediately()
+                
+                // Only set as active player if no other player has claimed it
+                if PlaybackManager.shared.activePlayer == .none {
+                    print("🔄 Auto-play: Setting radio as active player (disabled auto-play restoration)")
+                    PlaybackManager.shared.setActivePlayer(.radio)
                 }
             }
         }
@@ -772,6 +789,63 @@ class RadioPlayer: NSObject, ObservableObject {
             } else {
                 print("❌ Restore UI: Station with ID \(lastStationID) not found in stations array")
             }
+        }
+    }
+    
+    /// Immediately restores UI state for instant player display on app startup
+    /// This method runs synchronously to ensure the player appears immediately
+    private func restoreLastPlayedStationUIImmediately() {
+        print("🚀 Radio: Immediate UI restoration started")
+        
+        guard let lastStationID = self.userDefaults?.string(forKey: "LastPlayedStationID"),
+              let lastStation = self.viewModel?.stations.first(where: { $0.id == lastStationID }) else {
+            print("⚠️ Radio: No saved station found for immediate restoration")
+            return
+        }
+        
+        print("✅ Radio: Immediately restoring UI for station: \(lastStation.name)")
+        
+        // Set station object immediately for display
+        self.currentlyPlayingStation = lastStation
+        
+        // Find and set current index for UI consistency
+        if let currentIndex = self.viewModel?.stations.firstIndex(where: { $0.id == lastStationID }) {
+            self.currentStationIndex = currentIndex
+            print("🚀 Radio: Set currentStationIndex to \(currentIndex) for immediate display")
+        } else {
+            self.currentStationIndex = nil
+            print("⚠️ Radio: Could not find index for station - display preserved via currentlyPlayingStation")
+        }
+        
+        // Set up the player URL so it's ready for playback
+        if let url = URL(string: lastStation.url) {
+            self.setStationURL(url)
+            print("🚀 Radio: Station URL set for immediate readiness")
+        }
+        
+        print("✅ Radio: Immediate UI restoration completed - player should be visible now")
+    }
+    
+    /// Starts playback for an already restored station (UI is already set up)
+    /// This method handles the audio session and actual playback startup
+    private func startPlaybackForRestoredStation() {
+        print("🎵 Radio: Starting playback for restored station")
+        
+        guard let currentStation = currentlyPlayingStation else {
+            print("❌ Radio: No current station available for playback")
+            return
+        }
+        
+        print("🎵 Radio: Starting playback for: \(currentStation.name)")
+        
+        // Set user intent for playback
+        userWantsToPlay = true
+        
+        // Ensure audio session is activated before playing
+        self.ensureAudioSessionActivatedThenPlay {
+            self.play()
+            // Manually update lastPlayed for Recent tab
+            self.updateLastPlayed(currentStation)
         }
     }
     

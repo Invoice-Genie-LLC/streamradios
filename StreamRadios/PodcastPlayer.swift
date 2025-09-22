@@ -1151,8 +1151,6 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     
     func configure(with viewModel: PodcastViewModel) {
         self.viewModel = viewModel
-        // Note: Podcast episode restoration happens automatically when user navigates to podcasts
-        // The GlobalPlayerView priority logic ensures podcast player shows when content is available
         
         print("🔧 PodcastPlayer: Configuring with viewModel")
         
@@ -1160,9 +1158,38 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         restorationAttempts = 0
         hasSuccessfullyRestored = false
         
-        // Restore last played episode if podcast was the last active player
+        // IMMEDIATE UI RESTORATION: Set up basic UI state immediately for instant player display
+        // This ensures the podcast player shows up immediately like the radio player
+        let lastActivePlayer = PlaybackManager.shared.getLastActivePlayer()
+        let currentActivePlayer = PlaybackManager.shared.activePlayer
+        
+        if lastActivePlayer == .podcast {
+            print("🚀 Podcast: Podcast was last active player - checking if should restore")
+            
+            // Only restore if no player is currently active (app startup) OR if podcast is already active
+            if currentActivePlayer == .none || currentActivePlayer == .podcast {
+                print("🚀 Podcast: Restoring podcast player UI and claiming active status")
+                Task { @MainActor in
+                    restorePodcastPlayerUIImmediately()
+                    
+                    // Set as active player during app startup restoration
+                    if currentActivePlayer == .none {
+                        print("🚀 Podcast: Setting podcast as active player (startup restoration)")
+                        PlaybackManager.shared.setActivePlayer(.podcast)
+                    } else {
+                        print("🚀 Podcast: Podcast already active player - no need to set again")
+                    }
+                }
+            } else {
+                print("🚀 Podcast: Skipping restoration - another player is active (\(currentActivePlayer)) and user has switched")
+            }
+        } else {
+            print("🚀 Podcast: Podcast was not last active player (\(lastActivePlayer?.rawValue ?? "none")) - skipping restoration")
+        }
+        
+        // Detailed episode restoration (loads episodes, finds specific episode, etc.)
         Task { @MainActor in
-            print("🔧 PodcastPlayer: Starting immediate restoration with feeds count: \(viewModel.podcastFeeds.count)")
+            print("🔧 PodcastPlayer: Starting detailed restoration with feeds count: \(viewModel.podcastFeeds.count)")
             await restoreLastPlayedEpisodeOnStartup()
         }
         
@@ -1318,27 +1345,33 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Load episodes for this feed to find the specific episode
         await viewModel.loadEpisodesForFeed(feedId, isInitialLoad: true)
         
-        // Find and set the specific episode
+        // Find and set the specific episode (if not already set by immediate restoration)
         if let episode = viewModel.currentEpisodes.first(where: { $0.id == episodeId }) {
             print("🎵 PodcastPlayer: Episode restored and ready to play: \(episode.title)")
-            currentEpisode = episode
+            
+            // Only set if not already set by immediate restoration
+            if currentEpisode == nil {
+                currentEpisode = episode
+            }
             
             // Set the episode as ready to play (but don't auto-play)   
             userWantsToPlay = false // Don't auto-play on startup
             connectionState = .connected // Set to connected (ready to play)
             
-            // Set podcast as active player for proper audio session
+            // Set podcast as active player for proper audio session (safe to call multiple times)
             PlaybackManager.shared.setActivePlayer(.podcast)
             
             // Initialize the player with the episode's audio URL
             await initializePlayerForRestoredEpisode(episode: episode)
             
-            // Load saved progress
-            let savedProgress = stateManager.getProgress(for: episode.id)
-            if savedProgress > 0 {
-                currentProgress = savedProgress
-                currentTime = savedProgress * duration
-                print("🔧 PodcastPlayer: Restored progress: \(savedProgress * 100)%")
+            // Load saved progress (only if not already loaded)
+            if currentProgress == 0 {
+                let savedProgress = stateManager.getProgress(for: episode.id)
+                if savedProgress > 0 {
+                    currentProgress = savedProgress
+                    currentTime = savedProgress * duration
+                    print("🔧 PodcastPlayer: Restored progress: \(savedProgress * 100)%")
+                }
             }
             
             // Force UI update to ensure GlobalPlayerView shows the real episode data
@@ -1355,6 +1388,56 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         } else {
             print("⚠️ PodcastPlayer: Episode not found in loaded episodes: \(episodeId)")
         }
+    }
+    
+    /// Immediately restores basic podcast player UI state for instant display
+    /// This method runs synchronously to ensure the player appears immediately
+    @MainActor
+    private func restorePodcastPlayerUIImmediately() {
+        print("🚀 Podcast: Immediate UI restoration started")
+        
+        // Get saved episode data
+        guard let episodeData = UserDefaults.standard.dictionary(forKey: "LastPlayedEpisodeData") as? [String: String],
+              let episodeId = episodeData["episodeId"],
+              let feedId = episodeData["feedId"] else {
+            print("⚠️ Podcast: No saved episode data found for immediate restoration")
+            return
+        }
+        
+        print("✅ Podcast: Found saved episode data - Episode ID: \(episodeId), Feed ID: \(feedId)")
+        
+        // Set basic state to make player visible immediately
+        isPodcastActive = true
+        userWantsToPlay = false // Don't auto-play on startup
+        connectionState = .connected // Set to ready state
+        
+        // Try to find the feed in already loaded feeds (if available)
+        if let viewModel = viewModel,
+           let feed = viewModel.podcastFeeds.first(where: { $0.id == feedId }) {
+            print("🚀 Podcast: Found feed immediately: \(feed.title)")
+            currentFeed = feed
+            
+            // Try to find the episode if episodes are already loaded
+            if let episode = viewModel.currentEpisodes.first(where: { $0.id == episodeId }) {
+                print("🚀 Podcast: Found episode immediately: \(episode.title)")
+                currentEpisode = episode
+                
+                // Load saved progress for immediate display
+                let savedProgress = stateManager.getProgress(for: episode.id)
+                if savedProgress > 0 {
+                    currentProgress = savedProgress
+                    print("🚀 Podcast: Restored progress immediately: \(savedProgress * 100)%")
+                }
+            }
+        }
+        
+        // Force UI update to make player visible immediately
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+            print("🚀 Podcast: Triggered immediate UI update - player should be visible now")
+        }
+        
+        print("✅ Podcast: Immediate UI restoration completed")
     }
     
     /// Initialize the AVPlayer for a restored episode without starting playback

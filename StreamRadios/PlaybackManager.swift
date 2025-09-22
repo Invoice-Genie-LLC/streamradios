@@ -18,7 +18,7 @@ enum ActivePlayer: String {
 class PlaybackManager: ObservableObject {
     static let shared = PlaybackManager()
     
-    @Published var activePlayer: ActivePlayer = .radio
+    @Published var activePlayer: ActivePlayer = .none
     private var audioSessionConfigured = false
     private var backgroundInterruptionTimer: Timer?
     // State tracking for logging optimization
@@ -41,16 +41,16 @@ class PlaybackManager: ObservableObject {
     }
     
     func setActivePlayer(_ player: ActivePlayer) {
+        let previousPlayer = activePlayer
         activePlayer = player
         
         // Save the last active player to UserDefaults for app restart restoration
         UserDefaults.standard.set(player.rawValue, forKey: "LastActivePlayer")
+        UserDefaults.standard.synchronize() // Force immediate save
         
-        // Only log if the active player actually changed
-        if lastLoggedActivePlayer != player {
-            print("🎵 PlaybackManager: Active player set to \(player) (saved for restoration)")
-            lastLoggedActivePlayer = player
-        }
+        // Always log during restoration to help debug
+        print("🎵 PlaybackManager: Active player changed from \(previousPlayer) to \(player) (saved to UserDefaults)")
+        lastLoggedActivePlayer = player
         
         // Ensure audio session is properly configured for the active player
         activateAudioSessionForPlayer(player)
@@ -58,12 +58,15 @@ class PlaybackManager: ObservableObject {
     
     /// Get the last active player from UserDefaults for app startup restoration
     func getLastActivePlayer() -> ActivePlayer? {
-        guard let rawValue = UserDefaults.standard.string(forKey: "LastActivePlayer"),
+        let rawValue = UserDefaults.standard.string(forKey: "LastActivePlayer")
+        print("🔍 PlaybackManager: Raw LastActivePlayer value: \(rawValue ?? "nil")")
+        
+        guard let rawValue = rawValue,
               let player = ActivePlayer(rawValue: rawValue) else {
-            print("🎵 PlaybackManager: No last active player found")
+            print("🎵 PlaybackManager: No last active player found or invalid value")
             return nil
         }
-        print("🎵 PlaybackManager: Restored last active player: \(player)")
+        print("🎵 PlaybackManager: Successfully restored last active player: \(player)")
         return player
     }
     
