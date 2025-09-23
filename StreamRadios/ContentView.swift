@@ -30,6 +30,7 @@ struct ContentView: View {
     @EnvironmentObject var podcastViewModel: PodcastViewModel
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
+    @StateObject private var dataSyncManager = DataSyncManager.shared
     @State private var selectedPodcast: PodcastFeed?
     @State private var showPodcastListView: Bool
     @State private var seekPosition: Double
@@ -203,9 +204,12 @@ struct ContentView: View {
     // MARK: - Body
     
     var body: some View {
-        // Always show TabView to preserve NavigationView stacks
-        // Use UIKit integration to hide/show tab bar dynamically
-        TabView(selection: $selectedTab) {
+        ZStack {
+            // Main app content - only show when sync is complete
+            if !dataSyncManager.isSyncing || dataSyncManager.isFreshInstallUIReady {
+                // Always show TabView to preserve NavigationView stacks
+                // Use UIKit integration to hide/show tab bar dynamically
+                TabView(selection: $selectedTab) {
             // Radio Tab - Contains the original full interface
             radioTabContent
             .tabItem {
@@ -302,23 +306,25 @@ struct ContentView: View {
             .allowsHitTesting(true) // Allow interaction with player
             .ignoresSafeArea(.keyboard) // Keep player fixed when keyboard appears
         )
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
-            // App is closing: dismiss the player UI overlay
-            isPlayerSheetPresented = false
-            // Clear intent so overlay condition reevaluates to false when next launched
-            podcastPlayer.userWantsToPlay = false
-            radioPlayer.userWantsToPlay = false
-        }
-        
-        // Full-screen data sync progress overlay for fresh installs
-        DataSyncProgressView()
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("FreshInstallDataAvailable"))) { _ in
-            // Force UI refresh when sync completes
-            print("📢 ContentView: Received FreshInstallDataAvailable - forcing complete UI refresh")
-            DispatchQueue.main.async {
-                self.syncCompletionRefreshID = UUID()
-                print("🔄 ContentView: Updated syncCompletionRefreshID to force UI refresh")
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+                    // App is closing: dismiss the player UI overlay
+                    isPlayerSheetPresented = false
+                    // Clear intent so overlay condition reevaluates to false when next launched
+                    podcastPlayer.userWantsToPlay = false
+                    radioPlayer.userWantsToPlay = false
+                }
             }
+            
+            // Full-screen data sync progress overlay for fresh installs - always show when syncing
+            DataSyncProgressView()
+                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("FreshInstallDataAvailable"))) { _ in
+                    // Force UI refresh when sync completes
+                    print("📢 ContentView: Received FreshInstallDataAvailable - forcing complete UI refresh")
+                    DispatchQueue.main.async {
+                        self.syncCompletionRefreshID = UUID()
+                        print("🔄 ContentView: Updated syncCompletionRefreshID to force UI refresh")
+                    }
+                }
         }
     }
     
