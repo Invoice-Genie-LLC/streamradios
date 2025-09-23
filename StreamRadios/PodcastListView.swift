@@ -731,11 +731,11 @@ struct PodcastListView: View {
                                     }
                                 }
                         )
-                        .disabled(isEditing)
-                        .opacity(isEditing ? 0.6 : 1.0)
+                        .id(feedId)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             if !isEditing {
                                 Button {
+                                    print("🔄 SHARE BUTTON TAPPED for feed: \(feed.title)")
                                     sharePodcastFeed(feed)
                                 } label: {
                                     Label("Share", systemImage: "square.and.arrow.up")
@@ -743,17 +743,19 @@ struct PodcastListView: View {
                                 .tint(.blue)
                                 
                                 Button(role: .destructive) {
+                                    print("🗑️ DELETE BUTTON TAPPED for feed: \(feed.title)")
                                     podcastToDelete = feed
                                     showingDeleteConfirmation = true
+                                    print("🗑️ Delete confirmation should show now")
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
                             }
                         }
-                        .id(feedId)
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             if !isEditing {
                                 Button {
+                                    print("✏️ EDIT BUTTON TAPPED for feed: \(feed.title)")
                                     // Edit button action - use reliable edit data preparation
                                     if !isPreparingEditData {
                                         prepareEditData(for: feed) { success in
@@ -771,6 +773,8 @@ struct PodcastListView: View {
                                 .tint(.blue)
                             }
                         }
+                        .disabled(isEditing)
+                        .opacity(isEditing ? 0.6 : 1.0)
                     }
                 }
                 .onMove(perform: isEditing ? moveFeeds : nil)
@@ -848,9 +852,9 @@ struct PodcastListView: View {
                 Color.clear.frame(height: 100)  // Add extra space at the bottom
             }
             .simultaneousGesture(
-                DragGesture(minimumDistance: 0) // Set minimum distance to 0 for instant detection
+                DragGesture(minimumDistance: 10) // Increase minimum distance to avoid interfering with swipe actions
                     .onChanged { _ in
-                        // Instant update - triggers immediately when touch begins
+                        // Update when drag distance is significant enough
                         if !isScrolling.wrappedValue {
                             isScrolling.wrappedValue = true
                             // Hide TabView when scrolling starts and keep it hidden
@@ -873,10 +877,14 @@ struct PodcastListView: View {
                     }
             )
             .alert("Delete Podcast", isPresented: $showingDeleteConfirmation, presenting: podcastToDelete) { podcast in
-                Button("Cancel", role: .cancel) {}
+                Button("Cancel", role: .cancel) {
+                    print("🗑️ DELETE CANCELLED for: \(podcast.title)")
+                }
                 Button("Delete", role: .destructive) {
+                    print("🗑️ DELETE CONFIRMED for: \(podcast.title)")
                     currentDeletingFeedTitle = podcast.title
                     viewModel.deletePodcastFeed(podcast)
+                    print("🗑️ Called viewModel.deletePodcastFeed")
                 }
             } message: { podcast in
                 Text("Are you sure you want to delete '\(podcast.title)'? This action cannot be undone.")
