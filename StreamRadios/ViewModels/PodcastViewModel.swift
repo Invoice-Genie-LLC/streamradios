@@ -66,9 +66,20 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     }
     
     /// Generate a deterministic episode ID based on content (for episodes without GUID)
+    /// Enhanced with contamination prevention to ensure unique IDs across feeds
     static func generateDeterministicID(title: String, audioUrl: String, publicationDate: Date, feedUrl: String) -> String {
-        let content = "\(feedUrl)_\(title)_\(audioUrl)_\(publicationDate.timeIntervalSince1970)"
-        return "det_\(abs(content.hashValue))"
+        // CONTAMINATION PREVENTION: Ensure feedUrl is included for cross-feed uniqueness
+        let sanitizedFeedUrl = feedUrl.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let sanitizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sanitizedAudioUrl = audioUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Create content hash that includes feed URL for proper isolation
+        let content = "\(sanitizedFeedUrl)_\(sanitizedTitle)_\(sanitizedAudioUrl)_\(publicationDate.timeIntervalSince1970)"
+        let hash = abs(content.hashValue)
+        
+        // Include feed identifier in episode ID to prevent cross-feed contamination
+        let feedHash = abs(sanitizedFeedUrl.hashValue)
+        return "det_f\(feedHash)_\(hash)"
     }
     
     init(id: String = UUID().uuidString, title: String, descriptionText: String, audioUrl: String, publicationDate: Date, duration: TimeInterval, state: EpisodeState, feedId: String, localFilePath: String? = nil, fileSize: Int64? = nil, chapters: [PodcastChapter]? = nil, notes: PodcastNotes? = nil) {
@@ -95,7 +106,297 @@ struct PodcastEpisode: Identifiable, Codable, Equatable, Hashable {
     
     // Equatable based on unique identifier
     static func == (lhs: PodcastEpisode, rhs: PodcastEpisode) -> Bool {
-        return lhs.id == rhs.id
+        return lhs.id == rhs.id && lhs.feedId == rhs.feedId
+    }
+}
+
+ 
+/// Powerful episode contamination and duplication prevention measures
+/// Ensures each episode belongs strictly to its own feed with no cross-contamination
+struct EpisodeContaminationGuard {
+    
+    /// Comprehensive episode validation result
+    struct ValidationResult {
+        let isValid: Bool
+        var issues: [ContaminationIssue]
+        let correctedEpisode: PodcastEpisode?
+        
+        var hasContamination: Bool { !issues.isEmpty }
+        var hasCriticalIssues: Bool { issues.contains { $0.severity == .critical } }
+    }
+    
+    /// Types of contamination issues that can occur
+    enum ContaminationIssue {
+        case feedIdMismatch(expected: String, actual: String)
+        case duplicateEpisodeId(episodeId: String, conflictingFeeds: [String])
+        case crossFeedEpisodeReference(episodeId: String, originalFeed: String, contaminatingFeed: String)
+        case invalidFeedIdFormat(feedId: String)
+        case orphanedEpisode(episodeId: String)
+        case compositeIdMismatch(episodeId: String, expectedComposite: String, actualComposite: String)
+        case episodeIdCollision(episodeId: String, feeds: [String])
+        case futureDateEpisode(episodeId: String, futureDate: Date)
+        case invalidDateEpisode(episodeId: String, invalidDate: Date)
+        
+        var severity: Severity {
+            switch self {
+            case .feedIdMismatch, .duplicateEpisodeId, .crossFeedEpisodeReference, .episodeIdCollision:
+                return .critical
+            case .invalidFeedIdFormat, .orphanedEpisode, .compositeIdMismatch, .futureDateEpisode, .invalidDateEpisode:
+                return .warning
+            }
+        }
+        
+        var description: String {
+            switch self {
+            case .feedIdMismatch(let expected, let actual):
+                return "Episode feedId mismatch: expected '\(expected)', got '\(actual)'"
+            case .duplicateEpisodeId(let episodeId, let feeds):
+                return "Duplicate episode ID '\(episodeId)' found across feeds: \(feeds.joined(separator: ", "))"
+            case .crossFeedEpisodeReference(let episodeId, let original, let contaminating):
+                return "Cross-feed contamination: episode '\(episodeId)' from feed '\(original)' found in feed '\(contaminating)'"
+            case .invalidFeedIdFormat(let feedId):
+                return "Invalid feedId format: '\(feedId)'"
+            case .orphanedEpisode(let episodeId):
+                return "Orphaned episode without valid feed reference: '\(episodeId)'"
+            case .compositeIdMismatch(let episodeId, let expectedComposite, let actualComposite):
+                return "Composite ID mismatch for episode '\(episodeId)': expected '\(expectedComposite)', got '\(actualComposite)'"
+            case .episodeIdCollision(let episodeId, let feeds):
+                return "Episode ID collision '\(episodeId)' across multiple feeds: \(feeds.joined(separator: ", "))"
+            case .futureDateEpisode(let episodeId, let futureDate):
+                return "Episode '\(episodeId)' has future publication date: \(futureDate)"
+            case .invalidDateEpisode(let episodeId, let invalidDate):
+                return "Episode '\(episodeId)' has invalid publication date: \(invalidDate)"
+            }
+        }
+        
+        enum Severity {
+            case critical, warning
+        }
+    }
+    
+    /// Validate a single episode for contamination issues
+    static func validateEpisode(_ episode: PodcastEpisode, expectedFeedId: String, allEpisodes: [PodcastEpisode] = []) -> ValidationResult {
+        var issues: [ContaminationIssue] = []
+        var correctedEpisode: PodcastEpisode? = nil
+        
+        // 1. Validate feedId matches expected
+        if episode.feedId != expectedFeedId {
+            issues.append(.feedIdMismatch(expected: expectedFeedId, actual: episode.feedId))
+            
+            // Create corrected episode with proper feedId
+            var corrected = episode
+            corrected.feedId = expectedFeedId
+            correctedEpisode = corrected
+        }
+        
+        // 2. Validate feedId format
+        if episode.feedId.isEmpty || episode.feedId.contains(" ") || episode.feedId.contains("\n") {
+            issues.append(.invalidFeedIdFormat(feedId: episode.feedId))
+        }
+        
+        // 3. Check for duplicate episode IDs across different feeds
+        let duplicatesInOtherFeeds = allEpisodes.filter { $0.id == episode.id && $0.feedId != expectedFeedId }
+        if !duplicatesInOtherFeeds.isEmpty {
+            let conflictingFeeds = duplicatesInOtherFeeds.map { $0.feedId }
+            issues.append(.duplicateEpisodeId(episodeId: episode.id, conflictingFeeds: conflictingFeeds))
+        }
+        
+        // 4. Validate composite ID consistency
+        let expectedCompositeId = generateExpectedCompositeId(for: episode, feedId: expectedFeedId)
+        if episode.compositeID != expectedCompositeId {
+            issues.append(.compositeIdMismatch(episodeId: episode.id, expectedComposite: expectedCompositeId, actualComposite: episode.compositeID))
+        }
+        
+        // 5. Validate publication date
+        let now = Date()
+        let futureThreshold = now.addingTimeInterval(24 * 60 * 60) // Allow 1 day in future for timezone differences
+        
+        if episode.publicationDate > futureThreshold {
+            issues.append(.futureDateEpisode(episodeId: episode.id, futureDate: episode.publicationDate))
+        }
+        
+        // Check for extremely old dates (before 1990) which are likely invalid
+        let minimumValidDate = Date(timeIntervalSince1970: 631152000) // January 1, 1990
+        if episode.publicationDate < minimumValidDate {
+            issues.append(.invalidDateEpisode(episodeId: episode.id, invalidDate: episode.publicationDate))
+        }
+        
+        return ValidationResult(
+            isValid: issues.isEmpty,
+            issues: issues,
+            correctedEpisode: correctedEpisode
+        )
+    }
+    
+    /// Validate an entire collection of episodes for contamination
+    static func validateEpisodeCollection(_ episodes: [PodcastEpisode], expectedFeedId: String) -> [ValidationResult] {
+        var results: [ValidationResult] = []
+        var episodeIdTracker: [String: [String]] = [:] // episodeId -> [feedIds]
+        
+        // Build episode ID tracker for collision detection
+        for episode in episodes {
+            if episodeIdTracker[episode.id] == nil {
+                episodeIdTracker[episode.id] = []
+            }
+            episodeIdTracker[episode.id]?.append(episode.feedId)
+        }
+        
+        // Validate each episode
+        for episode in episodes {
+            var result = validateEpisode(episode, expectedFeedId: expectedFeedId, allEpisodes: episodes)
+            
+            // Add collision detection
+            if let feedIds = episodeIdTracker[episode.id], feedIds.count > 1 {
+                let uniqueFeeds = Array(Set(feedIds))
+                if uniqueFeeds.count > 1 {
+                    result.issues.append(.episodeIdCollision(episodeId: episode.id, feeds: uniqueFeeds))
+                }
+            }
+            
+            results.append(result)
+        }
+        
+        return results
+    }
+    
+    /// Sanitize and isolate episodes to their proper feeds
+    static func sanitizeEpisodes(_ episodes: [PodcastEpisode], targetFeedId: String) -> [PodcastEpisode] {
+        var sanitizedEpisodes: [PodcastEpisode] = []
+        var seenEpisodeIds: Set<String> = []
+        
+        for episode in episodes {
+            // Skip duplicates within the same collection
+            if seenEpisodeIds.contains(episode.id) {
+                print("🚫 CONTAMINATION GUARD: Skipping duplicate episode '\(episode.title)' (ID: \(episode.id))")
+                continue
+            }
+            
+            var sanitizedEpisode = episode
+            
+            // Force correct feedId
+            if sanitizedEpisode.feedId != targetFeedId {
+                print("🔧 CONTAMINATION GUARD: Correcting feedId for episode '\(episode.title)' from '\(episode.feedId)' to '\(targetFeedId)'")
+                sanitizedEpisode.feedId = targetFeedId
+            }
+            
+            // Validate publication date - skip episodes with future dates
+            let now = Date()
+            let futureThreshold = now.addingTimeInterval(24 * 60 * 60) // Allow 1 day in future for timezone differences
+            
+            if episode.publicationDate > futureThreshold {
+                print("🚫 CONTAMINATION GUARD: Skipping episode with future date '\(episode.title)' (Date: \(episode.publicationDate))")
+                continue
+            }
+            
+            // Skip episodes with invalid old dates (before 1990)
+            let minimumValidDate = Date(timeIntervalSince1970: 631152000) // January 1, 1990
+            if episode.publicationDate < minimumValidDate {
+                print("🚫 CONTAMINATION GUARD: Skipping episode with invalid old date '\(episode.title)' (Date: \(episode.publicationDate))")
+                continue
+            }
+            
+            // Regenerate composite ID with correct feedId
+            let expectedCompositeId = generateExpectedCompositeId(for: sanitizedEpisode, feedId: targetFeedId)
+            if sanitizedEpisode.compositeID != expectedCompositeId {
+                print("🔧 CONTAMINATION GUARD: Regenerating composite ID for episode '\(episode.title)'")
+                // Note: compositeID is computed property, so it will be automatically correct after feedId fix
+            }
+            
+            sanitizedEpisodes.append(sanitizedEpisode)
+            seenEpisodeIds.insert(sanitizedEpisode.id)
+        }
+        
+        print("✅ CONTAMINATION GUARD: Sanitized \(episodes.count) episodes -> \(sanitizedEpisodes.count) clean episodes for feed \(targetFeedId)")
+        return sanitizedEpisodes
+    }
+    
+    /// Generate expected composite ID for validation
+    private static func generateExpectedCompositeId(for episode: PodcastEpisode, feedId: String) -> String {
+        let dateString = String(episode.publicationDate.timeIntervalSince1970)
+        let titleHash = String(abs(episode.title.hashValue))
+        let audioUrlHash = String(abs(episode.audioUrl.hashValue))
+        return "\(feedId)_\(dateString)_\(titleHash)_\(audioUrlHash)"
+    }
+    
+    /// Perform comprehensive feed isolation check
+    static func performFeedIsolationCheck(allFeeds: [PodcastFeed]) -> [String: [ContaminationIssue]] {
+        var feedIssues: [String: [ContaminationIssue]] = [:]
+        var globalEpisodeTracker: [String: [String]] = [:] // episodeId -> [feedIds]
+        
+        // Build global episode tracker
+        for feed in allFeeds {
+            for episode in feed.episodes {
+                if globalEpisodeTracker[episode.id] == nil {
+                    globalEpisodeTracker[episode.id] = []
+                }
+                globalEpisodeTracker[episode.id]?.append(feed.id)
+            }
+        }
+        
+        // Check each feed for contamination
+        for feed in allFeeds {
+            var issues: [ContaminationIssue] = []
+            
+            for episode in feed.episodes {
+                // Check for cross-feed contamination
+                if let feedIds = globalEpisodeTracker[episode.id], feedIds.count > 1 {
+                    let otherFeeds = feedIds.filter { $0 != feed.id }
+                    if !otherFeeds.isEmpty {
+                        issues.append(.crossFeedEpisodeReference(
+                            episodeId: episode.id,
+                            originalFeed: feed.id,
+                            contaminatingFeed: otherFeeds.first!
+                        ))
+                    }
+                }
+                
+                // Check feedId consistency
+                if episode.feedId != feed.id {
+                    issues.append(.feedIdMismatch(expected: feed.id, actual: episode.feedId))
+                }
+            }
+            
+            if !issues.isEmpty {
+                feedIssues[feed.id] = issues
+            }
+        }
+        
+        return feedIssues
+    }
+    
+    /// Emergency decontamination procedure
+    static func emergencyDecontamination(episodes: [PodcastEpisode], targetFeedId: String) -> [PodcastEpisode] {
+        print("🚨 EMERGENCY DECONTAMINATION: Starting for feed \(targetFeedId) with \(episodes.count) episodes")
+        
+        var decontaminatedEpisodes: [PodcastEpisode] = []
+        var episodeIdRegistry: Set<String> = []
+        
+        for episode in episodes {
+            // Create completely clean episode
+            var cleanEpisode = episode
+            
+            // Force correct feedId
+            cleanEpisode.feedId = targetFeedId
+            
+            // Ensure unique episode ID within this feed
+            var uniqueId = episode.id
+            var counter = 1
+            while episodeIdRegistry.contains(uniqueId) {
+                uniqueId = "\(episode.id)_dedup_\(counter)"
+                counter += 1
+            }
+            
+            if uniqueId != episode.id {
+                print("🔧 EMERGENCY: Deduplicating episode ID '\(episode.id)' -> '\(uniqueId)'")
+                cleanEpisode.id = uniqueId
+            }
+            
+            episodeIdRegistry.insert(uniqueId)
+            decontaminatedEpisodes.append(cleanEpisode)
+        }
+        
+        print("✅ EMERGENCY DECONTAMINATION: Completed - \(decontaminatedEpisodes.count) clean episodes")
+        return decontaminatedEpisodes
     }
 }
 
@@ -153,6 +454,35 @@ class PodcastViewModel: ObservableObject {
     // MARK: - Shared Instance
     static let shared = PodcastViewModel()
     
+    /// Initialize contamination prevention system
+    @MainActor
+    func initializeContaminationPrevention() {
+        // Perform initial contamination check after a delay to allow app to fully load
+        Task {
+            // Wait for app to initialize
+            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+            
+            await MainActor.run {
+                print("🛡️ STARTUP: Performing initial contamination check")
+                performGlobalContaminationCheck()
+                
+                // Schedule periodic contamination checks
+                schedulePeriodicContaminationChecks()
+            }
+        }
+    }
+    
+    /// Schedule periodic contamination checks to maintain data integrity
+    private func schedulePeriodicContaminationChecks() {
+        // Run contamination check every 30 minutes
+        Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { _ in
+            Task { @MainActor in
+                print("🛡️ PERIODIC: Running scheduled contamination check")
+                self.performGlobalContaminationCheck()
+            }
+        }
+    }
+    
     // MARK: - RSS Processing Queue
     private let rssProcessingQueue = DispatchQueue(label: "com.streamradios.rss.processing", qos: .userInitiated)
     
@@ -160,14 +490,75 @@ class PodcastViewModel: ObservableObject {
     private var rssParsingTasks: [String: Task<Void, Error>] = [:]
     private let rssTaskQueue = DispatchQueue(label: "com.streamradios.rss.tasks", qos: .utility)
     
-    // MARK: - Published Properties
-    @Published var currentEpisodes: [PodcastEpisode] = []
+    // MARK: - Published Properties with Contamination Prevention
+    private var _currentEpisodes: [PodcastEpisode] = [] {
+        didSet {
+            objectWillChange.send()
+        }
+    }
+    
+    var currentEpisodes: [PodcastEpisode] {
+        get {
+            // 🛡️ ABSOLUTE CONTAMINATION PREVENTION: Always validate episodes before returning
+            guard let feedId = selectedFeedId else { return [] }
+            
+        // 🛡️ SMART EMPTY STATE HANDLING: Check for available snapshot before returning empty
+        if _currentEpisodes.isEmpty {
+            // Try to get episodes from snapshot if available
+            if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
+                print("🔄 SMART RECOVERY: Using snapshot episodes while loading")
+                return snapshotEpisodes
+            }
+            return []
+        }
+            
+            let validEpisodes = _currentEpisodes.filter { $0.feedId == feedId }
+            
+            // 🛡️ SMART CONTAMINATION DETECTION: Filter contaminated episodes but return clean ones
+            if validEpisodes.count != _currentEpisodes.count {
+                let contaminatedCount = _currentEpisodes.count - validEpisodes.count
+                print("🚨 GETTER CONTAMINATION: Found \(contaminatedCount) contaminated episodes, filtering them out but returning \(validEpisodes.count) clean episodes")
+                
+                // Log contaminated episodes
+                let contaminatedEpisodes = _currentEpisodes.filter { $0.feedId != feedId }
+                for episode in contaminatedEpisodes.prefix(3) {
+                    print("🚨 GETTER CONTAMINATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but selectedFeedId is '\(feedId)'")
+                }
+                
+                // Auto-fix by removing only contaminated episodes from internal storage
+                DispatchQueue.main.async {
+                    self._currentEpisodes = validEpisodes
+                    print("🛡️ SMART AUTO-FIX: Removed \(contaminatedCount) contaminated episodes, kept \(validEpisodes.count) clean episodes")
+                }
+            }
+            
+            return validEpisodes
+        }
+        set {
+            // 🛡️ ABSOLUTE CONTAMINATION PREVENTION: Validate all episodes before setting
+            guard let feedId = selectedFeedId else { 
+                _currentEpisodes = []
+                return 
+            }
+            
+            let validEpisodes = newValue.filter { $0.feedId == feedId }
+            if validEpisodes.count != newValue.count {
+                let contaminatedCount = newValue.count - validEpisodes.count
+                print("🚨 SETTER CONTAMINATION: Rejecting \(contaminatedCount) contaminated episodes during assignment")
+                
+                // Log contaminated episodes
+                let contaminatedEpisodes = newValue.filter { $0.feedId != feedId }
+                for episode in contaminatedEpisodes.prefix(3) {
+                    print("🚨 SETTER CONTAMINATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but selectedFeedId is '\(feedId)'")
+                }
+            }
+            
+            _currentEpisodes = validEpisodes
+            print("🛡️ SETTER PROTECTION: Set \(validEpisodes.count) validated episodes (rejected \(newValue.count - validEpisodes.count) contaminated)")
+        }
+    }
     @Published var podcastFeeds: [PodcastFeed] = []
     @Published var isLoading = false
-    
-    // FEED DUPLICATION PROTECTION: Track feeds being processed to prevent race conditions
-    private var feedsBeingProcessed: Set<String> = []
-    private let feedProcessingQueue = DispatchQueue(label: "com.streamradios.feedProcessing", attributes: .concurrent)
     @Published var isLoadingFeeds = false
     @Published var isLoadingEpisodes = false
     @Published var isLoadingMoreEpisodes = false
@@ -185,6 +576,83 @@ class PodcastViewModel: ObservableObject {
     @Published var lastPlayedEpisodes: [String: String] = [:]
     @Published var episodeProgress: [String: Double] = [:]
     @Published var downloadProgress: [String: Double] = [:]
+    
+    // MARK: - Operation Management
+    
+    /// Cancel pending operations to prevent UI conflicts
+    @MainActor
+    func cancelPendingOperations() {
+        // Cancel any pending feed loading operations
+        feedsBeingProcessed.removeAll()
+        
+        // Cancel any delayed operations that might interfere
+        print("🚫 OPERATIONS: Cancelled pending operations for clean navigation")
+    }
+    
+    // MARK: - Safe Episode Assignment and Validation
+    
+    /// Validate and clean current episodes to prevent UI contamination
+    @MainActor
+    private func validateAndCleanCurrentEpisodes() {
+        guard !currentEpisodes.isEmpty, let feedId = selectedFeedId, !feedId.isEmpty else { return }
+        
+        // Check for contamination in current episodes
+        let validEpisodes = currentEpisodes.filter { $0.feedId == feedId }
+        if validEpisodes.count != currentEpisodes.count {
+            let contaminatedCount = currentEpisodes.count - validEpisodes.count
+            print("🚨 UI VALIDATION: Found \(contaminatedCount) contaminated episodes in currentEpisodes for feed \(feedId)")
+            
+            // Log contaminated episodes for debugging
+            let contaminatedEpisodes = currentEpisodes.filter { $0.feedId != feedId }
+            for episode in contaminatedEpisodes.prefix(3) {
+                print("🚨 UI CONTAMINATED: Episode '\(episode.title)' has feedId '\(episode.feedId)' but currentEpisodes is for feed '\(feedId)'")
+            }
+            
+            // IMMEDIATE FIX: Replace with clean episodes
+            currentEpisodes = validEpisodes
+            print("🛡️ UI AUTO-CLEAN: Cleaned currentEpisodes to \(validEpisodes.count) valid episodes")
+            
+            // Trigger contamination cleanup
+            performImmediateContaminationFix()
+        }
+    }
+    
+    // MARK: - Safe Episode Assignment
+    
+    /// Safely assign episodes to currentEpisodes with contamination prevention
+    @MainActor
+    func safelyAssignCurrentEpisodes(_ episodes: [PodcastEpisode], targetFeedId: String, updateSelectedFeed: Bool = true) {
+        // 🛡️ CRITICAL CONTAMINATION PREVENTION: Validate all episodes belong to target feed
+        let validEpisodes = episodes.filter { $0.feedId == targetFeedId }
+        if validEpisodes.count != episodes.count {
+            let contaminatedCount = episodes.count - validEpisodes.count
+            print("🚨 CURRENT EPISODES CONTAMINATION: Found \(contaminatedCount) contaminated episodes for feed \(targetFeedId)")
+            
+            // Log contaminated episodes for debugging
+            let contaminatedEpisodes = episodes.filter { $0.feedId != targetFeedId }
+            for episode in contaminatedEpisodes.prefix(3) {
+                print("🚨 CONTAMINATED ASSIGNMENT: Episode '\(episode.title)' has feedId '\(episode.feedId)' but was assigned to feed '\(targetFeedId)'")
+            }
+            
+            // EMERGENCY DECONTAMINATION: If too many contaminated episodes, trigger full cleanup
+            if contaminatedCount > validEpisodes.count / 2 {
+                print("🚨 EMERGENCY: High contamination detected (\(contaminatedCount) contaminated vs \(validEpisodes.count) valid)")
+                performImmediateContaminationFix()
+            }
+        }
+        
+        // 🛡️ ABSOLUTE CONTAMINATION PREVENTION: Always use direct internal storage assignment
+        print("🛡️ ABSOLUTE SAFE ASSIGNMENT: Directly assigning \(validEpisodes.count) validated episodes to internal storage for feed \(targetFeedId)")
+        _currentEpisodes = validEpisodes
+        print("✅ ABSOLUTE SAFE ASSIGNMENT: Assigned \(validEpisodes.count) validated episodes directly to internal storage")
+        
+        // Update selected feed if requested
+        if updateSelectedFeed {
+            selectedFeedId = targetFeedId
+        }
+        
+        print("✅ SAFE ASSIGNMENT: Assigned \(validEpisodes.count) validated episodes to currentEpisodes for feed \(targetFeedId)")
+    }
     
     // PERFORMANCE OPTIMIZATION: Cache filtered results and counts to avoid re-filtering and re-counting
     private var tabFilterCache: [String: [Int: [PodcastEpisode]]] = [:] // feedId -> [tabIndex -> episodes]
@@ -238,8 +706,36 @@ class PodcastViewModel: ObservableObject {
     // IMMEDIATE NEW EPISODE CHECK: Track immediate check tasks
     private var immediateCheckTasks: [String: Task<Void, Never>] = [:]
     
+    // FEED PROCESSING SYNCHRONIZATION
+    private let feedProcessingQueue = DispatchQueue(label: "com.streamradios.feed.processing", attributes: .concurrent)
+    private var feedsBeingProcessed: Set<String> = []
+    
     // Current state
-    var selectedFeedId: String?
+    var selectedFeedId: String? {
+        didSet {
+            // 🛡️ SMART FEED SWITCH PROTECTION: Only clear if episodes belong to wrong feed
+            if let newFeedId = selectedFeedId, let oldFeedId = oldValue, newFeedId != oldFeedId {
+                print("🔄 FEED ID CHANGE: From \(oldFeedId) to \(newFeedId)")
+                
+                // Check if current episodes belong to the old feed - only clear if they do
+                let needsClearing = _currentEpisodes.contains { $0.feedId == oldFeedId }
+                if needsClearing {
+                    print("🧹 SMART CLEARING: Clearing episodes from old feed \(oldFeedId)")
+                    _currentEpisodes.removeAll()
+                } else {
+                    print("✅ SMART SKIP: Episodes don't belong to old feed, keeping current episodes")
+                }
+                
+                // 🛡️ GENTLE SYNCHRONIZATION: Ensure UI updates without forcing blank state
+                DispatchQueue.main.async {
+                    if self.selectedFeedId == newFeedId {
+                        self.objectWillChange.send()
+                        print("🔄 GENTLE SYNC: UI updated for feed switch to \(newFeedId)")
+                    }
+                }
+            }
+        }
+    }
     private var lastLoadTime: Date = Date()
     
     init() {
@@ -253,6 +749,15 @@ class PodcastViewModel: ObservableObject {
         
         // Load last played episodes from UserDefaults
         loadLastPlayedEpisodes()
+        
+        // Initialize contamination prevention system immediately
+        Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second delay
+            await MainActor.run {
+                print("🛡️ STARTUP: Initializing contamination prevention system")
+                initializeContaminationPrevention()
+            }
+        }
         
         // Load sorting preferences from UserDefaults
         loadSortingPreferences()
@@ -1691,6 +2196,15 @@ class PodcastViewModel: ObservableObject {
     private func backgroundRefreshForNewEpisodes(feedId: String, isInitialLoad: Bool) async {
         print("🔄 BACKGROUND REFRESH: Checking for new episodes for feed \(feedId)")
         
+        // 🚀 INSTANT SNAPSHOT CHECK: Skip all background operations if snapshot is fresh
+        if let snapshot = getEpisodeSnapshot(for: feedId), !snapshot.isEmpty {
+            let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
+            if snapshotAge < 300 { // 5 minutes
+                print("⚡ INSTANT SNAPSHOT: Skipping background refresh - fresh snapshot (\(Int(snapshotAge/60)) min old)")
+                return
+            }
+        }
+        
         // Check if feed needs RSS refresh for new episodes
         let shouldAutoRefresh = await shouldRefreshFeedFromRSS(feedId: feedId, isInitialLoad: isInitialLoad)
         guard shouldAutoRefresh else {
@@ -3023,10 +3537,32 @@ class PodcastViewModel: ObservableObject {
     func loadEpisodesForFeed(_ feedId: String, isInitialLoad: Bool = false) async {
         print("🔄 LOAD EPISODES: Starting load for feedId '\(feedId)' (isInitialLoad: \(isInitialLoad))")
         
+        // 🚀 PREVENT DUPLICATE OPERATIONS: Skip if already processing this feed
+        if feedsBeingProcessed.contains(feedId) {
+            print("⚡ DUPLICATE PREVENTION: Skipping load - feed \(feedId) already being processed")
+            return
+        }
+        
+        feedsBeingProcessed.insert(feedId)
+        defer { feedsBeingProcessed.remove(feedId) }
+        
         // INSTANT DISPLAY: Load cached episodes from Core Data FIRST for immediate UI display
         let cachedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
         if !cachedEpisodes.isEmpty {
-            print("⚡ INSTANT DISPLAY: Found \(cachedEpisodes.count) cached episodes - displaying immediately")
+            // 🛡️ CONTAMINATION PREVENTION: Validate all cached episodes belong to the requested feed
+            let validCachedEpisodes = cachedEpisodes.filter { $0.feedId == feedId }
+            if validCachedEpisodes.count != cachedEpisodes.count {
+                let contaminatedCount = cachedEpisodes.count - validCachedEpisodes.count
+                print("🚨 CACHED EPISODES CONTAMINATION: Found \(contaminatedCount) contaminated episodes in cached data for feed \(feedId)")
+                
+                // Log contaminated episodes for debugging
+                let contaminatedEpisodes = cachedEpisodes.filter { $0.feedId != feedId }
+                for episode in contaminatedEpisodes.prefix(3) {
+                    print("🚨 CONTAMINATED CACHED: Episode '\(episode.title)' has feedId '\(episode.feedId)' but was loaded for feed '\(feedId)'")
+                }
+            }
+            
+            print("⚡ INSTANT DISPLAY: Found \(validCachedEpisodes.count) validated cached episodes - displaying immediately")
             
             await MainActor.run {
                 // Apply current filter instantly (episodes already sorted newest first from Core Data)
@@ -3034,11 +3570,11 @@ class PodcastViewModel: ObservableObject {
                 let filteredEpisodes: [PodcastEpisode]
                 switch filter {
                 case .all:
-                    filteredEpisodes = cachedEpisodes // Already sorted newest first
+                    filteredEpisodes = validCachedEpisodes // Already sorted newest first
                 case .favorites:
-                    filteredEpisodes = cachedEpisodes.filter { $0.state.isFavorite }
+                    filteredEpisodes = validCachedEpisodes.filter { $0.state.isFavorite }
                 case .downloads:
-                    filteredEpisodes = cachedEpisodes.filter { $0.state.isDownloaded }
+                    filteredEpisodes = validCachedEpisodes.filter { $0.state.isDownloaded }
                 }
                 
                 // CRITICAL: Clear any contaminated episodes from wrong feeds
@@ -3047,23 +3583,23 @@ class PodcastViewModel: ObservableObject {
                     currentEpisodes = []
                 }
                 
-                // Update UI instantly with cached episodes
-                currentEpisodes = filteredEpisodes
+                // Update UI instantly with cached episodes using safe assignment
+                safelyAssignCurrentEpisodes(filteredEpisodes, targetFeedId: feedId)
                 selectedFeedId = feedId
                 isLoadingEpisodes = false
                 operationInProgress = false
                 
-                // Update episode counts immediately
-                let allCount = cachedEpisodes.count
-                let favoritesCount = cachedEpisodes.filter { $0.state.isFavorite }.count
-                let downloadsCount = cachedEpisodes.filter { $0.state.isDownloaded }.count
+                // Update episode counts immediately with validated episodes
+                let allCount = validCachedEpisodes.count
+                let favoritesCount = validCachedEpisodes.filter { $0.state.isFavorite }.count
+                let downloadsCount = validCachedEpisodes.filter { $0.state.isDownloaded }.count
                 episodeCounts = (all: allCount, favorites: favoritesCount, downloads: downloadsCount)
                 
-                print("⚡ INSTANT SUCCESS: Displaying \(filteredEpisodes.count) cached episodes immediately")
+                print("⚡ INSTANT SUCCESS: Displaying \(filteredEpisodes.count) validated cached episodes immediately")
             }
             
-            // Update snapshot with cached episodes for future instant access
-            updateEpisodeSnapshot(for: feedId, episodes: cachedEpisodes)
+            // Update snapshot with validated cached episodes for future instant access
+            updateEpisodeSnapshot(for: feedId, episodes: validCachedEpisodes)
             
             // BACKGROUND REFRESH: Check for new episodes in background without blocking UI
             Task.detached(priority: .background) {
@@ -3075,7 +3611,23 @@ class PodcastViewModel: ObservableObject {
         
         // ULTRA PERFORMANCE: Check for snapshots if no cached episodes
         if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
-            print("⚡ ULTRA PERFORMANCE: Using snapshot for feed \(feedId) - SKIPPING ALL EXPENSIVE OPERATIONS (newest episodes first)")
+            // 🛡️ CONTAMINATION PREVENTION: Validate all snapshot episodes belong to the requested feed
+            let validSnapshotEpisodes = snapshotEpisodes.filter { $0.feedId == feedId }
+            if validSnapshotEpisodes.count != snapshotEpisodes.count {
+                let contaminatedCount = snapshotEpisodes.count - validSnapshotEpisodes.count
+                print("🚨 SNAPSHOT CONTAMINATION: Found \(contaminatedCount) contaminated episodes in snapshot for feed \(feedId)")
+                
+                // Log contaminated episodes for debugging
+                let contaminatedEpisodes = snapshotEpisodes.filter { $0.feedId != feedId }
+                for episode in contaminatedEpisodes.prefix(3) {
+                    print("🚨 CONTAMINATED SNAPSHOT: Episode '\(episode.title)' has feedId '\(episode.feedId)' but was in snapshot for feed '\(feedId)'")
+                }
+                
+                // Update the snapshot with clean episodes
+                updateEpisodeSnapshot(for: feedId, episodes: validSnapshotEpisodes)
+            }
+            
+            print("⚡ ULTRA PERFORMANCE: Using \(validSnapshotEpisodes.count) validated snapshot episodes for feed \(feedId) - SKIPPING ALL EXPENSIVE OPERATIONS (newest episodes first)")
             
             await MainActor.run {
                 // Apply current filter instantly (episodes already sorted newest first in snapshot)
@@ -3083,13 +3635,13 @@ class PodcastViewModel: ObservableObject {
                 let filteredEpisodes: [PodcastEpisode]
                 switch filter {
                 case .all:
-                    filteredEpisodes = snapshotEpisodes // Already sorted newest first
+                    filteredEpisodes = validSnapshotEpisodes // Already sorted newest first
                 case .favorites:
                     // Maintain newest first order when filtering
-                    filteredEpisodes = snapshotEpisodes.filter { $0.state.isFavorite }
+                    filteredEpisodes = validSnapshotEpisodes.filter { $0.state.isFavorite }
                 case .downloads:
                     // Maintain newest first order when filtering
-                    filteredEpisodes = snapshotEpisodes.filter { $0.state.isDownloaded }
+                    filteredEpisodes = validSnapshotEpisodes.filter { $0.state.isDownloaded }
                 }
                 
                 // CRITICAL: Clear any contaminated episodes from wrong feeds
@@ -3104,10 +3656,10 @@ class PodcastViewModel: ObservableObject {
                 isLoadingEpisodes = false
                 operationInProgress = false
                 Task {
-                    await updateEpisodeCounts(for: feedId, episodes: snapshotEpisodes)
+                    await updateEpisodeCounts(for: feedId, episodes: validSnapshotEpisodes)
                 }
                 
-                print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
+                print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) validated episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
             }
             
             return
@@ -3137,6 +3689,14 @@ class PodcastViewModel: ObservableObject {
             await MainActor.run {
                 self.currentEpisodes.removeAll()
                 print("🔄 FEED SWITCH: Cleared episodes for feed transition from \(self.selectedFeedId ?? "nil") to \(feedId)")
+                
+                // 🛡️ CRITICAL: Clean all snapshots to prevent cross-contamination during feed switches
+                // This ensures we start with a clean slate for the new feed
+                if let oldFeedId = self.selectedFeedId {
+                    print("🧹 FEED SWITCH: Cleaning snapshot for old feed \(oldFeedId) to prevent contamination")
+                    self.episodeSnapshotCache.removeValue(forKey: oldFeedId)
+                    self.snapshotTimestamps.removeValue(forKey: oldFeedId)
+                }
             }
         }
         
@@ -3162,18 +3722,47 @@ class PodcastViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed
-                let safeEpisodes = filteredEpisodes.filter { $0.feedId == feedId }
-                if safeEpisodes.count != filteredEpisodes.count {
-                    print("🚨 FEED ISOLATION: Filtered out \(filteredEpisodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+                // CONTAMINATION GUARD: Comprehensive episode validation and sanitization
+                print("🛡️ CONTAMINATION GUARD: Validating \(filteredEpisodes.count) episodes for feed \(feedId)")
+                
+                // First pass: Basic feed isolation check
+                let basicSafeEpisodes = filteredEpisodes.filter { $0.feedId == feedId }
+                if basicSafeEpisodes.count != filteredEpisodes.count {
+                    print("🚨 FEED ISOLATION: Filtered out \(filteredEpisodes.count - basicSafeEpisodes.count) episodes that didn't belong to feed \(feedId)")
                     // Log details about contaminated episodes for debugging
                     let contaminatedEpisodes = filteredEpisodes.filter { $0.feedId != feedId }
-                    for episode in contaminatedEpisodes.prefix(3) {
+                    for episode in contaminatedEpisodes {
                         print("🚨 CONTAMINATED EPISODE: '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
                     }
+                    
+                    // IMMEDIATE FIX: Trigger contamination cleanup when detected
+                    print("🛡️ AUTO-FIX: Triggering immediate contamination cleanup")
+                    performImmediateContaminationFix()
                 }
-                print("📊 ⚡ SNAPSHOT INSTANT: Displaying \(safeEpisodes.count) episodes with ZERO processing overhead (newest episodes first)")
-                self.currentEpisodes = safeEpisodes
+                
+                // Second pass: Advanced contamination prevention
+                let sanitizedEpisodes = EpisodeContaminationGuard.sanitizeEpisodes(basicSafeEpisodes, targetFeedId: feedId)
+                
+                // Third pass: Comprehensive validation
+                let validationResults = EpisodeContaminationGuard.validateEpisodeCollection(sanitizedEpisodes, expectedFeedId: feedId)
+                let criticalIssues = validationResults.filter { $0.hasCriticalIssues }
+                
+                if !criticalIssues.isEmpty {
+                    print("🚨 CONTAMINATION GUARD: Found \(criticalIssues.count) episodes with critical contamination issues")
+                    for result in criticalIssues {
+                        for issue in result.issues {
+                            print("🚨 CRITICAL ISSUE: \(issue.description)")
+                        }
+                    }
+                    
+                    // Emergency decontamination if needed
+                    let finalEpisodes = EpisodeContaminationGuard.emergencyDecontamination(episodes: sanitizedEpisodes, targetFeedId: feedId)
+                    print("📊 ⚡ SNAPSHOT INSTANT: Displaying \(finalEpisodes.count) DECONTAMINATED episodes (newest episodes first)")
+                    self.safelyAssignCurrentEpisodes(finalEpisodes, targetFeedId: feedId)
+                } else {
+                    print("📊 ⚡ SNAPSHOT INSTANT: Displaying \(sanitizedEpisodes.count) CLEAN episodes (newest episodes first)")
+                    self.safelyAssignCurrentEpisodes(sanitizedEpisodes, targetFeedId: feedId)
+                }
                 self.hasMoreEpisodes = false // Snapshots contain complete data
                 self.isLoadingEpisodes = false
                 self.operationInProgress = false
@@ -3196,7 +3785,23 @@ class PodcastViewModel: ObservableObject {
         
         // ULTRA PERFORMANCE: Check for snapshots if no cached episodes
         if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
-            print("⚡ ULTRA PERFORMANCE: Using snapshot for feed \(feedId) - SKIPPING ALL EXPENSIVE OPERATIONS (newest episodes first)")
+            // 🛡️ CONTAMINATION PREVENTION: Validate all snapshot episodes belong to the requested feed
+            let validSnapshotEpisodes = snapshotEpisodes.filter { $0.feedId == feedId }
+            if validSnapshotEpisodes.count != snapshotEpisodes.count {
+                let contaminatedCount = snapshotEpisodes.count - validSnapshotEpisodes.count
+                print("🚨 FALLBACK SNAPSHOT CONTAMINATION: Found \(contaminatedCount) contaminated episodes in fallback snapshot for feed \(feedId)")
+                
+                // Log contaminated episodes for debugging
+                let contaminatedEpisodes = snapshotEpisodes.filter { $0.feedId != feedId }
+                for episode in contaminatedEpisodes.prefix(3) {
+                    print("🚨 CONTAMINATED FALLBACK: Episode '\(episode.title)' has feedId '\(episode.feedId)' but was in fallback snapshot for feed '\(feedId)'")
+                }
+                
+                // Update the snapshot with clean episodes
+                updateEpisodeSnapshot(for: feedId, episodes: validSnapshotEpisodes)
+            }
+            
+            print("⚡ ULTRA PERFORMANCE: Using \(validSnapshotEpisodes.count) validated fallback snapshot episodes for feed \(feedId) - SKIPPING ALL EXPENSIVE OPERATIONS (newest episodes first)")
             
             await MainActor.run {
                 // Apply current filter instantly (episodes already sorted newest first in snapshot)
@@ -3204,13 +3809,13 @@ class PodcastViewModel: ObservableObject {
                 let filteredEpisodes: [PodcastEpisode]
                 switch filter {
                 case .all:
-                    filteredEpisodes = snapshotEpisodes // Already sorted newest first
+                    filteredEpisodes = validSnapshotEpisodes // Already sorted newest first
                 case .favorites:
                     // Maintain newest first order when filtering
-                    filteredEpisodes = snapshotEpisodes.filter { $0.state.isFavorite }
+                    filteredEpisodes = validSnapshotEpisodes.filter { $0.state.isFavorite }
                 case .downloads:
                     // Maintain newest first order when filtering
-                    filteredEpisodes = snapshotEpisodes.filter { $0.state.isDownloaded }
+                    filteredEpisodes = validSnapshotEpisodes.filter { $0.state.isDownloaded }
                 }
                 
                 // CRITICAL: Clear any contaminated episodes from wrong feeds
@@ -3225,10 +3830,10 @@ class PodcastViewModel: ObservableObject {
                 isLoadingEpisodes = false
                 operationInProgress = false
                 Task {
-                    await updateEpisodeCounts(for: feedId, episodes: snapshotEpisodes)
+                    await updateEpisodeCounts(for: feedId, episodes: validSnapshotEpisodes)
                 }
                 
-                print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
+                print("📸 SNAPSHOT SUCCESS: Displaying \(filteredEpisodes.count) validated episodes instantly with newest episodes first - NO EXPENSIVE OPERATIONS NEEDED")
             }
             
             return
@@ -4518,19 +5123,18 @@ class PodcastViewModel: ObservableObject {
         print("🧽 Cleared all tab filter caches and counts (snapshots preserved)")
     }
     
-    /// Clear all existing episode snapshots
+    /// Clear all existing episode snapshots to prevent contamination spread
+    @MainActor
     func clearAllEpisodeSnapshots() {
         episodeSnapshotCache.removeAll()
         snapshotTimestamps.removeAll()
-        print("🗑️ SNAPSHOT: Cleared all existing episode snapshots")
+        print("🧹 EMERGENCY: Cleared all episode snapshots to prevent contamination spread")
         
         // Reset DataSyncManager snapshot tracking
-        Task { @MainActor in
-            DataSyncManager.shared.updateEpisodeSnapshotReadiness(
-                feedsWithSnapshots: 0,
-                totalFeedsRequiringSnapshots: 0
-            )
-        }
+        DataSyncManager.shared.updateEpisodeSnapshotReadiness(
+            feedsWithSnapshots: 0,
+            totalFeedsRequiringSnapshots: 0
+        )
     }
     
     
@@ -4573,11 +5177,52 @@ class PodcastViewModel: ObservableObject {
                 await self.cleanupOldSnapshots()
             }
             
-            // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed before caching
-            let safeEpisodes = episodes.filter { $0.feedId == feedId }
-            if safeEpisodes.count != episodes.count {
-                print("🚨 SNAPSHOT ISOLATION: Filtered out \(episodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
+            // ENHANCED CONTAMINATION PREVENTION: Multi-layer episode validation
+            let validatedEpisodes = episodes.compactMap { episode -> PodcastEpisode? in
+                // Layer 1: Basic validation
+                guard !episode.id.isEmpty,
+                      !episode.title.isEmpty,
+                      !episode.feedId.isEmpty,
+                      !episode.audioUrl.isEmpty else {
+                    print("🚨 SNAPSHOT VALIDATION: Skipping episode with missing data - Title: '\(episode.title)', ID: '\(episode.id)'")
+                    return nil
+                }
+                
+                // Layer 2: Feed isolation check
+                guard episode.feedId == feedId else {
+                    print("🚨 SNAPSHOT ISOLATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
+                    return nil
+                }
+                
+                // Layer 3: Episode ID integrity check for deterministic IDs
+                if episode.id.hasPrefix("det_f") {
+                    let feedHash = abs(feedId.lowercased().hashValue)
+                    let expectedPrefix = "det_f\(feedHash)_"
+                    if !episode.id.hasPrefix(expectedPrefix) {
+                        print("🚨 SNAPSHOT ID INTEGRITY: Episode '\(episode.title)' has ID '\(episode.id)' that doesn't match feed hash pattern")
+                        // Create corrected episode with proper ID
+                        var correctedEpisode = episode
+                        correctedEpisode.id = PodcastEpisode.generateDeterministicID(
+                            title: episode.title,
+                            audioUrl: episode.audioUrl,
+                            publicationDate: episode.publicationDate,
+                            feedUrl: feedId
+                        )
+                        correctedEpisode.feedId = feedId // Ensure feedId is correct
+                        print("🔧 SNAPSHOT CORRECTION: Corrected episode ID to '\(correctedEpisode.id)'")
+                        return correctedEpisode
+                    }
+                }
+                
+                return episode
             }
+            
+            if validatedEpisodes.count != episodes.count {
+                let filteredCount = episodes.count - validatedEpisodes.count
+                print("🛡️ SNAPSHOT VALIDATION: Filtered out \(filteredCount) contaminated/invalid episodes from feed \(feedId)")
+            }
+            
+            let safeEpisodes = validatedEpisodes
             
             // PERFORMANCE OPTIMIZATION: Use efficient sorting algorithm
             let sortedEpisodes = safeEpisodes.sorted { $0.publicationDate > $1.publicationDate }
@@ -4710,7 +5355,7 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// Get episode snapshot if available and recent
+    /// Get episode snapshot if available and recent with enhanced contamination prevention
     func getEpisodeSnapshot(for feedId: String) -> [PodcastEpisode]? {
         guard let episodes = episodeSnapshotCache[feedId],
               let timestamp = snapshotTimestamps[feedId] else {
@@ -4720,8 +5365,65 @@ class PodcastViewModel: ObservableObject {
         // Snapshots are valid for 10 minutes
         let isRecent = Date().timeIntervalSince(timestamp) < 600
         if isRecent {
-            print("📸 SNAPSHOT HIT: Using cached \(episodes.count) episodes for feed \(feedId)")
-            return episodes
+            // 🛡️ ENHANCED CONTAMINATION PREVENTION: Multi-layer validation and cleanup
+            let validatedEpisodes = episodes.compactMap { episode -> PodcastEpisode? in
+                // Layer 1: Basic validation
+                guard !episode.id.isEmpty,
+                      !episode.title.isEmpty,
+                      !episode.feedId.isEmpty,
+                      !episode.audioUrl.isEmpty else {
+                    print("🚨 SNAPSHOT RETRIEVAL: Skipping episode with missing data - Title: '\(episode.title)', ID: '\(episode.id)'")
+                    return nil
+                }
+                
+                // Layer 2: Feed isolation check
+                guard episode.feedId == feedId else {
+                    print("🚨 SNAPSHOT RETRIEVAL: Episode '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
+                    return nil
+                }
+                
+                // Layer 3: Episode ID integrity check for deterministic IDs
+                if episode.id.hasPrefix("det_f") {
+                    let expectedFeedHash = abs(feedId.lowercased().hashValue)
+                    let expectedPrefix = "det_f\(expectedFeedHash)_"
+                    if !episode.id.hasPrefix(expectedPrefix) {
+                        print("🚨 SNAPSHOT ID INTEGRITY: Episode '\(episode.title)' has ID '\(episode.id)' that doesn't match feed hash pattern for feed '\(feedId)'")
+                        // Create corrected episode with proper ID
+                        var correctedEpisode = episode
+                        correctedEpisode.id = PodcastEpisode.generateDeterministicID(
+                            title: episode.title,
+                            audioUrl: episode.audioUrl,
+                            publicationDate: episode.publicationDate,
+                            feedUrl: feedId
+                        )
+                        correctedEpisode.feedId = feedId // Ensure feedId is correct
+                        print("🔧 SNAPSHOT ID CORRECTION: Corrected episode ID to '\(correctedEpisode.id)'")
+                        return correctedEpisode
+                    }
+                }
+                
+                return episode
+            }
+            
+            if validatedEpisodes.count != episodes.count {
+                let filteredCount = episodes.count - validatedEpisodes.count
+                print("🛡️ SNAPSHOT RETRIEVAL: Filtered out \(filteredCount) contaminated/invalid episodes from snapshot for feed \(feedId)")
+                
+                // IMMEDIATE FIX: Update the snapshot with clean episodes
+                if !validatedEpisodes.isEmpty {
+                    episodeSnapshotCache[feedId] = validatedEpisodes
+                    print("🛡️ SNAPSHOT CLEANED: Updated snapshot with \(validatedEpisodes.count) clean episodes for feed \(feedId)")
+                } else {
+                    // If no valid episodes, remove the snapshot entirely
+                    episodeSnapshotCache.removeValue(forKey: feedId)
+                    snapshotTimestamps.removeValue(forKey: feedId)
+                    print("🛡️ SNAPSHOT REMOVED: No valid episodes found, removed contaminated snapshot for feed \(feedId)")
+                    return nil
+                }
+            }
+            
+            print("📸 SNAPSHOT HIT: Using \(validatedEpisodes.count) validated episodes for feed \(feedId)")
+            return validatedEpisodes
         } else {
             // Remove stale snapshot
             episodeSnapshotCache.removeValue(forKey: feedId)
@@ -4928,7 +5630,24 @@ class PodcastViewModel: ObservableObject {
                     return
                 }
                 
-                let episode = PodcastEpisode(
+                // DATE VALIDATION: Check for future episodes before creating
+                let now = Date()
+                let futureThreshold = now.addingTimeInterval(24 * 60 * 60) // Allow 1 day in future for timezone differences
+                
+                if pubDate > futureThreshold {
+                    print("🚫 RSS PARSER: Skipping episode with future date '\(currentTitle)' (Date: \(pubDate))")
+                    return
+                }
+                
+                // Check for invalid old dates (before 1990)
+                let minimumValidDate = Date(timeIntervalSince1970: 631152000) // January 1, 1990
+                if pubDate < minimumValidDate {
+                    print("🚫 RSS PARSER: Skipping episode with invalid old date '\(currentTitle)' (Date: \(pubDate))")
+                    return
+                }
+                
+                // CONTAMINATION PREVENTION: Create episode with strict feed isolation
+                let rawEpisode = PodcastEpisode(
                     id: episodeId,
                     title: currentTitle,
                     descriptionText: currentDescription.isEmpty ? currentTitle : currentDescription,
@@ -4944,7 +5663,27 @@ class PodcastViewModel: ObservableObject {
                     feedId: feedId
                 )
                 
-                newEpisodes.append(episode)
+                // CONTAMINATION GUARD: Validate episode before adding
+                let validationResult = EpisodeContaminationGuard.validateEpisode(rawEpisode, expectedFeedId: feedId, allEpisodes: newEpisodes)
+                
+                if validationResult.hasCriticalIssues {
+                    print("🚨 CONTAMINATION GUARD: Critical issues found in episode '\(currentTitle)': \(validationResult.issues.map { $0.description }.joined(separator: ", "))")
+                    
+                    // Use corrected episode if available, otherwise skip
+                    if let correctedEpisode = validationResult.correctedEpisode {
+                        print("🔧 CONTAMINATION GUARD: Using corrected episode for '\(currentTitle)'")
+                        newEpisodes.append(correctedEpisode)
+                    } else {
+                        print("🚫 CONTAMINATION GUARD: Skipping contaminated episode '\(currentTitle)'")
+                    }
+                } else {
+                    // Episode is clean, add it
+                    newEpisodes.append(rawEpisode)
+                    
+                    if validationResult.hasContamination {
+                        print("⚠️ CONTAMINATION GUARD: Minor issues in episode '\(currentTitle)': \(validationResult.issues.map { $0.description }.joined(separator: ", "))")
+                    }
+                }
             }
         }
         
@@ -5235,6 +5974,117 @@ class PodcastViewModel: ObservableObject {
                 }
             }
         }
+    }
+    
+    // MARK: - Episode Contamination Prevention Methods
+    
+    /// Perform comprehensive feed isolation check across all feeds
+    @MainActor
+    func performGlobalContaminationCheck() {
+        print("🛡️ GLOBAL CONTAMINATION CHECK: Starting comprehensive validation across all feeds")
+        
+        let feedIssues = EpisodeContaminationGuard.performFeedIsolationCheck(allFeeds: podcastFeeds)
+        
+        if feedIssues.isEmpty {
+            print("✅ GLOBAL CONTAMINATION CHECK: All feeds are clean - no contamination detected")
+        } else {
+            print("🚨 GLOBAL CONTAMINATION CHECK: Found contamination in \(feedIssues.count) feeds")
+            
+            for (feedId, issues) in feedIssues {
+                let feedTitle = podcastFeeds.first { $0.id == feedId }?.title ?? "Unknown Feed"
+                print("🚨 FEED \(feedTitle) (\(feedId)): \(issues.count) contamination issues")
+                
+                for issue in issues {
+                    print("   - \(issue.description)")
+                }
+                
+                // Auto-fix critical issues
+                let criticalIssues = issues.filter { $0.severity == .critical }
+                if !criticalIssues.isEmpty {
+                    print("🔧 AUTO-FIX: Attempting to fix \(criticalIssues.count) critical issues in feed \(feedTitle)")
+                    autoFixFeedContamination(feedId: feedId)
+                }
+            }
+        }
+    }
+    
+    /// Automatically fix contamination issues in a specific feed
+    @MainActor
+    private func autoFixFeedContamination(feedId: String) {
+        guard let feedIndex = podcastFeeds.firstIndex(where: { $0.id == feedId }) else {
+            print("🚨 AUTO-FIX: Feed \(feedId) not found")
+            return
+        }
+        
+        var feed = podcastFeeds[feedIndex]
+        let originalEpisodeCount = feed.episodes.count
+        
+        // Apply emergency decontamination
+        let cleanEpisodes = EpisodeContaminationGuard.emergencyDecontamination(episodes: feed.episodes, targetFeedId: feedId)
+        feed.episodes = cleanEpisodes
+        
+        // Update the feed
+        podcastFeeds[feedIndex] = feed
+        
+        // Update currentEpisodes if this is the selected feed
+        if selectedFeedId == feedId {
+            let sanitizedCurrentEpisodes = EpisodeContaminationGuard.sanitizeEpisodes(currentEpisodes, targetFeedId: feedId)
+            currentEpisodes = sanitizedCurrentEpisodes
+        }
+        
+        print("🔧 AUTO-FIX COMPLETE: Feed \(feed.title) - \(originalEpisodeCount) -> \(cleanEpisodes.count) episodes")
+    }
+    
+    /// Validate and sanitize episodes before assignment to currentEpisodes
+    @MainActor
+    private func validateAndSanitizeEpisodes(_ episodes: [PodcastEpisode], targetFeedId: String) -> [PodcastEpisode] {
+        // Quick validation for performance
+        let basicCleanEpisodes = episodes.filter { $0.feedId == targetFeedId }
+        
+        if basicCleanEpisodes.count != episodes.count {
+            print("🛡️ BASIC VALIDATION: Filtered \(episodes.count - basicCleanEpisodes.count) contaminated episodes")
+            
+            // Full sanitization for contaminated collections
+            let sanitizedEpisodes = EpisodeContaminationGuard.sanitizeEpisodes(episodes, targetFeedId: targetFeedId)
+            
+            // Validation check
+            let validationResults = EpisodeContaminationGuard.validateEpisodeCollection(sanitizedEpisodes, expectedFeedId: targetFeedId)
+            let criticalIssues = validationResults.filter { $0.hasCriticalIssues }
+            
+            if !criticalIssues.isEmpty {
+                print("🚨 CRITICAL CONTAMINATION: Emergency decontamination required")
+                return EpisodeContaminationGuard.emergencyDecontamination(episodes: sanitizedEpisodes, targetFeedId: targetFeedId)
+            }
+            
+            return sanitizedEpisodes
+        }
+        
+        return basicCleanEpisodes
+    }
+    
+    
+    /// Manual contamination check and fix - can be called immediately
+    @MainActor
+    func performImmediateContaminationFix() {
+        print("🛡️ IMMEDIATE FIX: Starting emergency contamination cleanup")
+        
+        // Check current episodes for contamination
+        if !currentEpisodes.isEmpty, let selectedFeedId = selectedFeedId {
+            let contaminatedEpisodes = currentEpisodes.filter { $0.feedId != selectedFeedId }
+            
+            if !contaminatedEpisodes.isEmpty {
+                print("🚨 IMMEDIATE FIX: Found \(contaminatedEpisodes.count) contaminated episodes in current display")
+                
+                // Clean current episodes immediately
+                let cleanEpisodes = currentEpisodes.filter { $0.feedId == selectedFeedId }
+                currentEpisodes = cleanEpisodes
+                
+                print("✅ IMMEDIATE FIX: Cleaned current episodes - showing \(cleanEpisodes.count) clean episodes")
+            }
+        }
+        
+        // Perform global contamination check
+        performGlobalContaminationCheck()
     }
     
     // MARK: - Private Methods
@@ -7010,14 +7860,21 @@ class PodcastViewModel: ObservableObject {
         
         if let snapshotEpisodes = snapshot, !snapshotEpisodes.isEmpty {
             let snapshotAge = Date().timeIntervalSince(snapshotTimestamps[feedId] ?? Date.distantPast)
-            // IMMEDIATE CHECK: Always allow RSS refresh on initial load for newest episodes
-            let refreshThreshold: TimeInterval = isInitialLoad ? 0 : 1800 // Immediate for initial load, 30 min for background
+            
+            // 🚀 INSTANT SNAPSHOT MODE: Skip ALL RSS operations when snapshot is fresh (< 5 minutes)
+            if snapshotAge < 300 { // 5 minutes
+                print("⚡ INSTANT SNAPSHOT: Skipping ALL RSS operations - fresh snapshot (\(Int(snapshotAge/60)) min old)")
+                return false
+            }
+            
+            // For older snapshots, use longer refresh threshold to reduce operations
+            let refreshThreshold: TimeInterval = 3600 // 1 hour for any refresh
             
             if snapshotAge < refreshThreshold {
-                print("⚡ PERFORMANCE: Skipping RSS refresh check - recent snapshot (\(Int(snapshotAge/60)) min old, threshold: \(Int(refreshThreshold/60)) min)")
+                print("⚡ PERFORMANCE: Skipping RSS refresh - recent snapshot (\(Int(snapshotAge/60)) min old)")
                 return false
             } else {
-                print("🔍 RSS REFRESH CHECK: Snapshot is \(Int(snapshotAge/60)) min old - proceeding with RSS check for new episodes")
+                print("🔍 RSS REFRESH CHECK: Snapshot is \(Int(snapshotAge/60)) min old - allowing background refresh")
                 return true
             }
         } else {
@@ -8466,6 +9323,13 @@ extension PodcastViewModel {
             return
         }
         
+        // CRITICAL FIX: Don't reload feeds if podcast is currently playing to prevent episode restart
+        let podcastPlayer = PodcastPlayer.shared
+        if podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil {
+            print("🚗 CARPLAY FIX: Skipping feed reload - podcast is currently playing to prevent episode restart")
+            return
+        }
+        
         print("🎯 CORE DATA LOAD: Starting loadFeedsFromCoreData() - Current feeds: \(podcastFeeds.count)")
         print("🎯 CORE DATA LOAD: Current podcastFeedOrder: \(podcastFeedOrder.count)")
         print("🎯 CORE DATA LOAD: isLoadingFromCoreData: \(isLoadingFromCoreData), isLoading: \(isLoading)")
@@ -9056,9 +9920,83 @@ extension PodcastViewModel {
         return Array(uniqueEpisodes.values).sorted { $0.publicationDate > $1.publicationDate }
     }
     
-    /// Remove duplicate episodes while intelligently merging episode states and preserving progress
-    /// PERFORMANCE: This method should only be called from background contexts for large episode lists
+    /// Remove duplicates from episodes while preserving the most complete episode data and state
+    /// Enhanced with contamination prevention and feed isolation
     private static func removeDuplicatesFromEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+        guard !episodes.isEmpty else { return [] }
+        
+        // ENHANCED CONTAMINATION PREVENTION: Pre-validate all episodes before processing
+        let preValidatedEpisodes = episodes.compactMap { episode -> PodcastEpisode? in
+            // Skip episodes with clearly invalid data
+            guard !episode.id.isEmpty,
+                  !episode.title.isEmpty,
+                  !episode.feedId.isEmpty,
+                  !episode.audioUrl.isEmpty else {
+                print("🚨 PREVALIDATION: Skipping episode with invalid data - ID: '\(episode.id)', Title: '\(episode.title)', FeedId: '\(episode.feedId)'")
+                return nil
+            }
+            
+            // Validate episode ID format to prevent contamination
+            if episode.id.contains("_f") && !episode.id.hasPrefix("det_f") {
+                print("🚨 PREVALIDATION: Suspicious episode ID format detected: \(episode.id)")
+            }
+            
+            return episode
+        }
+        
+        if preValidatedEpisodes.count != episodes.count {
+            print("🛡️ PREVALIDATION: Filtered out \(episodes.count - preValidatedEpisodes.count) invalid episodes")
+        }
+        
+        // CONTAMINATION PREVENTION: Group episodes by feedId first
+        let episodesByFeed = Dictionary(grouping: preValidatedEpisodes) { $0.feedId }
+        var cleanedEpisodes: [PodcastEpisode] = []
+        
+        for (feedId, feedEpisodes) in episodesByFeed {
+            // Validate feed isolation
+            if feedId.isEmpty {
+                print("🚨 DEDUP CONTAMINATION: Found episodes with empty feedId - applying emergency decontamination")
+                let decontaminatedEpisodes = EpisodeContaminationGuard.emergencyDecontamination(episodes: feedEpisodes, targetFeedId: "unknown_feed_\(UUID().uuidString)")
+                cleanedEpisodes.append(contentsOf: decontaminatedEpisodes)
+                continue
+            }
+            
+            // ENHANCED FEED ISOLATION: Validate all episodes actually belong to this feed
+            let trulyIsolatedEpisodes = feedEpisodes.compactMap { episode -> PodcastEpisode? in
+                // Check if episode ID contains feed information that matches
+                if episode.id.hasPrefix("det_f") {
+                    let feedHash = abs(feedId.lowercased().hashValue)
+                    let expectedPrefix = "det_f\(feedHash)_"
+                    if !episode.id.hasPrefix(expectedPrefix) {
+                        print("🚨 FEED ISOLATION: Episode ID \(episode.id) doesn't match expected feed hash pattern for feed \(feedId)")
+                        // Regenerate proper episode ID
+                        var correctedEpisode = episode
+                        correctedEpisode.id = PodcastEpisode.generateDeterministicID(
+                            title: episode.title,
+                            audioUrl: episode.audioUrl,
+                            publicationDate: episode.publicationDate,
+                            feedUrl: feedId // Use feedId as feedUrl for consistency
+                        )
+                        print("🔧 FEED ISOLATION: Corrected episode ID to \(correctedEpisode.id)")
+                        return correctedEpisode
+                    }
+                }
+                return episode
+            }
+            
+            // Sanitize episodes for this feed
+            let sanitizedFeedEpisodes = EpisodeContaminationGuard.sanitizeEpisodes(trulyIsolatedEpisodes, targetFeedId: feedId)
+            
+            // Perform standard deduplication within the feed
+            let deduplicatedFeedEpisodes = deduplicateEpisodesWithinFeed(sanitizedFeedEpisodes)
+            cleanedEpisodes.append(contentsOf: deduplicatedFeedEpisodes)
+        }
+        
+        return cleanedEpisodes.sorted { $0.publicationDate > $1.publicationDate }
+    }
+    
+    /// Deduplicate episodes within a single feed (helper method)
+    private static func deduplicateEpisodesWithinFeed(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
         guard !episodes.isEmpty else { return [] }
         
         // PERFORMANCE OPTIMIZATION: Batch EpisodeStateManager queries instead of individual calls

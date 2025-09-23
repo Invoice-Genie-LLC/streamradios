@@ -94,17 +94,44 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // PERFORMANCE FIX: Execute all CarPlay sync operations asynchronously to prevent main thread blocking
         Task.detached(priority: .userInitiated) {
-            // 1. Force PodcastViewModel to reload on background thread
-            await MainActor.run {
-                PodcastViewModel.shared.loadFeedsFromCoreData()
+            // CRITICAL FIX: Don't reload feeds if podcast is currently playing OR if CarPlay is connected
+            let podcastPlayer = PodcastPlayer.shared
+            let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+            let isCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
+            let hasActivePodcastSession = podcastPlayer.userWantsToPlay && podcastPlayer.currentEpisode != nil
+            
+            // CARPLAY FIX: Don't interfere with CarPlay sessions at all
+            if !isPodcastPlaying && !isCarPlayConnected && !hasActivePodcastSession {
+                // 1. Force PodcastViewModel to reload on background thread (only if no podcast is playing)
+                await MainActor.run {
+                    PodcastViewModel.shared.loadFeedsFromCoreData()
+                }
+            } else {
+                if isCarPlayConnected {
+                    print("🚗 CARPLAY SYNC: Skipping feed reload - CarPlay is connected, not interfering with CarPlay session")
+                } else if isPodcastPlaying {
+                    print("🚗 CARPLAY SYNC: Skipping feed reload - podcast is currently playing to prevent restart")
+                } else if hasActivePodcastSession {
+                    print("🚗 CARPLAY SYNC: Skipping feed reload - active podcast session detected")
+                }
             }
             
             // Small delay to prevent thread contention
             try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
             
-            // 2. Sync via CarPlayManager on background thread
-            await MainActor.run {
-                CarPlayManager.shared.forceRefreshPodcastData()
+            // 2. Sync via CarPlayManager on background thread (only if safe to do so)
+            if !isPodcastPlaying && !isCarPlayConnected && !hasActivePodcastSession {
+                await MainActor.run {
+                    CarPlayManager.shared.forceRefreshPodcastData()
+                }
+            } else {
+                if isCarPlayConnected {
+                    print("🚗 CARPLAY SYNC: Skipping CarPlay refresh - CarPlay is connected, not interfering")
+                } else if isPodcastPlaying {
+                    print("🚗 CARPLAY SYNC: Skipping CarPlay refresh - podcast is currently playing to prevent restart")
+                } else if hasActivePodcastSession {
+                    print("🚗 CARPLAY SYNC: Skipping CarPlay refresh - active podcast session detected")
+                }
             }
             
             // 3. Debug check after operations complete
@@ -116,24 +143,32 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
         }
         
-        // Set UserDefaults flag for polling-based backup
-        if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
-            appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
-            appGroupDefaults.set("SceneDidBecomeActive", forKey: "CarPlaySyncSource")
-            appGroupDefaults.synchronize()
-            print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when main app became active")
-        }
+        // CARPLAY FIX: Only send sync notifications if CarPlay is not connected and no active podcast session
+        let shouldSendCarPlayNotifications = !CarPlayManager.shared.isCarPlayConnected && 
+                                           !(PodcastPlayer.shared.userWantsToPlay && PodcastPlayer.shared.currentEpisode != nil)
         
-        // Multiple notification attempts with different timings
-        for delay in [0.0, 0.1, 0.3, 0.5, 1.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("CarPlayRefreshRequested"),
-                    object: nil,
-                    userInfo: ["source": "SceneDidBecomeActive", "attempt": "\(delay)"]
-                )
-                print("🚗 CARPLAY SYNC: Sent refresh request to CarPlay (attempt \(delay)s)")
+        if shouldSendCarPlayNotifications {
+            // Set UserDefaults flag for polling-based backup
+            if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
+                appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
+                appGroupDefaults.set("SceneDidBecomeActive", forKey: "CarPlaySyncSource")
+                appGroupDefaults.synchronize()
+                print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when main app became active")
             }
+            
+            // Multiple notification attempts with different timings
+            for delay in [0.0, 0.1, 0.3, 0.5, 1.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("CarPlayRefreshRequested"),
+                        object: nil,
+                        userInfo: ["source": "SceneDidBecomeActive", "attempt": "\(delay)"]
+                    )
+                    print("🚗 CARPLAY SYNC: Sent refresh request to CarPlay (attempt \(delay)s)")
+                }
+            }
+        } else {
+            print("🚗 CARPLAY SYNC: Skipping CarPlay notifications - CarPlay is connected or active podcast session detected")
         }
     }
 
@@ -149,22 +184,30 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         // 🚗 CARPLAY SYNC: Signal to CarPlay that podcast data needs refresh using shared UserDefaults
         // This ensures podcast feeds sync to CarPlay when app returns from background
+        // CARPLAY FIX: Only send sync notifications if CarPlay is not connected and no active podcast session
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            // Use app group UserDefaults for cross-scene communication
-            if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
-                appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
-                appGroupDefaults.set("SceneWillEnterForeground", forKey: "CarPlaySyncSource")
-                appGroupDefaults.synchronize()
-                print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when app entered foreground")
-            }
+            let shouldSendCarPlayNotifications = !CarPlayManager.shared.isCarPlayConnected && 
+                                               !(PodcastPlayer.shared.userWantsToPlay && PodcastPlayer.shared.currentEpisode != nil)
             
-            // Also send notification as backup (in case CarPlay is in same process)
-            NotificationCenter.default.post(
-                name: NSNotification.Name("CarPlayRefreshRequested"),
-                object: nil,
-                userInfo: ["source": "SceneWillEnterForeground"]
-            )
-            print("🚗 CARPLAY SYNC: Sent refresh request to CarPlay when app entered foreground")
+            if shouldSendCarPlayNotifications {
+                // Use app group UserDefaults for cross-scene communication
+                if let appGroupDefaults = UserDefaults(suiteName: "group.streamradios") {
+                    appGroupDefaults.set(Date().timeIntervalSince1970, forKey: "CarPlaySyncRequested")
+                    appGroupDefaults.set("SceneWillEnterForeground", forKey: "CarPlaySyncSource")
+                    appGroupDefaults.synchronize()
+                    print("🚗 CARPLAY SYNC: Set sync flag in shared UserDefaults when app entered foreground")
+                }
+                
+                // Also send notification as backup (in case CarPlay is in same process)
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("CarPlayRefreshRequested"),
+                    object: nil,
+                    userInfo: ["source": "SceneWillEnterForeground"]
+                )
+                print("🚗 CARPLAY SYNC: Sent refresh request to CarPlay when app entered foreground")
+            } else {
+                print("🚗 CARPLAY SYNC: Skipping foreground CarPlay notifications - CarPlay is connected or active podcast session detected")
+            }
         }
     }
 

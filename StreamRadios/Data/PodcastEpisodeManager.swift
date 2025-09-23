@@ -781,7 +781,7 @@ class PodcastEpisodeManager {
             
             var episode = managedEpisode.toPodcastEpisode()
             
-            // CRITICAL SAFETY CHECK: Validate feedId matches expected
+            // ENHANCED CONTAMINATION PREVENTION: Multi-layer validation
             if episode.feedId != feedId {
                 print("🚨 CORE DATA CONTAMINATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but query was for '\(feedId)'")
                 print("🚨 CONTAMINATION DETAILS: EpisodeID=\(episode.id), AudioURL=\(episode.audioUrl)")
@@ -790,6 +790,27 @@ class PodcastEpisodeManager {
                 // This should never happen if Core Data queries are working correctly
                 assertionFailure("Episode contamination detected - this indicates a critical data integrity issue")
                 return nil // Filter out contaminated episodes
+            }
+            
+            // ADDITIONAL VALIDATION: Check episode ID integrity for deterministic IDs
+            if episode.id.hasPrefix("det_f") {
+                let expectedFeedHash = abs(feedId.lowercased().hashValue)
+                let expectedPrefix = "det_f\(expectedFeedHash)_"
+                if !episode.id.hasPrefix(expectedPrefix) {
+                    print("🚨 EPISODE ID CONTAMINATION: Episode '\(episode.title)' has ID '\(episode.id)' that doesn't match feed hash pattern for feed '\(feedId)'")
+                    
+                    // CORRECTIVE ACTION: Regenerate proper episode ID
+                    var correctedEpisode = episode
+                    correctedEpisode.id = PodcastEpisode.generateDeterministicID(
+                        title: episode.title,
+                        audioUrl: episode.audioUrl,
+                        publicationDate: episode.publicationDate,
+                        feedUrl: feedId
+                    )
+                    correctedEpisode.feedId = feedId // Ensure feedId is correct
+                    print("🔧 EPISODE ID CORRECTION: Corrected episode ID from '\(episode.id)' to '\(correctedEpisode.id)'")
+                    episode = correctedEpisode
+                }
             }
             
             // ADDITIONAL SAFETY: Validate episode has required fields

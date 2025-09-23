@@ -3,6 +3,7 @@ import CarPlay
 import UIKit
 import os.log
 import CoreData
+import FlagKit
 
 /// CarPlay Manager for iOS 14+ using CPTemplateApplicationScene
 /// Removed deprecated MPPlayableContentDataSource/Delegate extensions
@@ -131,11 +132,26 @@ class CarPlayManager: ObservableObject {
     
     func getAvailableCountries() -> [String] {
         let countries = Set(radioStations.map { $0.country })
-        return Array(countries).sorted()
+        // Filter out placeholder entries that shouldn't appear in CarPlay
+        let filteredCountries = countries.filter { country in
+            return country != "Select Country" && 
+                   country != "Unknown Region" && 
+                   !country.isEmpty
+        }
+        return Array(filteredCountries).sorted()
     }
     
     func getFlagImage(for country: String) -> UIImage? {
-        // Return a simple system image for countries since flag images would require FlagKit
+        // Get the country flag using FlagKit
+        // First, find the country data to get the flag code
+        let allCountries = Country.getAllCountriesWithAPICodes()
+        if let countryData = allCountries.first(where: { $0.name == country }),
+           !countryData.flag.isEmpty,
+           let flag = Flag(countryCode: countryData.flag) {
+            return flag.image(style: FlagStyle.roundedRect)
+        }
+        
+        // Fallback to globe icon if flag not found
         return UIImage(systemName: "globe")
     }
     

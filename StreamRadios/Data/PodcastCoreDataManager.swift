@@ -185,7 +185,7 @@ class PodcastCoreDataManager {
         }
     }
     
-    /// Load episodes for a specific feed efficiently
+    /// Load episodes for a specific feed efficiently with contamination prevention
     func loadEpisodesForFeed(feedId: String, in context: NSManagedObjectContext) throws -> [PodcastEpisode] {
         let episodeRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
         episodeRequest.predicate = NSPredicate(format: "feedId == %@", feedId)
@@ -193,7 +193,27 @@ class PodcastCoreDataManager {
         episodeRequest.fetchBatchSize = BatchSettings.episodeBatchSize
         
         let managedEpisodes = try context.fetch(episodeRequest)
-        return managedEpisodes.map { $0.toPodcastEpisode() }
+        let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
+        
+        // 🛡️ CONTAMINATION PREVENTION: Double-check all episodes belong to the requested feed
+        let safeEpisodes = episodes.filter { $0.feedId == feedId }
+        if safeEpisodes.count != episodes.count {
+            let contaminatedCount = episodes.count - safeEpisodes.count
+            print("🚨 CORE DATA CONTAMINATION: Found \(contaminatedCount) episodes with wrong feedId in Core Data for feed \(feedId)")
+            
+            // Log the contaminated episodes for debugging
+            let contaminatedEpisodes = episodes.filter { $0.feedId != feedId }
+            for episode in contaminatedEpisodes.prefix(3) {
+                print("🚨 CONTAMINATED EPISODE: '\(episode.title)' has feedId '\(episode.feedId)' but was fetched for feed '\(feedId)'")
+            }
+            
+            // Trigger immediate Core Data cleanup for this feed
+            Task.detached(priority: .background) {
+                await self.cleanupContaminatedEpisodes(targetFeedId: feedId, contaminatedEpisodes: contaminatedEpisodes)
+            }
+        }
+        
+        return safeEpisodes
     }
     
     /// Get episodes for a specific feed (optimized for UI access)
@@ -342,18 +362,30 @@ class PodcastCoreDataManager {
             
             // Add new episodes with contamination prevention
             for episode in newEpisodes {
-                // CRITICAL CONTAMINATION PREVENTION: Validate episode data
+                // ENHANCED CONTAMINATION PREVENTION: Multi-layer episode validation
                 guard !episode.id.isEmpty,
-                      !episode.title.isEmpty,
+                      !episode.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !episode.audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       !feedId.isEmpty else {
-                    print("🚨 INVALID EPISODE DATA: Skipping episode with empty fields - ID=\(episode.id), Title=\(episode.title), FeedId=\(feedId)")
+                    print("🚨 INVALID EPISODE DATA: Skipping episode with empty/invalid fields - ID='\(episode.id)', Title='\(episode.title)', AudioUrl='\(episode.audioUrl)', FeedId='\(feedId)'")
                     continue
                 }
                 
-                // SAFETY CHECK: Ensure episode belongs to this feed if it has a feedId
+                // ENHANCED SAFETY CHECK: Ensure episode belongs to this feed
                 if !episode.feedId.isEmpty && episode.feedId != feedId {
-                    print("🚨 EPISODE FEEDID MISMATCH: Episode feedId=\(episode.feedId) but adding to feed=\(feedId)")
+                    print("🚨 EPISODE FEEDID MISMATCH: Episode feedId='\(episode.feedId)' but adding to feed='\(feedId)'")
                     continue
+                }
+                
+                // EPISODE ID INTEGRITY CHECK: Validate deterministic IDs match expected pattern
+                if episode.id.hasPrefix("det_f") {
+                    let expectedFeedHash = abs(feedId.lowercased().hashValue)
+                    let expectedPrefix = "det_f\(expectedFeedHash)_"
+                    if !episode.id.hasPrefix(expectedPrefix) {
+                        print("🚨 CORE DATA SAVE: Episode ID '\(episode.id)' doesn't match feed hash pattern for feed '\(feedId)'")
+                        print("🚨 Expected prefix: '\(expectedPrefix)', Episode title: '\(episode.title)'")
+                        continue // Skip contaminated episode
+                    }
                 }
                 
                 let managedEpisode = PodcastModel(context: backgroundContext)
@@ -716,11 +748,53 @@ class PodcastCoreDataManager {
                 episodeRequest.fetchBatchSize = min(limit, BatchSettings.episodeBatchSize)
                 
                 let managedEpisodes = try backgroundContext.fetch(episodeRequest)
-                return managedEpisodes.map { $0.toPodcastEpisode() }
+                let episodes = managedEpisodes.map { $0.toPodcastEpisode() }
+                
+                // 🛡️ CONTAMINATION PREVENTION: Ensure all episodes belong to the requested feed
+                let safeEpisodes = episodes.filter { $0.feedId == feedId }
+                if safeEpisodes.count != episodes.count {
+                    print("🚨 RECENT EPISODES CONTAMINATION: Found \(episodes.count - safeEpisodes.count) contaminated episodes for feed \(feedId)")
+                }
+                
+                return safeEpisodes
             } catch {
                 os_log("❌ Error loading recent episodes for feed %@: %@", 
                        log: self.log, type: .error, feedId, error.localizedDescription)
                 return []
+            }
+        }
+    }
+    
+    /// Clean up contaminated episodes in Core Data
+    private func cleanupContaminatedEpisodes(targetFeedId: String, contaminatedEpisodes: [PodcastEpisode]) async {
+        let backgroundContext = coreDataStack.newBackgroundContext()
+        
+        await backgroundContext.perform {
+            do {
+                print("🧹 CLEANUP: Starting Core Data cleanup for \(contaminatedEpisodes.count) contaminated episodes")
+                
+                for episode in contaminatedEpisodes {
+                    // Find the contaminated episode in Core Data
+                    let request: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
+                    request.predicate = NSPredicate(format: "id == %@", episode.id)
+                    
+                    let results = try backgroundContext.fetch(request)
+                    for managedEpisode in results {
+                        if managedEpisode.feedId != targetFeedId {
+                            print("🧹 CLEANUP: Correcting episode '\(episode.title)' feedId from '\(managedEpisode.feedId ?? "nil")' to '\(episode.feedId)'")
+                            managedEpisode.feedId = episode.feedId
+                        }
+                    }
+                }
+                
+                // Save the corrections
+                if backgroundContext.hasChanges {
+                    try backgroundContext.save()
+                    print("🧹 CLEANUP: Successfully corrected contaminated episodes in Core Data")
+                }
+                
+            } catch {
+                print("❌ CLEANUP ERROR: Failed to clean contaminated episodes: \(error)")
             }
         }
     }

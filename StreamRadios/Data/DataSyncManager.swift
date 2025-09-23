@@ -1324,11 +1324,17 @@ class DataSyncManager: ObservableObject {
                 snapshotsCreated += 1
                 print("📸 Snapshot already exists for '\(feed.title)'")
             } else if !feed.episodes.isEmpty {
-                // Create snapshot for feeds with episodes
-                podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: feed.episodes)
+                // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating snapshot
+                let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
+                if validEpisodes.count != feed.episodes.count {
+                    print("🚨 STARTUP CONTAMINATION: Feed '\(feed.title)' has \(feed.episodes.count - validEpisodes.count) contaminated episodes")
+                }
+                
+                // Create snapshot for feeds with validated episodes
+                podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: validEpisodes)
                 feedsWithSnapshots += 1
                 snapshotsCreated += 1
-                totalEpisodes += feed.episodes.count
+                totalEpisodes += validEpisodes.count
                 print("📸 Created final snapshot for '\(feed.title)' with \(feed.episodes.count) episodes")
             } else {
                 print("📸 Skipped snapshot for '\(feed.title)' - no episodes available")
@@ -1676,11 +1682,18 @@ class DataSyncManager: ObservableObject {
                     print("✅ Snapshot verified for '\(feed.title)': \(snapshot.count) episodes")
                 } else {
                     print("⚠️ Missing snapshot for '\(feed.title)' with \(feed.episodes.count) episodes")
-                    // Create missing snapshot
-                    podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: feed.episodes)
+                    
+                    // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating missing snapshot
+                    let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
+                    if validEpisodes.count != feed.episodes.count {
+                        print("🚨 MISSING SNAPSHOT CONTAMINATION: Feed '\(feed.title)' has \(feed.episodes.count - validEpisodes.count) contaminated episodes")
+                    }
+                    
+                    // Create missing snapshot with validated episodes
+                    podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: validEpisodes)
                     feedsWithSnapshots += 1
-                    totalSnapshotEpisodes += feed.episodes.count
-                    print("🔧 Created missing snapshot for '\(feed.title)'")
+                    totalSnapshotEpisodes += validEpisodes.count
+                    print("🔧 Created missing snapshot for '\(feed.title)' with \(validEpisodes.count) validated episodes")
                 }
             }
         }
@@ -1898,8 +1911,21 @@ class DataSyncManager: ObservableObject {
             
             for feed in podcastViewModel.podcastFeeds {
                 if !feed.episodes.isEmpty {
+                    // 🛡️ CONTAMINATION PREVENTION: Validate all episodes belong to this feed before processing
+                    let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
+                    if validEpisodes.count != feed.episodes.count {
+                        let contaminatedCount = feed.episodes.count - validEpisodes.count
+                        print("🚨 SNAPSHOT CONTAMINATION: Feed '\(feed.title)' has \(contaminatedCount) contaminated episodes - filtering them out")
+                        
+                        // Log contaminated episodes for debugging
+                        let contaminatedEpisodes = feed.episodes.filter { $0.feedId != feed.id }
+                        for episode in contaminatedEpisodes.prefix(3) {
+                            print("🚨 CONTAMINATED: Episode '\(episode.title)' has feedId '\(episode.feedId)' but is in feed '\(feed.id)'")
+                        }
+                    }
+                    
                     // CRITICAL: Refresh episode states before creating snapshot to ensure they're current
-                    let episodesWithCurrentStates = feed.episodes.map { episode in
+                    let episodesWithCurrentStates = validEpisodes.map { episode in
                         var updatedEpisode = episode
                         
                         // Get current states from EpisodeStateManager
@@ -1923,10 +1949,10 @@ class DataSyncManager: ObservableObject {
                         return updatedEpisode
                     }
                     
-                    // Create snapshot with episodes that have current states
+                    // Create snapshot with validated episodes that have current states
                     podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: episodesWithCurrentStates)
                     self.feedsWithSnapshots += 1
-                    print("📸 Created snapshot for '\(feed.title)' with \(feed.episodes.count) episodes with current states (\(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots))")
+                    print("📸 Created snapshot for '\(feed.title)' with \(validEpisodes.count) validated episodes with current states (\(self.feedsWithSnapshots)/\(self.totalFeedsRequiringSnapshots))")
                 } else {
                     print("📸 Skipped snapshot for '\(feed.title)' - no episodes loaded")
                 }

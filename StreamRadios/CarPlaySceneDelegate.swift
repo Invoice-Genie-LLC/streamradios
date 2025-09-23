@@ -75,6 +75,17 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func loadPodcastDataFromCoreData() async {
         os_log("🚗 CarPlay: Loading podcast data from Core Data", log: log, type: .info)
         
+        // ADDITIONAL SAFETY CHECK: Double-check if podcast is playing before proceeding
+        let podcastPlayer = PodcastPlayer.shared
+        let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+        let hasUserIntent = podcastPlayer.userWantsToPlay
+        let isActivePlayer = PlaybackManager.shared.activePlayer == .podcast
+        
+        if isPodcastPlaying || (hasUserIntent && podcastPlayer.currentEpisode != nil && isActivePlayer) {
+            os_log("🚗 CarPlay: Aborting loadPodcastDataFromCoreData - podcast is playing or has active session", log: log, type: .info)
+            return
+        }
+        
         // Use the main context and perform operations on its queue to avoid threading issues
         let context = CoreDataStack.shared.context
         
@@ -144,10 +155,20 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             } else {
                 print("🚗 CarPlay: DEBUG - No podcast feeds found in Core Data")
                 
-                // Try to trigger PodcastViewModel to load data if no feeds found
+                // Try to trigger PodcastViewModel to load data if no feeds found (only if safe to do so)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    print("🚗 CarPlay: DEBUG - Attempting to trigger PodcastViewModel data load")
-                    PodcastViewModel.shared.loadFeedsFromCoreData()
+                    // CRITICAL FIX: Don't reload if podcast is playing to prevent episode restart
+                    let podcastPlayer = PodcastPlayer.shared
+                    let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+                    let hasUserIntent = podcastPlayer.userWantsToPlay
+                    let isActivePlayer = PlaybackManager.shared.activePlayer == .podcast
+                    
+                    if !isPodcastPlaying && !(hasUserIntent && podcastPlayer.currentEpisode != nil && isActivePlayer) {
+                        print("🚗 CarPlay: DEBUG - Attempting to trigger PodcastViewModel data load")
+                        PodcastViewModel.shared.loadFeedsFromCoreData()
+                    } else {
+                        print("🚗 CarPlay: DEBUG - Skipping PodcastViewModel data load - podcast is playing or has active session")
+                    }
                     
                     // Re-check after a delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -1985,6 +2006,16 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
             let podcastPlayer = PodcastPlayer.shared
             let carPlayManager = CarPlayManager.shared
             
+            // CARPLAY PROTECTION: Don't reload the same episode that's already playing
+            // This prevents progress reset during CarPlay sessions
+            if let currentEpisode = podcastPlayer.currentEpisode,
+               currentEpisode.id == episode.id,
+               podcastPlayer.isPlaying {
+                os_log("🚗 CARPLAY PROTECTION: Episode %@ is already playing - not reloading to prevent progress reset", log: self.log, type: .info, episode.title)
+                completion()
+                return
+            }
+            
             // CRITICAL: Set PlaybackManager state before playing
             PlaybackManager.shared.activePlayer = .podcast
             
@@ -2374,6 +2405,23 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private func handleCarPlayRefreshRequest(_ notification: Notification) {
         let source = notification.userInfo?["source"] as? String ?? "unknown"
         os_log("🚗 CarPlay: Received refresh request from source: %@", log: log, type: .info, source)
+        
+        // CRITICAL FIX: Don't reload data if podcast is currently playing - this prevents episode restart
+        let podcastPlayer = PodcastPlayer.shared
+        let isPodcastPlaying = podcastPlayer.isPlaying && podcastPlayer.currentEpisode != nil
+        let hasUserIntent = podcastPlayer.userWantsToPlay
+        let isActivePlayer = PlaybackManager.shared.activePlayer == .podcast
+        
+        os_log("🚗 CarPlay: Refresh request - isPlaying: %@, hasEpisode: %@, userWantsToPlay: %@, activePlayer: %@", log: log, type: .info, 
+               podcastPlayer.isPlaying ? "YES" : "NO",
+               podcastPlayer.currentEpisode != nil ? "YES" : "NO",
+               hasUserIntent ? "YES" : "NO",
+               isActivePlayer ? "podcast" : "other")
+        
+        if isPodcastPlaying || (hasUserIntent && podcastPlayer.currentEpisode != nil && isActivePlayer) {
+            os_log("🚗 CarPlay: Skipping data reload - podcast is currently playing or has active session to prevent episode restart", log: log, type: .info)
+            return
+        }
         
         // 🔄 ENHANCED SYNC: Force reload podcast data from Core Data when main app requests refresh
         // This ensures that new podcast feeds added in the main app are immediately available in CarPlay

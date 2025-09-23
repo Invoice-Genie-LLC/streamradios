@@ -2900,13 +2900,27 @@ struct PodcastPlayerView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button(action: {
+                    // 🔙 INSTANT BACK BUTTON: Immediate navigation with zero delays
+                    print("🔙 BACK BUTTON: User tapped back button")
+                    
+                    // IMMEDIATE navigation - no async delays
                     selectedPodcast = nil
+                    print("🔙 BACK BUTTON: Navigation completed instantly")
+                    
+                    // Background cleanup AFTER navigation (non-blocking)
+                    Task.detached(priority: .background) {
+                        await MainActor.run {
+                            viewModel.cancelPendingOperations()
+                            print("🧹 BACKGROUND: Cleanup completed after navigation")
+                        }
+                    }
                 }) {
                     Image(systemName: "chevron.left")
                         .font(.body.weight(.medium))
                         .foregroundColor(.blue)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .disabled(false) // Ensure button is always enabled
             }
         }
                 .onAppear(perform: handleOnAppear)
@@ -3125,15 +3139,48 @@ struct PodcastPlayerView: View {
     }
 
     private var episodeRows: some View {
-        let episodes = viewModel.currentEpisodes
-        // Validation: Ensure all episodes belong to this feed
-        let wrongFeedEpisodes = episodes.filter { $0.feedId != feed.id }
+        let allEpisodes = viewModel.currentEpisodes
+        
+        // 🛡️ SMART UI CONTAMINATION PREVENTION: Filter and show only clean episodes
+        let episodes: [PodcastEpisode]
+        if allEpisodes.isEmpty {
+            episodes = [] // No episodes to show
+        } else if allEpisodes.allSatisfy({ $0.feedId == feed.id }) {
+            episodes = allEpisodes // All episodes belong to this feed
+        } else {
+            // Some episodes don't belong to this feed - filter to show only clean ones
+            episodes = allEpisodes.filter { $0.feedId == feed.id }
+            print("🛡️ SMART UI PROTECTION: Filtered to show \(episodes.count) clean episodes out of \(allEpisodes.count) total")
+        }
+        
+        // 🛡️ AGGRESSIVE CONTAMINATION DETECTION: Check for ANY wrong episodes
+        let wrongFeedEpisodes = allEpisodes.filter { $0.feedId != feed.id }
         if !wrongFeedEpisodes.isEmpty {
-            print("🚨 UI CONTAMINATION: Found \(wrongFeedEpisodes.count) episodes from wrong feed in \(feed.id)")
+            print("🚨 UI CONTAMINATION DETECTED: Found \(wrongFeedEpisodes.count) episodes from wrong feed in \(feed.id)")
             for episode in wrongFeedEpisodes.prefix(3) {
                 print("🚨 WRONG EPISODE: '\(episode.title)' belongs to \(episode.feedId), not \(feed.id)")
             }
+            
+            // 🛡️ IMMEDIATE EMERGENCY RESPONSE: Multiple layers of cleanup
+            print("🛡️ SMART RESPONSE: Starting targeted contamination cleanup")
+            
+            // Single cleanup operation - no multiple layers needed
+            DispatchQueue.main.async {
+                print("🧹 SMART CLEANUP: Assigning clean episodes immediately")
+                viewModel.safelyAssignCurrentEpisodes(episodes, targetFeedId: self.feed.id, updateSelectedFeed: false)
+            }
+            
+            // Simple recovery check - no delays
+            DispatchQueue.main.async {
+                if viewModel.currentEpisodes.isEmpty && !episodes.isEmpty {
+                    print("🔧 INSTANT RECOVERY: Assigning episodes immediately")
+                    viewModel.safelyAssignCurrentEpisodes(episodes, targetFeedId: self.feed.id, updateSelectedFeed: false)
+                } else {
+                    print("✅ RECOVERY: Episode display recovered successfully")
+                }
+            }
         }
+        
         return ForEach(episodes, id: \.id) { episode in
             OptimizedEpisodeRowView(
                 episode: episode,

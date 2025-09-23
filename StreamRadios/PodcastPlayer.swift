@@ -174,12 +174,22 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     }
     
     @objc private func handleAppWillEnterForeground() {
-        // CRITICAL FIX: Only restore playback if it was interrupted by the system, not if user paused
+        // SEAMLESS PLAYBACK FIX: Only restore playback if there was an actual audio interruption
+        // Normal app backgrounding/foregrounding should NOT interfere with continuous playback
         // We should only resume if:
         // 1. User wants to play (userWantsToPlay = true)
         // 2. Player is not currently playing (was interrupted)
         // 3. Was NOT manually paused by user
-        if userWantsToPlay && !isPlaying && !wasManuallyPaused {
+        // 4. There was an actual audio interruption (wasPlayingBeforeInterruption = true)
+        // 5. CARPLAY FIX: Not currently playing in CarPlay to prevent progress reset
+        
+        let isCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
+        let hadAudioInterruption = wasPlayingBeforeInterruption
+        
+        print("🔧 PodcastPlayer: App entering foreground - userWantsToPlay: \(userWantsToPlay), isPlaying: \(isPlaying), wasManuallyPaused: \(wasManuallyPaused), hadAudioInterruption: \(hadAudioInterruption), isCarPlayConnected: \(isCarPlayConnected)")
+        
+        // SEAMLESS PLAYBACK: Only intervene if there was an actual audio interruption
+        if userWantsToPlay && !isPlaying && !wasManuallyPaused && hadAudioInterruption && !isCarPlayConnected {
             print("🔧 PodcastPlayer: App entering foreground - restoring podcast playback if needed")
             DebugLogger.logInfo("App entering foreground with podcast playback intent - checking restoration needs", category: "BackgroundAudio")
             DebugLogger.setUserAction("Podcast Foreground Transition")
@@ -210,18 +220,34 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 }
             }
         } else if isPlaying {
+            print("✅ PodcastPlayer: App entering foreground - playback continued seamlessly")
             DebugLogger.logInfo("Podcast playback continued seamlessly during background/foreground transition", category: "BackgroundAudio")
         } else if wasManuallyPaused {
+            print("⏸️ PodcastPlayer: App entering foreground - podcast was manually paused, not auto-resuming")
             DebugLogger.logInfo("Podcast was manually paused by user - not resuming automatically", category: "BackgroundAudio")
+        } else if isCarPlayConnected {
+            print("🚗 PodcastPlayer: App entering foreground - CarPlay is connected, not interfering with CarPlay playback")
+            DebugLogger.logInfo("App entering foreground during CarPlay session - not interfering with CarPlay playback", category: "BackgroundAudio")
+        } else if !hadAudioInterruption {
+            print("🔄 PodcastPlayer: App entering foreground - no audio interruption occurred, allowing seamless continuation")
+            DebugLogger.logInfo("App entering foreground with no audio interruption - allowing seamless playback continuation", category: "BackgroundAudio")
         } else {
             DebugLogger.logInfo("App entering foreground with no podcast playback intent", category: "BackgroundAudio")
         }
     }
     
     @objc private func handleAppDidBecomeActive() {
-        // CRITICAL: Handle lock screen alarm scenarios where interruption end notifications may be missed
-        // This catches cases where alarms interrupt audio during lock screen and app becomes active after snooze
-        if wasPlayingBeforeInterruption && userWantsToPlay && !isPlaying && !wasManuallyPaused {
+        // SEAMLESS PLAYBACK FIX: Only handle genuine lock screen alarm interruption scenarios
+        // Normal app activation should NOT interfere with continuous playback
+        // This specifically catches cases where alarms interrupt audio during lock screen and app becomes active after snooze
+        
+        let isCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
+        let hadAudioInterruption = wasPlayingBeforeInterruption
+        
+        print("🔧 PodcastPlayer: App became active - hadAudioInterruption: \(hadAudioInterruption), userWantsToPlay: \(userWantsToPlay), isPlaying: \(isPlaying), wasManuallyPaused: \(wasManuallyPaused), isCarPlayConnected: \(isCarPlayConnected)")
+        
+        // SEAMLESS PLAYBACK: Only intervene for genuine lock screen alarm scenarios with confirmed interruptions
+        if hadAudioInterruption && userWantsToPlay && !isPlaying && !wasManuallyPaused && !isCarPlayConnected {
             print("🔧 PodcastPlayer: App became active after potential lock screen interruption - checking resume")
             DebugLogger.logInfo("App became active with interrupted podcast playback - attempting lock screen alarm resume", category: "LockScreenAudio")
             DebugLogger.setUserAction("Lock Screen Alarm Resume")
@@ -246,14 +272,20 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             }
         } else {
             // Log why we're not resuming for debugging
-            if !wasPlayingBeforeInterruption {
-                DebugLogger.logInfo("App became active but podcast was not playing before interruption", category: "LockScreenAudio")
+            if !hadAudioInterruption {
+                print("🔄 PodcastPlayer: App became active - no audio interruption occurred, allowing seamless continuation")
+                DebugLogger.logInfo("App became active with no audio interruption - allowing seamless playback continuation", category: "LockScreenAudio")
             } else if !userWantsToPlay {
                 DebugLogger.logInfo("App became active but user does not want podcast playback", category: "LockScreenAudio")
             } else if isPlaying {
+                print("✅ PodcastPlayer: App became active - playback continued seamlessly")
                 DebugLogger.logInfo("App became active and podcast is already playing", category: "LockScreenAudio")
             } else if wasManuallyPaused {
+                print("⏸️ PodcastPlayer: App became active - podcast was manually paused, not auto-resuming")
                 DebugLogger.logInfo("App became active but podcast was manually paused by user", category: "LockScreenAudio")
+            } else if isCarPlayConnected {
+                print("🚗 PodcastPlayer: App became active during CarPlay session - not interfering with CarPlay playback")
+                DebugLogger.logInfo("App became active during CarPlay session - not interfering with CarPlay playback", category: "LockScreenAudio")
             }
         }
     }
@@ -1396,6 +1428,13 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private func restorePodcastPlayerUIImmediately() {
         print("🚀 Podcast: Immediate UI restoration started")
         
+        // CARPLAY PROTECTION: Don't restore UI if episode is currently playing in CarPlay
+        // This prevents overwriting current progress with stale saved data
+        if CarPlayManager.shared.isCarPlayConnected && isPlaying && currentEpisode != nil {
+            print("🚗 CARPLAY PROTECTION: Skipping UI restoration - episode is playing in CarPlay")
+            return
+        }
+        
         // Get saved episode data
         guard let episodeData = UserDefaults.standard.dictionary(forKey: "LastPlayedEpisodeData") as? [String: String],
               let episodeId = episodeData["episodeId"],
@@ -1444,6 +1483,12 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     @MainActor
     private func initializePlayerForRestoredEpisode(episode: PodcastEpisode) async {
         print("🔧 PodcastPlayer: Initializing AVPlayer for restored episode: \(episode.title)")
+        
+        // CARPLAY PROTECTION: Don't reinitialize player if episode is currently playing in CarPlay
+        if CarPlayManager.shared.isCarPlayConnected && isPlaying && currentEpisode?.id == episode.id {
+            print("🚗 CARPLAY PROTECTION: Skipping player reinitialization - episode is playing in CarPlay")
+            return
+        }
         
         // Determine the playback URL
         var playUrl: URL?
@@ -1646,6 +1691,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     func playEpisode(_ episode: PodcastEpisode, feed: PodcastFeed) {
         os_log("Starting playback for episode: %@ (ID: %@)", log: log, type: .info, episode.title, episode.id)
         
+        // CARPLAY PROTECTION: Don't reload the same episode that's already playing during CarPlay sessions
+        // This prevents progress reset when phone app starts during CarPlay playback
+        if let currentEpisode = currentEpisode,
+           currentEpisode.id == episode.id,
+           isPlaying,
+           CarPlayManager.shared.isCarPlayConnected {
+            os_log("🚗 CARPLAY PROTECTION: Episode %@ is already playing in CarPlay - not reloading to prevent progress reset", log: log, type: .info, episode.title)
+            return
+        }
+        
         // IMMEDIATE USER FEEDBACK: Set loading state as soon as user taps play
         loadingEpisodeId = episode.id
         connectionState = .loading
@@ -1764,10 +1819,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         guard let url = playUrl else { return }
         
         let playerItem = AVPlayerItem(url: url)
-        if player == nil {
-            player = AVPlayer(playerItem: playerItem)
+        
+        // CARPLAY PROTECTION: Don't replace player item if same episode is playing in CarPlay
+        if CarPlayManager.shared.isCarPlayConnected && isPlaying && currentEpisode?.id == episode.id {
+            print("🚗 CARPLAY PROTECTION: Skipping player item replacement - episode is playing in CarPlay")
         } else {
-            player?.replaceCurrentItem(with: playerItem)
+            if player == nil {
+                player = AVPlayer(playerItem: playerItem)
+            } else {
+                player?.replaceCurrentItem(with: playerItem)
+            }
         }
 
         // Save last played episode in the view model immediately (thread-safe)
@@ -1832,11 +1893,19 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                         currentTime = maxProgress * duration
                         os_log("PROTECTION: Found progress %.4f from alternate source for episode: %@", log: log, type: .info, maxProgress, episode.title)
                     } else {
-                        // No progress found anywhere - safe to reset
-                        isInitialProgressLoad = true
-                        currentProgress = 0
-                        currentTime = 0
-                        os_log("No progress found - Setting currentProgress to 0 for episode: %@", log: log, type: .info, episode.title)
+                        // CARPLAY PROTECTION: Don't reset progress to 0 during CarPlay sessions
+                        // During CarPlay, the progress might not be synced to Core Data yet
+                        if CarPlayManager.shared.isCarPlayConnected && isPlaying {
+                            os_log("🚗 CARPLAY PROTECTION: Skipping progress reset to 0 - episode is playing in CarPlay", log: log, type: .info)
+                            // Keep existing progress values, don't reset to 0
+                            isInitialProgressLoad = false
+                        } else {
+                            // No progress found anywhere and not in CarPlay - safe to reset
+                            isInitialProgressLoad = true
+                            currentProgress = 0
+                            currentTime = 0
+                            os_log("No progress found - Setting currentProgress to 0 for episode: %@", log: log, type: .info, episode.title)
+                        }
                     }
                     
                     // Reset the flag after a brief delay
@@ -1848,9 +1917,14 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // ENHANCED PROTECTION: Even when shouldStartFromBeginning is true, double-check this is intentional
             // Only reset if this is a rewind action, not a reconnection or reload
             if shouldStartFromBeginning {
-                currentProgress = 0
-                currentTime = 0
-                os_log("Intentional reset - Starting from beginning for episode: %@", log: log, type: .info, episode.title)
+                // CARPLAY PROTECTION: Don't reset progress during CarPlay sessions even if shouldStartFromBeginning is true
+                if CarPlayManager.shared.isCarPlayConnected && isPlaying {
+                    os_log("🚗 CARPLAY PROTECTION: Ignoring shouldStartFromBeginning - episode is playing in CarPlay", log: log, type: .info)
+                } else {
+                    currentProgress = 0
+                    currentTime = 0
+                    os_log("Intentional reset - Starting from beginning for episode: %@", log: log, type: .info, episode.title)
+                }
             } else {
                 // Preserve current progress for reconnections/reloads
                 os_log("PROTECTION: Preserving current progress %.4f for episode reload: %@", log: log, type: .info, currentProgress, episode.title)
@@ -2014,6 +2088,16 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
     private func seekToSavedProgress() async {
         guard let currentEpisode = currentEpisode else { return }
         
+        // CARPLAY PROTECTION: Only prevent seeking if the SAME episode is already playing and has been restored
+        // This allows new episodes to restore their progress while preventing interference with currently playing episodes
+        if CarPlayManager.shared.isCarPlayConnected && 
+           isPlaying && 
+           hasRestoredPositionForCurrentEpisode && 
+           currentEpisodeIdForRestoration == currentEpisode.id {
+            os_log("🚗 CARPLAY PROTECTION: Skipping seekToSavedProgress - episode %@ is already playing in CarPlay with restored progress", log: log, type: .info, currentEpisode.title)
+            return
+        }
+        
         // Prevent repeated restoration calls for the same episode to improve scrolling performance
         if hasRestoredPositionForCurrentEpisode && currentEpisodeIdForRestoration == currentEpisode.id {
             print("💾 DEBUG: Skipping position restoration - already restored for episode")
@@ -2141,17 +2225,24 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     }
                 }
             } else {
-                // No progress found anywhere - safe to start from beginning
-                os_log("🔍 SEEK DEBUG - No progress found anywhere (saved: %.4f, state: %.4f, episode: %.4f) - starting from beginning", log: log, type: .info, savedProgress, stateManagerProgress, episodeStateProgress)
-                await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-                await MainActor.run {
-                    currentTime = 0
-                    currentProgress = 0
+                // CARPLAY PROTECTION: Don't reset to beginning during CarPlay sessions
+                if CarPlayManager.shared.isCarPlayConnected && isPlaying {
+                    os_log("🚗 CARPLAY PROTECTION: Skipping reset to beginning in seekToSavedProgress - episode is playing in CarPlay", log: log, type: .info)
                     hasRestoredPositionForCurrentEpisode = true
                     currentEpisodeIdForRestoration = currentEpisode.id
+                } else {
+                    // No progress found anywhere and not in CarPlay - safe to start from beginning
+                    os_log("🔍 SEEK DEBUG - No progress found anywhere (saved: %.4f, state: %.4f, episode: %.4f) - starting from beginning", log: log, type: .info, savedProgress, stateManagerProgress, episodeStateProgress)
+                    await player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                    await MainActor.run {
+                        currentTime = 0
+                        currentProgress = 0
+                        hasRestoredPositionForCurrentEpisode = true
+                        currentEpisodeIdForRestoration = currentEpisode.id
+                    }
+                    updateNowPlayingInfo()
+                    os_log("🔍 SEEK DEBUG - Set to beginning: currentTime=0, currentProgress=0", log: log, type: .info)
                 }
-                updateNowPlayingInfo()
-                os_log("🔍 SEEK DEBUG - Set to beginning: currentTime=0, currentProgress=0", log: log, type: .info)
             }
         }
     }
@@ -2185,10 +2276,59 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // Ensure progress is tracked when playing starts
            ensureProgressTracking(for: currentEpisode)
         
-        // Skip progress check for now to avoid main actor issues
+        // CARPLAY PROTECTION: Only prevent progress restoration if the same episode is already restored
+        let isCarPlayConnected = CarPlayManager.shared.isCarPlayConnected
+        let isAlreadyRestoredInCarPlay = isCarPlayConnected && 
+                                        hasRestoredPositionForCurrentEpisode && 
+                                        currentEpisodeIdForRestoration == currentEpisode.id
+        
+        // CRITICAL FIX: Check if we need to restore saved progress before playing
+        // This is essential for lock screen "Play Now" commands and CarPlay new episode playback
+        // BUT: Skip this if the same episode is already restored in CarPlay
+        if !isAlreadyRestoredInCarPlay {
+            let currentPlayerTime = player.currentTime().seconds
+            let savedProgress = stateManager.getProgress(for: currentEpisode.id)
+            let expectedTime = savedProgress * duration
+            
+            // If there's significant saved progress and the player is at or near the beginning,
+            // restore the saved position before starting playback
+            if savedProgress > 0.01 && duration > 0 && abs(currentPlayerTime - expectedTime) > 3.0 {
+                os_log("🔒 Lock Screen/CarPlay Play: Restoring saved progress %.1f%% (%.1fs) before starting playbook (CarPlay: %@)", 
+                       log: log, type: .info, savedProgress * 100, expectedTime, isCarPlayConnected ? "YES" : "NO")
+                
+                // Restore progress asynchronously to avoid blocking the lock screen command
+                Task {
+                    await seekToSavedProgress()
+                    
+                    // Start playback after position is restored
+                    await MainActor.run {
+                        player.play()
+                        isPlaying = true
+                        
+                        // Continue with the rest of the play logic
+                        self.continuePlayAfterProgressRestore()
+                    }
+                }
+                return
+            }
+        } else {
+            if isAlreadyRestoredInCarPlay {
+                os_log("🚗 CARPLAY PROTECTION: Skipping progress restoration - episode %@ already restored in CarPlay", log: log, type: .info, currentEpisode.title)
+            } else {
+                os_log("🔒 Play: Player already at correct position or no significant progress to restore", log: log, type: .info)
+            }
+        }
         
         player.play()
                isPlaying = true
+        
+        // Continue with the rest of the play logic
+        continuePlayAfterProgressRestore()
+    }
+    
+    /// Helper method to continue play logic after progress restoration
+    private func continuePlayAfterProgressRestore() {
+        guard let currentEpisode = currentEpisode else { return }
         
         // Apply current audio settings
         applyCurrentAudioSettings()
@@ -2268,6 +2408,11 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL FIX: Mark as manually paused to prevent auto-resume
         wasManuallyPaused = true
         
+        // CRITICAL FIX: Preserve user intent when pausing (don't clear userWantsToPlay)
+        // This ensures the podcast player remains visible in the UI after pausing from lock screen
+        // Only stop() method should clear userWantsToPlay, not pause()
+        // userWantsToPlay should remain true to keep the player visible for easy resumption
+        
         // CRITICAL FIX: Clear loading state when user pauses to prevent stuck buffering spinner
         if loadingEpisodeId == currentEpisode.id {
             loadingEpisodeId = nil
@@ -2325,8 +2470,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         
         // CRITICAL FIX: For lock screen pauses, ensure UserDefaults are synchronized immediately
         if isLockScreenPause {
+            // CRITICAL FIX: Preserve current episode data when pausing from lock screen
+            saveCurrentEpisodeToUserDefaults()
             UserDefaults.standard.synchronize()
-            os_log("🔒 Lock screen pause detected - forced UserDefaults synchronization", log: log, type: .info)
+            os_log("🔒 Lock screen pause detected - preserved episode data and forced UserDefaults synchronization", log: log, type: .info)
         }
 
         ensureProgressTracking(for: currentEpisode)
@@ -2349,10 +2496,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // UI will update only when playback state changes (play/pause/stop)
         // objectWillChange.send()
         
-        // Use centralized audio session management - only deactivate if no other audio is playing
-        if !isPlaying && PlaybackManager.shared.activePlayer == .podcast {
-            PlaybackManager.shared.deactivateAudioSession()
-        }
+        // CRITICAL FIX: Don't deactivate audio session when pausing - this clears Now Playing info
+        // Audio session should remain active when paused to preserve lock screen controls and episode info
+        // Only deactivate audio session when explicitly stopping (stop() method), not when pausing
+        // This ensures the lock screen continues to show episode information and playback controls when paused
     }
     
     /// Stops podcast and clears user intent (like RadioPlayer stop functionality)
@@ -2401,6 +2548,13 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         self.currentFeed = nil
         
         updateNowPlayingInfo()
+        
+        // CRITICAL FIX: Deactivate audio session when stopping (not pausing)
+        // This will clear Now Playing info appropriately when user stops playback completely
+        if PlaybackManager.shared.activePlayer == .podcast {
+            PlaybackManager.shared.deactivateAudioSession()
+        }
+        
         print("⏹️ Podcast stopped and user intent cleared")
     }
     

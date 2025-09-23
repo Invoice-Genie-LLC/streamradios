@@ -1206,18 +1206,42 @@ private class EpisodeBuilder {
         }
         
 
-        // CRITICAL: Generate feedId from feedUrl for proper episode-to-feed mapping
+        // ENHANCED CONTAMINATION PREVENTION: Generate feedId from feedUrl for proper episode-to-feed mapping
         let feedId = generateFeedIdFromUrl(feedUrl)
         
+        // ADDITIONAL VALIDATION: Ensure episode ID is properly isolated to this feed
+        let validatedEpisodeId: String
+        if let guid = guid, !guid.isEmpty {
+            validatedEpisodeId = guid
+        } else {
+            // Regenerate deterministic ID to ensure it includes proper feed isolation
+            validatedEpisodeId = PodcastEpisode.generateDeterministicID(
+                title: title,
+                audioUrl: audioUrl,
+                publicationDate: publicationDate,
+                feedUrl: feedUrl
+            )
+        }
+        
+        // CONTAMINATION PREVENTION: Validate all required fields are present
+        guard !validatedEpisodeId.isEmpty,
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !audioUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !feedId.isEmpty else {
+            print("🚨 RSS PARSER: Episode validation failed - skipping episode with missing required fields")
+            return nil
+        }
+        
         return PodcastEpisode(
-            id: episodeId,
-            title: title,
-            descriptionText: description,
-            audioUrl: audioUrl,
+            id: validatedEpisodeId,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            descriptionText: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            audioUrl: audioUrl.trimmingCharacters(in: .whitespacesAndNewlines),
             publicationDate: publicationDate,
             duration: episodeDuration,
             state: EpisodeState(isPlayed: false, isFavorite: false, progress: 0.0, isDownloaded: false),
-            feedId: feedId, // Properly assigned feedId for CloudKit sync
+            feedId: feedId, // Properly assigned feedId for CloudKit sync with contamination prevention
             fileSize: fileSize,
             chapters: chapters.isEmpty ? nil : chapters,
             notes: showNotes
