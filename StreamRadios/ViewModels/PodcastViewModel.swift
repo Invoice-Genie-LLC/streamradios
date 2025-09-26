@@ -451,20 +451,47 @@ struct EpisodeState: Codable, Equatable, Hashable {
 /// High-performance podcast view model designed for thousands of episodes
 @MainActor
 class PodcastViewModel: ObservableObject {
+    // CRITICAL: Feed isolation manager to prevent all contamination
+    private let feedIsolationManager = FeedIsolationManager()
+    
+    // 🛡️ RAPID ACCESS CACHE: Prevent contamination during rapid UI getter calls
+    private var _episodeCache: [PodcastEpisode]?
+    private var _episodeCacheFeedId: String?
+    private var _feedTransitionInProgress: Bool = false
+    
     // MARK: - Shared Instance
     static let shared = PodcastViewModel()
     
     /// Initialize contamination prevention system
     @MainActor
     func initializeContaminationPrevention() {
-        // Perform initial contamination check after a delay to allow app to fully load
+        print("🛡️ STARTUP: Initializing contamination prevention system")
+        
+        // Register all existing feeds with isolation manager
+        for feed in podcastFeeds {
+            feedIsolationManager.registerFeed(feedId: feed.id, feedUrl: feed.url)
+        }
+        
+        // Perform initial contamination check and cleanup
         Task {
             // Wait for app to initialize
             try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
             
             await MainActor.run {
                 print("🛡️ STARTUP: Performing initial contamination check")
-                performGlobalContaminationCheck()
+                
+                // Run global contamination cleanup through isolation manager
+                feedIsolationManager.performGlobalContaminationCleanup()
+                
+                // Validate isolation is working
+                let report = feedIsolationManager.validateGlobalIsolation()
+                if report.isClean {
+                    print("✅ GLOBAL CONTAMINATION CHECK: All feeds are clean - no contamination detected")
+                } else {
+                    print("🚨 GLOBAL CONTAMINATION CHECK: Found contamination in \(report.totalContaminatedFeeds) feeds with \(report.totalContaminatedEpisodes) contaminated episodes")
+                    // Run user data migration for existing contaminated data
+                    self.performUserDataMigration()
+                }
                 
                 // Schedule periodic contamination checks
                 schedulePeriodicContaminationChecks()
@@ -499,62 +526,143 @@ class PodcastViewModel: ObservableObject {
     
     var currentEpisodes: [PodcastEpisode] {
         get {
-            // 🛡️ ABSOLUTE CONTAMINATION PREVENTION: Always validate episodes before returning
-            guard let feedId = selectedFeedId else { return [] }
-            
-        // 🛡️ SMART EMPTY STATE HANDLING: Check for available snapshot before returning empty
-        if _currentEpisodes.isEmpty {
-            // Try to get episodes from snapshot if available
-            if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
-                print("🔄 SMART RECOVERY: Using snapshot episodes while loading")
-                return snapshotEpisodes
+            // Use isolation manager for guaranteed clean episodes
+            guard let feedId = selectedFeedId else { 
+                print("🔍 EPISODE GETTER: selectedFeedId is nil, returning empty")
+                return [] 
             }
-            return []
-        }
             
-            let validEpisodes = _currentEpisodes.filter { $0.feedId == feedId }
+            // Removed debug print for performance - this is called frequently
             
-            // 🛡️ SMART CONTAMINATION DETECTION: Filter contaminated episodes but return clean ones
-            if validEpisodes.count != _currentEpisodes.count {
-                let contaminatedCount = _currentEpisodes.count - validEpisodes.count
-                print("🚨 GETTER CONTAMINATION: Found \(contaminatedCount) contaminated episodes, filtering them out but returning \(validEpisodes.count) clean episodes")
-                
-                // Log contaminated episodes
-                let contaminatedEpisodes = _currentEpisodes.filter { $0.feedId != feedId }
-                for episode in contaminatedEpisodes.prefix(3) {
-                    print("🚨 GETTER CONTAMINATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but selectedFeedId is '\(feedId)'")
-                }
-                
-                // Auto-fix by removing only contaminated episodes from internal storage
-                DispatchQueue.main.async {
-                    self._currentEpisodes = validEpisodes
-                    print("🛡️ SMART AUTO-FIX: Removed \(contaminatedCount) contaminated episodes, kept \(validEpisodes.count) clean episodes")
+            // Block cache access during feed transitions
+            if _feedTransitionInProgress {
+                // Check if this is a delayed call and we should clear the flag
+                if let selectedId = selectedFeedId, selectedId == feedId {
+                    print("🔧 EPISODE GETTER: Transition flag still set but feed matches - clearing immediately")
+                    _feedTransitionInProgress = false
+                } else {
+                    print("🚨 EPISODE GETTER: Transition in progress, returning empty for feed \(feedId)")
+                    return []
                 }
             }
             
-            return validEpisodes
+            // Clear cache if it's for a different feed
+            if let cacheFeedId = _episodeCacheFeedId, cacheFeedId != feedId {
+                print("🚨 EPISODE GETTER: Cache mismatch - cached=\(cacheFeedId), requested=\(feedId), clearing and returning empty")
+                _episodeCache = nil
+                _episodeCacheFeedId = nil
+                return []
+            }
+            
+            // Validate cache integrity
+            if let cached = _episodeCache, let cacheFeedId = _episodeCacheFeedId, cacheFeedId == feedId {
+                let wrongEpisodes = cached.filter { $0.feedId != feedId }
+                if !wrongEpisodes.isEmpty {
+                    _episodeCache = nil
+                    _episodeCacheFeedId = nil
+                }
+            }
+            
+            // Return cached episodes if available and valid
+            if let cached = _episodeCache, _episodeCacheFeedId == feedId {
+                // Double-verify cache integrity before returning
+                let cleanCached = cached.filter { $0.feedId == feedId }
+                if cleanCached.count != cached.count {
+                    print("🚨 EPISODE GETTER: Cache contaminated, clearing and reloading")
+                    _episodeCache = nil
+                    _episodeCacheFeedId = nil
+                    // Fall through to reload
+                } else {
+                    return cached
+                }
+            }
+            
+            // Ensure feed is registered before getting episodes
+            if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
+                feedIsolationManager.registerFeed(feedId: feedId, feedUrl: feed.url)
+                print("🔍 EPISODE GETTER: Registered feed \(feedId) with isolation manager")
+            } else {
+                print("🚨 EPISODE GETTER: Feed \(feedId) not found in podcastFeeds! Available feeds: \(podcastFeeds.map { $0.id })")
+            }
+            
+            // Get episodes from isolation manager
+            let isolatedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
+            print("🔍 EPISODE GETTER: Got \(isolatedEpisodes.count) episodes from isolation manager for feed \(feedId)")
+            
+            // 🛡️ SMART EMPTY STATE HANDLING: Check for available snapshot before returning empty
+            if isolatedEpisodes.isEmpty {
+                print("🔍 EPISODE GETTER: No episodes in isolation manager, checking snapshots...")
+                // Try to get episodes from snapshot if available
+                if let snapshotEpisodes = getEpisodeSnapshot(for: feedId) {
+                    print("🔍 EPISODE GETTER: Found \(snapshotEpisodes.count) episodes in snapshot, using those")
+                    // Register snapshot episodes with isolation manager for future safety
+                    feedIsolationManager.replaceEpisodesForFeed(snapshotEpisodes, feedId: feedId)
+                    // Clear transition flag since we found episodes
+                    _feedTransitionInProgress = false
+                    print("🔧 EPISODE GETTER: Found episodes, clearing transition flag")
+                    // Cache the result
+                    _episodeCache = snapshotEpisodes
+                    _episodeCacheFeedId = feedId
+                    return snapshotEpisodes
+                } else {
+                    print("🚨 EPISODE GETTER: No episodes in isolation manager AND no snapshots for feed \(feedId) - returning empty")
+                }
+                // Cache empty result
+                _episodeCache = []
+                _episodeCacheFeedId = feedId
+                return []
+            }
+            
+            // 🛡️ FINAL SAFETY CHECK: Double-validate all episodes belong to current feed
+            let validatedEpisodes = isolatedEpisodes.filter { $0.feedId == feedId }
+            if validatedEpisodes.count != isolatedEpisodes.count {
+                // Update isolation manager with clean episodes
+                feedIsolationManager.replaceEpisodesForFeed(validatedEpisodes, feedId: feedId)
+            }
+            
+            // Clear transition flag since we have valid episodes
+            _feedTransitionInProgress = false
+            print("🔧 EPISODE GETTER: Found \(validatedEpisodes.count) episodes, clearing transition flag")
+            
+            // Cache the validated result
+            _episodeCache = validatedEpisodes
+            _episodeCacheFeedId = feedId
+            
+            print("🔍 EPISODE GETTER: Returning \(validatedEpisodes.count) validated episodes for feed \(feedId)")
+            return validatedEpisodes
         }
         set {
-            // 🛡️ ABSOLUTE CONTAMINATION PREVENTION: Validate all episodes before setting
+            // Clear cache when episodes are being set
+            _episodeCache = nil
+            _episodeCacheFeedId = nil
+            
+            // Always use isolation manager
             guard let feedId = selectedFeedId else { 
-                _currentEpisodes = []
+                // If no feed selected but trying to clear episodes, clear all isolation manager data
+                if newValue.isEmpty {
+                    feedIsolationManager.clearAllFeeds()
+                }
                 return 
             }
             
-            let validEpisodes = newValue.filter { $0.feedId == feedId }
-            if validEpisodes.count != newValue.count {
-                let contaminatedCount = newValue.count - validEpisodes.count
-                print("🚨 SETTER CONTAMINATION: Rejecting \(contaminatedCount) contaminated episodes during assignment")
-                
-                // Log contaminated episodes
-                let contaminatedEpisodes = newValue.filter { $0.feedId != feedId }
-                for episode in contaminatedEpisodes.prefix(3) {
-                    print("🚨 SETTER CONTAMINATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but selectedFeedId is '\(feedId)'")
-                }
+            // Register feed if not already registered
+            if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
+                feedIsolationManager.registerFeed(feedId: feedId, feedUrl: feed.url)
             }
             
-            _currentEpisodes = validEpisodes
-            print("🛡️ SETTER PROTECTION: Set \(validEpisodes.count) validated episodes (rejected \(newValue.count - validEpisodes.count) contaminated)")
+            // Handle special case of removeAll() - clear only this feed
+            if newValue.isEmpty {
+                feedIsolationManager.clearEpisodesForFeed(feedId)
+            } else {
+                // Validate episodes before assigning
+                let validEpisodes = newValue.filter { $0.feedId == feedId }
+                if validEpisodes.count != newValue.count {
+                }
+                
+                // Let isolation manager handle all validation and assignment
+                feedIsolationManager.replaceEpisodesForFeed(validEpisodes, feedId: feedId)
+                let finalCount = feedIsolationManager.getEpisodesForFeed(feedId).count
+            }
         }
     }
     @Published var podcastFeeds: [PodcastFeed] = []
@@ -619,47 +727,46 @@ class PodcastViewModel: ObservableObject {
     
     // MARK: - Safe Episode Assignment
     
-    /// Safely assign episodes to currentEpisodes with contamination prevention
+    /// Safely assign episodes to currentEpisodes with absolute contamination prevention
     @MainActor
     func safelyAssignCurrentEpisodes(_ episodes: [PodcastEpisode], targetFeedId: String, updateSelectedFeed: Bool = true) {
-        // 🛡️ CRITICAL CONTAMINATION PREVENTION: Validate all episodes belong to target feed
-        let validEpisodes = episodes.filter { $0.feedId == targetFeedId }
-        if validEpisodes.count != episodes.count {
-            let contaminatedCount = episodes.count - validEpisodes.count
-            print("🚨 CURRENT EPISODES CONTAMINATION: Found \(contaminatedCount) contaminated episodes for feed \(targetFeedId)")
-            
-            // Log contaminated episodes for debugging
-            let contaminatedEpisodes = episodes.filter { $0.feedId != targetFeedId }
-            for episode in contaminatedEpisodes.prefix(3) {
-                print("🚨 CONTAMINATED ASSIGNMENT: Episode '\(episode.title)' has feedId '\(episode.feedId)' but was assigned to feed '\(targetFeedId)'")
-            }
-            
-            // EMERGENCY DECONTAMINATION: If too many contaminated episodes, trigger full cleanup
-            if contaminatedCount > validEpisodes.count / 2 {
-                print("🚨 EMERGENCY: High contamination detected (\(contaminatedCount) contaminated vs \(validEpisodes.count) valid)")
-                performImmediateContaminationFix()
-            }
-        }
+        print("🔧 SAFELY ASSIGN: Starting assignment of \(episodes.count) episodes to feed \(targetFeedId)")
         
-        // 🛡️ ABSOLUTE CONTAMINATION PREVENTION: Always use direct internal storage assignment
-        print("🛡️ ABSOLUTE SAFE ASSIGNMENT: Directly assigning \(validEpisodes.count) validated episodes to internal storage for feed \(targetFeedId)")
-        _currentEpisodes = validEpisodes
-        print("✅ ABSOLUTE SAFE ASSIGNMENT: Assigned \(validEpisodes.count) validated episodes directly to internal storage")
-        
-        // Update selected feed if requested
+        // 🛡️ ABSOLUTE CONTAMINATION PREVENTION: Update selectedFeedId FIRST
         if updateSelectedFeed {
+            print("🔧 SAFELY ASSIGN: Updating selectedFeedId to \(targetFeedId)")
             selectedFeedId = targetFeedId
         }
         
-        print("✅ SAFE ASSIGNMENT: Assigned \(validEpisodes.count) validated episodes to currentEpisodes for feed \(targetFeedId)")
+        // Register feed with isolation manager
+        if let feed = podcastFeeds.first(where: { $0.id == targetFeedId }) {
+            feedIsolationManager.registerFeed(feedId: targetFeedId, feedUrl: feed.url)
+            print("🔧 SAFELY ASSIGN: Registered feed \(targetFeedId) with isolation manager")
+        } else {
+            print("🚨 SAFELY ASSIGN: Feed \(targetFeedId) not found in podcastFeeds!")
+        }
+        
+        // Clear any stale cache before assigning new episodes
+        _episodeCache = nil
+        _episodeCacheFeedId = nil
+        print("🔧 SAFELY ASSIGN: Cleared episode cache")
+        
+        // Use the setter to ensure proper isolation manager handling
+        currentEpisodes = episodes
+        print("🔧 SAFELY ASSIGN: Assigned episodes via setter")
+        
+        // Force UI refresh to ensure episodes are displayed
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+            print("🔧 SAFELY ASSIGN: Triggered UI refresh")
+        }
     }
     
     // PERFORMANCE OPTIMIZATION: Cache filtered results and counts to avoid re-filtering and re-counting
     private var tabFilterCache: [String: [Int: [PodcastEpisode]]] = [:] // feedId -> [tabIndex -> episodes]
     private var tabFilterCounts: [String: (all: Int, favorites: Int, downloads: Int)] = [:] // feedId -> episode counts
     
-    // INSTANT SNAPSHOT CACHE: Complete episode snapshots to eliminate ALL expensive operations
-    private var episodeSnapshotCache: [String: [PodcastEpisode]] = [:] // feedId -> complete episode list
+    // SNAPSHOT TIMING: Track when feeds were last processed for cache freshness
     private var snapshotTimestamps: [String: Date] = [:] // feedId -> last snapshot time
     
     // MARK: - Feed Deletion Progress Tracking
@@ -713,17 +820,35 @@ class PodcastViewModel: ObservableObject {
     // Current state
     var selectedFeedId: String? {
         didSet {
+            let oldValue = oldValue
+            let newValue = selectedFeedId
+            // Set transition flag to block cache access during feed changes
+            if oldValue != newValue {
+                _feedTransitionInProgress = true
+            }
+            
+            // Clear cache aggressively when feed changes
+            _episodeCache = nil
+            _episodeCacheFeedId = nil
+            _episodeCache = []  // Set to empty array as backup
+            _episodeCacheFeedId = selectedFeedId  // Pre-set new feedId to block old cache
+            _episodeCache = nil  // Clear again
+            _episodeCacheFeedId = nil  // Clear feedId again
+            
+            // Clear transition flag after a much shorter delay
+            if oldValue != newValue {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                    self._feedTransitionInProgress = false
+                    print("🔧 TRANSITION FLAG: Cleared transition flag for feed change to \(self.selectedFeedId ?? "nil")")
+                }
+            }
+            
             // 🛡️ SMART FEED SWITCH PROTECTION: Only clear if episodes belong to wrong feed
             if let newFeedId = selectedFeedId, let oldFeedId = oldValue, newFeedId != oldFeedId {
-                print("🔄 FEED ID CHANGE: From \(oldFeedId) to \(newFeedId)")
-                
                 // Check if current episodes belong to the old feed - only clear if they do
                 let needsClearing = _currentEpisodes.contains { $0.feedId == oldFeedId }
                 if needsClearing {
-                    print("🧹 SMART CLEARING: Clearing episodes from old feed \(oldFeedId)")
                     _currentEpisodes.removeAll()
-                } else {
-                    print("✅ SMART SKIP: Episodes don't belong to old feed, keeping current episodes")
                 }
                 
                 // 🛡️ GENTLE SYNCHRONIZATION: Ensure UI updates without forcing blank state
@@ -1681,7 +1806,6 @@ class PodcastViewModel: ObservableObject {
         // This forces re-filtering when user switches between tabs
         tabFilterCache.removeAll()
         tabFilterCounts.removeAll()
-        print("🧹 CACHE CLEAR: Invalidated all tab caches for real-time filtering updates")
         
         // 🎯 IMMEDIATE REFRESH: Also refresh the current tab's filtering to show changes instantly
         Task {
@@ -2415,7 +2539,8 @@ class PodcastViewModel: ObservableObject {
                 print("🔄 IMMEDIATE CHECK: Parsed complete feed with \(allCurrentEpisodes.count) episodes")
             } else {
                 // Fallback: merge new episodes with existing snapshot
-                if let existingSnapshot = episodeSnapshotCache[feedId] {
+                let existingSnapshot = feedIsolationManager.getEpisodesForFeed(feedId)
+                if !existingSnapshot.isEmpty {
                     completeEpisodeList = newEpisodes + existingSnapshot
                 } else {
                     completeEpisodeList = newEpisodes
@@ -2423,10 +2548,11 @@ class PodcastViewModel: ObservableObject {
                 print("🔄 IMMEDIATE CHECK: Using fallback merge with \(completeEpisodeList.count) episodes")
             }
             
-            // CLEAN UP: Remove old snapshot before creating new one
-            if episodeSnapshotCache[feedId] != nil {
-                print("🗑️ SNAPSHOT CLEANUP: Removing old snapshot for feed \(feedId)")
-                episodeSnapshotCache.removeValue(forKey: feedId)
+            // CLEAN UP: Remove old episodes before creating new ones
+            let existingEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
+            if !existingEpisodes.isEmpty {
+                print("🗑️ ISOLATION CLEANUP: Removing old episodes for feed \(feedId)")
+                feedIsolationManager.clearEpisodesForFeed(feedId)
                 snapshotTimestamps.removeValue(forKey: feedId)
             }
             
@@ -2492,7 +2618,8 @@ class PodcastViewModel: ObservableObject {
     /// Get known episode IDs from snapshot for ultra-fast comparison
     private func getKnownEpisodeIdsFromSnapshot(feedId: String, limit: Int) async -> Set<String> {
         return await MainActor.run {
-            guard let snapshot = self.episodeSnapshotCache[feedId] else {
+            let snapshot = self.feedIsolationManager.getEpisodesForFeed(feedId)
+            if snapshot.isEmpty {
                 return Set<String>()
             }
             
@@ -2513,30 +2640,30 @@ class PodcastViewModel: ObservableObject {
         // Update episode manager cache (fast operation)
         await self.episodeManager.updateCacheWithNewEpisodes(newEpisodes, for: feedId)
         
-        // IMMEDIATE SNAPSHOT UPDATE: Prepend new episodes to existing snapshot
+        // IMMEDIATE SNAPSHOT UPDATE: Use FeedIsolationManager to merge new episodes
         await MainActor.run {
-            if let existingSnapshot = self.episodeSnapshotCache[feedId] {
+            let existingSnapshot = self.feedIsolationManager.getEpisodesForFeed(feedId)
+            if !existingSnapshot.isEmpty {
                 // Merge new episodes with existing, ensuring no duplicates
                 let existingIds = Set(existingSnapshot.map { $0.id })
                 let trulyNewEpisodes = newEpisodes.filter { !existingIds.contains($0.id) }
                 
                 if !trulyNewEpisodes.isEmpty {
-                    // Sort by publication date (newest first) and update snapshot
-                    let updatedEpisodes = (trulyNewEpisodes + existingSnapshot).sorted(by: { 
-                        $0.publicationDate > $1.publicationDate 
-                    })
-                    
-                    self.episodeSnapshotCache[feedId] = updatedEpisodes
+                    // Merge and let isolation manager handle validation and sorting
+                    let allEpisodes = trulyNewEpisodes + existingSnapshot
+                    self.feedIsolationManager.replaceEpisodesForFeed(allEpisodes, feedId: feedId)
                     self.snapshotTimestamps[feedId] = Date()
                     
-                    print("🆕 LIGHTWEIGHT INTEGRATION: Added \(trulyNewEpisodes.count) new episodes to snapshot - total: \(updatedEpisodes.count)")
+                    let finalCount = self.feedIsolationManager.getEpisodesForFeed(feedId).count
+                    print("🆕 ISOLATION INTEGRATION: Added \(trulyNewEpisodes.count) new episodes - total: \(finalCount)")
                 }
             } else {
                 // No existing snapshot, create new one with just the new episodes
-                self.episodeSnapshotCache[feedId] = newEpisodes.sorted { $0.publicationDate > $1.publicationDate }
+                self.feedIsolationManager.replaceEpisodesForFeed(newEpisodes, feedId: feedId)
                 self.snapshotTimestamps[feedId] = Date()
                 
-                print("🆕 LIGHTWEIGHT INTEGRATION: Created new snapshot with \(newEpisodes.count) episodes")
+                let finalCount = self.feedIsolationManager.getEpisodesForFeed(feedId).count
+                print("🆕 ISOLATION INTEGRATION: Created new snapshot with \(finalCount) episodes")
             }
         }
     }
@@ -3490,6 +3617,12 @@ class PodcastViewModel: ObservableObject {
             let feed = try await feedManager.addFeed(from: feedURL, customTitle: customTitle)
             print("📊 Parsed feed: \(feed.title)")
             
+            // CRITICAL: Register new feed with isolation manager immediately
+            await MainActor.run {
+                feedIsolationManager.registerFeed(feedId: feed.id, feedUrl: feed.url)
+                print("🛡️ REGISTERED: New feed \(feed.id) registered with isolation manager")
+            }
+            
             // Step 2: Immediate UI update - add to arrays for instant feedback
             await MainActor.run {
                 self.podcastFeeds.append(feed)
@@ -3549,6 +3682,10 @@ class PodcastViewModel: ObservableObject {
         // INSTANT DISPLAY: Load cached episodes from Core Data FIRST for immediate UI display
         let cachedEpisodes = await PodcastCoreDataManager.shared.getEpisodesForFeed(feedId)
         if !cachedEpisodes.isEmpty {
+            // DEBUG: Check episode states
+            let statesApplied = cachedEpisodes.filter { $0.state.progress > 0 || $0.state.isFavorite || $0.state.isDownloaded || $0.state.isPlayed }
+            print("🔍 EPISODE STATES: Found \(cachedEpisodes.count) episodes, \(statesApplied.count) have states applied")
+            print("🔍 EPISODE STATE MANAGER: Ready=\(EpisodeStateManager.shared.isReady)")
             // 🛡️ CONTAMINATION PREVENTION: Validate all cached episodes belong to the requested feed
             let validCachedEpisodes = cachedEpisodes.filter { $0.feedId == feedId }
             if validCachedEpisodes.count != cachedEpisodes.count {
@@ -3565,6 +3702,14 @@ class PodcastViewModel: ObservableObject {
             print("⚡ INSTANT DISPLAY: Found \(validCachedEpisodes.count) validated cached episodes - displaying immediately")
             
             await MainActor.run {
+                // Register feed with isolation manager
+                if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
+                    feedIsolationManager.registerFeed(feedId: feedId, feedUrl: feed.url)
+                }
+                
+                // Store validated episodes in isolation manager
+                feedIsolationManager.replaceEpisodesForFeed(validCachedEpisodes, feedId: feedId)
+                
                 // Apply current filter instantly (episodes already sorted newest first from Core Data)
                 let filter = EpisodeFilter(rawValue: currentTab) ?? .all
                 let filteredEpisodes: [PodcastEpisode]
@@ -3577,14 +3722,8 @@ class PodcastViewModel: ObservableObject {
                     filteredEpisodes = validCachedEpisodes.filter { $0.state.isDownloaded }
                 }
                 
-                // CRITICAL: Clear any contaminated episodes from wrong feeds
-                if !currentEpisodes.isEmpty && currentEpisodes.first?.feedId != feedId {
-                    print("🧹 CONTAMINATION CLEANUP: Clearing \(currentEpisodes.count) episodes from wrong feed")
-                    currentEpisodes = []
-                }
-                
-                // Update UI instantly with cached episodes using safe assignment
-                safelyAssignCurrentEpisodes(filteredEpisodes, targetFeedId: feedId)
+                // Update UI instantly with cached episodes using isolation manager
+                feedIsolationManager.replaceEpisodesForFeed(filteredEpisodes, feedId: feedId)
                 selectedFeedId = feedId
                 isLoadingEpisodes = false
                 operationInProgress = false
@@ -3683,24 +3822,26 @@ class PodcastViewModel: ObservableObject {
         // CRITICAL: Cancel all RSS operations when switching feeds for immediate responsiveness
         cancelAllRSSOperations()
         
+        // 🛡️ CONTAMINATION PREVENTION: Update selectedFeedId FIRST to prevent race condition
+        let oldFeedId = selectedFeedId
+        selectedFeedId = feedId
+        
         // CRITICAL FIX: Clear current episodes immediately when switching feeds
         // This prevents UI from showing wrong feed episodes during feed transitions
-        if selectedFeedId != feedId {
+        if oldFeedId != feedId {
             await MainActor.run {
-                self.currentEpisodes.removeAll()
-                print("🔄 FEED SWITCH: Cleared episodes for feed transition from \(self.selectedFeedId ?? "nil") to \(feedId)")
-                
-                // 🛡️ CRITICAL: Clean all snapshots to prevent cross-contamination during feed switches
-                // This ensures we start with a clean slate for the new feed
-                if let oldFeedId = self.selectedFeedId {
-                    print("🧹 FEED SWITCH: Cleaning snapshot for old feed \(oldFeedId) to prevent contamination")
-                    self.episodeSnapshotCache.removeValue(forKey: oldFeedId)
-                    self.snapshotTimestamps.removeValue(forKey: oldFeedId)
+                // Clear episodes from the OLD feed in isolation manager
+                if let oldId = oldFeedId {
+                    print("🧹 FEED SWITCH: Cleaning episodes for old feed \(oldId) to prevent contamination")
+                    self.feedIsolationManager.clearEpisodesForFeed(oldId)
+                    self.snapshotTimestamps.removeValue(forKey: oldId)
                 }
+                
+                // Now clear current episodes (selectedFeedId is already updated to new feed)
+                self.currentEpisodes.removeAll()
+                print("🔄 FEED SWITCH: Cleared episodes for feed transition from \(oldFeedId ?? "nil") to \(feedId)")
             }
         }
-        
-        selectedFeedId = feedId
         currentPage = 1
         
         // INSTANT SNAPSHOT: Check for complete episode snapshot first (fastest path)
@@ -3722,47 +3863,21 @@ class PodcastViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                // CONTAMINATION GUARD: Comprehensive episode validation and sanitization
-                print("🛡️ CONTAMINATION GUARD: Validating \(filteredEpisodes.count) episodes for feed \(feedId)")
+                // CONTAMINATION GUARD: Use isolation manager for absolute safety
+                print("🛡️ CONTAMINATION GUARD: Sanitizing \(filteredEpisodes.count) episodes for feed \(feedId)")
                 
-                // First pass: Basic feed isolation check
-                let basicSafeEpisodes = filteredEpisodes.filter { $0.feedId == feedId }
-                if basicSafeEpisodes.count != filteredEpisodes.count {
-                    print("🚨 FEED ISOLATION: Filtered out \(filteredEpisodes.count - basicSafeEpisodes.count) episodes that didn't belong to feed \(feedId)")
-                    // Log details about contaminated episodes for debugging
-                    let contaminatedEpisodes = filteredEpisodes.filter { $0.feedId != feedId }
-                    for episode in contaminatedEpisodes {
-                        print("🚨 CONTAMINATED EPISODE: '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
-                    }
-                    
-                    // IMMEDIATE FIX: Trigger contamination cleanup when detected
-                    print("🛡️ AUTO-FIX: Triggering immediate contamination cleanup")
-                    performImmediateContaminationFix()
+                // Register feed with isolation manager
+                if let feed = podcastFeeds.first(where: { $0.id == feedId }) {
+                    feedIsolationManager.registerFeed(feedId: feedId, feedUrl: feed.url)
                 }
                 
-                // Second pass: Advanced contamination prevention
-                let sanitizedEpisodes = EpisodeContaminationGuard.sanitizeEpisodes(basicSafeEpisodes, targetFeedId: feedId)
+                // Let isolation manager handle all validation and sanitization
+                feedIsolationManager.replaceEpisodesForFeed(filteredEpisodes, feedId: feedId)
+                let sanitizedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
                 
-                // Third pass: Comprehensive validation
-                let validationResults = EpisodeContaminationGuard.validateEpisodeCollection(sanitizedEpisodes, expectedFeedId: feedId)
-                let criticalIssues = validationResults.filter { $0.hasCriticalIssues }
-                
-                if !criticalIssues.isEmpty {
-                    print("🚨 CONTAMINATION GUARD: Found \(criticalIssues.count) episodes with critical contamination issues")
-                    for result in criticalIssues {
-                        for issue in result.issues {
-                            print("🚨 CRITICAL ISSUE: \(issue.description)")
-                        }
-                    }
-                    
-                    // Emergency decontamination if needed
-                    let finalEpisodes = EpisodeContaminationGuard.emergencyDecontamination(episodes: sanitizedEpisodes, targetFeedId: feedId)
-                    print("📊 ⚡ SNAPSHOT INSTANT: Displaying \(finalEpisodes.count) DECONTAMINATED episodes (newest episodes first)")
-                    self.safelyAssignCurrentEpisodes(finalEpisodes, targetFeedId: feedId)
-                } else {
-                    print("📊 ⚡ SNAPSHOT INSTANT: Displaying \(sanitizedEpisodes.count) CLEAN episodes (newest episodes first)")
-                    self.safelyAssignCurrentEpisodes(sanitizedEpisodes, targetFeedId: feedId)
-                }
+                print("📊 ⚡ SNAPSHOT INSTANT: Displaying \(sanitizedEpisodes.count) ISOLATION-CLEAN episodes (newest episodes first)")
+                // Episodes are now guaranteed clean by isolation manager - no further validation needed
+                self.safelyAssignCurrentEpisodes(sanitizedEpisodes, targetFeedId: feedId)
                 self.hasMoreEpisodes = false // Snapshots contain complete data
                 self.isLoadingEpisodes = false
                 self.operationInProgress = false
@@ -4447,6 +4562,7 @@ class PodcastViewModel: ObservableObject {
     
     /// Request immediate refresh for a feed (user initiated) - optimized for newest episodes first
     func requestFeedRefresh(_ feedId: String) {
+        print("🎯 REQUEST REFRESH: User requested refresh for feed \(feedId)")
         let userRefreshKey = "UserRequestedRefresh_\(feedId)"
         UserDefaults.standard.set(true, forKey: userRefreshKey)
         
@@ -5126,9 +5242,9 @@ class PodcastViewModel: ObservableObject {
     /// Clear all existing episode snapshots to prevent contamination spread
     @MainActor
     func clearAllEpisodeSnapshots() {
-        episodeSnapshotCache.removeAll()
+        feedIsolationManager.clearAllFeeds()
         snapshotTimestamps.removeAll()
-        print("🧹 EMERGENCY: Cleared all episode snapshots to prevent contamination spread")
+        print("🧹 EMERGENCY: Cleared all episodes from isolation manager to prevent contamination spread")
         
         // Reset DataSyncManager snapshot tracking
         DataSyncManager.shared.updateEpisodeSnapshotReadiness(
@@ -5152,9 +5268,9 @@ class PodcastViewModel: ObservableObject {
         }
         
         for feedId in snapshotsToRemove {
-            episodeSnapshotCache.removeValue(forKey: feedId)
+            feedIsolationManager.clearEpisodesForFeed(feedId)
             snapshotTimestamps.removeValue(forKey: feedId)
-            print("🗑️ CLEANUP: Removed old snapshot for feed \(feedId)")
+            print("🗑️ CLEANUP: Removed old episodes for feed \(feedId)")
         }
         
         if !snapshotsToRemove.isEmpty {
@@ -5162,7 +5278,7 @@ class PodcastViewModel: ObservableObject {
         }
     }
     
-    /// PERFORMANCE OPTIMIZED: Create or update episode snapshot with minimal CPU impact
+    /// Create or update episode snapshot - now uses FeedIsolationManager as single source of truth
     func updateEpisodeSnapshot(for feedId: String, episodes: [PodcastEpisode]) {
         // PERFORMANCE: Skip snapshot creation if we already have a recent one
         if let existingTimestamp = snapshotTimestamps[feedId],
@@ -5170,70 +5286,17 @@ class PodcastViewModel: ObservableObject {
             return
         }
         
-        // PERFORMANCE: Run expensive operations on background queue
+        // 🛡️ SINGLE SOURCE OF TRUTH: Use FeedIsolationManager to handle all validation and storage
+        feedIsolationManager.replaceEpisodesForFeed(episodes, feedId: feedId)
+        
+        // Update timestamp for cache freshness tracking
+        snapshotTimestamps[feedId] = Date()
+        
+        let finalCount = feedIsolationManager.getEpisodesForFeed(feedId).count
+        print("📸 ISOLATION SNAPSHOT: Cached \(finalCount) contamination-free episodes for feed \(feedId)")
+        
+        // Update snapshot readiness tracking
         Task.detached(priority: .utility) {
-            // CLEANUP: Periodically clean up old snapshots to prevent memory buildup
-            if await self.episodeSnapshotCache.count > 10 {
-                await self.cleanupOldSnapshots()
-            }
-            
-            // ENHANCED CONTAMINATION PREVENTION: Multi-layer episode validation
-            let validatedEpisodes = episodes.compactMap { episode -> PodcastEpisode? in
-                // Layer 1: Basic validation
-                guard !episode.id.isEmpty,
-                      !episode.title.isEmpty,
-                      !episode.feedId.isEmpty,
-                      !episode.audioUrl.isEmpty else {
-                    print("🚨 SNAPSHOT VALIDATION: Skipping episode with missing data - Title: '\(episode.title)', ID: '\(episode.id)'")
-                    return nil
-                }
-                
-                // Layer 2: Feed isolation check
-                guard episode.feedId == feedId else {
-                    print("🚨 SNAPSHOT ISOLATION: Episode '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
-                    return nil
-                }
-                
-                // Layer 3: Episode ID integrity check for deterministic IDs
-                if episode.id.hasPrefix("det_f") {
-                    let feedHash = abs(feedId.lowercased().hashValue)
-                    let expectedPrefix = "det_f\(feedHash)_"
-                    if !episode.id.hasPrefix(expectedPrefix) {
-                        print("🚨 SNAPSHOT ID INTEGRITY: Episode '\(episode.title)' has ID '\(episode.id)' that doesn't match feed hash pattern")
-                        // Create corrected episode with proper ID
-                        var correctedEpisode = episode
-                        correctedEpisode.id = PodcastEpisode.generateDeterministicID(
-                            title: episode.title,
-                            audioUrl: episode.audioUrl,
-                            publicationDate: episode.publicationDate,
-                            feedUrl: feedId
-                        )
-                        correctedEpisode.feedId = feedId // Ensure feedId is correct
-                        print("🔧 SNAPSHOT CORRECTION: Corrected episode ID to '\(correctedEpisode.id)'")
-                        return correctedEpisode
-                    }
-                }
-                
-                return episode
-            }
-            
-            if validatedEpisodes.count != episodes.count {
-                let filteredCount = episodes.count - validatedEpisodes.count
-                print("🛡️ SNAPSHOT VALIDATION: Filtered out \(filteredCount) contaminated/invalid episodes from feed \(feedId)")
-            }
-            
-            let safeEpisodes = validatedEpisodes
-            
-            // PERFORMANCE OPTIMIZATION: Use efficient sorting algorithm
-            let sortedEpisodes = safeEpisodes.sorted { $0.publicationDate > $1.publicationDate }
-            
-            // Update cache on main actor
-            await MainActor.run {
-                self.episodeSnapshotCache[feedId] = sortedEpisodes
-                self.snapshotTimestamps[feedId] = Date()
-                print("📸 SNAPSHOT: Cached \(sortedEpisodes.count) episodes for feed \(feedId) (newest first)")
-            }
-            
             // Update DataSyncManager snapshot readiness tracking (low priority)
             let feedsWithEpisodes = await self.podcastFeeds.filter { !$0.episodes.isEmpty }
             var feedsWithSnapshots = 0
@@ -5254,19 +5317,14 @@ class PodcastViewModel: ObservableObject {
     
     /// PULL-TO-REFRESH: Force snapshot update bypassing throttling for immediate UI refresh
     func forceUpdateEpisodeSnapshot(for feedId: String, episodes: [PodcastEpisode]) {
-        // CRITICAL SAFETY CHECK: Ensure all episodes actually belong to this feed before caching
-        let safeEpisodes = episodes.filter { $0.feedId == feedId }
-        if safeEpisodes.count != episodes.count {
-            print("🚨 FORCE SNAPSHOT: Filtered out \(episodes.count - safeEpisodes.count) episodes that didn't belong to feed \(feedId)")
-        }
+        // 🛡️ SINGLE SOURCE OF TRUTH: Use FeedIsolationManager to handle all validation and storage
+        feedIsolationManager.replaceEpisodesForFeed(episodes, feedId: feedId)
         
-        // PERFORMANCE OPTIMIZATION: Use efficient sorting algorithm
-        let sortedEpisodes = safeEpisodes.sorted { $0.publicationDate > $1.publicationDate }
-        
-        // Update cache immediately (bypass throttling)
-        episodeSnapshotCache[feedId] = sortedEpisodes
+        // Update timestamp for cache freshness tracking (bypass throttling)
         snapshotTimestamps[feedId] = Date()
-        print("📸 FORCE SNAPSHOT: Immediately cached \(sortedEpisodes.count) episodes for feed \(feedId) (pull-to-refresh)")
+        
+        let finalCount = feedIsolationManager.getEpisodesForFeed(feedId).count
+        print("📸 FORCE ISOLATION SNAPSHOT: Immediately cached \(finalCount) contamination-free episodes for feed \(feedId) (pull-to-refresh)")
         
         // Update DataSyncManager snapshot readiness tracking (background)
         Task.detached(priority: .background) {
@@ -5300,9 +5358,11 @@ class PodcastViewModel: ObservableObject {
                 // Find feedId by searching through cached snapshots first (fastest)
                 var foundFeedId: String? = nil
                 await MainActor.run {
-                    for (cachedFeedId, episodes) in self.episodeSnapshotCache {
+                    // Find feed ID by checking all registered feeds in isolation manager
+                    for feedId in self.feedIsolationManager.getAllRegisteredFeedIds() {
+                        let episodes = self.feedIsolationManager.getEpisodesForFeed(feedId)
                         if episodes.contains(where: { $0.id == episodeId }) {
-                            foundFeedId = cachedFeedId
+                            foundFeedId = feedId
                             break
                         }
                     }
@@ -5324,11 +5384,13 @@ class PodcastViewModel: ObservableObject {
                 }
             }
             
-            // Get current snapshot
-            guard let currentSnapshot = await MainActor.run(body: {
-                return self.episodeSnapshotCache[resolvedFeedId]
-            }) else {
-                print("⚠️ PROACTIVE SNAPSHOT: No snapshot exists for feed \(resolvedFeedId)")
+            // Get current snapshot from isolation manager
+            let currentSnapshot = await MainActor.run {
+                return self.feedIsolationManager.getEpisodesForFeed(resolvedFeedId)
+            }
+            
+            if currentSnapshot.isEmpty {
+                print("⚠️ PROACTIVE SNAPSHOT: No episodes exist for feed \(resolvedFeedId)")
                 return
             }
             
@@ -5346,91 +5408,40 @@ class PodcastViewModel: ObservableObject {
                 return episode
             }
             
-            // Update snapshot cache on main thread
+            // Update episodes through isolation manager
             await MainActor.run {
-                self.episodeSnapshotCache[resolvedFeedId] = updatedSnapshot
+                self.feedIsolationManager.replaceEpisodesForFeed(updatedSnapshot, feedId: resolvedFeedId)
                 self.snapshotTimestamps[resolvedFeedId] = Date()
-                print("⚡ PROACTIVE SNAPSHOT: Updated episode \(episodeId) in feed \(resolvedFeedId) snapshot")
+                print("⚡ PROACTIVE ISOLATION: Updated episode \(episodeId) in feed \(resolvedFeedId)")
             }
         }
     }
     
-    /// Get episode snapshot if available and recent with enhanced contamination prevention
+    /// Get episode snapshot if available - now uses FeedIsolationManager as single source of truth
     func getEpisodeSnapshot(for feedId: String) -> [PodcastEpisode]? {
-        guard let episodes = episodeSnapshotCache[feedId],
-              let timestamp = snapshotTimestamps[feedId] else {
-            return nil
+        // 🛡️ SINGLE SOURCE OF TRUTH: Always use FeedIsolationManager for guaranteed clean episodes
+        let isolatedEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
+        
+        if isolatedEpisodes.isEmpty {
+            // Check if we have a timestamp to know if this feed was processed recently
+            guard let timestamp = snapshotTimestamps[feedId] else {
+                return nil
+            }
+            
+            // Only return empty if the snapshot is recent (within 10 minutes)
+            let isRecent = Date().timeIntervalSince(timestamp) < 600
+            if isRecent {
+                print("📸 ISOLATION SNAPSHOT: No episodes for feed \(feedId) (recent check)")
+                return []
+            } else {
+                // Remove stale timestamp
+                snapshotTimestamps.removeValue(forKey: feedId)
+                return nil
+            }
         }
         
-        // Snapshots are valid for 10 minutes
-        let isRecent = Date().timeIntervalSince(timestamp) < 600
-        if isRecent {
-            // 🛡️ ENHANCED CONTAMINATION PREVENTION: Multi-layer validation and cleanup
-            let validatedEpisodes = episodes.compactMap { episode -> PodcastEpisode? in
-                // Layer 1: Basic validation
-                guard !episode.id.isEmpty,
-                      !episode.title.isEmpty,
-                      !episode.feedId.isEmpty,
-                      !episode.audioUrl.isEmpty else {
-                    print("🚨 SNAPSHOT RETRIEVAL: Skipping episode with missing data - Title: '\(episode.title)', ID: '\(episode.id)'")
-                    return nil
-                }
-                
-                // Layer 2: Feed isolation check
-                guard episode.feedId == feedId else {
-                    print("🚨 SNAPSHOT RETRIEVAL: Episode '\(episode.title)' has feedId '\(episode.feedId)' but expected '\(feedId)'")
-                    return nil
-                }
-                
-                // Layer 3: Episode ID integrity check for deterministic IDs
-                if episode.id.hasPrefix("det_f") {
-                    let expectedFeedHash = abs(feedId.lowercased().hashValue)
-                    let expectedPrefix = "det_f\(expectedFeedHash)_"
-                    if !episode.id.hasPrefix(expectedPrefix) {
-                        print("🚨 SNAPSHOT ID INTEGRITY: Episode '\(episode.title)' has ID '\(episode.id)' that doesn't match feed hash pattern for feed '\(feedId)'")
-                        // Create corrected episode with proper ID
-                        var correctedEpisode = episode
-                        correctedEpisode.id = PodcastEpisode.generateDeterministicID(
-                            title: episode.title,
-                            audioUrl: episode.audioUrl,
-                            publicationDate: episode.publicationDate,
-                            feedUrl: feedId
-                        )
-                        correctedEpisode.feedId = feedId // Ensure feedId is correct
-                        print("🔧 SNAPSHOT ID CORRECTION: Corrected episode ID to '\(correctedEpisode.id)'")
-                        return correctedEpisode
-                    }
-                }
-                
-                return episode
-            }
-            
-            if validatedEpisodes.count != episodes.count {
-                let filteredCount = episodes.count - validatedEpisodes.count
-                print("🛡️ SNAPSHOT RETRIEVAL: Filtered out \(filteredCount) contaminated/invalid episodes from snapshot for feed \(feedId)")
-                
-                // IMMEDIATE FIX: Update the snapshot with clean episodes
-                if !validatedEpisodes.isEmpty {
-                    episodeSnapshotCache[feedId] = validatedEpisodes
-                    print("🛡️ SNAPSHOT CLEANED: Updated snapshot with \(validatedEpisodes.count) clean episodes for feed \(feedId)")
-                } else {
-                    // If no valid episodes, remove the snapshot entirely
-                    episodeSnapshotCache.removeValue(forKey: feedId)
-                    snapshotTimestamps.removeValue(forKey: feedId)
-                    print("🛡️ SNAPSHOT REMOVED: No valid episodes found, removed contaminated snapshot for feed \(feedId)")
-                    return nil
-                }
-            }
-            
-            print("📸 SNAPSHOT HIT: Using \(validatedEpisodes.count) validated episodes for feed \(feedId)")
-            return validatedEpisodes
-        } else {
-            // Remove stale snapshot
-            episodeSnapshotCache.removeValue(forKey: feedId)
-            snapshotTimestamps.removeValue(forKey: feedId)
-            print("📸 SNAPSHOT EXPIRED: Removed stale cache for feed \(feedId)")
-            return nil
-        }
+        print("📸 ISOLATION SNAPSHOT: Using \(isolatedEpisodes.count) contamination-free episodes for feed \(feedId)")
+        return isolatedEpisodes
     }
     
     /// Ultra-fast check for new episodes - pulls ALL new episodes and updates UI instantly
@@ -5736,10 +5747,11 @@ class PodcastViewModel: ObservableObject {
                 // Update Core Data with new episodes first
                 try await PodcastCoreDataManager.shared.addNewEpisodes(newEpisodes, to: feedId)
                 
-                // CLEAN UP: Remove old snapshot before creating new one
-                if episodeSnapshotCache[feedId] != nil {
-                    print("🗑️ BACKGROUND CLEANUP: Removing old snapshot for feed \(feedId)")
-                    episodeSnapshotCache.removeValue(forKey: feedId)
+                // CLEAN UP: Remove old episodes before creating new ones
+                let existingEpisodes = feedIsolationManager.getEpisodesForFeed(feedId)
+                if !existingEpisodes.isEmpty {
+                    print("🗑️ BACKGROUND CLEANUP: Removing old episodes for feed \(feedId)")
+                    feedIsolationManager.clearEpisodesForFeed(feedId)
                     snapshotTimestamps.removeValue(forKey: feedId)
                 }
                 
@@ -6066,25 +6078,49 @@ class PodcastViewModel: ObservableObject {
     /// Manual contamination check and fix - can be called immediately
     @MainActor
     func performImmediateContaminationFix() {
-        print("🛡️ IMMEDIATE FIX: Starting emergency contamination cleanup")
+        print("🛡️ EMERGENCY FIX: Starting immediate contamination cleanup with isolation manager")
         
-        // Check current episodes for contamination
-        if !currentEpisodes.isEmpty, let selectedFeedId = selectedFeedId {
-            let contaminatedEpisodes = currentEpisodes.filter { $0.feedId != selectedFeedId }
-            
-            if !contaminatedEpisodes.isEmpty {
-                print("🚨 IMMEDIATE FIX: Found \(contaminatedEpisodes.count) contaminated episodes in current display")
-                
-                // Clean current episodes immediately
-                let cleanEpisodes = currentEpisodes.filter { $0.feedId == selectedFeedId }
-                currentEpisodes = cleanEpisodes
-                
-                print("✅ IMMEDIATE FIX: Cleaned current episodes - showing \(cleanEpisodes.count) clean episodes")
-            }
+        // Use isolation manager for comprehensive cleanup
+        feedIsolationManager.performGlobalContaminationCleanup()
+        
+        // Validate cleanup was successful
+        let report = feedIsolationManager.validateGlobalIsolation()
+        if report.isClean {
+            print("✅ EMERGENCY FIX: All contamination cleaned successfully")
+        } else {
+            print("🚨 EMERGENCY FIX: Some contamination remains - \(report.totalContaminatedEpisodes) episodes in \(report.totalContaminatedFeeds) feeds")
         }
         
-        // Perform global contamination check
-        performGlobalContaminationCheck()
+        // Trigger UI refresh to show clean data
+        objectWillChange.send()
+    }
+    
+    /// Perform comprehensive migration for existing contaminated user data
+    @MainActor
+    func performUserDataMigration() {
+        print("🛡️ MIGRATION: Starting comprehensive user data migration")
+        
+        Task {
+            // Run Core Data migration through isolation manager
+            await feedIsolationManager.performUserDataMigration(coreDataStack: CoreDataStack.shared)
+            
+            await MainActor.run {
+                // Refresh all feeds after migration
+                Task {
+                    self.loadFeedsFromCoreData()
+                    
+                    await MainActor.run {
+                        // Re-register all feeds with isolation manager
+                        for feed in self.podcastFeeds {
+                            self.feedIsolationManager.registerFeed(feedId: feed.id, feedUrl: feed.url)
+                        }
+                        
+                        print("✅ MIGRATION: User data migration completed successfully")
+                        self.objectWillChange.send()
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - Private Methods
@@ -8312,11 +8348,11 @@ class PodcastViewModel: ObservableObject {
     /// This should be called when PodcastListView loads to check for new content
     /// Now runs entirely in background to prevent main thread blocking
     func automaticCloudKitSync() async {
-        // PERFORMANCE: Skip expensive CloudKit sync if we have snapshots or recent sync
+        // PERFORMANCE: Skip expensive CloudKit sync if we have episodes or recent sync
         let hasSnapshot = await MainActor.run {
-            // Check if ANY feed has snapshots, not just the selected feed
-            // This prevents unnecessary CloudKit sync when snapshots exist but selectedFeedId is nil
-            return !self.episodeSnapshotCache.isEmpty
+            // Check if ANY feed has episodes, not just the selected feed
+            // This prevents unnecessary CloudKit sync when episodes exist but selectedFeedId is nil
+            return !self.feedIsolationManager.getAllRegisteredFeedIds().isEmpty
         }
         
         let hasRecentSync = await MainActor.run {
@@ -8355,11 +8391,11 @@ class PodcastViewModel: ObservableObject {
     /// Perform automatic CloudKit check for new feeds and updated episode states
     /// This runs silently without triggering progress banners
     private func performAutomaticCloudKitCheck() async {
-        // PERFORMANCE: Skip expensive CloudKit operations if we have snapshots
+        // PERFORMANCE: Skip expensive CloudKit operations if we have episodes
         let hasSnapshot = await MainActor.run {
-            // Check if ANY feed has snapshots, not just the selected feed
-            // This prevents unnecessary CloudKit sync when snapshots exist but selectedFeedId is nil
-            return !self.episodeSnapshotCache.isEmpty
+            // Check if ANY feed has episodes, not just the selected feed
+            // This prevents unnecessary CloudKit sync when episodes exist but selectedFeedId is nil
+            return !self.feedIsolationManager.getAllRegisteredFeedIds().isEmpty
         }
         
         if hasSnapshot {
@@ -9413,6 +9449,19 @@ extension PodcastViewModel {
                 // Batch property updates to prevent multiple UI refreshes
                 self.podcastFeeds = loadedFeeds
                 self.podcastFeedOrder = loadedFeeds.map { $0.id }
+                
+                // 🛡️ CRITICAL: Register all feeds with FeedIsolationManager immediately after loading
+                for feed in loadedFeeds {
+                    self.feedIsolationManager.registerFeed(feedId: feed.id, feedUrl: feed.url)
+                    
+                    // Immediately populate the isolation manager with episodes
+                    if !feed.episodes.isEmpty {
+                        self.feedIsolationManager.replaceEpisodesForFeed(feed.episodes, feedId: feed.id)
+                        print("🛡️ FEED REGISTERED: \(feed.id) with \(feed.episodes.count) episodes")
+                    } else {
+                        print("🛡️ FEED REGISTERED: \(feed.id) with no episodes")
+                    }
+                }
                 
                 // Clear loading flags
                 self.isLoading = false

@@ -1599,8 +1599,14 @@ struct EpisodeRowView: View {
         // Force SwiftUI to re-evaluate when uiRefreshTrigger changes
         let refreshTrigger = viewModel.uiRefreshTrigger
         
-        // Find the current episode state from viewModel's currentEpisodes array
-        let foundEpisode = viewModel.currentEpisodes.first { $0.id == episode.id } ?? episode
+        // 🛡️ CONTAMINATION PREVENTION: Only access currentEpisodes if this episode belongs to current feed
+        guard episode.feedId == viewModel.selectedFeedId else {
+            return episode
+        }
+        
+        // 🚀 PERFORMANCE: Use passed episode directly instead of searching through all episodes
+        // The parent view already passed us the correct episode from currentEpisodes
+        let foundEpisode = episode
         
         // Debug logging to track UI refresh
         if foundEpisode.state.isFavorite != episode.state.isFavorite {
@@ -2148,12 +2154,17 @@ struct OptimizedEpisodeRowView: View, Equatable {
         // Force SwiftUI to re-evaluate when uiRefreshTrigger changes
         let refreshTrigger = viewModel.uiRefreshTrigger
         
-        // Find the current episode state from viewModel's currentEpisodes array
-        let foundEpisode = viewModel.currentEpisodes.first { $0.id == episode.id } ?? episode
+        // 🛡️ CONTAMINATION PREVENTION: Only access currentEpisodes if this episode belongs to current feed
+        guard episode.feedId == viewModel.selectedFeedId else {
+            return episode
+        }
+        
+        // 🚀 PERFORMANCE: Use passed episode directly instead of searching through all episodes
+        // The parent view already passed us the correct episode from currentEpisodes
+        let foundEpisode = episode
         
         // Debug logging to track UI refresh
         if foundEpisode.state.isFavorite != episode.state.isFavorite {
-            print("🎯 OPTIMIZED ROW: Episode \(episode.id) favorite changed: \(episode.state.isFavorite) -> \(foundEpisode.state.isFavorite) (trigger: \(refreshTrigger))")
         }
         
         return foundEpisode
@@ -3139,7 +3150,13 @@ struct PodcastPlayerView: View {
     }
 
     private var episodeRows: some View {
-        let allEpisodes = viewModel.currentEpisodes
+        // 🚀 PERFORMANCE: Only access currentEpisodes ONCE per render, not per episode row
+        let allEpisodes: [PodcastEpisode]
+        if viewModel.selectedFeedId == feed.id {
+            allEpisodes = viewModel.currentEpisodes
+        } else {
+            allEpisodes = []
+        }
         
         // 🛡️ SMART UI CONTAMINATION PREVENTION: Filter and show only clean episodes
         let episodes: [PodcastEpisode]

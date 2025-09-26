@@ -1307,6 +1307,10 @@ class DataSyncManager: ObservableObject {
     private func ensureEpisodeSnapshotsAreCreated(_ podcastViewModel: PodcastViewModel) async {
         print("📸 FINAL SNAPSHOT CHECK: Ensuring all feeds have episode snapshots...")
         
+        // CRITICAL: Clear old snapshots first to ensure fresh state data
+        podcastViewModel.clearAllEpisodeSnapshots()
+        print("🗑️ CLEARED: All old episode snapshots before final creation")
+        
         let feedsWithEpisodes = podcastViewModel.podcastFeeds.filter { !$0.episodes.isEmpty }
         var snapshotsCreated = 0
         var totalEpisodes = 0
@@ -1316,26 +1320,42 @@ class DataSyncManager: ObservableObject {
         feedsWithSnapshots = 0
         
         for feed in podcastViewModel.podcastFeeds {
-            // Check if snapshot already exists
-            if podcastViewModel.getEpisodeSnapshot(for: feed.id) != nil {
-                if !feed.episodes.isEmpty {
-                    feedsWithSnapshots += 1
-                }
-                snapshotsCreated += 1
-                print("📸 Snapshot already exists for '\(feed.title)'")
-            } else if !feed.episodes.isEmpty {
+            // Since we cleared all snapshots, create new ones for feeds with episodes
+            if !feed.episodes.isEmpty {
                 // 🛡️ CONTAMINATION PREVENTION: Validate episodes before creating snapshot
                 let validEpisodes = feed.episodes.filter { $0.feedId == feed.id }
                 if validEpisodes.count != feed.episodes.count {
                     print("🚨 STARTUP CONTAMINATION: Feed '\(feed.title)' has \(feed.episodes.count - validEpisodes.count) contaminated episodes")
                 }
                 
-                // Create snapshot for feeds with validated episodes
-                podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: validEpisodes)
+                // Apply current states from EpisodeStateManager before creating snapshot
+                let episodesWithCurrentStates = validEpisodes.map { episode in
+                    var updatedEpisode = episode
+                    
+                    // Get current states from EpisodeStateManager
+                    let progress = EpisodeStateManager.shared.getProgress(for: episode.id)
+                    let isFavorite = EpisodeStateManager.shared.isFavorite(episode.id)
+                    let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
+                    let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
+                    
+                    // DEBUG: Log states for ALL episodes to see what's happening
+                    print("📸 FINAL SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
+                    
+                    // Update episode state with current values
+                    updatedEpisode.state.progress = progress
+                    updatedEpisode.state.isFavorite = isFavorite
+                    updatedEpisode.state.isDownloaded = isDownloaded
+                    updatedEpisode.state.isPlayed = (playbackState == .played)
+                    
+                    return updatedEpisode
+                }
+                
+                // Create snapshot for feeds with validated episodes that have current states
+                podcastViewModel.updateEpisodeSnapshot(for: feed.id, episodes: episodesWithCurrentStates)
                 feedsWithSnapshots += 1
                 snapshotsCreated += 1
                 totalEpisodes += validEpisodes.count
-                print("📸 Created final snapshot for '\(feed.title)' with \(feed.episodes.count) episodes")
+                print("📸 Created final snapshot for '\(feed.title)' with \(validEpisodes.count) episodes with current states")
             } else {
                 print("📸 Skipped snapshot for '\(feed.title)' - no episodes available")
             }
@@ -1896,7 +1916,27 @@ class DataSyncManager: ObservableObject {
     
     /// Create episode snapshots for all loaded feeds for instant access
     private func createEpisodeSnapshotsForAllFeeds(_ podcastViewModel: PodcastViewModel) async {
+        // CRITICAL: Always clear old snapshots first to ensure fresh data
         await MainActor.run {
+            podcastViewModel.clearAllEpisodeSnapshots()
+            print("🗑️ CLEARED: All old episode snapshots to ensure fresh state data")
+        }
+        
+        // First, ensure EpisodeStateManager is ready before creating snapshots
+        if !EpisodeStateManager.shared.isReady {
+            print("⚠️ SNAPSHOT: EpisodeStateManager not ready, waiting...")
+            // Wait briefly for it to be ready
+            for _ in 0..<10 {
+                if EpisodeStateManager.shared.isReady {
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+            }
+        }
+        
+        await MainActor.run { [weak self] in
+            guard let self = self else { return }
+            
             let feedCount = podcastViewModel.podcastFeeds.count
             let feedsWithEpisodes = podcastViewModel.podcastFeeds.filter { !$0.episodes.isEmpty }
             
@@ -1925,6 +1965,13 @@ class DataSyncManager: ObservableObject {
                     }
                     
                     // CRITICAL: Refresh episode states before creating snapshot to ensure they're current
+                    
+                    // DEBUG: Check EpisodeStateManager state
+                    let progressCount = EpisodeStateManager.shared.episodeProgress.count
+                    let favoritesCount = EpisodeStateManager.shared.episodeFavorites.count
+                    let downloadsCount = EpisodeStateManager.shared.episodeDownloads.count
+                    print("📸 SNAPSHOT: EpisodeStateManager Ready=\(EpisodeStateManager.shared.isReady), Progress=\(progressCount), Favorites=\(favoritesCount), Downloads=\(downloadsCount)")
+                    
                     let episodesWithCurrentStates = validEpisodes.map { episode in
                         var updatedEpisode = episode
                         
@@ -1934,10 +1981,8 @@ class DataSyncManager: ObservableObject {
                         let isDownloaded = EpisodeStateManager.shared.isDownloaded(episode.id)
                         let playbackState = EpisodeStateManager.shared.getState(for: episode.id)
                         
-                        // DEBUG: Log states for episodes that have non-default values
-                        if progress > 0 || isFavorite || isDownloaded || playbackState == .played {
-                            print("📸 SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
-                        }
+                        // DEBUG: Log states for ALL episodes to see what's happening
+                        print("📸 SNAPSHOT DEBUG: Episode '\(episode.title)' - Progress: \(String(format: "%.2f", progress)), Favorite: \(isFavorite), Downloaded: \(isDownloaded), Played: \(playbackState == .played)")
                         
                         // Update episode state with current values
                         updatedEpisode.state.progress = progress

@@ -709,6 +709,12 @@ class PodcastEpisodeManager {
         let episodeStatesData = EpisodeStateManager.shared.getBatchEpisodeData(for: episodeIds)
         let isCloudKitPriorityMode = EpisodeStateManager.shared.isCloudKitPriorityMode()
         
+        // DEBUG: Check if state manager has any data
+        let stateCount = episodeStatesData.count
+        let progressCount = EpisodeStateManager.shared.episodeProgress.count
+        let favoritesCount = EpisodeStateManager.shared.episodeFavorites.count
+        print("🔍 EPISODE STATE DEBUG: StateManager Ready=\(EpisodeStateManager.shared.isReady), States=\(stateCount), Progress=\(progressCount), Favorites=\(favoritesCount)")
+        
         // PARALLEL PROCESSING: Use concurrent map for conversion
         let convertedEpisodes: [PodcastEpisode] = managedEpisodes.compactMap { managedEpisode -> PodcastEpisode? in
             guard let episodeId = managedEpisode.id else { return nil }
@@ -757,6 +763,11 @@ class PodcastEpisodeManager {
                 progress: finalProgress,
                 isDownloaded: finalDownloaded
             )
+            
+            // DEBUG: Log state application
+            if finalProgress > 0 || finalFavorite || finalDownloaded || finalState == .played {
+                print("🔍 STATE APPLIED: Episode '\(episode.title)' - Progress: \(finalProgress), Favorite: \(finalFavorite), Downloaded: \(finalDownloaded), Played: \(finalState == .played)")
+            }
             
             return episode
         }
