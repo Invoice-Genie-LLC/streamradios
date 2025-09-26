@@ -107,17 +107,16 @@ struct PodcastListView: View {
     var isFooterMenuHidden: Binding<Bool>
     
     // FORCE UI REFRESH: Observe uiRefreshTrigger to force SwiftUI re-evaluation
-    private var uiRefreshObserver: UUID {
-        viewModel.uiRefreshTrigger
-    }
+    @State private var uiRefreshObserver = UUID()
     private let podcastPlayer = PodcastPlayer.shared // Remove @StateObject to stop observing updates
     @StateObject private var radioPlayer = RadioPlayer.shared
     @EnvironmentObject private var radioStationViewModel: RadioStationViewModel
     @State private var scrollToEpisodeID: String?
     @State private var refreshID = UUID()
-    @State private var dataCheckTimer: Timer?
+    @State private var isNavigatingBack = false
     @State private var selectedTab: Tab = .podcast
     @State private var isPlayerSheetPresented = false
+    @State private var dataCheckTimer: Timer?
     
     // Auto-focus on newly added podcast
     @State private var newlyAddedPodcastId: String?
@@ -423,10 +422,28 @@ struct PodcastListView: View {
                    NotificationCenter.default.removeObserver(self, name: NSNotification.Name("FreshInstallDataAvailable"), object: nil)
                }
                .onChange(of: selectedPodcast) { _, newValue in
-                   // When selectedPodcast is set from outside (like from ContentView),
-                   // automatically show the episode list and request a refresh
+                   // PERFORMANCE FIX: Skip operations during back navigation to prevent delays
+                   guard !isNavigatingBack else {
+                       print("🔙 BACK NAVIGATION: Skipping onChange operations for better performance")
+                       return
+                   }
+                   
+                   // PERFORMANCE FIX: Only trigger refresh when selecting a podcast, not when going back
                    if let podcast = newValue {
+                       // When selectedPodcast is set from outside (like from ContentView),
+                       // automatically show the episode list and request a refresh
                        viewModel.requestFeedRefresh(podcast.id)
+                   } else {
+                       // BACK NAVIGATION OPTIMIZATION: Clear any pending operations when going back
+                       viewModel.cancelPendingOperations()
+                       
+                       // CRITICAL FIX: Clear episode loading state when navigating back
+                       if podcastPlayer.loadingEpisodeId != nil {
+                           podcastPlayer.loadingEpisodeId = nil
+                           print("🔙 BACK NAVIGATION: Cleared episode loading state in onChange")
+                       }
+                       
+                       print("🔙 BACK NAVIGATION: Cleared pending operations for better performance")
                    }
                }
                .onChange(of: viewModel.podcastFeeds.count) { _, newCount in
@@ -2873,6 +2890,7 @@ struct PodcastPlayerView: View {
     @State private var endIndicatorScale: CGFloat = 1.0
     @State private var showSuccessToast = false
     @State private var successMessage = ""
+    @State private var isNavigatingBack = false
     
     // MARK: - Bindings
     @Binding var selectedPodcast: PodcastFeed?
@@ -2916,14 +2934,44 @@ struct PodcastPlayerView: View {
                     // 🔙 INSTANT BACK BUTTON: Immediate navigation with zero delays
                     print("🔙 BACK BUTTON: User tapped back button")
                     
-                    // IMMEDIATE navigation - no async delays
-                    selectedPodcast = nil
+                    // PERFORMANCE FIX: Prevent multiple rapid taps and unnecessary operations
+                    guard selectedPodcast != nil && !isNavigatingBack else { 
+                        print("🔙 BACK BUTTON: Already navigating or at root, ignoring tap")
+                        return 
+                    }
+                    
+                    // CRITICAL FIX: Allow back navigation even during episode loading
+                    // Clear any loading states that might interfere with navigation
+                    if let loadingEpisodeId = podcastPlayer.loadingEpisodeId {
+                        print("🔙 BACK BUTTON: Clearing loading state for episode \(loadingEpisodeId) to allow navigation")
+                        podcastPlayer.loadingEpisodeId = nil
+                    }
+                    
+                    // Set navigation flag to prevent interference
+                    isNavigatingBack = true
+                    
+                    // IMMEDIATE navigation - no async delays, no animations
+                    withAnimation(.none) {
+                        selectedPodcast = nil
+                    }
+                    
+                    // Reset navigation flag after a brief delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        isNavigatingBack = false
+                    }
                     print("🔙 BACK BUTTON: Navigation completed instantly")
                     
                     // Background cleanup AFTER navigation (non-blocking)
                     Task.detached(priority: .background) {
                         await MainActor.run {
                             viewModel.cancelPendingOperations()
+                            
+                            // CRITICAL FIX: Stop any ongoing episode loading when navigating back
+                            if podcastPlayer.loadingEpisodeId != nil {
+                                podcastPlayer.loadingEpisodeId = nil
+                                print("🔙 BACK NAVIGATION: Cleared episode loading state")
+                            }
+                            
                             print("🧹 BACKGROUND: Cleanup completed after navigation")
                         }
                     }
@@ -2933,7 +2981,7 @@ struct PodcastPlayerView: View {
                         .foregroundColor(.blue)
                 }
                 .buttonStyle(PlainButtonStyle())
-                .disabled(false) // Ensure button is always enabled
+                .disabled(isNavigatingBack) // Prevent multiple taps during navigation
             }
         }
                 .onAppear(perform: handleOnAppear)
