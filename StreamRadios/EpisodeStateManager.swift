@@ -603,42 +603,59 @@ class EpisodeStateManager: ObservableObject {
         // This ensures episode progress is available immediately when episodes are played
         context.performAndWait {
             do {
-                // Fetch all episodes that have state data
+                // CRITICAL FIX: Fetch ALL episodes, not just those with state data
+                // The contamination fixes may have reset some state flags
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "progress > 0 OR isFavorite == YES OR isDownloaded == YES OR isPlayed == YES")
+                // Remove the restrictive predicate to load all episodes
                 
                 let episodes = try context.fetch(fetchRequest)
+                print("💾 CORE DATA LOAD: Found \(episodes.count) total episodes in Core Data")
+                
+                var progressCount = 0
+                var favoritesCount = 0
+                var downloadsCount = 0
+                var playedCount = 0
                 
                 for episode in episodes {
-                    guard let episodeId = episode.id else { continue }
+                    guard let episodeId = episode.id, !episodeId.isEmpty else { 
+                        print("⚠️ CORE DATA LOAD: Skipping episode with empty ID")
+                        continue 
+                    }
                     
-                    // Load progress
+                    // Load progress (check for any progress > 0)
                     if episode.progress > 0 {
                         loadedProgress[episodeId] = Double(episode.progress)
+                        progressCount += 1
                     }
                     
                     // Load favorites
                     if episode.isFavorite {
                         loadedFavorites[episodeId] = true
+                        favoritesCount += 1
                     }
                     
                     // Load downloads
                     if episode.isDownloaded {
                         loadedDownloads[episodeId] = true
+                        downloadsCount += 1
                     }
                     
                     // Load played state - prioritize explicit isPlayed over progress calculation
                     if episode.isPlayed {
                         loadedStates[episodeId] = .played
-                        print("💾 LOADED PLAYED: Episode \(episodeId) loaded as .played from Core Data")
+                        playedCount += 1
+                        print("💾 LOADED PLAYED: Episode \(episodeId.prefix(8)) loaded as .played from Core Data")
                     } else if episode.progress >= 1.0 {
                         // Episode completed but not explicitly marked as played - mark it
                         loadedStates[episodeId] = .played
-                        print("💾 LOADED PLAYED: Episode \(episodeId) loaded as .played from progress (100%)")
+                        playedCount += 1
+                        print("💾 LOADED PLAYED: Episode \(episodeId.prefix(8)) loaded as .played from progress (100%)")
                     } else if episode.progress > 0 {
                         loadedStates[episodeId] = .inProgress
                     }
                 }
+                
+                print("💾 CORE DATA LOAD DETAILS: Progress=\(progressCount), Favorites=\(favoritesCount), Downloads=\(downloadsCount), Played=\(playedCount)")
                 
             } catch {
                 print("❌ EpisodeStateManager: Failed to load from Core Data: \(error)")
@@ -656,6 +673,7 @@ class EpisodeStateManager: ObservableObject {
         
         // Fallback: If no Core Data found, try loading from UserDefaults (for migration)
         if loadedProgress.isEmpty && loadedFavorites.isEmpty && loadedDownloads.isEmpty {
+            print("🔄 EpisodeStateManager: No Core Data found, trying UserDefaults fallback")
             self.loadFromUserDefaultsAsFallback()
         }
     }
@@ -960,6 +978,8 @@ class EpisodeStateManager: ObservableObject {
                 .union(Set(self.episodeFavorites.keys))
                 .union(Set(self.episodeDownloads.keys))
             
+            print("💾 CORE DATA SAVE: Attempting to update \(episodesToUpdate.count) episodes")
+            
             for episodeId in episodesToUpdate {
                 let fetchRequest: NSFetchRequest<PodcastModel> = PodcastModel.fetchRequest()
                 fetchRequest.predicate = NSPredicate(format: "id == %@", episodeId)
@@ -1023,6 +1043,9 @@ class EpisodeStateManager: ObservableObject {
                             savedCount += 1
                             
                         }
+                    } else {
+                        print("⚠️ CORE DATA SAVE: Episode not found in Core Data: \(episodeId.prefix(8))")
+                        errorCount += 1
                     }
                 } catch {
                     print("❌ EpisodeStateManager: Failed to fetch episode \(episodeId): \(error)")
@@ -1034,10 +1057,13 @@ class EpisodeStateManager: ObservableObject {
             if savedCount > 0 {
                 do {
                     try context.save()
+                    print("✅ CORE DATA SAVE: Successfully saved \(savedCount) episodes to Core Data")
                 } catch {
                     print("❌ EpisodeStateManager: Failed to save to Core Data: \(error)")
                     errorCount += 1
                 }
+            } else {
+                print("💾 CORE DATA SAVE: No changes to save")
             }
             
             if errorCount > 0 {
@@ -1334,10 +1360,14 @@ class EpisodeStateManager: ObservableObject {
     func pausePlayback(episodeId: String, progress: Double) {
         episodeProgress[episodeId] = progress
         
+        // CRITICAL FIX: Set state based on progress, ensuring .inProgress is set for paused episodes
         if progress >= 1.0 {
             episodeStates[episodeId] = .played
         } else if progress > 0 {
             episodeStates[episodeId] = .inProgress
+        } else {
+            // Even if progress is 0, if we're pausing, it should be .new (not .inProgress)
+            episodeStates[episodeId] = .new
         }
         
         if currentlyPlayingEpisodeId == episodeId {
@@ -1345,7 +1375,26 @@ class EpisodeStateManager: ObservableObject {
         }
         
         saveCurrentStates()
-        sendThrottledUpdate()
+        
+        // CRITICAL: Send immediate update for pause state changes to prevent UI lag
+        sendImmediateUpdate()
+        
+        // REAL-TIME NOTIFICATION: Send immediate notification for progress changes on main thread
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .init("EpisodeProgressChangedInstantly"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "progress": progress]
+            )
+            
+            // Also send state change notification for real-time status updates
+            let newState: EpisodePlaybackState = progress >= 1.0 ? .played : (progress > 0 ? .inProgress : .new)
+            NotificationCenter.default.post(
+                name: .init("EpisodeStateChangedInstantly"),
+                object: nil,
+                userInfo: ["episodeId": episodeId, "state": newState.rawValue]
+            )
+        }
     }
     
     func switchToEpisode(newEpisodeId: String, previousEpisodeId: String, previousProgress: Double) {
@@ -1570,7 +1619,14 @@ class EpisodeStateManager: ObservableObject {
                 self.episodeStates[episodeId] = newState
             }
             saveCurrentStates()
-            sendThrottledUpdate()
+            
+            // CRITICAL: Use immediate update for pause operations (when isPlaying is false)
+            // This ensures progress labels update instantly when episodes are paused
+            if !isPlaying {
+                sendImmediateUpdate()
+            } else {
+                sendThrottledUpdate()
+            }
             
             // Send immediate notification for state changes
             if episodeStates[episodeId] != existingState {
@@ -1588,6 +1644,17 @@ class EpisodeStateManager: ObservableObject {
                             userInfo: ["episodeId": episodeId, "isPlayed": true]
                         )
                     }
+                }
+            }
+            
+            // CRITICAL: Send immediate progress notification for pause operations
+            if !isPlaying && shouldUpdateProgress {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .init("EpisodeProgressChangedInstantly"),
+                        object: nil,
+                        userInfo: ["episodeId": episodeId, "progress": self.episodeProgress[episodeId] ?? 0.0]
+                    )
                 }
             }
             

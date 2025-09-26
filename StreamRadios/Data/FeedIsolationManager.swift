@@ -39,11 +39,14 @@ class FeedIsolationManager: ObservableObject {
             let validEpisodes = newEpisodes.compactMap { episode -> PodcastEpisode? in
                 var validatedEpisode = episode
                 
-                // Force correct feedId
-                validatedEpisode.feedId = feedId
+                // CRITICAL FIX: Only update feedId if it's empty or wrong, preserve existing episode IDs
+                if validatedEpisode.feedId.isEmpty || validatedEpisode.feedId != feedId {
+                    validatedEpisode.feedId = feedId
+                }
                 
-                // Regenerate episode ID with proper feed isolation
-                if episode.id.isEmpty || !episode.id.contains(feedId) {
+                // CRITICAL FIX: Only regenerate episode ID if it's completely empty
+                // Preserve existing IDs to maintain EpisodeStateManager connections
+                if episode.id.isEmpty {
                     validatedEpisode.id = generateIsolatedEpisodeId(
                         title: episode.title,
                         audioUrl: episode.audioUrl,
@@ -70,9 +73,15 @@ class FeedIsolationManager: ObservableObject {
             
             let validEpisodes = newEpisodes.compactMap { episode -> PodcastEpisode? in
                 var validatedEpisode = episode
-                validatedEpisode.feedId = feedId
                 
-                if episode.id.isEmpty || !episode.id.contains(feedId) {
+                // CRITICAL FIX: Only update feedId if it's empty or wrong, preserve existing episode IDs
+                if validatedEpisode.feedId.isEmpty || validatedEpisode.feedId != feedId {
+                    validatedEpisode.feedId = feedId
+                }
+                
+                // CRITICAL FIX: Only regenerate episode ID if it's completely empty
+                // Preserve existing IDs to maintain EpisodeStateManager connections
+                if episode.id.isEmpty {
                     validatedEpisode.id = generateIsolatedEpisodeId(
                         title: episode.title,
                         audioUrl: episode.audioUrl,
@@ -271,8 +280,9 @@ class FeedIsolationManager: ObservableObject {
                         }
                     }
                     
-                    // Regenerate episode ID if it doesn't contain proper feed isolation
-                    if let episodeId = episode.id, !episodeId.contains(feedId) {
+                    // CRITICAL FIX: Only regenerate episode ID if it's completely empty
+                    // Preserve existing IDs to maintain EpisodeStateManager connections
+                    if let episodeId = episode.id, episodeId.isEmpty {
                         let newId = generateIsolatedEpisodeId(
                             title: episode.title ?? "",
                             audioUrl: episode.audioUrl ?? "",

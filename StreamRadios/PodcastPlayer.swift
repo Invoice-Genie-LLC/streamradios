@@ -2445,13 +2445,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         let isActuallyCompleted = finalProgress >= 0.99
         stateManager.updateProgress(for: currentEpisode.id, progress: finalProgress, isPlaying: false, currentTime: actualCurrentTime)
         
-        // Don't mark as "played" during regular pause unless actually completed
-        if isActuallyCompleted {
-            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
-        } else {
-            // Just update the progress without changing played status
-            stateManager.setProgress(for: currentEpisode.id, progress: finalProgress)
-        }
+        // CRITICAL FIX: Always call pausePlayback() to ensure episode state is set to .inProgress
+        // This ensures the status label shows "IN PROGRESS" immediately when paused
+        stateManager.pausePlayback(episodeId: currentEpisode.id, progress: finalProgress)
         
         // REAL-TIME SYNC: Use the new real-time sync method for episode pause with known feedId
         stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: finalProgress, reason: "episode_paused", feedId: currentEpisode.feedId)

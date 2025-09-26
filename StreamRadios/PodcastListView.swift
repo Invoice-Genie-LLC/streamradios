@@ -1917,7 +1917,7 @@ struct EpisodeRowView: View {
     
     private var episodeStatusChip: some View {
         Group {
-            // FIX: Always use EpisodeStateManager as the source of truth for status display
+            // CRITICAL FIX: Always use EpisodeStateManager as the source of truth for status display
             let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
             let isPlayedByState = episodeState == .played
             let isCompletedByProgress = currentProgress >= 0.99 && !isPlaying
@@ -1937,7 +1937,9 @@ struct EpisodeRowView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue))
-            } else if currentProgress > 0 {
+            } else if episodeState == .inProgress {
+                // CRITICAL FIX: Use episodeState instead of currentProgress for "IN PROGRESS" determination
+                // This ensures the status shows immediately when an episode is paused
                 Text("IN PROGRESS")
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
