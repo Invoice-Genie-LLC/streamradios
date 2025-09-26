@@ -1361,7 +1361,8 @@ class EpisodeStateManager: ObservableObject {
         episodeProgress[episodeId] = progress
         
         // CRITICAL FIX: Set state based on progress, ensuring .inProgress is set for paused episodes
-        if progress >= 1.0 {
+        let wasCompleted = progress >= 1.0
+        if wasCompleted {
             episodeStates[episodeId] = .played
         } else if progress > 0 {
             episodeStates[episodeId] = .inProgress
@@ -1378,6 +1379,17 @@ class EpisodeStateManager: ObservableObject {
         
         // CRITICAL: Send immediate update for pause state changes to prevent UI lag
         sendImmediateUpdate()
+        
+        // CRITICAL FIX: Trigger CloudKit sync for completed episodes
+        if wasCompleted {
+            Task.detached(priority: .userInitiated) {
+                await PodcastCloudKitManager.shared.syncPodcastPlayedInstantly(
+                    episodeId: episodeId,
+                    isPlayed: true
+                )
+                print("☁️ PAUSE COMPLETION: Synced played state to CloudKit for completed episode: \(episodeId)")
+            }
+        }
         
         // REAL-TIME NOTIFICATION: Send immediate notification for progress changes on main thread
         DispatchQueue.main.async {
@@ -1440,6 +1452,9 @@ class EpisodeStateManager: ObservableObject {
         
         saveCurrentStates()
         sendImmediateUpdate() // Use immediate update for completion
+        
+        // CRITICAL FIX: Trigger CloudKit sync for played state when episode completes
+        setPlayed(episodeId, isPlayed: true)
         
         // Send immediate notification for UI updates
         DispatchQueue.main.async {
@@ -1643,6 +1658,17 @@ class EpisodeStateManager: ObservableObject {
                             object: nil,
                             userInfo: ["episodeId": episodeId, "isPlayed": true]
                         )
+                    }
+                }
+                
+                // CRITICAL FIX: Trigger CloudKit sync when episode becomes played via updateProgress
+                if newState == .played && existingState != .played {
+                    Task.detached(priority: .userInitiated) {
+                        await PodcastCloudKitManager.shared.syncPodcastPlayedInstantly(
+                            episodeId: episodeId,
+                            isPlayed: true
+                        )
+                        print("☁️ UPDATE PROGRESS COMPLETION: Synced played state to CloudKit for completed episode: \(episodeId)")
                     }
                 }
             }
