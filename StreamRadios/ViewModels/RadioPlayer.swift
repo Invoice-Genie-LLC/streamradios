@@ -1848,6 +1848,10 @@ class RadioPlayer: NSObject, ObservableObject {
         // CRITICAL: This is an explicit user action to play radio - stop podcast if active
         stopPodcastPlayback()
         
+        // CRITICAL FIX: Mark that user has played content for the first time
+        // This enables TabView hiding behavior on scroll
+        UserDefaults.standard.set(true, forKey: "hasEverPlayedContent")
+        
         // Ensure PlaybackManager knows radio is the active player
         PlaybackManager.shared.setActivePlayer(.radio)
         

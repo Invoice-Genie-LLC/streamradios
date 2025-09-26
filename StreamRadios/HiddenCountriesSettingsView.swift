@@ -134,7 +134,11 @@ struct HiddenCountriesSettingsView: View {
                                 if !isScrolling {
                                     print("🏠 DEBUG: Setting isScrolling = true in HiddenCountriesSettingsView")
                                     isScrolling = true
-                                    isFooterMenuHidden = true
+                                    // CRITICAL FIX: Only hide footer menu if user has ever played content
+                                    let hasEverPlayedContent = UserDefaults.standard.bool(forKey: "hasEverPlayedContent")
+                                    if hasEverPlayedContent {
+                                        isFooterMenuHidden = true
+                                    }
                                 }
                             }
                         }

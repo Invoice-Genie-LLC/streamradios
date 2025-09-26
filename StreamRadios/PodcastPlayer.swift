@@ -1708,6 +1708,10 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         // CRITICAL: Set user intent to play podcast (like RadioPlayer)
         userWantsToPlay = true
         
+        // CRITICAL FIX: Mark that user has played content for the first time
+        // This enables TabView hiding behavior on scroll
+        UserDefaults.standard.set(true, forKey: "hasEverPlayedContent")
+        
         // Load appropriate playback speed for this feed
         currentFeed = feed
         loadPlaybackSpeedForCurrentContext()
