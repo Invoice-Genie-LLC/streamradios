@@ -137,9 +137,11 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         
         // Configure CarPlayManager with the loaded podcast data on main actor
         await MainActor.run {
-            CarPlayManager.shared.configurePodcastData(podcastFeeds)
+            // Get the feed order from PodcastViewModel to maintain consistency
+            let feedOrder = PodcastViewModel.shared.podcastFeedOrder
+            CarPlayManager.shared.configurePodcastData(podcastFeeds, feedOrder: feedOrder)
             os_log("🚗 CarPlay: Configured CarPlayManager with %d podcast feeds (episodes will load on-demand)", log: self.log, type: .info, podcastFeeds.count)
-            print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds")
+            print("🚗 CarPlay: Configured with \(podcastFeeds.count) podcast feeds in order")
             
             // DEBUGGING: Force immediate template refresh if we have feeds
             if !podcastFeeds.isEmpty {
@@ -173,9 +175,10 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
                     // Re-check after a delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                         let updatedFeeds = PodcastViewModel.shared.podcastFeeds
+                        let feedOrder = PodcastViewModel.shared.podcastFeedOrder
                         print("🚗 CarPlay: DEBUG - After PodcastViewModel load: \(updatedFeeds.count) feeds")
                         if !updatedFeeds.isEmpty {
-                            CarPlayManager.shared.configurePodcastData(updatedFeeds)
+                            CarPlayManager.shared.configurePodcastData(updatedFeeds, feedOrder: feedOrder)
                             self.refreshPodcastTabTemplate()
                         }
                     }
@@ -2224,6 +2227,56 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
         ) { [weak self] notification in
             self?.handleStationArtworkUpdate(notification)
         }
+        
+        // Listen for CarPlay station order changes (immediate refresh)
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("CarPlayStationOrderChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            print("🚗 CarPlay: Received station order change - refreshing stations template")
+            self?.refreshStationsTemplate()
+        }
+        
+        // Listen for CarPlay podcast order changes (immediate refresh)
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("CarPlayPodcastOrderChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            print("🚗 CarPlay: Received podcast order change - refreshing podcast template")
+            self?.refreshPodcastTabTemplate()
+        }
+    }
+    
+    /// Refresh the stations template immediately when order changes
+    private func refreshStationsTemplate() {
+        guard let interfaceController = self.interfaceController,
+              let tabBarTemplate = interfaceController.rootTemplate as? CPTabBarTemplate else {
+            print("🚗 CarPlay: No interface controller or tab bar template available for stations refresh")
+            return
+        }
+        
+        // Find the stations tab (usually index 1)
+        let stationsTabIndex = 1
+        guard stationsTabIndex < tabBarTemplate.templates.count,
+              let stationsTab = tabBarTemplate.templates[stationsTabIndex] as? CPListTemplate else {
+            print("🚗 CarPlay: Stations tab not found for refresh")
+            return
+        }
+        
+        // Create fresh stations template with updated order
+        let newStationsTab = createStationsTab()
+        
+        // Replace the stations tab with the updated one
+        var updatedTemplates = tabBarTemplate.templates
+        updatedTemplates[stationsTabIndex] = newStationsTab
+        
+        // Update the tab bar template
+        let newTabBarTemplate = CPTabBarTemplate(templates: updatedTemplates)
+        interfaceController.setRootTemplate(newTabBarTemplate, animated: false)
+        
+        print("🚗 ⭐ CarPlay: Refreshed stations template with new favorite order")
     }
     
     private func handlePodcastProgressUpdate(_ notification: Notification) {

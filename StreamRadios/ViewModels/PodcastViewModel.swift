@@ -9098,12 +9098,56 @@ extension PodcastViewModel {
         // SORTING FIX: Save the sorted order to Core Data to persist the changes
         saveFeedsToCoreData()
         
+        // Notify CarPlay immediately about podcast feed order change
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PodcastFeedOrderChanged"),
+            object: nil,
+            userInfo: ["newOrder": podcastFeedOrder]
+        )
+        
         // Save sort direction to UserDefaults
         UserDefaults.standard.set(isAscendingSort, forKey: "PodcastIsAscendingSort")
         
         // CRITICAL: Trigger UI refresh to show the sorted order immediately
         objectWillChange.send()
         print("🎯 SORTING: Applied \(isAscendingSort ? "A-Z" : "Z-A") sort and triggered UI refresh")
+    }
+    
+    /// Update podcast feed order manually and notify CarPlay immediately
+    func updatePodcastFeedOrder(_ newOrder: [String]) {
+        podcastFeedOrder = newOrder
+        
+        // Reorder the podcastFeeds array to match the new order
+        let feedLookup = Dictionary(uniqueKeysWithValues: podcastFeeds.map { ($0.id, $0) })
+        var reorderedFeeds: [PodcastFeed] = []
+        
+        for feedId in newOrder {
+            if let feed = feedLookup[feedId] {
+                reorderedFeeds.append(feed)
+            }
+        }
+        
+        // Add any feeds that might not be in the order array
+        let orderedFeedIds = Set(newOrder)
+        for feed in podcastFeeds {
+            if !orderedFeedIds.contains(feed.id) {
+                reorderedFeeds.append(feed)
+            }
+        }
+        
+        podcastFeeds = reorderedFeeds
+        
+        // Save the new order to Core Data
+        saveFeedsToCoreData()
+        
+        // Notify CarPlay immediately about podcast feed order change
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PodcastFeedOrderChanged"),
+            object: nil,
+            userInfo: ["newOrder": podcastFeedOrder]
+        )
+        
+        print("🎙️ Updated podcast feed order and notified CarPlay")
     }
     
     /// Load sorting preferences from UserDefaults
@@ -9791,6 +9835,18 @@ extension PodcastViewModel {
         
         // Save the new order to Core Data
         saveFeedsToCoreData()
+        
+        // Notify CarPlay immediately about podcast feed order change
+        NotificationCenter.default.post(
+            name: NSNotification.Name("PodcastFeedOrderChanged"),
+            object: nil,
+            userInfo: [
+                "newOrder": podcastFeedOrder,
+                "reason": "manual_reorder"
+            ]
+        )
+        
+        print("🎙️ Moved podcast feed and notified CarPlay of new order")
     }
     
     /// Clear all episode states from EpisodeStateManager during bulk deletion

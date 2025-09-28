@@ -14,20 +14,6 @@ struct ManualStationsData {
     /// Manual stations organized by country
     /// Add new countries and stations here easily
     static let manualStationsByCountry: [String: [ManualStationInfo]] = [
-        
-        // MARK: - United States
-        "United States": [
-            ManualStationInfo(
-                name: "Q104.1 Cleveland",
-                url: "https://prod-54-164-138-156.amperwave.net/audacy-wqalfmaac-hlsc.m3u8",
-                iconURL: nil
-            ),
-            ManualStationInfo(
-                name: "The Jim Rome Show",
-                url: "https://19313.live.streamtheworld.com/JIM_ROMEAAC.aac",
-                iconURL: nil
-            )
-        ],
 
         // MARK: - Albania
         "Albania": [
@@ -183,16 +169,19 @@ struct ManualStationsData {
             )
         ],
         
-        // MARK: - Add More Countries Here
-        // To add a new country, follow this pattern:
-        // "CountryName": [
-        //     ManualStationInfo(
-        //         name: "Station Name",
-        //         url: "https://stream.url.here",
-        //         iconURL: "optional_icon_url"
-        //     ),
-        //     // Add more stations...
-        // ],
+        // MARK: - United States
+        "United States": [
+            ManualStationInfo(
+                name: "Q104.1 Cleveland",
+                url: "https://prod-54-164-138-156.amperwave.net/audacy-wqalfmaac-hlsc.m3u8",
+                iconURL: nil
+            ),
+            ManualStationInfo(
+                name: "The Jim Rome Show",
+                url: "https://19313.live.streamtheworld.com/JIM_ROMEAAC.aac",
+                iconURL: nil
+            )
+        ],
         
     ]
 }

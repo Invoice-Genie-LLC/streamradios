@@ -770,7 +770,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         
         // Configure podcast data for CarPlay and ensure data is loaded
         let carPlayManager = CarPlayManager.shared
-        carPlayManager.configurePodcastData(podcastViewModel.podcastFeeds)
+        carPlayManager.configurePodcastData(podcastViewModel.podcastFeeds, feedOrder: podcastViewModel.podcastFeedOrder)
         
         // Ensure radio station data is available for CarPlay
         carPlayManager.updateContent()

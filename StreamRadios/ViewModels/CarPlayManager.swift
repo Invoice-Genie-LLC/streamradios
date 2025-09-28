@@ -21,6 +21,7 @@ class CarPlayManager: ObservableObject {
     // Data properties
     private var radioStations: [RadioStation] = []
     private var podcastFeeds: [PodcastFeed] = []
+    private var podcastFeedOrder: [String] = [] // Maintains same order as main app
     private var recentPodcastEpisodes: [PodcastEpisode] = []
     private var recentlyPlayedEpisodes: [(episode: PodcastEpisode, playedAt: Date)] = []
     private let maxRecentEpisodes = 10
@@ -37,6 +38,91 @@ class CarPlayManager: ObservableObject {
     private init() {
         os_log("CarPlay: CarPlayManager initialized", log: log, type: .info)
         loadRecentlyPlayedEpisodes()
+        setupNotificationListeners()
+    }
+    
+    // MARK: - Real-time Order Synchronization
+    
+    private func setupNotificationListeners() {
+        // Listen for favorite station order changes
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("FavoriteStationOrderChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            print("🚗 CarPlay: Received favorite station order change notification")
+            self?.handleFavoriteStationOrderChange(notification)
+        }
+        
+        // Listen for podcast feed order changes
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("PodcastFeedOrderChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            print("🚗 CarPlay: Received podcast feed order change notification")
+            self?.handlePodcastFeedOrderChange(notification)
+        }
+        
+        // Listen for favorite station additions/removals
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("FavoriteStationChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            print("🚗 CarPlay: Received favorite station change notification")
+            self?.handleFavoriteStationChange(notification)
+        }
+    }
+    
+    @MainActor
+    private func handleFavoriteStationOrderChange(_ notification: Notification) {
+        // Immediately update radio stations data from the main app
+        self.radioStations = RadioStationViewModel.shared.stations
+        
+        // Trigger CarPlay template refresh for stations
+        NotificationCenter.default.post(
+            name: NSNotification.Name("CarPlayStationOrderChanged"),
+            object: nil,
+            userInfo: ["reason": "favorite_order_changed"]
+        )
+        
+        print("🚗 ⭐ CarPlay: Updated favorite station order immediately")
+    }
+    
+    @MainActor
+    private func handlePodcastFeedOrderChange(_ notification: Notification) {
+        // Get updated feed order from main app
+        let updatedFeedOrder = PodcastViewModel.shared.podcastFeedOrder
+        let updatedFeeds = PodcastViewModel.shared.podcastFeeds
+        
+        // Update our local data immediately
+        self.podcastFeeds = updatedFeeds
+        self.podcastFeedOrder = updatedFeedOrder
+        
+        // Trigger CarPlay template refresh for podcasts
+        NotificationCenter.default.post(
+            name: NSNotification.Name("CarPlayPodcastOrderChanged"),
+            object: nil,
+            userInfo: ["reason": "feed_order_changed"]
+        )
+        
+        print("🚗 🎙️ CarPlay: Updated podcast feed order immediately")
+    }
+    
+    @MainActor
+    private func handleFavoriteStationChange(_ notification: Notification) {
+        // Update radio stations data when favorites are added/removed
+        self.radioStations = RadioStationViewModel.shared.stations
+        
+        // Trigger CarPlay template refresh
+        NotificationCenter.default.post(
+            name: NSNotification.Name("CarPlayStationOrderChanged"),
+            object: nil,
+            userInfo: ["reason": "favorite_changed"]
+        )
+        
+        print("🚗 ⭐ CarPlay: Updated favorite stations immediately")
     }
     
     // MARK: - Public Data Access Methods
@@ -63,8 +149,9 @@ class CarPlayManager: ObservableObject {
         let latestFeeds = PodcastViewModel.shared.podcastFeeds
         print("🚗 CarPlay: DEBUG - Found \(latestFeeds.count) feeds in PodcastViewModel (no reload needed)")
         
-        // Configure CarPlayManager with latest data
-        self.configurePodcastData(latestFeeds)
+        // Configure CarPlayManager with latest data and maintain order
+        let feedOrder = PodcastViewModel.shared.podcastFeedOrder
+        self.configurePodcastData(latestFeeds, feedOrder: feedOrder)
         
         // Update our local data
         self.updateContent()
@@ -84,14 +171,42 @@ class CarPlayManager: ObservableObject {
         print("🚗 CarPlay: Optimized force refresh completed with \(latestFeeds.count) feeds")
     }
     
-    func configurePodcastData(_ podcastFeeds: [PodcastFeed]) {
+    func configurePodcastData(_ podcastFeeds: [PodcastFeed], feedOrder: [String] = []) {
         self.podcastFeeds = podcastFeeds
+        self.podcastFeedOrder = feedOrder.isEmpty ? podcastFeeds.map { $0.id } : feedOrder
         updateRecentPodcastEpisodes()
-        os_log("CarPlay: Configured with %d podcast feeds", log: log, type: .info, podcastFeeds.count)
+        os_log("CarPlay: Configured with %d podcast feeds in order", log: log, type: .info, podcastFeeds.count)
     }
     
     func getPodcastFeeds() -> [PodcastFeed] {
-        return podcastFeeds
+        // Use the same ordering as the main app by respecting podcastFeedOrder
+        // This ensures CarPlay shows feeds in the exact same order as the main app
+        
+        // Get the feed order from the main PodcastViewModel
+        let feedOrder = podcastFeedOrder
+        
+        // Create a lookup dictionary for fast access
+        let feedLookup = Dictionary(uniqueKeysWithValues: podcastFeeds.map { ($0.id, $0) })
+        
+        // Return feeds in the same order as the main app
+        var orderedFeeds: [PodcastFeed] = []
+        
+        // First, add feeds that are in the order array
+        for feedId in feedOrder {
+            if let feed = feedLookup[feedId] {
+                orderedFeeds.append(feed)
+            }
+        }
+        
+        // Then add any feeds that might not be in the order array (edge case)
+        let orderedFeedIds = Set(feedOrder)
+        for feed in podcastFeeds {
+            if !orderedFeedIds.contains(feed.id) {
+                orderedFeeds.append(feed)
+            }
+        }
+        
+        return orderedFeeds
     }
     
     func getStations(for country: String) -> [RadioStation] {
@@ -99,17 +214,34 @@ class CarPlayManager: ObservableObject {
     }
     
     func getFavoriteStations() -> [RadioStation] {
-        return radioStations.filter { $0.isFavorite }.sorted { first, second in
-            if let firstOrder = first.favoriteOrder, let secondOrder = second.favoriteOrder {
-                return firstOrder < secondOrder
-            } else if first.favoriteOrder != nil {
-                return true
-            } else if second.favoriteOrder != nil {
-                return false
-            } else {
-                return (first.favoritedAt ?? Date.distantPast) > (second.favoritedAt ?? Date.distantPast)
+        // Get hidden countries (same as main app)
+        let hiddenCountriesData = UserDefaults.standard.data(forKey: "hiddenCountries") ?? Data()
+        let hiddenCountries = (try? JSONDecoder().decode(Set<String>.self, from: hiddenCountriesData)) ?? Set<String>()
+        
+        // Filter out favorites from hidden countries and use EXACT same sorting as main app
+        return radioStations.filter { $0.isFavorite && !hiddenCountries.contains($0.country) }
+            .sorted { (station1, station2) in
+                // First, check if both stations have favoriteOrder values
+                if let order1 = station1.favoriteOrder, let order2 = station2.favoriteOrder {
+                    return order1 < order2
+                }
+                
+                // If only one has favoriteOrder, prioritize it
+                if station1.favoriteOrder != nil && station2.favoriteOrder == nil {
+                    return true
+                }
+                if station1.favoriteOrder == nil && station2.favoriteOrder != nil {
+                    return false
+                }
+                
+                // If neither has favoriteOrder, fall back to favoritedAt timestamp (ASCENDING like main app)
+                if let date1 = station1.favoritedAt, let date2 = station2.favoritedAt {
+                    return date1 < date2
+                }
+                
+                // Final fallback: alphabetical by name
+                return station1.name.localizedCaseInsensitiveCompare(station2.name) == .orderedAscending
             }
-        }
     }
     
     func getRecentStations() -> [RadioStation] {

@@ -2571,6 +2571,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Sync favorite changes to CloudKit using the comprehensive sync system
             syncStationToCloudKit(updatedStation, reason: "Favorite status changed")
+            
+            // Notify CarPlay immediately about favorite station changes
+            NotificationCenter.default.post(
+                name: NSNotification.Name("FavoriteStationChanged"),
+                object: nil,
+                userInfo: [
+                    "stationId": updatedStation.id,
+                    "isFavorite": updatedStation.isFavorite,
+                    "favoriteOrder": updatedStation.favoriteOrder as Any
+                ]
+            )
         }
     }
     
@@ -2619,6 +2630,24 @@ class RadioStationViewModel: NSObject, ObservableObject {
         if let index = stations.firstIndex(where: { $0.id == station.id }) {
             stations[index].order = newOrder
             syncStationToCloudKit(stations[index], reason: "Order changed")
+        }
+    }
+    
+    /// Update favorite station order and notify CarPlay immediately
+    func updateFavoriteStationOrder(_ stationId: String, newFavoriteOrder: Int) {
+        if let index = stations.firstIndex(where: { $0.id == stationId }) {
+            stations[index].favoriteOrder = newFavoriteOrder
+            syncStationToCloudKit(stations[index], reason: "Favorite order changed")
+            
+            // Notify CarPlay immediately about favorite order change
+            NotificationCenter.default.post(
+                name: NSNotification.Name("FavoriteStationOrderChanged"),
+                object: nil,
+                userInfo: [
+                    "stationId": stationId,
+                    "newFavoriteOrder": newFavoriteOrder
+                ]
+            )
         }
     }
     
@@ -3022,7 +3051,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
             await syncFavoriteOrderChangesToCloudKit()
         }
         
-        print("📡 🔄 Updated favorite order values for \(favoritesList.count) stations")
+        // Notify CarPlay immediately about favorite order change
+        NotificationCenter.default.post(
+            name: NSNotification.Name("FavoriteStationOrderChanged"),
+            object: nil,
+            userInfo: [
+                "reason": "manual_reorder",
+                "stationCount": favoritesList.count
+            ]
+        )
+        
+        print("📡 🔄 Updated favorite order values for \(favoritesList.count) stations and notified CarPlay")
     }
     
     /// Sort stations alphabetically and toggle sort direction
