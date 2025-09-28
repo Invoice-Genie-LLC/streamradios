@@ -2947,40 +2947,24 @@ struct PodcastPlayerView: View {
                         return 
                     }
                     
-                    // CRITICAL FIX: Allow back navigation even during episode loading
-                    // Clear any loading states that might interfere with navigation
-                    if let loadingEpisodeId = podcastPlayer.loadingEpisodeId {
-                        print("🔙 BACK BUTTON: Clearing loading state for episode \(loadingEpisodeId) to allow navigation")
-                        podcastPlayer.loadingEpisodeId = nil
-                    }
-                    
-                    // Set navigation flag to prevent interference
+                    // Set navigation flag immediately to prevent multiple taps
                     isNavigatingBack = true
                     
-                    // IMMEDIATE navigation - no async delays, no animations
-                    withAnimation(.none) {
-                        selectedPodcast = nil
-                    }
+                    // CRITICAL FIX: Clear all loading and navigation states immediately
+                    podcastPlayer.loadingEpisodeId = nil
+                    viewModel.cancelPendingOperations()
                     
-                    // Reset navigation flag after a brief delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        isNavigatingBack = false
-                    }
+                    // CRITICAL FIX: Clear selectedFeedId to prevent navigation stack confusion
+                    viewModel.selectedFeedId = nil
+                    
+                    // IMMEDIATE navigation - no async delays, no animations
+                    selectedPodcast = nil
+                    
                     print("🔙 BACK BUTTON: Navigation completed instantly")
                     
-                    // Background cleanup AFTER navigation (non-blocking)
-                    Task.detached(priority: .background) {
-                        await MainActor.run {
-                            viewModel.cancelPendingOperations()
-                            
-                            // CRITICAL FIX: Stop any ongoing episode loading when navigating back
-                            if podcastPlayer.loadingEpisodeId != nil {
-                                podcastPlayer.loadingEpisodeId = nil
-                                print("🔙 BACK NAVIGATION: Cleared episode loading state")
-                            }
-                            
-                            print("🧹 BACKGROUND: Cleanup completed after navigation")
-                        }
+                    // Reset navigation flag after navigation is complete
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        isNavigatingBack = false
                     }
                 }) {
                     Image(systemName: "chevron.left")
