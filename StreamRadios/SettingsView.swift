@@ -2102,12 +2102,14 @@ struct DestructiveButton: View {
 struct ExportProgressView: View {
     let title: String
     let progress: Double?
+    let subtitle: String?
     
     @Environment(\.colorScheme) var colorScheme
     
-    init(title: String, progress: Double? = nil) {
+    init(title: String, progress: Double? = nil, subtitle: String? = nil) {
         self.title = title
         self.progress = progress
+        self.subtitle = subtitle
     }
     
     var body: some View {
@@ -2119,6 +2121,12 @@ struct ExportProgressView: View {
                         .foregroundColor(colorScheme == .dark ? .white : .primary)
                 }
                 .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                if let subtitle = subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -2128,6 +2136,12 @@ struct ExportProgressView: View {
                     Text(title)
                         .font(.subheadline)
                         .foregroundColor(colorScheme == .dark ? .white : .primary)
+                }
+                if let subtitle = subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(colorScheme == .dark ? .gray : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -2209,9 +2223,10 @@ struct InternalDataManagementView: View {
     @State private var showDocumentPicker = false
     @State private var showExportSheet = false
     @State private var exportURL: URL?
+    @State private var importURL: URL?
     @State private var isImporting = false
     @State private var importProgress: Double = 0.0
-    @State private var importURL: URL?
+    @State private var importOperation: String = ""
     
     // State variables for deletion operations
     @State private var isDeletingAllAppData = false
@@ -2600,7 +2615,8 @@ struct InternalDataManagementView: View {
                     if isImporting {
                         ExportProgressView(
                             title: getImportProgressTitle(),
-                            progress: importProgress
+                            progress: importProgress,
+                            subtitle: importOperation
                         )
                     }
                 }
@@ -2910,6 +2926,7 @@ struct InternalDataManagementView: View {
     private func handleImport(url: URL) {
         isImporting = true
         importProgress = 0.0
+        importOperation = ""
         
         // Use the appropriate import method based on the selected import type
         switch importType {
@@ -2918,11 +2935,16 @@ struct InternalDataManagementView: View {
                 DispatchQueue.main.async {
                     importProgress = progress
                 }
+            } messageHandler: { message in
+                DispatchQueue.main.async {
+                    importOperation = message
+                }
             } completion: {
                 DispatchQueue.main.async {
                     isImporting = false
                     importURL = nil
                     onImportComplete?(viewModel.selectedCountry)
+                    importOperation = ""
                 }
             }
         case .withImages:
@@ -2930,11 +2952,16 @@ struct InternalDataManagementView: View {
                 DispatchQueue.main.async {
                     importProgress = progress
                 }
+            } messageHandler: { message in
+                DispatchQueue.main.async {
+                    importOperation = message
+                }
             } completion: {
                 DispatchQueue.main.async {
                     isImporting = false
                     importURL = nil
                     onImportComplete?(viewModel.selectedCountry)
+                    importOperation = ""
                 }
             }
         case .favoritesList:
@@ -2942,11 +2969,16 @@ struct InternalDataManagementView: View {
                 DispatchQueue.main.async {
                     importProgress = progress
                 }
+            } messageHandler: { message in
+                DispatchQueue.main.async {
+                    importOperation = message
+                }
             } completion: {
                 DispatchQueue.main.async {
                     isImporting = false
                     importURL = nil
                     onImportComplete?(viewModel.selectedCountry)
+                    importOperation = ""
                 }
             }
         case .favoritesWithImages:
@@ -2954,11 +2986,16 @@ struct InternalDataManagementView: View {
                 DispatchQueue.main.async {
                     importProgress = progress
                 }
+            } messageHandler: { message in
+                DispatchQueue.main.async {
+                    importOperation = message
+                }
             } completion: {
                 DispatchQueue.main.async {
                     isImporting = false
                     importURL = nil
                     onImportComplete?(viewModel.selectedCountry)
+                    importOperation = ""
                 }
             }
         }

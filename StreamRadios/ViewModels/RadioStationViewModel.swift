@@ -1012,6 +1012,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 // Station exists locally - merge CloudKit data with local state
                 var mergedStation = cloudKitStation
                 
+                // CRITICAL IMPORT PROTECTION: Preserve user-imported custom data
+                if localStation.iconData != nil || localStation.iTunesArtworkData != nil {
+                    print("🛡️ IMPORT PROTECTION: Preserving custom icon data for user-imported station '\(localStation.name)'")
+                    mergedStation.iconData = localStation.iconData
+                    mergedStation.iTunesArtworkData = localStation.iTunesArtworkData
+                }
+                
                 // CROSS-COUNTRY CONTAMINATION PREVENTION: Validate country consistency
                 if localStation.country != cloudKitStation.country {
                     print("🚨 COUNTRY CONTAMINATION DETECTED: Station '\(cloudKitStation.name)' has mismatched countries - Local: '\(localStation.country)' vs CloudKit: '\(cloudKitStation.country)'")
@@ -1061,6 +1068,14 @@ class RadioStationViewModel: NSObject, ObservableObject {
             let key = local.url.lowercased()
             if mergedByURL[key] == nil {
                 mergedByURL[key] = local
+            } else {
+                // CRITICAL IMPORT PROTECTION: If local station has custom data, preserve it over CloudKit version
+                let existingStation = mergedByURL[key]!
+                if (local.iconData != nil || local.iTunesArtworkData != nil) && 
+                   (existingStation.iconData == nil && existingStation.iTunesArtworkData == nil) {
+                    print("🛡️ IMPORT PROTECTION: Replacing CloudKit station with user-imported version for '\(local.name)'")
+                    mergedByURL[key] = local
+                }
             }
         }
         stations = Array(mergedByURL.values)
@@ -1293,39 +1308,120 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     )
                 }
 
-                // Get existing URLs to check for duplicates
-                let existingURLs = Set(stations.map { $0.url })
+                // IMPORT OVERRIDE LOGIC: Import ALL stations from file, replacing existing ones and adding new ones
+                var stationsToImport: [RadioStation] = []
+                var stationsToReplace: [(index: Int, station: RadioStation)] = []
                 
-                // Filter out stations that already exist by URL
-                let newStations = stationsFromJson.filter { !existingURLs.contains($0.url) }
+                print("📥 IMPORT ANALYSIS: Processing \(stationsFromJson.count) stations from import file")
+                print("📊 CURRENT STATE: \(stations.count) stations currently in memory")
+                
+                // ENHANCED: Also check Core Data for existing stations (including default stations)
+                let context = CoreDataStack.shared.persistentContainer.viewContext
+                
+                for importedStation in stationsFromJson {
+                    // First check in-memory stations
+                    if let existingIndex = stations.firstIndex(where: { $0.url == importedStation.url }) {
+                        let existingStation = stations[existingIndex]
+                        
+                        // CRITICAL: Custom imported stations ALWAYS win over any existing station
+                        // This includes API stations, default stations, or any other type
+                        print("🔄 IMPORT OVERRIDE: Replacing existing station '\(existingStation.name)' (URL: \(existingStation.url)) with imported version")
+                        
+                        // Preserve some local state from existing station
+                        var updatedStation = importedStation
+                        // Mark as user-imported station for future protection
+                        if !updatedStation.id.hasPrefix("import_") && !updatedStation.id.hasPrefix("manual_") {
+                            updatedStation.id = "import_" + updatedStation.id
+                        }
+                        updatedStation.lastPlayed = existingStation.lastPlayed
+                        updatedStation.order = existingStation.order
+                        // Only preserve favorite status if imported station isn't already marked as favorite
+                        if !importedStation.isFavorite && existingStation.isFavorite {
+                            updatedStation.isFavorite = existingStation.isFavorite
+                            updatedStation.favoritedAt = existingStation.favoritedAt
+                            updatedStation.favoriteOrder = existingStation.favoriteOrder
+                        }
+                        stationsToReplace.append((index: existingIndex, station: updatedStation))
+                    } else {
+                        // Check if station exists in Core Data (might be a default station not loaded in memory)
+                        let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                        fetchRequest.predicate = NSPredicate(format: "url == %@", importedStation.url)
+                        
+                        do {
+                            let existingCoreDataStations = try context.fetch(fetchRequest)
+                            if let existingCDStation = existingCoreDataStations.first {
+                                print("🔄 IMPORT OVERRIDE (CORE DATA): Found existing station in Core Data '\(existingCDStation.name ?? "Unknown")' - will be replaced by import")
+                                // Delete the existing Core Data station - it will be replaced by the imported one
+                                context.delete(existingCDStation)
+                            }
+                        } catch {
+                            print("⚠️ Error checking Core Data for existing station: \(error)")
+                        }
+                        
+                        // Add as new station (will replace any Core Data version we just deleted)
+                        print("➕ IMPORT NEW: Adding new station '\(importedStation.name)' (URL: \(importedStation.url)) - Logo: \(importedStation.iconData != nil ? "Yes" : "No")")
+                        var newImportedStation = importedStation
+                        // Mark as user-imported station for future protection
+                        if !newImportedStation.id.hasPrefix("import_") && !newImportedStation.id.hasPrefix("manual_") {
+                            newImportedStation.id = "import_" + newImportedStation.id
+                        }
+                        stationsToImport.append(newImportedStation)
+                    }
+                }
+                
+                print("📊 IMPORT SUMMARY: Will replace \(stationsToReplace.count) existing stations and add \(stationsToImport.count) new stations")
+                
+                // Save Core Data context to commit any deletions of existing default stations
+                do {
+                    try context.save()
+                    print("✅ CORE DATA: Saved deletions of existing stations that will be replaced by imports")
+                } catch {
+                    print("⚠️ Error saving Core Data deletions: \(error)")
+                }
+                
+                let newStations = stationsToImport
                 
                 let totalNewStations = Double(newStations.count)
                 var importedStations = 0.0
 
                 DispatchQueue.main.async {
-                    // Append new stations instead of removing existing ones
+                    // First, replace existing stations with imported versions
+                    for replacement in stationsToReplace {
+                        self.stations[replacement.index] = replacement.station
+                        print("🔄 Replaced station at index \(replacement.index) with imported version: \(replacement.station.name)")
+                    }
+                    
+                    // Then append new stations
                     for station in newStations {
                         self.stations.append(station)
                         importedStations += 1
                         progressHandler(importedStations / max(totalNewStations, 1))
                     }
 
-                    print("Imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+                    let totalProcessed = newStations.count + stationsToReplace.count
+                    let skipped = stationsFromJson.count - totalProcessed
+                    print("Imported \(newStations.count) new stations, replaced \(stationsToReplace.count) existing stations. Skipped \(skipped) duplicates.")
 
                     // Save these to CoreData first
                     self.saveStationsToCoreData()
 
-                    // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
+                    // Wait a bit to ensure Core Data save is complete, then save ALL imported stations to CloudKit
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        // Only save the newly imported stations to CloudKit (with URL duplicate checking)
-                        DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
+                        // Collect ALL imported stations (both new and replaced) that have iconData for CloudKit sync
+                        let allImportedStations = newStations + stationsToReplace.map { $0.station }
+                        let stationsWithIconData = allImportedStations.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+                        
+                        print("☁️ CLOUDKIT SYNC: Syncing \(allImportedStations.count) total imported stations (\(stationsWithIconData.count) with custom icons)")
+                        
+                        // Save ALL imported stations to CloudKit with duplicate prevention
+                        DataStore.shared.saveImportedStationsToCloudKit(stations: allImportedStations) { success, recordIDs in
                             DispatchQueue.main.async {
                                 if success {
-                                    print("Successfully saved \(newStations.count) new stations to CloudKit.")
-                                    NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported \(newStations.count) new stations. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+                                    print("Successfully saved \(allImportedStations.count) imported stations to CloudKit (\(stationsWithIconData.count) with custom icons).")
+                                    NotificationManager.shared.notifyUserImmediate(title: "Import Complete", message: "Successfully imported \(totalProcessed) stations (\(stationsWithIconData.count) with custom icons). Skipped \(skipped) duplicates.")
                                 } else {
-                                    print("Failed to save some or all new stations to CloudKit.")
-                                    NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
+                                    print("Failed to save some or all imported stations to CloudKit.")
+                                    NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(totalProcessed) stations locally. Some stations may not have synced to iCloud.")
                                 }
                                 
                                 // Clear import flag and notify completion
@@ -1530,7 +1626,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     /// Import stations as list (metadata only)
-    func importStationsAsList(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+    func importStationsAsList(url: URL, progressHandler: @escaping (Double) -> Void, messageHandler: ((String) -> Void)? = nil, completion: @escaping () -> Void) {
         print("🚀 DEBUG: importStationsAsList called")
         
         // Set import flag to prevent sync interference
@@ -1542,15 +1638,18 @@ class RadioStationViewModel: NSObject, ObservableObject {
         NotificationManager.shared.requestAuthorization()
         
         // Notify user that import has started
+        messageHandler?("Reading file…")
         NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing station list from file (metadata only)")
         
         do {
             let data = try Data(contentsOf: url)
             print("📄 Import: Read \(data.count) bytes from file")
+            messageHandler?("Decoding JSON… \(data.count) bytes")
             
             let jsonDecoder = JSONDecoder()
             let exportStationsFromJson = try jsonDecoder.decode([ExportStation].self, from: data)
             print("✅ Import: Successfully decoded \(exportStationsFromJson.count) ExportStation objects")
+            messageHandler?("Decoded \(exportStationsFromJson.count) stations")
             
             // Convert ExportStation to RadioStation with proper defaults (no images)
             let stationsFromJson = exportStationsFromJson.map { exportStation in
@@ -1580,6 +1679,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             var importedStations = 0.0
 
             DispatchQueue.main.async {
+                messageHandler?("Appending to library…")
                 // Append new stations instead of removing existing ones
                 for station in newStations {
                     self.stations.append(station)
@@ -1594,14 +1694,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
 
                 // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    messageHandler?("Uploading new stations to iCloud…")
                     // Only save the newly imported stations to CloudKit (with URL duplicate checking)
                     DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
                         DispatchQueue.main.async {
                             if success {
                                 print("Successfully saved \(newStations.count) new stations to CloudKit.")
+                                messageHandler?("iCloud sync complete: \(newStations.count) items")
                                 NotificationManager.shared.notifyUserImmediate(title: "Import Completed", message: "Successfully imported \(newStations.count) new stations (list only).")
                             } else {
                                 print("Failed to save some or all new stations to CloudKit.")
+                                messageHandler?("iCloud sync completed with warnings")
                                 NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
                             }
                             
@@ -1617,6 +1720,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             print("❌ Import: Failed to import stations list: \(error)")
             DispatchQueue.main.async {
                 self.isImportInProgress = false
+                messageHandler?("Failed: \(error.localizedDescription)")
                 NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import stations list: \(error.localizedDescription)")
                 completion()
             }
@@ -1624,7 +1728,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     /// Import stations with images (metadata + custom images)
-    func importStationsWithImages(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+    func importStationsWithImages(url: URL, progressHandler: @escaping (Double) -> Void, messageHandler: ((String) -> Void)? = nil, completion: @escaping () -> Void) {
         print("🚀 DEBUG: importStationsWithImages called")
         
         // Set import flag to prevent sync interference
@@ -1636,6 +1740,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         NotificationManager.shared.requestAuthorization()
         
         // Notify user that import has started
+        messageHandler?("Reading file…")
         NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing stations with images from file")
         
         do {
@@ -1649,6 +1754,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Count stations with images
             let stationsWithImages = exportStationsFromJson.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
             print("🖼️ Import: Stations with custom images: \(stationsWithImages.count)")
+            messageHandler?("Found \(stationsWithImages.count) items with logos")
             
             // Convert ExportStation to RadioStation preserving image data
             let stationsFromJson = exportStationsFromJson.map { exportStation in
@@ -1668,17 +1774,90 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 )
             }
 
-            // Get existing URLs to check for duplicates
-            let existingURLs = Set(stations.map { $0.url })
+            // IMPORT OVERRIDE LOGIC: Import ALL stations from file, replacing existing ones and adding new ones
+            var stationsToImport: [RadioStation] = []
+            var stationsToReplace: [(index: Int, station: RadioStation)] = []
             
-            // Filter out stations that already exist by URL
-            let newStations = stationsFromJson.filter { !existingURLs.contains($0.url) }
+            print("📥 IMPORT ANALYSIS (WITH IMAGES): Processing \(stationsFromJson.count) stations from import file")
+            print("📊 CURRENT STATE: \(stations.count) stations currently in memory")
+            
+            // ENHANCED: Also check Core Data for existing stations (including default stations)
+            let context = CoreDataStack.shared.persistentContainer.viewContext
+            
+            for importedStation in stationsFromJson {
+                // First check in-memory stations
+                if let existingIndex = stations.firstIndex(where: { $0.url == importedStation.url }) {
+                    let existingStation = stations[existingIndex]
+                    
+                    // CRITICAL: Custom imported stations ALWAYS win over any existing station
+                    // This includes API stations, default stations, or any other type
+                    print("🔄 IMPORT OVERRIDE: Replacing existing station '\(existingStation.name)' (URL: \(existingStation.url)) with imported version (with images)")
+                    
+                    // Preserve some local state from existing station
+                    var updatedStation = importedStation
+                    // Mark as user-imported station for future protection
+                    if !updatedStation.id.hasPrefix("import_") && !updatedStation.id.hasPrefix("manual_") {
+                        updatedStation.id = "import_" + updatedStation.id
+                    }
+                    updatedStation.lastPlayed = existingStation.lastPlayed
+                    updatedStation.order = existingStation.order
+                    // Only preserve favorite status if imported station isn't already marked as favorite
+                    if !importedStation.isFavorite && existingStation.isFavorite {
+                        updatedStation.isFavorite = existingStation.isFavorite
+                        updatedStation.favoritedAt = existingStation.favoritedAt
+                        updatedStation.favoriteOrder = existingStation.favoriteOrder
+                    }
+                    stationsToReplace.append((index: existingIndex, station: updatedStation))
+                } else {
+                    // Check if station exists in Core Data (might be a default station not loaded in memory)
+                    let fetchRequest: NSFetchRequest<CDStation> = CDStation.fetchRequest()
+                    fetchRequest.predicate = NSPredicate(format: "url == %@", importedStation.url)
+                    
+                    do {
+                        let existingCoreDataStations = try context.fetch(fetchRequest)
+                        if let existingCDStation = existingCoreDataStations.first {
+                            print("🔄 IMPORT OVERRIDE (CORE DATA WITH IMAGES): Found existing station in Core Data '\(existingCDStation.name ?? "Unknown")' - will be replaced by import")
+                            // Delete the existing Core Data station - it will be replaced by the imported one
+                            context.delete(existingCDStation)
+                        }
+                    } catch {
+                        print("⚠️ Error checking Core Data for existing station: \(error)")
+                    }
+                    
+                    // Add as new station (will replace any Core Data version we just deleted)
+                    print("➕ IMPORT NEW (WITH IMAGES): Adding new station '\(importedStation.name)' (URL: \(importedStation.url)) - Logo: \(importedStation.iconData != nil ? "Yes" : "No")")
+                    var newImportedStation = importedStation
+                    // Mark as user-imported station for future protection
+                    if !newImportedStation.id.hasPrefix("import_") && !newImportedStation.id.hasPrefix("manual_") {
+                        newImportedStation.id = "import_" + newImportedStation.id
+                    }
+                    stationsToImport.append(newImportedStation)
+                }
+            }
+            
+            print("📊 IMPORT SUMMARY (WITH IMAGES): Will replace \(stationsToReplace.count) existing stations and add \(stationsToImport.count) new stations")
+            
+            // Save Core Data context to commit any deletions of existing default stations
+            do {
+                try context.save()
+                print("✅ CORE DATA (WITH IMAGES): Saved deletions of existing stations that will be replaced by imports")
+            } catch {
+                print("⚠️ Error saving Core Data deletions: \(error)")
+            }
+            
+            let newStations = stationsToImport
             
             let totalNewStations = Double(newStations.count)
             var importedStations = 0.0
 
             DispatchQueue.main.async {
-                // Append new stations instead of removing existing ones
+                // First, replace existing stations with imported versions
+                for replacement in stationsToReplace {
+                    self.stations[replacement.index] = replacement.station
+                    print("🔄 Replaced station at index \(replacement.index) with imported version: \(replacement.station.name)")
+                }
+                
+                // Then append new stations
                 for station in newStations {
                     self.stations.append(station)
                     importedStations += 1
@@ -1686,22 +1865,33 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 }
 
                 let newStationsWithImages = newStations.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
-                print("Imported \(newStations.count) new stations with \(newStationsWithImages.count) custom images. Skipped \(stationsFromJson.count - newStations.count) duplicates.")
+                let totalProcessed = newStations.count + stationsToReplace.count
+                let skipped = stationsFromJson.count - totalProcessed
+                print("Imported \(newStations.count) new stations with \(newStationsWithImages.count) custom images, replaced \(stationsToReplace.count) existing stations. Skipped \(skipped) duplicates.")
 
                 // Save these to CoreData first
                 self.saveStationsToCoreData()
 
-                // Wait a bit to ensure Core Data save is complete, then save only new stations to CloudKit
+                // Wait a bit to ensure Core Data save is complete, then save ALL imported stations to CloudKit
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    // Only save the newly imported stations to CloudKit (with URL duplicate checking)
-                    DataStore.shared.saveImportedStationsToCloudKit(stations: newStations) { success, recordIDs in
+                    // Collect ALL imported stations (both new and replaced) that have iconData for CloudKit sync
+                    let allImportedStations = newStations + stationsToReplace.map { $0.station }
+                    let stationsWithIconData = allImportedStations.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
+                    
+                    messageHandler?("Uploading \(allImportedStations.count) stations to iCloud (\(stationsWithIconData.count) with images)…")
+                    print("☁️ CLOUDKIT SYNC (WITH IMAGES): Syncing \(allImportedStations.count) total imported stations (\(stationsWithIconData.count) with custom icons)")
+                    
+                    // Save ALL imported stations to CloudKit with duplicate prevention
+                    DataStore.shared.saveImportedStationsToCloudKit(stations: allImportedStations) { success, recordIDs in
                         DispatchQueue.main.async {
                             if success {
-                                print("Successfully saved \(newStations.count) new stations with images to CloudKit.")
-                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed", message: "Successfully imported \(newStations.count) new stations with \(newStationsWithImages.count) custom images.")
+                                print("Successfully saved \(allImportedStations.count) imported stations with images to CloudKit (\(stationsWithIconData.count) with custom icons).")
+                                messageHandler?("iCloud sync complete: \(allImportedStations.count) items (\(stationsWithIconData.count) with images)")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed", message: "Successfully imported \(totalProcessed) stations (\(stationsWithIconData.count) with custom images).")
                             } else {
-                                print("Failed to save some or all new stations to CloudKit.")
-                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(newStations.count) new stations locally. Some stations may not have synced to iCloud.")
+                                print("Failed to save some or all imported stations to CloudKit.")
+                                messageHandler?("iCloud sync completed with warnings")
+                                NotificationManager.shared.notifyUserImmediate(title: "Import Completed with Warnings", message: "Imported \(totalProcessed) stations locally. Some stations may not have synced to iCloud.")
                             }
                             
                             // Clear import flag and notify completion
@@ -1716,6 +1906,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             print("❌ Import: Failed to import stations with images: \(error)")
             DispatchQueue.main.async {
                 self.isImportInProgress = false
+                messageHandler?("Failed: \(error.localizedDescription)")
                 NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import stations with images: \(error.localizedDescription)")
                 completion()
             }
@@ -1811,7 +2002,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     /// Import favorite stations as list (metadata only) with smart country assignment
-    func importFavoritesAsList(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+    func importFavoritesAsList(url: URL, progressHandler: @escaping (Double) -> Void, messageHandler: ((String) -> Void)? = nil, completion: @escaping () -> Void) {
         print("🚀 DEBUG: importFavoritesAsList called")
         
         // Set import flag to prevent sync interference
@@ -1823,6 +2014,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         NotificationManager.shared.requestAuthorization()
         
         // Notify user that import has started
+        messageHandler?("Reading file…")
         NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing favorite stations list from file (metadata only)")
         
         do {
@@ -1856,11 +2048,13 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Filter out stations that already exist by URL
             let newFavorites = favoritesFromJson.filter { !existingURLs.contains($0.url) }
+            messageHandler?("Filtering duplicates… kept \(newFavorites.count) new / skipped \(favoritesFromJson.count - newFavorites.count)")
             
             let totalNewFavorites = Double(newFavorites.count)
             var importedFavorites = 0.0
 
             DispatchQueue.main.async {
+                messageHandler?("Distributing favorites by country…")
                 // Group favorites by country for smart assignment
                 let favoritesByCountry = Dictionary(grouping: newFavorites) { $0.country }
                 
@@ -1904,6 +2098,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             print("❌ Import: Failed to import favorites list: \(error)")
             DispatchQueue.main.async {
                 self.isImportInProgress = false
+                messageHandler?("Failed: \(error.localizedDescription)")
                 NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import favorites list: \(error.localizedDescription)")
                 completion()
             }
@@ -1911,7 +2106,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
     }
     
     /// Import favorite stations with images (metadata + custom images) with smart country assignment
-    func importFavoritesWithImages(url: URL, progressHandler: @escaping (Double) -> Void, completion: @escaping () -> Void) {
+    func importFavoritesWithImages(url: URL, progressHandler: @escaping (Double) -> Void, messageHandler: ((String) -> Void)? = nil, completion: @escaping () -> Void) {
         print("🚀 DEBUG: importFavoritesWithImages called")
         
         // Set import flag to prevent sync interference
@@ -1923,6 +2118,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
         NotificationManager.shared.requestAuthorization()
         
         // Notify user that import has started
+        messageHandler?("Reading file…")
         NotificationManager.shared.notifyUserImmediate(title: "Import Started", message: "Importing favorite stations with images from file")
         
         do {
@@ -1936,6 +2132,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             // Count favorites with images
             let favoritesWithImages = exportStationsFromJson.filter { $0.iconData != nil || $0.iTunesArtworkData != nil }
             print("🖼️ Import: Favorite stations with custom images: \(favoritesWithImages.count)")
+            messageHandler?("Found \(favoritesWithImages.count) items with logos")
             
             // Convert ExportStation to RadioStation preserving image data (all as favorites)
             let favoritesFromJson = exportStationsFromJson.map { exportStation in
@@ -2009,6 +2206,7 @@ class RadioStationViewModel: NSObject, ObservableObject {
             print("❌ Import: Failed to import favorites with images: \(error)")
             DispatchQueue.main.async {
                 self.isImportInProgress = false
+                messageHandler?("Failed: \(error.localizedDescription)")
                 NotificationManager.shared.notifyUserImmediate(title: "Import Failed", message: "Failed to import favorites with images: \(error.localizedDescription)")
                 completion()
             }
@@ -2371,29 +2569,64 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             stations[index] = updatedStation
             
-            // ENHANCED CLOUDKIT SYNC: Sync favorite status and station data to CloudKit automatically
-            print("📡 🚨 RADIO CLOUDKIT SYNC: Station \(updatedStation.id) favorite \(updatedStation.isFavorite)")
-            
-            // Save locally first so UI and persistence are correct before remote sync
-            saveStationsToCoreData()
-            Task {
-                do {
-                    // Save the complete updated station to CloudKit
-                    try await RadioStationCloudKitManager.shared.saveRadioStationToCloudKit(updatedStation)
-                    
-                    // Also update the specific favorite status for real-time sync
-                    try await RadioStationCloudKitManager.shared.updateFavoriteStatus(
-                        stationId: updatedStation.id,
-                        isFavorite: updatedStation.isFavorite,
-                        favoritedAt: updatedStation.favoritedAt,
-                        favoriteOrder: updatedStation.favoriteOrder
-                    )
-                    
-                    print("📡 ✅ RADIO CLOUDKIT SYNC: Successfully synced favorite change for \(updatedStation.name)")
-                } catch {
-                    print("📡 ❌ RADIO CLOUDKIT SYNC: Failed to sync favorite change: \(error)")
+            // Sync favorite changes to CloudKit using the comprehensive sync system
+            syncStationToCloudKit(updatedStation, reason: "Favorite status changed")
+        }
+    }
+    
+    // MARK: - Comprehensive CloudKit Sync for User Modifications
+    
+    /// Sync any user-modified station to CloudKit
+    /// Call this method whenever a user modifies any station field
+    func syncStationToCloudKit(_ station: RadioStation, reason: String = "User modification") {
+        print("📡 🔄 CLOUDKIT SYNC: Syncing station '\(station.name)' to CloudKit - Reason: \(reason)")
+        
+        // Save locally first
+        saveStationsToCoreData()
+        
+        // Sync to CloudKit
+        Task {
+            DataStore.shared.saveImportedStationsToCloudKit(stations: [station]) { success, recordIDs in
+                DispatchQueue.main.async {
+                    if success {
+                        print("✅ CLOUDKIT SYNC: Successfully synced '\(station.name)' to CloudKit")
+                    } else {
+                        print("❌ CLOUDKIT SYNC: Failed to sync '\(station.name)' to CloudKit")
+                    }
                 }
             }
+        }
+    }
+    
+    /// Update station name and sync to CloudKit
+    func updateStationName(_ station: RadioStation, newName: String) {
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            stations[index].name = newName
+            syncStationToCloudKit(stations[index], reason: "Name changed")
+        }
+    }
+    
+    /// Update station country and sync to CloudKit
+    func updateStationCountry(_ station: RadioStation, newCountry: String) {
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            stations[index].country = newCountry
+            syncStationToCloudKit(stations[index], reason: "Country changed")
+        }
+    }
+    
+    /// Update station order and sync to CloudKit
+    func updateStationOrder(_ station: RadioStation, newOrder: Int) {
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            stations[index].order = newOrder
+            syncStationToCloudKit(stations[index], reason: "Order changed")
+        }
+    }
+    
+    /// Update last played and sync to CloudKit
+    func updateLastPlayed(_ station: RadioStation) {
+        if let index = stations.firstIndex(where: { $0.id == station.id }) {
+            stations[index].lastPlayed = Date()
+            syncStationToCloudKit(stations[index], reason: "Last played updated")
         }
     }
     
@@ -3319,10 +3552,22 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     }
                 }
                 
-                // Check if we already have this station with favicon data
-                let existingIconData = existingStationsMap[apiStation.stationuuid]?.iconData
+                // Check if we already have this station and preserve its favorite status and icon data
+                // Check both Core Data (existingStationsMap) and in-memory stations
+                let existingStationFromCoreData = existingStationsMap[apiStation.stationuuid]
+                let existingStationFromMemory = stations.first { $0.id == apiStation.stationuuid || $0.url == apiStation.url }
+                
+                // Prioritize in-memory station (more up-to-date) over Core Data
+                let existingStation = existingStationFromMemory ?? existingStationFromCoreData
+                let existingIconData = existingStation?.iconData
+                
                 if existingIconData != nil {
                     cachedFaviconCount += 1
+                }
+                
+                // Log when preserving favorite status
+                if existingStation?.isFavorite == true {
+                    print("⭐ FAVORITE PRESERVED: Keeping favorite status for API station '\(apiStation.name)'")
                 }
                 
                 // Clean station name by trimming whitespace and ALL leading special characters
@@ -3395,11 +3640,11 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     url: apiStation.url,
                     iconData: existingIconData, // Use cached favicon if available
                     country: stationCountry,
-                    isFavorite: false,
-                    favoritedAt: nil,
-                    favoriteOrder: nil,
-                    order: 0,
-                    lastPlayed: nil
+                    isFavorite: existingStation?.isFavorite ?? false, // Preserve existing favorite status
+                    favoritedAt: existingStation?.favoritedAt, // Preserve existing favorite date
+                    favoriteOrder: existingStation?.favoriteOrder, // Preserve existing favorite order
+                    order: existingStation?.order ?? 0, // Preserve existing order
+                    lastPlayed: existingStation?.lastPlayed // Preserve existing last played date
                 )
             }
             
@@ -3452,8 +3697,31 @@ class RadioStationViewModel: NSObject, ObservableObject {
             
             // Filter out stations that already exist by URL AND exclude any manual stations that might have been mixed in
             let uniqueNewStations = newStations.filter { station in
-                // Exclude if URL already exists
-                guard !existingURLs.contains(station.url) else { return false }
+                // ENHANCED PROTECTION: Check both Core Data and in-memory stations for existing URLs
+                let urlExistsInCoreData = existingURLs.contains(station.url)
+                let existingInMemoryStation = stations.first { $0.url == station.url }
+                
+                // If URL exists in Core Data, skip
+                if urlExistsInCoreData {
+                    print("🚫 IMPORT PROTECTION: Skipping API station '\(station.name)' - URL exists in Core Data")
+                    return false
+                }
+                
+                // If URL exists in memory, check if we should protect the existing station
+                if let existingStation = existingInMemoryStation {
+                    // ENHANCED PROTECTION: Protect stations that are user-imported or have custom data
+                    let isUserImported = existingStation.iconData != nil || 
+                                       existingStation.iTunesArtworkData != nil || 
+                                       existingStation.id.hasPrefix("manual_") ||
+                                       existingStation.id.hasPrefix("import_") // Mark imported stations
+                    
+                    if isUserImported {
+                        print("🛡️ IMPORT PROTECTION: Skipping API station '\(station.name)' - protecting user-imported station '\(existingStation.name)'")
+                        return false
+                    } else {
+                        print("🔄 API REPLACEMENT: Allowing API station '\(station.name)' to replace existing API station '\(existingStation.name)'")
+                    }
+                }
                 
                 // CRITICAL: Exclude manual stations entirely from API processing
                 guard !station.id.hasPrefix("manual_") else {
@@ -3509,6 +3777,17 @@ class RadioStationViewModel: NSObject, ObservableObject {
                 print("📡 RadioBrowserAPI: Adding \(uniqueNewStations.count) new stations for \(country.name)")
                 
                 for newStation in uniqueNewStations.reversed() {
+                    // CRITICAL PROTECTION: Double-check that we're not overwriting an imported station with custom data
+                    let existingStationIndex = stations.firstIndex { $0.url == newStation.url }
+                    if let existingIndex = existingStationIndex {
+                        let existingStation = stations[existingIndex]
+                        // If existing station has custom icon data or is manually imported, preserve it
+                        if existingStation.iconData != nil || existingStation.iTunesArtworkData != nil || existingStation.id.hasPrefix("manual_") {
+                            print("🛡️ IMPORT PROTECTION: Preserving user-imported station '\(existingStation.name)' with custom data over API station")
+                            continue // Skip adding this API station
+                        }
+                    }
+                    
                     // Increment order of existing stations in the same country to make room at top
                     for i in 0..<stations.count {
                         if stations[i].country == country.name {
@@ -3950,9 +4229,31 @@ class RadioStationViewModel: NSObject, ObservableObject {
                     )
                 }
                 
-                // Replace stations for this country while preserving other countries
-                stations = stations.filter { $0.country != country } + loadedStations
-                print("🌐 ✅ Loaded \(loadedStations.count) cached stations for \(country) from Core Data")
+                // CRITICAL FIX: Merge loaded stations with existing ones, preserving user-imported stations with custom data
+                let existingCountryStations = stations.filter { $0.country == country }
+                let existingURLs = Set(existingCountryStations.map { $0.url })
+                
+                // Enhanced filtering: Only add loaded stations that don't conflict with user-imported stations
+                let newLoadedStations = loadedStations.filter { loadedStation in
+                    // Skip if URL already exists in memory
+                    guard !existingURLs.contains(loadedStation.url) else {
+                        return false
+                    }
+                    
+                    // Double-check: if there's an existing station with custom data, don't override it
+                    if let existingStation = existingCountryStations.first(where: { $0.url == loadedStation.url }) {
+                        if existingStation.iconData != nil || existingStation.iTunesArtworkData != nil {
+                            print("🛡️ CORE DATA PROTECTION: Preserving user-imported station '\(existingStation.name)' over Core Data version")
+                            return false
+                        }
+                    }
+                    
+                    return true
+                }
+                
+                // Keep all non-country stations + existing country stations + new loaded stations
+                stations = stations.filter { $0.country != country } + existingCountryStations + newLoadedStations
+                print("🌐 ✅ Loaded \(loadedStations.count) cached stations for \(country) from Core Data (added \(newLoadedStations.count) new, preserved \(existingCountryStations.count) existing)")
             } catch {
                 print("⚠️ Error loading cached stations for \(country): \(error)")
             }

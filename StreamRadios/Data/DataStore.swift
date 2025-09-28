@@ -750,7 +750,7 @@ class DataStore {
         }
     }
     
-    // Method specifically for import operations - checks for URL duplicates
+    // Method specifically for import operations - handles both new and updated stations
     func saveImportedStationsToCloudKit(stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
         fetchExistingStationURLs { existingURLs, error in
             guard error == nil else {
@@ -760,14 +760,33 @@ class DataStore {
             }
 
             let newStations = stations.filter { !existingURLs.contains($0.url) }
-            if newStations.isEmpty {
-                print("No new stations to save; all station URLs already exist in CloudKit.")
+            let existingStations = stations.filter { existingURLs.contains($0.url) }
+            
+            print("CloudKit Import: \(newStations.count) new stations, \(existingStations.count) existing stations to update")
+            
+            if newStations.isEmpty && existingStations.isEmpty {
+                print("No stations to save or update in CloudKit.")
                 completion(true, [])
                 return
             }
 
-            print("Saving \(newStations.count) new stations to CloudKit (filtered by URL).")
-            self.processNewStations(newStations, completion: completion)
+            // Process new stations first
+            if !newStations.isEmpty {
+                print("Saving \(newStations.count) new stations to CloudKit.")
+                self.processNewStations(newStations) { success, recordIDs in
+                    if success && !existingStations.isEmpty {
+                        // Then merge iconData for existing stations only if missing
+                        print("Merging iconData for \(existingStations.count) existing stations in CloudKit.")
+                        self.mergeIconDataForExistingStations(existingStations, completion: completion)
+                    } else {
+                        completion(success, recordIDs)
+                    }
+                }
+            } else {
+                // Only existing stations to update - merge iconData only if missing
+                print("Merging iconData for \(existingStations.count) existing stations in CloudKit.")
+                self.mergeIconDataForExistingStations(existingStations, completion: completion)
+            }
         }
     }
 
@@ -777,6 +796,8 @@ class DataStore {
         var recordsToSave = [CKRecord]()
         for station in stations {
             let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
+            
+            // Sync ALL station fields to CloudKit
             record["name"] = station.name
             record["url"] = station.url
             record["country"] = station.country
@@ -784,11 +805,23 @@ class DataStore {
             record["favoritedAt"] = station.favoritedAt
             record["favoriteOrder"] = station.favoriteOrder
             record["order"] = station.order
+            record["lastPlayed"] = station.lastPlayed
+            record["lastUpdated"] = Date() // Track when record was last updated
+            
+            // Handle iconData
             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                 if let asset = createAsset(from: image) {
                     record["iconData"] = asset
                 }
             }
+            
+            // Handle iTunesArtworkData
+            if let iTunesArtworkData = station.iTunesArtworkData, let imageData = Data(base64Encoded: iTunesArtworkData), let image = UIImage(data: imageData) {
+                if let asset = createAsset(from: image) {
+                    record["iTunesArtworkData"] = asset
+                }
+            }
+            
             recordsToSave.append(record)
         }
 
@@ -801,6 +834,8 @@ class DataStore {
         var recordsToSave = [CKRecord]()
         for station in stations {
             let record = CKRecord(recordType: "streamingRadios", recordID: CKRecord.ID(recordName: station.id))
+            
+            // Sync ALL station fields to CloudKit
             record["name"] = station.name
             record["url"] = station.url
             record["country"] = station.country
@@ -808,16 +843,148 @@ class DataStore {
             record["favoritedAt"] = station.favoritedAt
             record["favoriteOrder"] = station.favoriteOrder
             record["order"] = station.order
+            record["lastPlayed"] = station.lastPlayed
+            record["lastUpdated"] = Date() // Track when record was last updated
+            
+            // Handle iconData
             if let iconData = station.iconData, let imageData = Data(base64Encoded: iconData), let image = UIImage(data: imageData) {
                 if let asset = createAsset(from: image) {
                     record["iconData"] = asset
                 }
             }
+            
+            // Handle iTunesArtworkData
+            if let iTunesArtworkData = station.iTunesArtworkData, let imageData = Data(base64Encoded: iTunesArtworkData), let image = UIImage(data: imageData) {
+                if let asset = createAsset(from: image) {
+                    record["iTunesArtworkData"] = asset
+                }
+            }
+            
             recordsToSave.append(record)
         }
 
         // Process batches with optimized batch size for CloudKit
         processBatch(records: recordsToSave, maxBatchSize: 200, completion: completion)
+    }
+
+    // Method to merge iconData for existing stations only if missing
+    private func mergeIconDataForExistingStations(_ stations: [RadioStation], completion: @escaping (Bool, [String]?) -> Void) {
+        let database = CKContainer.default().privateCloudDatabase
+        
+        // Create a map of URL to imported station for quick lookup
+        let stationsByURL = Dictionary(uniqueKeysWithValues: stations.map { ($0.url, $0) })
+        
+        // Fetch existing records by URL
+        let predicate = NSPredicate(format: "url IN %@", stations.map { $0.url })
+        let query = CKQuery(recordType: "streamingRadios", predicate: predicate)
+        
+        database.perform(query, inZoneWith: nil) { records, error in
+            if let error = error {
+                print("Error fetching existing CloudKit records for merge: \(error)")
+                completion(false, nil)
+                return
+            }
+            
+            guard let existingRecords = records else {
+                print("No existing records found for merge")
+                completion(true, [])
+                return
+            }
+            
+            var recordsToUpdate: [CKRecord] = []
+            
+            for record in existingRecords {
+                guard let recordURL = record["url"] as? String,
+                      let importedStation = stationsByURL[recordURL] else {
+                    continue
+                }
+                
+                var needsUpdate = false
+                
+                // Update ALL fields that may have changed
+                
+                // Update name if changed
+                if let currentName = record["name"] as? String, currentName != importedStation.name {
+                    record["name"] = importedStation.name
+                    needsUpdate = true
+                    print("📝 Updating station name in CloudKit: '\(currentName)' -> '\(importedStation.name)'")
+                }
+                
+                // Update country if changed
+                if let currentCountry = record["country"] as? String, currentCountry != importedStation.country {
+                    record["country"] = importedStation.country
+                    needsUpdate = true
+                    print("🌍 Updating station country in CloudKit: \(importedStation.name) -> \(importedStation.country)")
+                }
+                
+                // Update favorite status if it has changed
+                let currentFavoriteStatus = (record["isFavorite"] as? String) == "true"
+                if currentFavoriteStatus != importedStation.isFavorite {
+                    record["isFavorite"] = importedStation.isFavorite ? "true" : "false"
+                    record["favoritedAt"] = importedStation.favoritedAt
+                    record["favoriteOrder"] = importedStation.favoriteOrder
+                    needsUpdate = true
+                    print("⭐ Updating favorite status in CloudKit record: \(importedStation.name) -> \(importedStation.isFavorite)")
+                }
+                
+                // Update station order if it has changed
+                if let currentOrder = record["order"] as? Int, currentOrder != importedStation.order {
+                    record["order"] = importedStation.order
+                    needsUpdate = true
+                    print("🔢 Updating station order in CloudKit record: \(importedStation.name) -> \(importedStation.order)")
+                }
+                
+                // Update lastPlayed if it has changed
+                let currentLastPlayed = record["lastPlayed"] as? Date
+                if currentLastPlayed != importedStation.lastPlayed {
+                    record["lastPlayed"] = importedStation.lastPlayed
+                    needsUpdate = true
+                    print("⏰ Updating last played in CloudKit record: \(importedStation.name)")
+                }
+                
+                // Always update lastUpdated when any field changes
+                if needsUpdate {
+                    record["lastUpdated"] = Date()
+                }
+                
+                // Only add iconData if it's missing in CloudKit but present in import
+                if record["iconData"] == nil && importedStation.iconData != nil {
+                    if let iconData = importedStation.iconData,
+                       let imageData = Data(base64Encoded: iconData),
+                       let image = UIImage(data: imageData),
+                       let asset = self.createAsset(from: image) {
+                        record["iconData"] = asset
+                        needsUpdate = true
+                        print("🔄 Adding missing iconData to existing CloudKit record: \(importedStation.name)")
+                    }
+                }
+                
+                // Only add iTunesArtworkData if it's missing in CloudKit but present in import
+                if record["iTunesArtworkData"] == nil && importedStation.iTunesArtworkData != nil {
+                    if let iTunesArtworkData = importedStation.iTunesArtworkData,
+                       let imageData = Data(base64Encoded: iTunesArtworkData),
+                       let image = UIImage(data: imageData),
+                       let asset = self.createAsset(from: image) {
+                        record["iTunesArtworkData"] = asset
+                        needsUpdate = true
+                        print("🔄 Adding missing iTunesArtworkData to existing CloudKit record: \(importedStation.name)")
+                    }
+                }
+                
+                if needsUpdate {
+                    recordsToUpdate.append(record)
+                }
+            }
+            
+            if recordsToUpdate.isEmpty {
+                print("✅ No CloudKit records need iconData updates - all existing records already have images")
+                completion(true, [])
+                return
+            }
+            
+            print("📡 Updating \(recordsToUpdate.count) CloudKit records with missing iconData")
+            self.processBatch(records: recordsToUpdate, maxBatchSize: 200, completion: completion)
+        }
     }
 
     private func processBatch(records: [CKRecord], maxBatchSize: Int, start: Int = 0, allSavedRecords: [String] = [], completion: @escaping (Bool, [String]?) -> Void) {
