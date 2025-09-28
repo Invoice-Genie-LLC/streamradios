@@ -1615,6 +1615,7 @@ struct EpisodeRowView: View {
     @State private var bannerAlertMessage = ""
     @State private var refreshTrigger = UUID() // Force UI refresh when progress changes
     @State private var downloadButtonPressed = false // For download button press animation
+    @State private var localLoadingState = false // For play button loading animation
     private let buttonSize: CGFloat = 22
     private let rowHeight: CGFloat = 70
     
@@ -1719,44 +1720,81 @@ struct EpisodeRowView: View {
                     
                     if isPlayedByState || isCompletedByProgress {
                         print("🔄 BUTTON DEBUG 1: Calling rewindAndPlay for episode: \(episode.title)")
-                        podcastPlayer.rewindAndPlay(episode: episode)
+                        // Start loading animation for rewind and play
+                        print("🎬 LOADING: Setting localLoadingState = true for rewind")
+                        localLoadingState = true
+                        
+                        // Add a small delay to ensure the loading animation is visible
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            podcastPlayer.rewindAndPlay(episode: episode)
+                        }
                     } else if isPlaying {
                         print("🔄 BUTTON DEBUG 1: Calling onStop for episode: \(episode.title)")
                         onStop()
                     } else {
                         print("🔄 BUTTON DEBUG 1: Calling onPlay for episode: \(episode.title)")
-                        onPlay()
-                    }
-                }) {
-                    Group {
-                        if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
-                            // Show spinning loading state
-                            Image(systemName: "arrow.2.circlepath")
-                                .font(.title)
-                                .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
-                                .foregroundColor(.blue)
-                                .rotationEffect(.degrees(360))
-                                .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: podcastPlayer.loadingEpisodeId)
-                        } else {
-                            // FIX: Use EpisodeStateManager for consistent button display
-                            let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
-                            let isPlayedByState = episodeState == .played
-                            let isCompletedByProgress = currentProgress >= 0.99
-                            let shouldShowRewind = isPlayedByState || isCompletedByProgress
-                            
-                            // Regular play/pause/replay button with consistent state logic
-                            Image(systemName: shouldShowRewind ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
-                                .resizable()
-                                .frame(width: buttonSize + 6, height: buttonSize + 6) // Larger visual button
-                                .foregroundColor(shouldShowRewind ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
+                        // Start loading animation for play
+                        print("🎬 LOADING: Setting localLoadingState = true for play")
+                        localLoadingState = true
+                        
+                        // Add a small delay to ensure the loading animation is visible
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            onPlay()
                         }
                     }
-                    .padding(8) // Add padding for larger tap area
-                    .background(Color.clear) // Invisible background to catch taps
-                    .contentShape(Rectangle()) // Ensure entire area is tappable
+                }) {
+                    // FIX: Use EpisodeStateManager for consistent button display
+                    let episodeState = EpisodeStateManager.shared.getState(for: episode.id)
+                    let isPlayedByState = episodeState == .played
+                    let isCompletedByProgress = currentProgress >= 0.99
+                    let shouldShowRewind = isPlayedByState || isCompletedByProgress
+                    
+                    // Regular play/pause/replay button with consistent state logic
+                    Image(systemName: shouldShowRewind ? "arrow.counterclockwise.circle.fill" : (isPlaying ? "pause.circle.fill" : "play.circle.fill"))
+                        .resizable()
+                        .frame(width: buttonSize + 6, height: buttonSize + 6) // Larger visual button
+                        .foregroundColor(shouldShowRewind ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
+                        .opacity(localLoadingState ? 0.3 : 1.0) // Dim button when loading
+                        .scaleEffect(localLoadingState ? 0.9 : 1.0) // Shrink button when loading
+                        .animation(.easeInOut(duration: 0.1), value: localLoadingState)
                 }
-                .frame(width: 60, height: 60) // Larger tap area (was 44x44)
+                .frame(width: 44, height: 44) // Fixed play button area
+                .overlay(
+                    // Loading overlay with spinning animation
+                    ZStack {
+                        if localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && !isPlaying) {
+                            // Debug: Print when loading overlay is shown
+                            let _ = print("🎬 LOADING OVERLAY: Showing for episode \(episode.title), localLoadingState: \(localLoadingState), loadingEpisodeId: \(podcastPlayer.loadingEpisodeId ?? "nil")")
+                            
+                            // Semi-transparent circular overlay
+                            Circle()
+                                .fill(Color.blue.opacity(0.8))
+                                .frame(width: 44, height: 44)
+                            
+                            // Loading spinner
+                            ProgressView()
+                                .scaleEffect(1.0)
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.15), value: localLoadingState)
+                )
                 .padding(.top, 2) // Align with first line of text
+                .onChange(of: isPlaying) { _, newValue in
+                    // Clear loading state when episode starts playing (with minimum display time)
+                    if newValue {
+                        // Ensure loading animation is visible for at least 300ms
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            localLoadingState = false
+                        }
+                    }
+                }
+                .onChange(of: podcastPlayer.loadingEpisodeId) { _, newValue in
+                    // Clear loading state when loading completes or changes
+                    if newValue != episode.id {
+                        localLoadingState = false
+                    }
+                }
                 
                 // COLUMN 2: Episode info (Flexible width with intelligent truncation)
                 VStack(alignment: .leading, spacing: 4) {
@@ -1863,6 +1901,9 @@ struct EpisodeRowView: View {
             .padding(.vertical, 8)
             .contentShape(Rectangle())
             .onTapGesture {
+                // Start local loading state when tapped
+                print("🎬 ROW TAP LOADING: Setting localLoadingState = true for episode: \(episode.title)")
+                localLoadingState = true
                 onPlay()
             }
             .onReceive(podcastPlayer.$currentProgress) { _ in
@@ -2494,8 +2535,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
             ZStack {
                 Button(action: isPlaying ? onStop : {
                     // Start local loading state when play button tapped
+                    print("🎬 OPTIMIZED LOADING: Setting localLoadingState = true for play")
                     localLoadingState = true
-                    onPlay()
+                    
+                    // Add a small delay to ensure the loading animation is visible
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        onPlay()
+                    }
                 }) {
                     Group {
                         if podcastPlayer.loadingEpisodeId == episode.id && !isPlaying {
@@ -2516,6 +2562,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .font(.title2)
                                 .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
                                 .foregroundColor(currentButtonColor)
+                                .opacity(localLoadingState ? 0.3 : 1.0) // Dim button when loading
+                                .scaleEffect(localLoadingState ? 0.9 : 1.0) // Shrink button when loading
+                                .animation(.easeInOut(duration: 0.1), value: localLoadingState)
                         }
                     }
                 }
@@ -2523,15 +2572,16 @@ struct OptimizedEpisodeRowView: View, Equatable {
                 
                 // Loading overlay similar to radio station implementation
                 if localLoadingState {
+                    let _ = print("🎬 OPTIMIZED LOADING OVERLAY: Showing for episode \(episode.title), localLoadingState: \(localLoadingState), loadingEpisodeId: \(podcastPlayer.loadingEpisodeId ?? "nil"), currentEpisode: \(podcastPlayer.currentEpisode?.id ?? "nil")")
                     ZStack {
                         // Semi-transparent circular overlay with more visibility
                         Circle()
-                            .fill(Color.black.opacity(0.6))
+                            .fill(Color.blue.opacity(0.8))
                             .frame(width: 44, height: 44)
                         
                         // Loading spinner
                         ProgressView()
-                            .scaleEffect(0.8)
+                            .scaleEffect(1.0)
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     }
                     .transition(.opacity)
@@ -2656,8 +2706,13 @@ struct OptimizedEpisodeRowView: View, Equatable {
         .contentShape(Rectangle())
         .onTapGesture {
             // Start local loading state when tapped
+            print("🎬 OPTIMIZED ROW TAP LOADING: Setting localLoadingState = true for episode: \(episode.title)")
             localLoadingState = true
-            onPlay()
+            
+            // Ensure loading state is visible for minimum duration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                onPlay()
+            }
         }
         .onReceive(podcastPlayer.$currentProgress) { _ in
             // Force view refresh when progress changes for playing episodes
@@ -2674,9 +2729,12 @@ struct OptimizedEpisodeRowView: View, Equatable {
             }
         }
         .onChange(of: isPlaying) { _, newIsPlaying in
-            // Clear loading state when this episode starts playing
+            // Clear loading state when this episode starts playing (with minimum display time)
             if newIsPlaying {
-                localLoadingState = false
+                // Ensure loading animation is visible for at least 300ms
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    localLoadingState = false
+                }
             }
         }
         .onChange(of: localLoadingState) { _, isLoading in
@@ -3243,7 +3301,12 @@ struct PodcastPlayerView: View {
             OptimizedEpisodeRowView(
                 episode: episode,
                 isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                onPlay: { playEpisode(episode) },
+                onPlay: { 
+                    print("🎬 EPISODE LIST LOADING: Setting loading state for episode: \(episode.title)")
+                    // Set loading state in PodcastPlayer for immediate feedback
+                    podcastPlayer.loadingEpisodeId = episode.id
+                    playEpisode(episode) 
+                },
                 onStop: { podcastPlayer.togglePlayPause() },
                 viewModel: viewModel,
                 podcastPlayer: podcastPlayer
