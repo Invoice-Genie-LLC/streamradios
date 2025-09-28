@@ -55,9 +55,16 @@ struct RadioStreamApp: App {
                     // DebugLogger.logInfo will be added when import is fixed
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                    // Reconfigure podcast player when app becomes active to ensure restoration works
-                    print("📱 App became active - reconfiguring podcast player")
-                    PodcastPlayer.shared.configure(with: podcastViewModel)
+                    // CRITICAL FIX: Only reconfigure if podcast player doesn't already have an active episode
+                    // This prevents progress reset when returning from lock screen with current episode
+                    print("📱 App became active - checking if podcast player needs reconfiguration")
+                    
+                    if PodcastPlayer.shared.currentEpisode == nil {
+                        print("📱 App became active - reconfiguring podcast player (no current episode)")
+                        PodcastPlayer.shared.configure(with: podcastViewModel)
+                    } else {
+                        print("📱 App became active - skipping reconfiguration (episode already loaded, preserving progress)")
+                    }
                 }
                 .onDisappear {
                             appDelegate.updatePodcastStateAndSave()

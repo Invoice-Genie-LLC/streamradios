@@ -2294,9 +2294,19 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             let savedProgress = stateManager.getProgress(for: currentEpisode.id)
             let expectedTime = savedProgress * duration
             
-            // If there's significant saved progress and the player is at or near the beginning,
-            // restore the saved position before starting playback
-            if savedProgress > 0.01 && duration > 0 && abs(currentPlayerTime - expectedTime) > 3.0 {
+            // CRITICAL FIX: Prevent progress reset when returning from lock screen
+            // If the current player time is already significantly ahead (user used lock screen controls),
+            // don't restore to an older saved position - preserve the current progress
+            let currentProgress = duration > 0 ? currentPlayerTime / duration : 0
+            let hasCurrentProgress = currentProgress > 0.01
+            let isCurrentProgressAhead = currentProgress > savedProgress
+            
+            // Only restore saved progress if:
+            // 1. There's significant saved progress AND
+            // 2. Player is at or near the beginning AND
+            // 3. Current progress isn't already ahead of saved progress (lock screen usage)
+            if savedProgress > 0.01 && duration > 0 && abs(currentPlayerTime - expectedTime) > 3.0 && 
+               (!hasCurrentProgress || !isCurrentProgressAhead) {
                 os_log("🔒 Lock Screen/CarPlay Play: Restoring saved progress %.1f%% (%.1fs) before starting playbook (CarPlay: %@)", 
                        log: log, type: .info, savedProgress * 100, expectedTime, isCarPlayConnected ? "YES" : "NO")
                 
@@ -2314,6 +2324,9 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                     }
                 }
                 return
+            } else if hasCurrentProgress && isCurrentProgressAhead {
+                os_log("🔒 LOCK SCREEN PROTECTION: Current progress %.1f%% is ahead of saved %.1f%% - preserving current position", 
+                       log: log, type: .info, currentProgress * 100, savedProgress * 100)
             }
         } else {
             if isAlreadyRestoredInCarPlay {
