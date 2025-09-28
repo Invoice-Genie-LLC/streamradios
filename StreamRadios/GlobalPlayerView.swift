@@ -196,12 +196,23 @@ struct HomeButton: View {
             // Show button directly based on isScrolling OR shouldShow state
             if isScrolling || shouldShow {
                 Button(action: {
+                    print("🏠 HOME BUTTON: Tapped - forcing TabView to show")
                     // Use smooth animation for TabView restoration
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                        // CRITICAL: Always force TabView to show regardless of current state
                         isFooterMenuHidden = false // Show TabView when tapped
                         isScrolling = false // Stop scrolling state immediately
                         shouldShow = false // Hide Home button only when tapped
                     }
+                    
+                    // SAFETY: Post notification to ensure all views reset their scrolling state
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ForceTabViewVisible"),
+                        object: nil,
+                        userInfo: ["source": "HomeButton"]
+                    )
+                    
+                    print("🏠 HOME BUTTON: TabView restoration complete - isFooterMenuHidden: \(isFooterMenuHidden), isScrolling: \(isScrolling)")
                 }) {
                     ZStack {
                         // Base glass layer

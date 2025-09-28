@@ -266,6 +266,31 @@ struct ContentView: View {
             setupTabView()
             checkAndStartDataSync()
             checkSubscriptionStatus()
+            
+            // SAFETY: Ensure TabView is visible on app appear
+            ensureTabViewIsVisible()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ForceTabViewVisible"))) { _ in
+            print("🏠 CONTENT VIEW: Received ForceTabViewVisible notification")
+            
+            // CRITICAL: Force TabView to be visible regardless of current state
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                isFooterMenuHidden = false
+                isScrolling = false
+            }
+            
+            // SAFETY: Update tab bar visibility to ensure it's shown
+            updateTabBarVisibility()
+            
+            print("🏠 CONTENT VIEW: Forced TabView visible - isFooterMenuHidden: \(isFooterMenuHidden), isScrolling: \(isScrolling)")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            print("🏠 APP STATE: App became active - ensuring TabView is visible")
+            
+            // Small delay to let the app settle
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                ensureTabViewIsVisible()
+            }
         }
         .onChange(of: isFooterMenuHidden) { _, newValue in
             // Update tab bar visibility when scroll state changes
@@ -831,6 +856,18 @@ struct ContentView: View {
     private func setupTabView() {
         // Additional tab view configuration if needed
         // Tab bar appearance is already configured in init
+    }
+    
+    /// Ensure TabView is visible - called on app appear and when needed
+    private func ensureTabViewIsVisible() {
+        // Only reset if we're in a problematic state (both hidden and not scrolling)
+        if isFooterMenuHidden && !isScrolling {
+            print("🏠 SAFETY: Detected TabView hidden without scrolling - forcing visible")
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                isFooterMenuHidden = false
+            }
+            updateTabBarVisibility()
+        }
     }
     
     private func checkAndStartDataSync() {
