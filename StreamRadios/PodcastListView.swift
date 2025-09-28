@@ -1713,15 +1713,8 @@ struct EpisodeRowView: View {
                     let isPlayedByState = episodeState == .played
                     let isCompletedByProgress = currentProgress >= 0.99
                     
-                    print("🔄 BUTTON DEBUG 1: Play/Rewind button pressed for episode: \(episode.title)")
-                    print("🔄 BUTTON DEBUG 1: episode.id = \(episode.id)")
-                    print("🔄 BUTTON DEBUG 1: episodeState = \(episodeState.rawValue), progress = \(String(format: "%.3f", currentProgress)), episode.state.isPlayed = \(episode.state.isPlayed)")
-                    print("🔄 BUTTON DEBUG 1: isPlayedByState = \(isPlayedByState), isCompletedByProgress = \(isCompletedByProgress)")
-                    
                     if isPlayedByState || isCompletedByProgress {
-                        print("🔄 BUTTON DEBUG 1: Calling rewindAndPlay for episode: \(episode.title)")
                         // Start loading animation for rewind and play
-                        print("🎬 LOADING: Setting localLoadingState = true for rewind")
                         localLoadingState = true
                         
                         // Add a small delay to ensure the loading animation is visible
@@ -1729,12 +1722,9 @@ struct EpisodeRowView: View {
                             podcastPlayer.rewindAndPlay(episode: episode)
                         }
                     } else if isPlaying {
-                        print("🔄 BUTTON DEBUG 1: Calling onStop for episode: \(episode.title)")
                         onStop()
                     } else {
-                        print("🔄 BUTTON DEBUG 1: Calling onPlay for episode: \(episode.title)")
                         // Start loading animation for play
-                        print("🎬 LOADING: Setting localLoadingState = true for play")
                         localLoadingState = true
                         
                         // Add a small delay to ensure the loading animation is visible
@@ -1754,9 +1744,9 @@ struct EpisodeRowView: View {
                         .resizable()
                         .frame(width: buttonSize + 6, height: buttonSize + 6) // Larger visual button
                         .foregroundColor(shouldShowRewind ? .adaptiveSecondaryText : (isPlaying ? .blue : .green))
-                        .opacity(localLoadingState ? 0.3 : 1.0) // Dim button when loading
-                        .scaleEffect(localLoadingState ? 0.9 : 1.0) // Shrink button when loading
-                        .animation(.easeInOut(duration: 0.1), value: localLoadingState)
+                        .opacity((localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && !isPlaying)) ? 0.3 : 1.0) // Dim button when loading
+                        .scaleEffect((localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && !isPlaying)) ? 0.9 : 1.0) // Shrink button when loading
+                        .animation(.easeInOut(duration: 0.1), value: localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && !isPlaying))
                 }
                 .frame(width: 44, height: 44) // Fixed play button area
                 .overlay(
@@ -2562,17 +2552,20 @@ struct OptimizedEpisodeRowView: View, Equatable {
                                 .font(.title2)
                                 .dynamicTypeSize(...DynamicTypeSize.accessibility1) // Cap icon size
                                 .foregroundColor(currentButtonColor)
-                                .opacity(localLoadingState ? 0.3 : 1.0) // Dim button when loading
-                                .scaleEffect(localLoadingState ? 0.9 : 1.0) // Shrink button when loading
-                                .animation(.easeInOut(duration: 0.1), value: localLoadingState)
+                                .opacity((localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && podcastPlayer.loadingEpisodeId != nil)) ? 0.3 : 1.0) // Dim button when loading
+                                .scaleEffect((localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && podcastPlayer.loadingEpisodeId != nil)) ? 0.9 : 1.0) // Shrink button when loading
+                                .animation(.easeInOut(duration: 0.1), value: localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && podcastPlayer.loadingEpisodeId != nil))
                         }
                     }
                 }
                 .frame(width: 44, height: 44) // Fixed play button area
                 
                 // Loading overlay similar to radio station implementation
-                if localLoadingState {
-                    let _ = print("🎬 OPTIMIZED LOADING OVERLAY: Showing for episode \(episode.title), localLoadingState: \(localLoadingState), loadingEpisodeId: \(podcastPlayer.loadingEpisodeId ?? "nil"), currentEpisode: \(podcastPlayer.currentEpisode?.id ?? "nil")")
+                let shouldShowLoading = localLoadingState || (podcastPlayer.loadingEpisodeId == episode.id && podcastPlayer.loadingEpisodeId != nil)
+                let _ = print("🎬 LOADING DEBUG: Episode \(episode.title) - localLoadingState: \(localLoadingState), loadingEpisodeId: \(podcastPlayer.loadingEpisodeId ?? "nil"), episodeId: \(episode.id), isPlaying: \(isPlaying), shouldShow: \(shouldShowLoading)")
+                
+                if shouldShowLoading {
+                    let _ = print("🎬 OPTIMIZED LOADING OVERLAY: Showing for episode \(episode.title), localLoadingState: \(localLoadingState), loadingEpisodeId: \(podcastPlayer.loadingEpisodeId ?? "nil"), currentEpisode: \(podcastPlayer.currentEpisode?.id ?? "nil"), isPlaying: \(isPlaying)")
                     ZStack {
                         // Semi-transparent circular overlay with more visibility
                         Circle()
@@ -2722,7 +2715,10 @@ struct OptimizedEpisodeRowView: View, Equatable {
             // Force view refresh when current time changes for playing episodes
             // This ensures real-time time left updates
         }
-        .onReceive(podcastPlayer.$isPlaying) { isPlaying in
+        .onChange(of: podcastPlayer.loadingEpisodeId) { _, newLoadingId in
+            print("🎬 LOADING STATE CHANGE: Episode \(episode.title) - loadingEpisodeId changed to: \(newLoadingId ?? "nil")")
+        }
+        .onChange(of: podcastPlayer.isPlaying) { _, isPlaying in
             // Clear loading state when playback starts for this episode
             if isPlaying && podcastPlayer.currentEpisode?.id == episode.id {
                 localLoadingState = false

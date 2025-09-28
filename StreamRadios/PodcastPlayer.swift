@@ -2265,10 +2265,8 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
                 return
             }
         
-        // CRITICAL FIX: Clear loading state and set proper connection state when resuming
-        if loadingEpisodeId == currentEpisode.id {
-            loadingEpisodeId = nil
-        }
+        // LOADING STATE: Keep loading state active until playback actually starts
+        // loadingEpisodeId will be cleared when playback begins in the time observer
         connectionState = .connected
         
         // Set podcast as the active player - this will handle audio session activation
@@ -2737,6 +2735,17 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
             // Pause without clearing current episode/feed so GlobalPlayer remains visible
             pause()
         } else {
+            // IMMEDIATE USER FEEDBACK: Set loading state when resuming playback
+            if let currentEpisode = currentEpisode {
+                loadingEpisodeId = currentEpisode.id
+                
+                // Auto-clear loading state after short duration to prevent stuck animations
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    if self?.loadingEpisodeId == currentEpisode.id {
+                        self?.loadingEpisodeId = nil
+                    }
+                }
+            }
             stopRadioPlayback()
             play()
         }
