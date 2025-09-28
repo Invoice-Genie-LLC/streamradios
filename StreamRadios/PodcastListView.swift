@@ -941,11 +941,11 @@ struct PodcastListView: View {
     
     private func moveFeeds(from source: IndexSet, to destination: Int) {
         viewModel.moveFeed(from: source, to: destination)
-                refreshID = UUID()
         
-        viewModel.refreshAllFeeds()
-            viewModel.objectWillChange.send()
-        }
+        // No need for refreshID = UUID() or refreshAllFeeds() since moveFeed now sends proper notifications
+        // and objectWillChange.send() is sufficient for UI updates without disrupting TabView state
+        viewModel.objectWillChange.send()
+    }
     
     private func onAppear() {
         os_log("PodcastListView appeared", log: log, type: .info)
