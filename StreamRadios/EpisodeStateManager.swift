@@ -1819,10 +1819,9 @@ class EpisodeStateManager: ObservableObject {
             )
         }
         
-        // Ensure UI updates happen on main thread
-        DispatchQueue.main.async {
-            self.episodeFavorites[episodeId] = isFavorite
-        }
+        // CRITICAL FIX: Set favorite state SYNCHRONOUSLY before CloudKit sync
+        // This prevents race condition where CloudKit sync reads old state
+        episodeFavorites[episodeId] = isFavorite
         saveCurrentStates()
         userDefaults.synchronize() // Force immediate sync
         sendImmediateUpdate() // Use immediate update for real-time UI
@@ -1991,10 +1990,9 @@ class EpisodeStateManager: ObservableObject {
             )
         }
         
-        // Ensure UI updates happen on main thread
-        DispatchQueue.main.async {
-            self.episodeDownloads[episodeId] = isDownloaded
-        }
+        // CRITICAL FIX: Set download state SYNCHRONOUSLY before CloudKit sync
+        // This prevents race condition where CloudKit sync reads old state
+        episodeDownloads[episodeId] = isDownloaded
         saveCurrentStates()
         userDefaults.synchronize() // Force immediate sync
         sendImmediateUpdate() // Use immediate update for real-time UI

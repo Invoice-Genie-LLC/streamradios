@@ -959,7 +959,8 @@ struct PodcastPlayerSheetView: View {
         updatedEpisode.state.isFavorite = episodeStateManagerState // Set current state so toggle works correctly
         
         // Set the target state in EpisodeStateManager first
-        EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: targetState)
+        // Pass feedId for immediate CloudKit sync
+        EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: targetState, feedId: episode.feedId)
         
         // Call viewModel with the corrected episode state
         viewModel.toggleFavorite(for: updatedEpisode)

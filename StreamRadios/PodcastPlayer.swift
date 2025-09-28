@@ -2527,24 +2527,32 @@ public class PodcastPlayer: ObservableObject, AudioPlayerProtocol {
         if let currentEpisode = currentEpisode {
             let progress = duration > 0 ? currentTime / duration : 0
             
-            // Save progress when stopping
-            saveProgressIfNeeded()
-            saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user stopped episode")
-            
-            // Update StateManager
-            let actualCurrentTime = player.currentTime().seconds
-            stateManager.updateProgress(for: currentEpisode.id, progress: currentProgress, isPlaying: false, currentTime: actualCurrentTime)
-            stateManager.pausePlayback(episodeId: currentEpisode.id, progress: currentProgress)
-            
-            // REAL-TIME SYNC: Use the new real-time sync method for episode stop with known feedId
-            stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: "app_closed", feedId: currentEpisode.feedId)
-            
-            // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
-            NotificationCenter.default.post(
-                name: .init("InstantSyncDidUpdatePodcastProgress"),
-                object: nil,
-                userInfo: ["episodeId": currentEpisode.id, "progress": progress]
-            )
+            // CRITICAL FIX: Only save progress if there's meaningful progress (> 1%)
+            // This prevents ghost progress saving for episodes that were never really played
+            if progress > 0.01 {
+                // Save progress when stopping
+                saveProgressIfNeeded()
+                saveProgressWithCoreDataPriority(for: currentEpisode, progress: progress, reason: "user stopped episode")
+                
+                // Update StateManager
+                let actualCurrentTime = player.currentTime().seconds
+                stateManager.updateProgress(for: currentEpisode.id, progress: progress, isPlaying: false, currentTime: actualCurrentTime)
+                stateManager.pausePlayback(episodeId: currentEpisode.id, progress: progress)
+                
+                // REAL-TIME SYNC: Use the new real-time sync method for episode stop with known feedId
+                stateManager.setProgressWithRealTimeSync(for: currentEpisode.id, progress: progress, reason: "app_closed", feedId: currentEpisode.feedId)
+                
+                // REAL-TIME LOCAL SYNC: Trigger immediate local sync notification for instant UI updates
+                NotificationCenter.default.post(
+                    name: .init("InstantSyncDidUpdatePodcastProgress"),
+                    object: nil,
+                    userInfo: ["episodeId": currentEpisode.id, "progress": progress]
+                )
+                
+                print("📊 PROGRESS SAVE: Saved meaningful progress \(progress) for episode \(currentEpisode.title)")
+            } else {
+                print("📊 PROGRESS SKIP: Skipped saving minimal progress \(progress) for episode \(currentEpisode.title)")
+            }
         }
         
         player.pause()

@@ -8218,7 +8218,8 @@ class PodcastViewModel: ObservableObject {
             }
             
             // CRITICAL: Update EpisodeStateManager first (source of truth for download state)
-            EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false)
+            // Pass feedId for immediate CloudKit sync
+            EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: false, feedId: episode.feedId)
             
             // ⚡ IMMEDIATE SNAPSHOT UPDATE: Update snapshot for instant loading on next access
             updateSnapshotForEpisodeStateChange(episodeId: episode.id, feedId: episode.feedId)
@@ -8883,7 +8884,8 @@ extension PodcastViewModel {
         print("📡 FAVORITE TOGGLE: About to call updateEpisodeState with isFavorite: \(newState)")
         
         // ⚡ IMMEDIATE UI UPDATE: Update episode state in EpisodeStateManager first (source of truth)
-        EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: newState)
+        // Pass feedId for immediate CloudKit sync
+        EpisodeStateManager.shared.setFavorite(episode.id, isFavorite: newState, feedId: episode.feedId)
         
         // ⚡ IMMEDIATE SNAPSHOT UPDATE: Update snapshot for instant loading on next access
         updateSnapshotForEpisodeStateChange(episodeId: episode.id, feedId: episode.feedId)
@@ -9248,7 +9250,8 @@ extension PodcastViewModel {
                     print("📁 DEBUG: Successfully moved file from \(tempURL.path) to \(localURL.path)")
                     
                     // CRITICAL: Update both EpisodeStateManager AND Core Data for download state
-                    EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: true)
+                    // Pass feedId for immediate CloudKit sync
+                    EpisodeStateManager.shared.setDownloaded(episode.id, isDownloaded: true, feedId: episode.feedId)
                     
                     // ⚡ IMMEDIATE SNAPSHOT UPDATE: Update snapshot for instant loading on next access
                     self.updateSnapshotForEpisodeStateChange(episodeId: episode.id, feedId: episode.feedId)
