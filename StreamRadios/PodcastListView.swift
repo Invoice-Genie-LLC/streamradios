@@ -1645,9 +1645,9 @@ struct EpisodeRowView: View {
         if isPlaying {
             return podcastPlayer.currentProgress
         } else {
-            // For non-playing episodes, get real-time progress from viewModel's episodeProgress cache
-            // This will update when sync notifications are received
-            return viewModel.episodeProgress[episode.id] ?? episode.state.progress
+            // CRITICAL FIX: Always use EpisodeStateManager as source of truth for saved progress
+            // This ensures progress bar matches exactly where progress was last saved
+            return EpisodeStateManager.shared.getProgress(for: episode.id)
         }
     }
     
@@ -2215,9 +2215,9 @@ struct OptimizedEpisodeRowView: View, Equatable {
         if isPlaying {
             return podcastPlayer.currentProgress
         } else {
-            // For non-playing episodes, get real-time progress from viewModel's episodeProgress cache
-            // This will update when sync notifications are received
-            return viewModel.episodeProgress[episode.id] ?? cachedProgress
+            // CRITICAL FIX: Always use EpisodeStateManager as source of truth for saved progress
+            // This ensures progress bar matches exactly where progress was last saved
+            return EpisodeStateManager.shared.getProgress(for: episode.id)
         }
     }
     
