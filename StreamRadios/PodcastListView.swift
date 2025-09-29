@@ -99,6 +99,7 @@ struct PodcastListView: View {
     @State private var newPodcastURL = ""
     @Binding var selectedPodcast: PodcastFeed?
     @State private var searchText = ""
+    @State private var isSearchPresented = false
     @State private var showingDeleteConfirmation = false
     @State private var podcastToDelete: PodcastFeed?
     @State private var expandedFeedId: String?
@@ -363,8 +364,20 @@ struct PodcastListView: View {
                        VStack(spacing: 0) {
                            // FORCE UI REFRESH: Hidden view that observes uiRefreshTrigger
                            Text("").hidden().id(uiRefreshObserver)
-                           instructionText
-                           searchBar
+                           
+                           // Custom Search Bar (when presented)
+                           if isSearchPresented {
+                               CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search episodes in saved podcasts")
+                                   .padding(.horizontal, 16)
+                                   .padding(.top, 8)
+                                   .padding(.bottom, 12)
+                                   .transition(.move(edge: .top).combined(with: .opacity))
+                           }
+                           
+                           // Only show instruction text when there are no podcasts at all
+                           if viewModel.podcastFeeds.isEmpty {
+                               instructionText
+                           }
                            
                            if !searchText.isEmpty {
                                episodeResultsList
@@ -399,16 +412,39 @@ struct PodcastListView: View {
                .toolbar {
                    ToolbarItemGroup(placement: .navigationBarTrailing) {
                        if !isEditing && selectedPodcast == nil {
-                           Button(action: { 
-                               // Show confirmation alert for podcast sorting
-                               alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: { 
-                                   viewModel.sortFeedsAlphabetically()
-                               })
-                           }) {
-                               Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
-                           }
-                           Button(action: { showingSearchPodcasts = true }) {
-                               Image(systemName: "plus")
+                           HStack(spacing: 8) {
+                               // Search button
+                               Button(action: {
+                                   withAnimation(.easeInOut(duration: 0.3)) {
+                                       isSearchPresented.toggle()
+                                   }
+                               }) {
+                                   Image(systemName: "magnifyingglass")
+                                       .foregroundColor(.white)
+                                       .font(.system(size: 20, weight: .medium))
+                                       .frame(width: 32, height: 32)
+                               }
+                               
+                               // Sort button
+                               Button(action: {
+                                   // Show confirmation alert for podcast sorting
+                                   alertManager.showCustomAlert(for: .confirmPodcastSortChange, deleteAction: {
+                                       viewModel.sortFeedsAlphabetically()
+                                   })
+                               }) {
+                                   Image(systemName: viewModel.isAscendingSort ? "arrow.up.circle" : "arrow.down.circle")
+                                       .foregroundColor(.white)
+                                       .font(.system(size: 20, weight: .medium))
+                                       .frame(width: 32, height: 32)
+                               }
+                               
+                               // Plus button
+                               Button(action: { showingSearchPodcasts = true }) {
+                                   Image(systemName: "plus")
+                                       .foregroundColor(.white)
+                                       .font(.system(size: 20, weight: .medium))
+                                       .frame(width: 32, height: 32)
+                               }
                            }
                        }
                    }
@@ -469,7 +505,7 @@ struct PodcastListView: View {
                .id(refreshID)
                .sheet(isPresented: Binding(
                    get: { showingAddPodcast },
-                   set: { newValue in 
+                   set: { newValue in
                        showingAddPodcast = newValue
                        if !newValue {
                            resetAddState()
@@ -480,16 +516,16 @@ struct PodcastListView: View {
                    AddPodcastView(
                        isPresented: Binding(
                            get: { showingAddPodcast },
-                           set: { newValue in 
+                           set: { newValue in
                                showingAddPodcast = newValue
                                if !newValue {
                                    resetAddState()
                                    checkForNewlyAddedPodcast()
                                }
                            }
-                       ), 
-                       title: $newPodcastTitle, 
-                       url: $newPodcastURL, 
+                       ),
+                       title: $newPodcastTitle,
+                       url: $newPodcastURL,
                        podcastToEdit: nil,
                        onAdd: addPodcast,
                        onUpdate: nil
@@ -497,7 +533,7 @@ struct PodcastListView: View {
                }
                .sheet(isPresented: Binding(
                    get: { showingEditPodcast && isEditDataReady },
-                   set: { newValue in 
+                   set: { newValue in
                        showingEditPodcast = newValue
                        if !newValue {
                            resetEditState()
@@ -507,7 +543,7 @@ struct PodcastListView: View {
                    AddPodcastView(
                        isPresented: Binding(
                            get: { showingEditPodcast && isEditDataReady },
-                           set: { newValue in 
+                           set: { newValue in
                                showingEditPodcast = newValue
                                if !newValue {
                                    resetEditState()
@@ -515,19 +551,19 @@ struct PodcastListView: View {
                            }
                        ),
                        title: Binding(
-                           get: { 
-                               return editPodcastTitle 
+                           get: {
+                               return editPodcastTitle
                            },
-                           set: { newValue in 
-                               editPodcastTitle = newValue 
+                           set: { newValue in
+                               editPodcastTitle = newValue
                            }
                        ),
                        url: Binding(
-                           get: { 
-                               return editPodcastURL 
+                           get: {
+                               return editPodcastURL
                            },
-                           set: { newValue in 
-                               editPodcastURL = newValue 
+                           set: { newValue in
+                               editPodcastURL = newValue
                            }
                        ),
                        podcastToEdit: podcastToEdit,
@@ -605,44 +641,9 @@ struct PodcastListView: View {
             .foregroundColor(.secondary)
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            .padding(.bottom, 16)
     }
     
-    private var searchBar: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.gray)
-                .padding(.leading, 8)
-            
-            ZStack(alignment: .trailing) {
-                TextField("Search episodes in saved podcasts", text: $searchText)
-                    .padding(.vertical, 8)
-                    .padding(.trailing, 30)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                    .onChange(of: searchText) { newValue in
-                        searchText = String(newValue.prefix(100))  // Limit to 100 characters
-                        viewModel.searchSavedEpisodesAcrossPodcasts(searchText)
-                    }
-                
-                if !searchText.isEmpty {
-                    Button(action: {
-                        searchText = ""
-                        viewModel.searchSavedEpisodesAcrossPodcasts("")
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.gray)
-                            .padding(.trailing, 8)
-                    }
-                    .transition(.opacity)
-                    .animation(.default, value: searchText)
-                }
-            }
-        }
-        .background(Color(.systemGray6))
-        .cornerRadius(10)
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-    }
     
     private var podcastList: some View {
         VStack(spacing: 0) {
@@ -692,7 +693,7 @@ struct PodcastListView: View {
                             isPlaying: podcastPlayer.currentEpisode?.feedId == feed.id && podcastPlayer.isPlaying,
                             onPlay: { podcastPlayer.playLastEpisodeForFeed(feed) },
                             onStop: { podcastPlayer.togglePlayPause() },
-                            onTap: { 
+                            onTap: {
                                 if isEditing {
                                     // In edit mode, prepare edit data reliably
                                     if !isPreparingEditData {
@@ -1189,7 +1190,7 @@ struct PodcastListView: View {
     // PERFORMANCE: Get filtered feed order without expensive nested lookups
     private func getFilteredFeedOrder() -> [String] {
         // SORTING FIX: Invalidate cache when podcastFeedOrder changes to ensure sorting updates are visible
-        if searchText == lastSearchText && 
+        if searchText == lastSearchText &&
            viewModel.podcastFeeds.count == lastPodcastFeedsCount &&
            filteredFeedOrderCache.count == viewModel.podcastFeedOrder.count {
             
@@ -1352,6 +1353,88 @@ class ShareContent: NSObject, UIActivityItemSource {
             return subject
         }
         return ""
+    }
+}
+
+// MARK: - Custom Search Bar
+struct CustomSearchBar: View {
+    @Binding var searchText: String
+    @Binding var isPresented: Bool
+    var placeholder: String = "Search..."
+    @Environment(\.colorScheme) var colorScheme
+    @FocusState private var isTextFieldFocused: Bool
+    
+    private var searchBarBackgroundColor: Color {
+        colorScheme == .dark ? Color(.systemGray5) : Color(.systemGray6)
+    }
+    
+    private var textColor: Color {
+        colorScheme == .dark ? .white : .primary
+    }
+    
+    private var iconColor: Color {
+        colorScheme == .dark ? .gray : .secondary
+    }
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Search field with icons
+            HStack(spacing: 8) {
+                // Magnifying glass icon
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(iconColor)
+                    .font(.system(size: 16, weight: .medium))
+                
+                // Text field
+                TextField(placeholder, text: $searchText)
+                    .font(.system(size: 16))
+                    .foregroundColor(textColor)
+                    .focused($isTextFieldFocused)
+                    .submitLabel(.search)
+                    .onChange(of: searchText) { _, newValue in
+                        // Limit search text and trigger episode search
+                        let limitedText = String(newValue.prefix(100))
+                        if limitedText != searchText {
+                            searchText = limitedText
+                        }
+                        PodcastViewModel.shared.searchSavedEpisodesAcrossPodcasts(searchText)
+                    }
+                
+                // Clear button when text exists
+                if !searchText.isEmpty {
+                    Button(action: {
+                        searchText = ""
+                        PodcastViewModel.shared.searchSavedEpisodesAcrossPodcasts("")
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(iconColor)
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(searchBarBackgroundColor)
+            .cornerRadius(12)
+            
+            // Cancel button
+            Button("Cancel") {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isPresented = false
+                    searchText = ""
+                    PodcastViewModel.shared.searchSavedEpisodesAcrossPodcasts("")
+                    isTextFieldFocused = false
+                }
+            }
+            .foregroundColor(.blue)
+            .font(.system(size: 16))
+        }
+        .onAppear {
+            // Auto-focus when search bar appears
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isTextFieldFocused = true
+            }
+        }
     }
 }
 
@@ -3022,7 +3105,7 @@ struct PodcastPlayerView: View {
             viewDidAppear = false
             episodesDidLoad = false
         }
-                .onChange(of: viewModel.podcastFeedOrder) { _ in 
+                .onChange(of: viewModel.podcastFeedOrder) { _ in
                     // PERFORMANCE: Use optimized feed refresh instead of expensive fetchAllEpisodes
                     if viewModel.currentEpisodes.isEmpty {
                         viewModel.requestFeedRefresh(feed.id)
@@ -3280,11 +3363,11 @@ struct PodcastPlayerView: View {
             OptimizedEpisodeRowView(
                 episode: episode,
                 isPlaying: podcastPlayer.currentEpisode?.id == episode.id && podcastPlayer.isPlaying,
-                onPlay: { 
+                onPlay: {
                     print("🎬 EPISODE LIST LOADING: Setting loading state for episode: \(episode.title)")
                     // Set loading state in PodcastPlayer for immediate feedback
                     podcastPlayer.loadingEpisodeId = episode.id
-                    playEpisode(episode) 
+                    playEpisode(episode)
                 },
                 onStop: { podcastPlayer.togglePlayPause() },
                 viewModel: viewModel,
@@ -3598,14 +3681,14 @@ struct PodcastPlayerView: View {
         
         // CRITICAL FIX: Check if current episodes actually belong to this feed
         // Also ensure the selectedFeedId matches to prevent showing wrong feed episodes
-        let currentEpisodesForThisFeed = !viewModel.currentEpisodes.isEmpty && 
-                                        viewModel.currentEpisodes.first?.feedId == feed.id && 
+        let currentEpisodesForThisFeed = !viewModel.currentEpisodes.isEmpty &&
+                                        viewModel.currentEpisodes.first?.feedId == feed.id &&
                                         viewModel.selectedFeedId == feed.id &&
                                         viewModel.currentEpisodes.allSatisfy { $0.feedId == feed.id }
         
         print("🔄 FEED CHECK: feedId=\(feed.id), selectedFeedId=\(viewModel.selectedFeedId ?? "nil"), episodes=\(viewModel.currentEpisodes.count), firstEpisodeFeedId=\(viewModel.currentEpisodes.first?.feedId ?? "nil"), allMatch=\(viewModel.currentEpisodes.allSatisfy { $0.feedId == feed.id })")
         
-        // Initialize state for this view appearance  
+        // Initialize state for this view appearance
         episodesDidLoad = !viewModel.currentEpisodes.isEmpty && currentEpisodesForThisFeed
                 
         // Synchronize viewModel.currentTab with selectedTab to ensure proper filtering
@@ -3658,13 +3741,13 @@ struct PodcastPlayerView: View {
     }
     
     private func loadMoreIfNeeded() {
-        guard !isLoadingMore && viewModel.hasMoreEpisodes else { 
+        guard !isLoadingMore && viewModel.hasMoreEpisodes else {
             // Provide haptic feedback when no more episodes to load
             if !viewModel.hasMoreEpisodes {
                 let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
                 impactFeedback.impactOccurred()
             }
-            return 
+            return
         }
         
         // Provide haptic feedback when starting to load
@@ -3689,13 +3772,13 @@ struct PodcastPlayerView: View {
     }
     
     private func loadMoreEpisodesRefreshable() async {
-        guard !isLoadingMore && viewModel.hasMoreEpisodes else { 
+        guard !isLoadingMore && viewModel.hasMoreEpisodes else {
             // Provide haptic feedback when no more episodes to load
             if !viewModel.hasMoreEpisodes {
                 let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
                 impactFeedback.impactOccurred()
             }
-            return 
+            return
         }
         
         // Provide haptic feedback when starting to load
@@ -3929,7 +4012,7 @@ struct PodcastList: View {
                         }
                     },
                     onStop: { podcastPlayer.togglePlayPause() },
-                    onTap: { 
+                    onTap: {
                         selectedPodcast = feed
                         // Request immediate refresh when user selects a feed
                         print("🔄 USER SELECTED FEED: Requesting immediate refresh for \(feed.title)")

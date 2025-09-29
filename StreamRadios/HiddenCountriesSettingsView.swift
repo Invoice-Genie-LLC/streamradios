@@ -15,10 +15,12 @@ struct HiddenCountriesSettingsView: View {
     
     @AppStorage("hiddenCountries") private var hiddenCountriesData: Data = Data()
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     
     @State private var hiddenCountries: Set<String> = []
     @State private var searchText = ""
+    @State private var isSearchPresented = false
     
     // Default initializer for backward compatibility
     init() {
@@ -35,7 +37,7 @@ struct HiddenCountriesSettingsView: View {
     private let allCountries = Country.getAllCountriesWithAPICodes().filter { $0.name != "Select Country" }
     
     private var filteredCountries: [Country] {
-        let filtered = searchText.isEmpty ? allCountries : 
+        let filtered = searchText.isEmpty ? allCountries :
             allCountries.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
         return filtered.sorted { $0.name < $1.name }
     }
@@ -58,37 +60,19 @@ struct HiddenCountriesSettingsView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-                // Search bar
+            // Custom Navigation Header
+            customNavigationHeader
+            
             VStack(spacing: 0) {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(secondaryTextColor)
-                            .font(.body)
-                        
-                        TextField("Search countries...", text: $searchText)
-                            .font(.body)
-                            .textFieldStyle(PlainTextFieldStyle())
-                            .foregroundColor(primaryTextColor)
-                        
-                        if !searchText.isEmpty {
-                            Button(action: {
-                                searchText = ""
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(secondaryTextColor)
-                                    .font(.body)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(cardBackgroundColor)
-                    .cornerRadius(12)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
+                // Custom Search Bar (when presented)
+                if isSearchPresented {
+                    CustomSearchBar(searchText: $searchText, isPresented: $isSearchPresented, placeholder: "Search countries...")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+                        .background(backgroundColor)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                .padding(.bottom, 16)
-                .background(backgroundColor)
                 
                 // Countries list
                 List {
@@ -149,36 +133,86 @@ struct HiddenCountriesSettingsView: View {
                         }
                 )
             }
-            .background(backgroundColor)
-            .navigationTitle("Hidden Countries")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button("Hide All") {
-                            hideAllCountries()
-                        }
-                        
-                        Button("Show All") {
-                            showAllCountries()
-                        }
-                        
-                        Button("Reset to Default") {
-                            resetToDefault()
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundColor(.blue)
-                            .font(.body)
-                    }
-                }
         }
+        .background(backgroundColor)
+        .navigationBarHidden(true)
         .onAppear {
             loadHiddenCountries()
         }
         .onDisappear {
             saveHiddenCountries()
         }
+    }
+    
+    // MARK: - Custom Navigation Header
+    private var customNavigationHeader: some View {
+        HStack(spacing: 0) {
+            // Back button
+            Button(action: {
+                dismiss()
+            }) {
+                Image(systemName: "chevron.left")
+                    .foregroundColor(.blue)
+                    .font(.system(size: 18, weight: .medium))
+            }
+            .frame(width: 88, height: 44, alignment: .leading)
+            .padding(.leading, 16)
+            
+            // Title (perfectly centered)
+            Text("Hidden Countries")
+                .font(.headline)
+                .foregroundColor(primaryTextColor)
+                .frame(maxWidth: .infinity, alignment: .center)
+            
+            // Combined buttons container with exact PodcastListView styling
+            HStack(spacing: 0) {
+                // Search button
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isSearchPresented.toggle()
+                    }
+                }) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.white)
+                        .font(.system(size: 20, weight: .medium))
+                        .frame(width: 44, height: 44)
+                }
+                
+                // Menu button
+                Menu {
+                    Button("Hide All") {
+                        hideAllCountries()
+                    }
+                    
+                    Button("Show All") {
+                        showAllCountries()
+                    }
+                    
+                    Button("Reset to Default") {
+                        resetToDefault()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundColor(.white)
+                        .font(.system(size: 20, weight: .medium))
+                        .frame(width: 44, height: 44)
+                }
+            }
+            .frame(width: 88, height: 44)
+            .background(
+                Capsule()
+                    .fill(.ultraThinMaterial)
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(backgroundColor)
+        .overlay(
+            Rectangle()
+                .frame(height: 0.5)
+                .foregroundColor(Color.gray.opacity(0.3)),
+            alignment: .bottom
+        )
     }
     
     private func toggleCountryVisibility(_ countryName: String, isHidden: Bool) {
@@ -357,6 +391,21 @@ struct HiddenCountryRow: View {
         }
     }
 }
+
+
+// MARK: - Liquid Glass Search Toolbar Behavior Modifier
+struct SearchToolbarBehaviorModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .searchToolbarBehavior(.minimize)
+        } else {
+            // For iOS < 26.0, ensure search bar is visible with standard behavior
+            content
+        }
+    }
+}
+
 
 struct HiddenCountriesSettingsView_Previews: PreviewProvider {
     static var previews: some View {
