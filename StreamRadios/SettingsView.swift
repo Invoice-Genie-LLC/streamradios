@@ -792,9 +792,12 @@ extension SettingsView {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(debugLoggingEnabled ? .blue : .gray)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(red: 0x19/255.0, green: 0x19/255.0, blue: 0x18/255.0))
+                    )
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .modifier(ConditionalLiquidGlass(cornerRadius: 12))
                 }
 
                 
@@ -811,9 +814,12 @@ extension SettingsView {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(.red)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(red: 0x19/255.0, green: 0x19/255.0, blue: 0x18/255.0))
+                    )
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .modifier(ConditionalLiquidGlass(cornerRadius: 12))
                 }
             }
             .padding(.horizontal, 16)
