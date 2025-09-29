@@ -8,6 +8,35 @@
 import SwiftUI
 import FlagKit
 
+// MARK: - Conditional Liquid Glass Modifier
+struct ConditionalLiquidGlass: ViewModifier {
+    let cornerRadius: CGFloat
+    
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            content
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.3),
+                                    Color.white.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+        }
+    }
+}
+
 struct HiddenCountriesSettingsView: View {
     // Scroll detection bindings for TabView hide functionality
     @Binding var isScrolling: Bool
@@ -147,13 +176,19 @@ struct HiddenCountriesSettingsView: View {
     // MARK: - Custom Navigation Header
     private var customNavigationHeader: some View {
         HStack(spacing: 0) {
-            // Back button
+
             Button(action: {
                 dismiss()
             }) {
                 Image(systemName: "chevron.left")
-                    .foregroundColor(.blue)
-                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.white)
+                    .font(.system(size: 20, weight: .medium))
+                    .frame(width: 40, height: 40)
+                    .background(
+                        Circle()
+                            .fill(Color(red: 0x19/255.0, green: 0x19/255.0, blue: 0x18/255.0))
+                    )
+                    .modifier(ConditionalLiquidGlass(cornerRadius: 20))
             }
             .frame(width: 88, height: 44, alignment: .leading)
             .padding(.leading, 16)
@@ -165,7 +200,7 @@ struct HiddenCountriesSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             
             // Combined buttons container with exact PodcastListView styling
-            HStack(spacing: 0) {
+            HStack(spacing: 8) {
                 // Search button
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.3)) {
@@ -175,33 +210,39 @@ struct HiddenCountriesSettingsView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundColor(.white)
                         .font(.system(size: 20, weight: .medium))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 32, height: 32)
                 }
                 
-                // Menu button
-                Menu {
-                    Button("Hide All") {
-                        hideAllCountries()
+                // Menu button - wrapped to prevent styling interference
+                ZStack {
+                    Menu {
+                        Button("Hide All") {
+                            hideAllCountries()
+                        }
+                        
+                        Button("Show All") {
+                            showAllCountries()
+                        }
+                        
+                        Button("Reset to Default") {
+                            resetToDefault()
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundColor(.white)
+                            .font(.system(size: 20, weight: .medium))
+                            .frame(width: 32, height: 32)
                     }
-                    
-                    Button("Show All") {
-                        showAllCountries()
-                    }
-                    
-                    Button("Reset to Default") {
-                        resetToDefault()
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundColor(.white)
-                        .font(.system(size: 20, weight: .medium))
-                        .frame(width: 44, height: 44)
+                    .menuStyle(.borderlessButton)
                 }
             }
-            .frame(width: 88, height: 44)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .mask(RoundedRectangle(cornerRadius: 20))
             .background(
-                Capsule()
-                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(red: 0x19/255.0, green: 0x19/255.0, blue: 0x18/255.0))
+                    .modifier(ConditionalLiquidGlass(cornerRadius: 20))
             )
         }
         .padding(.horizontal, 16)
